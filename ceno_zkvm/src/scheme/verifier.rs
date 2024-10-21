@@ -168,18 +168,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         logup_sum -=
             E::from(dummy_table_item_multiplicity as u64) * dummy_table_item.invert().unwrap();
 
-        // check rw_set equality across all proofs
-        // TODO: enable this when we have global state_in/state_out
-        // if prod_r != prod_w {
-        //     return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
-        // }
-
         // check logup relation across all proofs
         if logup_sum != E::ZERO {
             return Err(ZKVMError::VerifyError(format!(
                 "logup_sum({:?}) != 0",
                 logup_sum
             )));
+        }
+
+        let initial_global_state = eval_by_expr_with_instance(
+            &[],
+            &[],
+            pi,
+            &challenges,
+            &self.vk.initial_global_state_expr,
+        );
+        prod_w *= initial_global_state;
+        let finalize_global_state = eval_by_expr_with_instance(
+            &[],
+            &[],
+            pi,
+            &challenges,
+            &self.vk.finalize_global_state_expr,
+        );
+        prod_r *= finalize_global_state;
+        // check rw_set equality across all proofs
+        if prod_r != prod_w {
+            return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
         }
 
         Ok(true)
@@ -413,8 +428,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if cs.assert_zero_expressions.iter().any(|expr| {
             eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
         }) {
-            // TODO add me back
-            // return Err(ZKVMError::VerifyError("zero expression != 0"));
+            return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
 
         tracing::debug!(

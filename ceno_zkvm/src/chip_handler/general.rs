@@ -4,7 +4,9 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
-    instructions::riscv::constants::EXIT_CODE_IDX,
+    instructions::riscv::constants::{
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+    },
     structs::ROMType,
     tables::InsnRecord,
 };
@@ -36,6 +38,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             self.cs
                 .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
         ])
+    }
+
+    pub fn query_init_pc(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "init_pc", INIT_PC_IDX)
+    }
+
+    pub fn query_init_cycle(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "init_cycle", INIT_CYCLE_IDX)
+    }
+
+    pub fn query_end_pc(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "end_pc", END_PC_IDX)
+    }
+
+    pub fn query_end_cycle(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
     }
 
     pub fn lk_record<NR, N>(
@@ -143,17 +161,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn require_equal<NR, N>(
         &mut self,
         name_fn: N,
-        target: Expression<E>,
-        rlc_record: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "require_equal",
-            |cb| cb.cs.require_zero(name_fn, target - rlc_record),
-        )
+        self.namespace(|| "require_equal", |cb| cb.cs.require_zero(name_fn, a - b))
     }
 
     pub fn require_one<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
@@ -201,6 +216,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         match C {
             16 => self.assert_u16(name_fn, expr),
+            14 => self.assert_u14(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
             c => panic!("Unsupported bit range {c}"),
@@ -216,6 +232,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "assert_u5",
             |cb| cb.lk_record(name_fn, ROMType::U5, vec![expr]),
         )
+    }
+
+    fn assert_u14<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.lk_record(name_fn, ROMType::U14, vec![expr])?;
+        Ok(())
     }
 
     fn assert_u16<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>

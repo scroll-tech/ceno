@@ -1,27 +1,25 @@
-use std::{iter, panic, time::Instant};
+use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
-    instructions::riscv::{arith::AddInstruction, branch::BltuInstruction, jump::JalInstruction},
+    instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
-    tables::ProgramTableCircuit,
+    state::GlobalState,
+    tables::{MemFinalRecord, ProgramTableCircuit, RamTable, RegTable, RegTableCircuit},
 };
 use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM,
-    InsnKind::{ADD, BLTU, EANY, JAL},
-    StepRecord, VMState,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, StepRecord, Tracer, VMState, WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::ecall::HaltInstruction,
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{AndTableCircuit, LtuTableCircuit, U16TableCircuit},
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
+use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
@@ -43,7 +41,6 @@ const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
 #[allow(clippy::unusual_byte_groupings)]
 const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
-
     declare_program!(
         program,
         // func7   rs2   rs1   f3  rd    opcode
@@ -112,142 +109,120 @@ fn main() {
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
-    // opcode circuits
-    let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
-    let bltu_config = zkvm_cs.register_opcode_circuit::<BltuInstruction>();
-    let jal_config = zkvm_cs.register_opcode_circuit::<JalInstruction<E>>();
-    let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
-    // tables
-    let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
-    let and_config = zkvm_cs.register_table_circuit::<AndTableCircuit<E>>();
-    let ltu_config = zkvm_cs.register_table_circuit::<LtuTableCircuit<E>>();
+
+    let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let reg_config = zkvm_cs.register_table_circuit::<RegTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
-
-    let program_code: Vec<u32> = PROGRAM_CODE
-        .iter()
-        .cloned()
-        .chain(iter::repeat(ECALL_HALT))
-        .take(512)
-        .collect();
-    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<BltuInstruction>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<JalInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
-
-    zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
-        &zkvm_cs,
-        u16_range_config.clone(),
-        &(),
-    );
-    zkvm_fixed_traces.register_table_circuit::<AndTableCircuit<E>>(
-        &zkvm_cs,
-        and_config.clone(),
-        &(),
-    );
-    zkvm_fixed_traces.register_table_circuit::<LtuTableCircuit<E>>(
-        &zkvm_cs,
-        ltu_config.clone(),
-        &(),
-    );
-    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
-        &zkvm_cs,
-        prog_config.clone(),
-        &PROGRAM_CODE,
-    );
-
-    let pk = zkvm_cs
-        .clone()
-        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
-        .expect("keygen failed");
-    let vk = pk.get_vk();
-
-    // proving
-    let prover = ZKVMProver::new(pk);
-    let verifier = ZKVMVerifier::new(vk);
+    zkvm_cs.register_global_state::<GlobalState>();
 
     for instance_num_vars in args.start..args.end {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
+
+        let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
+        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+
+        zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+            &zkvm_cs,
+            prog_config.clone(),
+            &PROGRAM_CODE,
+        );
+
+        // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
+        // vm.x4 += vm.x1
+        let reg_init = {
+            let mut reg_init = RegTable::init_state();
+            reg_init[1].value = 1;
+            reg_init[2].value = u32::MAX;
+            reg_init[3].value = step_loop;
+            reg_init
+        };
+
+        zkvm_fixed_traces.register_table_circuit::<RegTableCircuit<E>>(
+            &zkvm_cs,
+            reg_config.clone(),
+            &Some(reg_init.clone()),
+        );
+
+        let pk = zkvm_cs
+            .clone()
+            .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces)
+            .expect("keygen failed");
+        let vk = pk.get_vk();
+
+        // proving
+        let prover = ZKVMProver::new(pk);
+        let verifier = ZKVMVerifier::new(vk);
+
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
 
-        // init vm.x1 = 1, vm.x2 = -1, vm.x3 = num_instances
-        // vm.x4 += vm.x1
         vm.init_register_unsafe(1usize, 1);
         vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
-        vm.init_register_unsafe(3usize, step_loop as u32);
-        for (i, inst) in program_code.iter().enumerate() {
+        vm.init_register_unsafe(3usize, step_loop);
+        for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
 
         let all_records = vm
             .iter_until_halt()
             .collect::<Result<Vec<StepRecord>, _>>()
-            .expect("vm exec failed")
-            .into_iter()
-            .collect::<Vec<_>>();
-        let mut add_records = Vec::new();
-        let mut bltu_records = Vec::new();
-        let mut jal_records = Vec::new();
-        let mut halt_records = Vec::new();
-        all_records.into_iter().for_each(|record| {
-            let kind = record.insn().kind().1;
-            match kind {
-                ADD => add_records.push(record),
-                BLTU => bltu_records.push(record),
-                JAL => jal_records.push(record),
-                EANY => {
-                    if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
-                        halt_records.push(record);
-                    }
-                }
-                _ => {}
-            }
-        });
+            .expect("vm exec failed");
 
-        assert_eq!(halt_records.len(), 1);
-        let exit_code = halt_records[0].rs2().unwrap().value;
-        // TODO set correct end_ts
-        let pi = PublicValues::new(exit_code, 0, 0);
+        let halt_record = all_records
+            .iter()
+            .rev()
+            .find(|record| {
+                record.insn().codes().kind == EANY
+                    && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
+            })
+            .expect("halt record not found");
 
-        tracing::info!(
-            "tracer generated {} ADD records, {} BLTU records, {} JAL records",
-            add_records.len(),
-            bltu_records.len(),
-            jal_records.len(),
+        let final_access = vm.tracer().final_accesses();
+
+        let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
+        let exit_code = halt_record.rs2().unwrap().value;
+        let pi = PublicValues::new(
+            exit_code,
+            CENO_PLATFORM.rom_start(),
+            Tracer::SUBCYCLES_PER_INSN as u32,
+            EXIT_PC as u32,
+            end_cycle,
         );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
         // assign opcode circuits
-        zkvm_witness
-            .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
+        config
+            .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
             .unwrap();
-        zkvm_witness
-            .assign_opcode_circuit::<BltuInstruction>(&zkvm_cs, &bltu_config, bltu_records)
-            .unwrap();
-        zkvm_witness
-            .assign_opcode_circuit::<JalInstruction<E>>(&zkvm_cs, &jal_config, jal_records)
-            .unwrap();
-        zkvm_witness
-            .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
-            .unwrap();
-
         zkvm_witness.finalize_lk_multiplicities();
         // assign table circuits
-        zkvm_witness
-            .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
+        config
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
             .unwrap();
+
+        // Find the final register values and cycles.
+        let reg_final = reg_init
+            .iter()
+            .map(|rec| {
+                let index = rec.addr as usize;
+                let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                MemFinalRecord {
+                    value: vm.peek_register(index),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec();
+
+        // assign register finalization.
         zkvm_witness
-            .assign_table_circuit::<AndTableCircuit<E>>(&zkvm_cs, &and_config, &())
+            .assign_table_circuit::<RegTableCircuit<E>>(&zkvm_cs, &reg_config, &reg_final)
             .unwrap();
-        zkvm_witness
-            .assign_table_circuit::<LtuTableCircuit<E>>(&zkvm_cs, &ltu_config, &())
-            .unwrap();
+        // assign program circuit
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
                 &zkvm_cs,
                 &prog_config,
-                &program_code.len(),
+                &PROGRAM_CODE.len(),
             )
             .unwrap();
 

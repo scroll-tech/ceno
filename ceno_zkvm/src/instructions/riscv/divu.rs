@@ -151,7 +151,7 @@ mod test {
 
     mod divu {
 
-        use ceno_emul::{Change, StepRecord, Word};
+        use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
@@ -164,7 +164,7 @@ mod test {
                 Instruction,
                 riscv::{constants::UInt, divu::DivUInstruction},
             },
-            scheme::mock_prover::{MOCK_PC_DIVU, MOCK_PROGRAM, MockProver},
+            scheme::mock_prover::{MOCK_PC_START, MockProver},
         };
 
         fn verify(name: &'static str, dividend: Word, divisor: Word, exp_outcome: Word) {
@@ -183,13 +183,15 @@ mod test {
             } else {
                 dividend / divisor
             };
+
+            let insn_code = encode_rv32(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, lkm) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                     StepRecord::new_r_instruction(
                         3,
-                        MOCK_PC_DIVU,
-                        MOCK_PROGRAM[9],
+                        MOCK_PC_START,
+                        insn_code,
                         dividend,
                         divisor,
                         Change::new(0, outcome),
@@ -215,6 +217,7 @@ mod test {
                     .into_iter()
                     .map(|v| v.into())
                     .collect_vec(),
+                &[insn_code],
                 None,
                 Some(lkm),
             );

@@ -1,5 +1,8 @@
 use ceno_emul::InsnKind;
 
+mod rv32im;
+pub use rv32im::Rv32imConfig;
+
 pub mod arith;
 pub mod arith_imm;
 pub mod branch;
