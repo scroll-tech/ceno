@@ -205,6 +205,7 @@ mod test {
                     ),
                 ])
                 .unwrap();
+
             let expected_rd_written = UInt::from_const_unchecked(
                 Value::new_unchecked(exp_outcome).as_u16_limbs().to_vec(),
             );
@@ -213,6 +214,7 @@ mod test {
                 .outcome
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
+
             let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
             MockProver::assert_with_expected_errors(
                 &cb,

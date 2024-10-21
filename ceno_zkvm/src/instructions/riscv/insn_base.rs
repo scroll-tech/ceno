@@ -565,7 +565,6 @@ mod test {
             None,
             None,
         );
-
         Ok(())
     }
 }

@@ -625,7 +625,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
-    /// assertion there are errors in the circuit, and panic once all success.
+    /// Run and check errors
+    ///
+    /// Panic, unless we see exactly the expected errors.
+    /// (Expecting no errors is a valid expectation.)
     pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
