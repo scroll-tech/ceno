@@ -62,7 +62,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "outcome_is_zero",
             is_zero.expr(),
             outcome_value.clone(),
-            ((1u64 << UInt::<E>::M) - 1).into(),
+            ((1u64 << UInt::<E>::TOTAL_BITS) - 1).into(),
             outcome_value,
         )?;
 
