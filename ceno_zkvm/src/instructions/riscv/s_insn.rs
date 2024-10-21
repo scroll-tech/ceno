@@ -30,7 +30,8 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         memory_addr: AddressExpr<E>,
-        memory_value: MemoryExpr<E>,
+        prev_memory_value: MemoryExpr<E>,
+        new_memory_value: MemoryExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
@@ -51,8 +52,13 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         ))?;
 
         // Memory
-        let mem_write =
-            WriteMEM::construct_circuit(circuit_builder, memory_addr, memory_value, vm_state.ts)?;
+        let mem_write = WriteMEM::construct_circuit(
+            circuit_builder,
+            memory_addr,
+            prev_memory_value,
+            new_memory_value,
+            vm_state.ts,
+        )?;
 
         Ok(SInstructionConfig {
             vm_state,

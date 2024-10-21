@@ -6,7 +6,7 @@ use itertools::Itertools;
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
     chip_handler::{
-        AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations,
+        AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
         RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
@@ -255,7 +255,7 @@ impl<E: ExtensionField> ReadMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: AddressExpr<E>,
-        mem_read: [Expression<E>; UINT_LIMBS],
+        mem_read: Expression<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
@@ -302,7 +302,6 @@ impl<E: ExtensionField> ReadMEM<E> {
 #[derive(Debug)]
 pub struct WriteMEM<E: ExtensionField> {
     pub prev_ts: WitIn,
-    pub prev_value: UInt<E>,
     pub lt_cfg: AssertLTConfig,
 }
 
@@ -310,26 +309,22 @@ impl<E: ExtensionField> WriteMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: AddressExpr<E>,
-        mem_written: [Expression<E>; UINT_LIMBS],
+        prev_value: MemoryExpr<E>,
+        new_value: MemoryExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
-        let prev_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
 
         let (_, lt_cfg) = circuit_builder.memory_write(
             || "write_memory",
             &mem_addr,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
-            prev_value.memory_expr(),
-            mem_written,
+            prev_value,
+            new_value,
         )?;
 
-        Ok(WriteMEM {
-            prev_ts,
-            prev_value,
-            lt_cfg,
-        })
+        Ok(WriteMEM { prev_ts, lt_cfg })
     }
 
     pub fn assign_instance(
@@ -344,13 +339,6 @@ impl<E: ExtensionField> WriteMEM<E> {
             step.memory_op().unwrap().previous_cycle
         );
 
-        // Memory State
-        self.prev_value.assign_value(
-            instance,
-            Value::new_unchecked(step.memory_op().unwrap().value.before),
-        );
-
-        // Memory Write
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
@@ -377,12 +365,12 @@ impl<E: ExtensionField> MemAddr<E> {
         Self::construct(cb, 0)
     }
 
-    /// An address which is range-checked, and aligned to 2 bytes. Bit 0 is constant 0. Bit 1 is variable.
+    /// An address which is range-checked, and aligned to 2 bits. Bit 0 is constant 0. Bit 1 is variable.
     pub fn construct_align2(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         Self::construct(cb, 1)
     }
 
-    /// An address which is range-checked, and aligned to 4 bytes. Bits 0 and 1 are constant 0.
+    /// An address which is range-checked, and aligned to 4 bits. Bits 0 and 1 are constant 0.
     pub fn construct_align4(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         Self::construct(cb, 2)
     }
@@ -392,12 +380,12 @@ impl<E: ExtensionField> MemAddr<E> {
         self.addr.address_expr()
     }
 
-    /// Represent the address aligned to 2 bytes.
+    /// Represent the address aligned to 2 bits.
     pub fn expr_align2(&self) -> AddressExpr<E> {
         self.addr.address_expr() - self.low_bit_exprs()[0].clone()
     }
 
-    /// Represent the address aligned to 4 bytes.
+    /// Represent the address aligned to 4 bits.
     pub fn expr_align4(&self) -> AddressExpr<E> {
         let low_bits = self.low_bit_exprs();
         self.addr.address_expr() - low_bits[1].clone() * 2.into() - low_bits[0].clone()
