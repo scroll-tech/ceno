@@ -225,14 +225,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(f)
     }
 
-    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn query_instance<N: Into<String>>(
         &mut self,
         n: N,
         idx: usize,
     ) -> Result<Instance, ZKVMError> {
         let i = Instance(idx);
 
-        let name = n().into();
+        let name = n.into();
         self.instance_name_map.insert(i, name);
 
         Ok(i)

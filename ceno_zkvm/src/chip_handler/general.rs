@@ -34,26 +34,26 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
         Ok([
-            self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
+            self.cs.query_instance("exit_code_low", EXIT_CODE_IDX)?,
             self.cs
-                .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
+                .query_instance("exit_code_high", EXIT_CODE_IDX + 1)?,
         ])
     }
 
     pub fn query_init_pc(&mut self) -> Result<Instance, ZKVMError> {
-        self.cs.query_instance(|| "init_pc", INIT_PC_IDX)
+        self.cs.query_instance("init_pc", INIT_PC_IDX)
     }
 
     pub fn query_init_cycle(&mut self) -> Result<Instance, ZKVMError> {
-        self.cs.query_instance(|| "init_cycle", INIT_CYCLE_IDX)
+        self.cs.query_instance("init_cycle", INIT_CYCLE_IDX)
     }
 
     pub fn query_end_pc(&mut self) -> Result<Instance, ZKVMError> {
-        self.cs.query_instance(|| "end_pc", END_PC_IDX)
+        self.cs.query_instance("end_pc", END_PC_IDX)
     }
 
     pub fn query_end_cycle(&mut self) -> Result<Instance, ZKVMError> {
-        self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
+        self.cs.query_instance("end_cycle", END_CYCLE_IDX)
     }
 
     pub fn lk_record<NR, N>(
