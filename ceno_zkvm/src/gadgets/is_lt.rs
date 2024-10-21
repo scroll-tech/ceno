@@ -196,10 +196,11 @@ impl InnerLtConfig {
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
+        let diff_abs = (rhs as i64 - lhs as i64).abs() as u64;
         let diff = if is_signed_lt {
-            Self::range(self.diff.len()) - (rhs - lhs) as u64
+            Self::range(self.diff.len()) - diff_abs
         } else {
-            (lhs - rhs) as u64
+            diff_abs
         };
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
@@ -352,7 +353,7 @@ impl InnerSignedLtConfig {
 
         let config = InnerLtConfig::construct_circuit(
             cb,
-            format!("{name}lhs<rhs"),
+            format!("{name} (lhs < rhs)"),
             lhs_value,
             rhs_value,
             is_lt_expr,
