@@ -634,12 +634,15 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             Self::run(cb, wits_in, programs, lkm)
         };
 
-        let errors = result.err().unwrap_or_default();
-        let groups = errors.into_iter().into_group_map_by(|error| {
-            constraint_names
-                .iter()
-                .find(|&constraint_name| error.contains(constraint_name))
-        });
+        let groups = result
+            .err()
+            .into_iter()
+            .flatten()
+            .into_group_map_by(|error| {
+                constraint_names
+                    .iter()
+                    .find(|&constraint_name| error.contains(constraint_name))
+            });
         // Unexpected errors
         if let Some(errors) = groups.get(&None) {
             println!("======================================================");
@@ -654,26 +657,11 @@ Hints:
                     "
             );
 
-            // Print errors and skip consecutive duplicates errors if they are equal.
-            let mut duplicates = 0;
-            let mut prev_err = None;
-            for error in errors {
-                if prev_err.is_some() && prev_err.unwrap() == error {
-                    duplicates += 1;
-                } else {
-                    error.print(wits_in, &cb.cs.witin_namespace_map);
+            for (count, error) in errors.iter().dedup_with_count() {
+                error.print(wits_in, &cb.cs.witin_namespace_map);
+                if count > 1 {
+                    println!("Error: {} duplicates hidden.", count - 1);
                 }
-                prev_err = Some(error);
-            }
-
-            if duplicates > 0 {
-                println!(
-                    "Error: {} constraints not satisfied ({} duplicates hidden)",
-                    errors.len(),
-                    duplicates
-                );
-            } else {
-                println!("Error: {} constraints not satisfied", errors.len());
             }
             println!("======================================================");
             panic!("(Unexpected) Constraints not satisfied");
