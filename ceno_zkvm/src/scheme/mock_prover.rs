@@ -253,6 +253,15 @@ impl<E: ExtensionField> MockProverError<E> {
             | Self::LkMultiplicityError { inst_id, .. } => *inst_id,
         }
     }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::AssertZeroError { name, .. }
+            | Self::AssertEqualError { name, .. }
+            | Self::LookupError { name, .. } => name,
+            _ => "",
+        }
+    }
 }
 
 pub(crate) struct MockProver<E: ExtensionField> {
@@ -608,6 +617,43 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     .collect::<Vec<_>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
+            }
+        }
+    }
+
+    /// assert if all the constraints are statisfied.
+    /// If `constraint_name` is specified, assert when the failed constraint doesn't match.
+    pub fn assert_unsatisfied(
+        cb: &CircuitBuilder<E>,
+        wits_in: &[ArcMultilinearExtension<'a, E>],
+        programs: &[u32],
+        constraint_name: &str,
+        challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
+    ) {
+        let result = if let Some(challenge) = challenge {
+            Self::run_with_challenge(cb, wits_in, challenge, lkm)
+        } else {
+            Self::run(cb, wits_in, programs, lkm)
+        };
+
+        let constraint_eq = constraint_name.len() > 0;
+        match result {
+            Ok(_) => {
+                println!("======================================================");
+                println!("Constraints are all satisfied!!");
+                println!("======================================================");
+                panic!();
+            }
+            Err(errors) => {
+                for error in &errors {
+                    if constraint_eq && !error.name().contains(constraint_name) {
+                        println!("======================================================");
+                        println!("Error: {} constraint satisfied", error.name());
+                        println!("======================================================");
+                        panic!("Constraints satisfied");
+                    }
+                }
             }
         }
     }
