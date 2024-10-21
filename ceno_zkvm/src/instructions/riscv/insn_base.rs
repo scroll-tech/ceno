@@ -567,7 +567,7 @@ mod test {
                 None,
             );
         } else {
-            MockProver::assert_unsatisfied(
+            MockProver::assert_unsatisfied_constraint(
                 &cb,
                 &raw_witin
                     .de_interleaving()

@@ -228,7 +228,7 @@ mod test {
                     Some(lkm),
                 );
             } else {
-                MockProver::assert_unsatisfied(
+                MockProver::assert_unsatisfied_constraint(
                     &cb,
                     &raw_witin
                         .de_interleaving()

@@ -629,8 +629,11 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
+    // TODO genelize error handling flow
+    // one idea is to implement a util on Vec<Errors> type errors.assert_name_contains("xxx")
+    // see: https://github.com/scroll-tech/ceno/pull/436#discussion_r1808222127 for details.
     /// assertion there are errors in the circuit, and panic once all success.
-    pub fn assert_unsatisfied(
+    pub fn assert_unsatisfied_constraint(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
