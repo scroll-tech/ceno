@@ -14,7 +14,6 @@ serde.workspace = true
 ff_ext = { path = "../ff_ext" }
 gkr = { path = "../gkr", features = ["parallel"] }
 gkr-graph = { version = "0", path = "../gkr-graph" }
-mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 simple-frontend = { version = "0", path = "../simple-frontend" }
 singer-utils = { version = "0", path = "../singer-utils" }

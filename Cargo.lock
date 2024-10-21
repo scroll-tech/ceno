@@ -1700,7 +1700,6 @@ dependencies = [
  "gkr-graph",
  "goldilocks",
  "itertools 0.13.0",
- "mpcs",
  "multilinear_extensions",
  "paste",
  "pprof",
@@ -2004,13 +2003,11 @@ dependencies = [
 name = "transcript"
 version = "0.1.0"
 dependencies = [
- "ark-std",
  "crossbeam-channel",
  "ff",
  "ff_ext",
  "goldilocks",
  "poseidon",
- "rayon",
  "serde",
 ]
 
