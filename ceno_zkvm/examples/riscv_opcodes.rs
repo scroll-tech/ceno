@@ -5,7 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{MemFinalRecord, MemTable, ProgramTableCircuit, RamTable, RegTable},
+    tables::{MemFinalRecord, ProgramTableCircuit, initial_memory, initial_registers},
 };
 use clap::Parser;
 use const_env::from_env;
@@ -13,7 +13,7 @@ use const_env::from_env;
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext,
     InsnKind::{EANY, LUI, LW},
-    StepRecord, Tracer, VMState, WordAddr, encode_rv32,
+    RegIdx, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -135,20 +135,14 @@ fn main() {
         );
 
         let reg_init = {
-            let mut reg_init = RegTable::init_state();
+            let mut reg_init = initial_registers();
             reg_init[1].value = 1;
             reg_init[2].value = u32::MAX;
             reg_init[3].value = step_loop;
             reg_init
         };
 
-        let mem_init = {
-            let mut mem_init = MemTable::init_state();
-            for (i, value) in program_data.iter().enumerate() {
-                mem_init[i].value = *value;
-            }
-            mem_init
-        };
+        let mem_init = initial_memory(&program_data);
 
         config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
 
@@ -164,16 +158,15 @@ fn main() {
 
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
-        let ram_start = ByteAddr(CENO_PLATFORM.ram_start()).waddr();
 
-        vm.init_register_unsafe(1usize, 1);
-        vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
-        vm.init_register_unsafe(3usize, step_loop);
+        for record in &reg_init {
+            vm.init_register_unsafe(record.addr as RegIdx, record.value);
+        }
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
-        for (i, data) in program_data.iter().enumerate() {
-            vm.init_memory(ram_start + i as u32, *data);
+        for record in &mem_init {
+            vm.init_memory(record.addr.into(), record.value);
         }
 
         let all_records = vm
