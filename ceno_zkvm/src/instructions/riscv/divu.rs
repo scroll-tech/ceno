@@ -205,10 +205,10 @@ mod test {
                     ),
                 ])
                 .unwrap();
-
             let expected_rd_written = UInt::from_const_unchecked(
                 Value::new_unchecked(exp_outcome).as_u16_limbs().to_vec(),
             );
+
             config
                 .outcome
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
@@ -228,7 +228,6 @@ mod test {
                 Some(lkm),
             );
         }
-
         #[test]
         fn test_opcode_divu() {
             verify("basic", 10, 2, 5, true);
