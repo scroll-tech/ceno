@@ -638,11 +638,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .err()
             .into_iter()
             .flatten()
-            .into_group_map_by(|error| {
-                constraint_names
-                    .iter()
-                    .find(|&constraint_name| error.contains(constraint_name))
-            });
+            .into_group_map_by(|error| constraint_names.iter().find(|&name| error.contains(name)));
         // Unexpected errors
         if let Some(errors) = groups.get(&None) {
             println!("======================================================");
