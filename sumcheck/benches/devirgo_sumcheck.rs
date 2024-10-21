@@ -1,19 +1,18 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use std::{array, sync::Arc};
+use std::array;
 
 use ark_std::test_rng;
 use const_env::from_env;
 use criterion::*;
-use ff_ext::{ExtensionField, ff::Field};
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use sumcheck::{structs::IOPProverStateV2 as IOPProverState, util::ceil_log2};
 
 use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{
-    commutative_op_mle_pair,
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
+    mle::DenseMultilinearExtension,
     op_mle,
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2 as VirtualPolynomial},
 };
@@ -57,7 +56,7 @@ fn prepare_input<'a, E: ExtensionField>(
     virtual_poly_v1.add_mle_list(fs.to_vec(), E::ONE);
 
     // devirgo version
-    let mut virtual_poly_v2: Vec<Vec<ArcMultilinearExtension<'a, E>>> = transpose(
+    let virtual_poly_v2: Vec<Vec<ArcMultilinearExtension<'a, E>>> = transpose(
         fs.iter()
             .map(|f| match &f.evaluations() {
                 multilinear_extensions::mle::FieldType::Base(evaluations) => evaluations
@@ -76,7 +75,7 @@ fn prepare_input<'a, E: ExtensionField>(
             })
             .collect(),
     );
-    let mut virtual_poly_v2: Vec<VirtualPolynomial<E>> = virtual_poly_v2
+    let virtual_poly_v2: Vec<VirtualPolynomial<E>> = virtual_poly_v2
         .into_iter()
         .map(|fs| {
             let mut virtual_polynomial = VirtualPolynomial::new(fs[0].num_vars());
