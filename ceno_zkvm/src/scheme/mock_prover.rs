@@ -665,7 +665,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     }
                 }
 
-                // if un-expected errors happen
+                // Unexpected errors
                 if !unexpected_errors.is_empty() {
                     println!("======================================================");
                     for error in unexpected_errors {
@@ -675,12 +675,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     panic!("Constraints not satisfied");
                 }
 
-                // if expected error doesn't happen
+                // Expected errors didn't happen
                 if duplicates == 0 {
                     println!("======================================================");
                     println!("Error: {} constraint satisfied", constraint_name.unwrap());
                     println!("======================================================");
-                    panic!("Constraints satisfied");
+                    panic!("Constraints satisfied unexpectedly");
                 }
             }
         }
