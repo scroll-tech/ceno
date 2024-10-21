@@ -254,17 +254,8 @@ impl<E: ExtensionField> MockProverError<E> {
         }
     }
 
-    fn name(&self) -> &str {
-        match self {
-            Self::AssertZeroError { name, .. }
-            | Self::AssertEqualError { name, .. }
-            | Self::LookupError { name, .. } => name,
-            _ => "",
-        }
-    }
-
     fn contains(&self, constraint_name: &str) -> bool {
-        self.name().contains(constraint_name)
+        format!("{:?}", self).contains(constraint_name)
     }
 }
 
