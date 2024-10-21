@@ -44,11 +44,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let imm = UInt::new(|| "imm", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
+        let imm = UInt::new("imm", circuit_builder)?;
 
-        let memory_addr = rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?;
+        let memory_addr = rs1_read.add("memory_addr", circuit_builder, &imm, true)?;
 
         let memory_value = match I::INST_KIND {
             InsnKind::SW => rs2_read.memory_expr(),
@@ -120,13 +120,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new(|| "imm", circuit_builder)?;
-        let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let imm = UInt::new("imm", circuit_builder)?;
+        let memory_read = UInt::new_unchecked("memory_read", circuit_builder)?;
 
         let (memory_addr, memory_value) = match I::INST_KIND {
             InsnKind::LW => (
-                rs1_read.add(|| "memory_addr", circuit_builder, &imm, true)?,
+                rs1_read.add("memory_addr", circuit_builder, &imm, true)?,
                 memory_read.register_expr(),
             ),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),

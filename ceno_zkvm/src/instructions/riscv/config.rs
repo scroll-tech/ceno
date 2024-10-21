@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 
 use crate::{
     Value,
@@ -209,25 +209,17 @@ pub struct AssertSignedLtConfig {
 }
 
 impl AssertSignedLtConfig {
-    pub fn construct_circuit<
-        E: ExtensionField,
-        NR: Into<String> + Display + Clone,
-        N: FnOnce() -> NR,
-    >(
+    pub fn construct_circuit<E: ExtensionField, Name: Into<String>>(
         cb: &mut CircuitBuilder<E>,
-        name_fn: N,
+        name: Name,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
-        cb.namespace(
-            || "assert_signed_lt",
-            |cb| {
-                let name = name_fn();
-                let config =
-                    InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, Expression::ONE)?;
-                Ok(Self { config })
-            },
-        )
+        cb.namespace("assert_signed_lt", |cb| {
+            let config =
+                InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, Expression::ONE)?;
+            Ok(Self { config })
+        })
     }
 
     pub fn assign_instance<E: ExtensionField>(
@@ -256,28 +248,20 @@ impl SignedLtConfig {
         self.is_lt.expr()
     }
 
-    pub fn construct_circuit<
-        E: ExtensionField,
-        NR: Into<String> + Display + Clone,
-        N: FnOnce() -> NR,
-    >(
+    pub fn construct_circuit<E: ExtensionField, Name: Into<String>>(
         cb: &mut CircuitBuilder<E>,
-        name_fn: N,
+        name: Name,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
-        cb.namespace(
-            || "is_signed_lt",
-            |cb| {
-                let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"))?;
-                cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
-                let config =
-                    InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
+        cb.namespace("is_signed_lt", |cb| {
+            let name: String = Into::into(name);
+            let is_lt = cb.create_witin(format!("{name} is_signed_lt witin"))?;
+            cb.assert_bit("is_lt_bit", is_lt.expr())?;
+            let config = InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
 
-                Ok(SignedLtConfig { is_lt, config })
-            },
-        )
+            Ok(SignedLtConfig { is_lt, config })
+        })
     }
 
     pub fn assign_instance<E: ExtensionField>(
@@ -303,9 +287,9 @@ struct InnerSignedLtConfig {
 }
 
 impl InnerSignedLtConfig {
-    pub fn construct_circuit<E: ExtensionField, NR: Into<String> + Display + Clone>(
+    pub fn construct_circuit<E: ExtensionField, Name: Into<String>>(
         cb: &mut CircuitBuilder<E>,
-        name: NR,
+        name: Name,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
         is_lt_expr: Expression<E>,
@@ -314,14 +298,14 @@ impl InnerSignedLtConfig {
         // Extract the sign bit.
         let is_lhs_neg = IsLtConfig::construct_circuit(
             cb,
-            || "lhs_msb",
+            "lhs_msb",
             max_signed_limb_expr.clone(),
             lhs.limbs.iter().last().unwrap().expr(), // msb limb
             1,
         )?;
         let is_rhs_neg = IsLtConfig::construct_circuit(
             cb,
-            || "rhs_msb",
+            "rhs_msb",
             max_signed_limb_expr,
             rhs.limbs.iter().last().unwrap().expr(), // msb limb
             1,
@@ -335,7 +319,7 @@ impl InnerSignedLtConfig {
 
         let config = InnerLtConfig::construct_circuit(
             cb,
-            format!("{name}lhs<rhs"),
+            format!("{}lhs<rhs", Into::into(name)),
             lhs_value,
             rhs_value,
             is_lt_expr,

@@ -126,16 +126,16 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
         let record = InsnRecord([
-            cb.create_fixed(|| "pc")?,
-            cb.create_fixed(|| "opcode")?,
-            cb.create_fixed(|| "rd")?,
-            cb.create_fixed(|| "funct3")?,
-            cb.create_fixed(|| "rs1")?,
-            cb.create_fixed(|| "rs2")?,
-            cb.create_fixed(|| "imm_or_funct7")?,
+            cb.create_fixed("pc")?,
+            cb.create_fixed("opcode")?,
+            cb.create_fixed("rd")?,
+            cb.create_fixed("funct3")?,
+            cb.create_fixed("rs1")?,
+            cb.create_fixed("rs2")?,
+            cb.create_fixed("imm_or_funct7")?,
         ]);
 
-        let mlt = cb.create_witin(|| "mlt")?;
+        let mlt = cb.create_witin("mlt")?;
 
         let record_exprs = {
             let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
@@ -143,7 +143,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             cb.rlc_chip_record(fields)
         };
 
-        cb.lk_table_record(|| "prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
+        cb.lk_table_record("prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
 
         Ok(ProgramTableConfig { record, mlt })
     }

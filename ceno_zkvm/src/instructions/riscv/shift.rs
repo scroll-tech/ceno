@@ -53,18 +53,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     fn construct_circuit(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5")?;
+        let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
+        let rs2_low5 = circuit_builder.create_witin("rs2_low5")?;
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
-        let mut pow2_rs2_low5 = UInt::new_unchecked(|| "pow2_rs2_low5", circuit_builder)?;
+        let mut pow2_rs2_low5 = UInt::new_unchecked("pow2_rs2_low5", circuit_builder)?;
         // rs2 = rs2_high | rs2_low5
-        let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
+        let rs2_high = UInt::new("rs2_high", circuit_builder)?;
 
         let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
             InsnKind::SLL => {
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
                 let rd_written = rs1_read.mul(
-                    || "rd_written = rs1_read * pow2_rs2_low5",
+                    "rd_written = rs1_read * pow2_rs2_low5",
                     circuit_builder,
                     &mut pow2_rs2_low5,
                     true,
@@ -72,11 +72,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                 (rs1_read, rd_written, None, None)
             }
             InsnKind::SRL => {
-                let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let remainder = UInt::new(|| "remainder", circuit_builder)?;
+                let mut rd_written = UInt::new("rd_written", circuit_builder)?;
+                let remainder = UInt::new("remainder", circuit_builder)?;
                 let div_config = DivConfig::construct_circuit(
                     circuit_builder,
-                    || "srl_div",
+                    "srl_div",
                     &mut pow2_rs2_low5,
                     &mut rd_written,
                     &remainder,
@@ -100,9 +100,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         )?;
 
         circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.value())?;
-        circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr())?;
+        circuit_builder.assert_ux::<_, 5>("rs2_low5 in u5", rs2_low5.expr())?;
         circuit_builder.require_equal(
-            || "rs2 == rs2_high * 2^5 + rs2_low5",
+            "rs2 == rs2_high * 2^5 + rs2_low5",
             rs2_read.value(),
             rs2_high.value() * (1 << 5).into() + rs2_low5.expr(),
         )?;
@@ -236,7 +236,7 @@ mod tests {
         rs2_read: u32,
         expected_rd_written: u32,
     ) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let shift = rs2_read & 0b11111;
@@ -255,21 +255,17 @@ mod tests {
         };
 
         let config = cb
-            .namespace(
-                || format!("{prefix}_({name})"),
-                |cb| {
-                    let config =
-                        ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace(format!("{prefix}_({name})"), |cb| {
+                let config = ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
         config
             .rd_written
             .require_equal(
-                || format!("{prefix}_({name})_assert_rd_written"),
+                format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
                 &UInt::from_const_unchecked(
                     Value::new_unchecked(expected_rd_written)

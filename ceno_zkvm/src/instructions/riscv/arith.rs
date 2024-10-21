@@ -56,32 +56,30 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let (rs1_read, rs2_read, rd_written) = match I::INST_KIND {
             InsnKind::ADD => {
                 // rd_written = rs1_read + rs2_read
-                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-                let rd_written = rs1_read.add(|| "rd_written", circuit_builder, &rs2_read, true)?;
+                let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+                let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
+                let rd_written = rs1_read.add("rd_written", circuit_builder, &rs2_read, true)?;
                 (rs1_read, rs2_read, rd_written)
             }
 
             InsnKind::SUB => {
                 // rd_written + rs2_read = rs1_read
                 // rd_written is the new value to be updated in register so we need to constrain its range.
-                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-                let rs1_read = rs2_read.clone().add(
-                    || "rs1_read",
-                    circuit_builder,
-                    &rd_written.clone(),
-                    true,
-                )?;
+                let rd_written = UInt::new("rd_written", circuit_builder)?;
+                let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
+                let rs1_read =
+                    rs2_read
+                        .clone()
+                        .add("rs1_read", circuit_builder, &rd_written.clone(), true)?;
                 (rs1_read, rs2_read, rd_written)
             }
 
             InsnKind::MUL => {
                 // rs1_read * rs2_read = rd_written
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+                let mut rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
                 let rd_written =
-                    rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true)?;
+                    rs1_read.mul("rd_written", circuit_builder, &mut rs2_read, true)?;
                 (rs1_read, rs2_read, rd_written)
             }
 
@@ -183,16 +181,13 @@ mod test {
 
     #[test]
     fn test_opcode_add() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "add",
-                |cb| {
-                    let config = AddInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace("add", |cb| {
+                let config = AddInstruction::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -219,7 +214,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(
@@ -238,16 +233,13 @@ mod test {
 
     #[test]
     fn test_opcode_add_overflow() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "add",
-                |cb| {
-                    let config = AddInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace("add", |cb| {
+                let config = AddInstruction::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -274,7 +266,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(
@@ -293,16 +285,13 @@ mod test {
 
     #[test]
     fn test_opcode_sub() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "sub",
-                |cb| {
-                    let config = SubInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace("sub", |cb| {
+                let config = SubInstruction::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -329,7 +318,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(
@@ -348,16 +337,13 @@ mod test {
 
     #[test]
     fn test_opcode_sub_underflow() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "sub",
-                |cb| {
-                    let config = SubInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace("sub", |cb| {
+                let config = SubInstruction::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -384,7 +370,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(
@@ -403,10 +389,10 @@ mod test {
 
     #[test]
     fn test_opcode_mul() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
+            .namespace("mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
 
@@ -431,7 +417,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(
@@ -450,10 +436,10 @@ mod test {
 
     #[test]
     fn test_opcode_mul_overflow() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
+            .namespace("mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
 
@@ -477,7 +463,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(
@@ -496,10 +482,10 @@ mod test {
 
     #[test]
     fn test_opcode_mul_overflow2() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
+            .namespace("mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
 
@@ -531,7 +517,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(

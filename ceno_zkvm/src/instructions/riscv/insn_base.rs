@@ -37,14 +37,14 @@ impl<E: ExtensionField> StateInOut<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         branching: bool,
     ) -> Result<Self, ZKVMError> {
-        let pc = circuit_builder.create_witin(|| "pc")?;
+        let pc = circuit_builder.create_witin("pc")?;
         let (next_pc_opt, next_pc_expr) = if branching {
-            let next_pc = circuit_builder.create_witin(|| "next_pc")?;
+            let next_pc = circuit_builder.create_witin("next_pc")?;
             (Some(next_pc), next_pc.expr())
         } else {
             (None, pc.expr() + PC_STEP_SIZE.into())
         };
-        let ts = circuit_builder.create_witin(|| "ts")?;
+        let ts = circuit_builder.create_witin("ts")?;
         let next_ts = ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize).into();
         circuit_builder.state_in(pc.expr(), ts.expr())?;
         circuit_builder.state_out(next_pc_expr, next_ts)?;
@@ -87,10 +87,10 @@ impl<E: ExtensionField> ReadRS1<E> {
         rs1_read: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rs1_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
+        let id = circuit_builder.create_witin("rs1_id")?;
+        let prev_ts = circuit_builder.create_witin("prev_rs1_ts")?;
         let (_, lt_cfg) = circuit_builder.register_read(
-            || "read_rs1",
+            "read_rs1",
             id,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RS1 as usize).into(),
@@ -142,10 +142,10 @@ impl<E: ExtensionField> ReadRS2<E> {
         rs2_read: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rs2_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
+        let id = circuit_builder.create_witin("rs2_id")?;
+        let prev_ts = circuit_builder.create_witin("prev_rs2_ts")?;
         let (_, lt_cfg) = circuit_builder.register_read(
-            || "read_rs2",
+            "read_rs2",
             id,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RS2 as usize).into(),
@@ -197,11 +197,11 @@ impl<E: ExtensionField> WriteRD<E> {
         rd_written: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rd_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
-        let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
+        let id = circuit_builder.create_witin("rd_id")?;
+        let prev_ts = circuit_builder.create_witin("prev_rd_ts")?;
+        let prev_value = UInt::new_unchecked("prev_rd_value", circuit_builder)?;
         let (_, lt_cfg) = circuit_builder.register_write(
-            || "write_rd",
+            "write_rd",
             id,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
@@ -258,9 +258,9 @@ impl<E: ExtensionField> ReadMEM<E> {
         mem_read: [Expression<E>; UINT_LIMBS],
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
+        let prev_ts = circuit_builder.create_witin("prev_ts")?;
         let (_, lt_cfg) = circuit_builder.memory_read(
-            || "read_memory",
+            "read_memory",
             &mem_addr,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
@@ -313,11 +313,11 @@ impl<E: ExtensionField> WriteMEM<E> {
         mem_written: [Expression<E>; UINT_LIMBS],
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
-        let prev_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
+        let prev_ts = circuit_builder.create_witin("prev_ts")?;
+        let prev_value = UInt::new_unchecked("prev_memory_value", circuit_builder)?;
 
         let (_, lt_cfg) = circuit_builder.memory_write(
-            || "write_memory",
+            "write_memory",
             &mem_addr,
             prev_ts.expr(),
             cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
@@ -414,14 +414,14 @@ impl<E: ExtensionField> MemAddr<E> {
 
         // The address as two u16 limbs.
         // Soundness: This does not use the UInt range-check but specialized checks instead.
-        let addr = UInt::new_unchecked(|| "memory_addr", cb)?;
+        let addr = UInt::new_unchecked("memory_addr", cb)?;
         let limbs = addr.expr();
 
         // Witness and constrain the non-zero low bits.
         let low_bits = (n_zeros..Self::N_LOW_BITS)
             .map(|i| {
-                let bit = cb.create_witin(|| format!("addr_bit_{}", i))?;
-                cb.assert_bit(|| format!("addr_bit_{}", i), bit.expr())?;
+                let bit = cb.create_witin(format!("addr_bit_{}", i))?;
+                cb.assert_bit(format!("addr_bit_{}", i), bit.expr())?;
                 Ok(bit)
             })
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
@@ -438,11 +438,11 @@ impl<E: ExtensionField> MemAddr<E> {
             .unwrap()
             .expr();
         let mid_u14 = (limbs[0].clone() - low_sum) * shift_right;
-        cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
+        cb.assert_ux::<_, 14>("mid_u14", mid_u14)?;
 
         // Range check the high limb.
         for high_u16 in limbs.iter().skip(1) {
-            cb.assert_ux::<_, _, 16>(|| "high_u16", high_u16.clone())?;
+            cb.assert_ux::<_, 16>("high_u16", high_u16.clone())?;
         }
 
         Ok(MemAddr { addr, low_bits })
@@ -517,7 +517,7 @@ mod test {
     }
 
     fn impl_test_mem_addr(align: u32, addr: u32, is_ok: bool) -> Result<(), ZKVMError> {
-        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<E>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let mem_addr = match align {
@@ -548,9 +548,9 @@ mod test {
         assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
 
         if is_ok {
-            cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;
-            cb.require_equal(|| "", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
-            cb.require_equal(|| "", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
+            cb.require_equal("", mem_addr.expr_unaligned(), addr.into())?;
+            cb.require_equal("", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
+            cb.require_equal("", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
         }
 
         let res = MockProver::run(

@@ -38,12 +38,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
 
         let equal = IsEqualConfig::construct_circuit(
             circuit_builder,
-            || "rs1==rs2",
+            "rs1==rs2",
             rs2_read.value(),
             rs1_read.value(),
         )?;

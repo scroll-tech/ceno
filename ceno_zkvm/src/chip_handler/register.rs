@@ -11,18 +11,18 @@ use crate::{
 
 use super::{RegisterChipOperations, RegisterExpr};
 
-impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperations<E, NR, N>
+impl<'a, E: ExtensionField, Name: Into<String>> RegisterChipOperations<E, Name>
     for CircuitBuilder<'a, E>
 {
     fn register_read(
         &mut self,
-        name_fn: N,
+        name: Name,
         register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
-        self.namespace(name_fn, |cb| {
+        self.namespace(name, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
@@ -47,13 +47,13 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                 ]
                 .concat(),
             );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            cb.read_record("read_record", read_record)?;
+            cb.write_record("write_record", write_record)?;
 
             // assert prev_ts < current_ts
             let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,
-                || "prev_ts < ts",
+                "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
                 UINT_LIMBS,
@@ -67,7 +67,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
 
     fn register_write(
         &mut self,
-        name_fn: N,
+        name: Name,
         register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
@@ -75,7 +75,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
         assert!(register_id.expr().degree() <= 1);
-        self.namespace(name_fn, |cb| {
+        self.namespace(name, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
@@ -100,12 +100,12 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                 ]
                 .concat(),
             );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            cb.read_record("read_record", read_record)?;
+            cb.write_record("write_record", write_record)?;
 
             let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,
-                || "prev_ts < ts",
+                "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
                 UINT_LIMBS,

@@ -40,16 +40,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let mut imm = UInt::new(|| "imm", circuit_builder)?;
-        let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+        let mut imm = UInt::new("imm", circuit_builder)?;
+        let mut rd_written = UInt::new("rd_written", circuit_builder)?;
 
         // Note: `imm` is set to 2**imm (upto 32 bit) just for SRLI for efficient verification
         // Goal is to constrain:
         // rs1 == rd_written * imm + remainder
-        let remainder = UInt::new(|| "remainder", circuit_builder)?;
+        let remainder = UInt::new("remainder", circuit_builder)?;
         let div_config = DivConfig::construct_circuit(
             circuit_builder,
-            || "srli_div",
+            "srli_div",
             &mut imm,
             &mut rd_written,
             &remainder,
@@ -135,24 +135,20 @@ mod test {
     }
 
     fn verify_srli(imm: u32, rs1_read: u32, expected_rd_written: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "srli",
-                |cb| {
-                    let config =
-                        ShiftImmInstruction::<GoldilocksExt2, SrliOp>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace("srli", |cb| {
+                let config = ShiftImmInstruction::<GoldilocksExt2, SrliOp>::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
         config
             .rd_written
             .require_equal(
-                || "assert_rd_written",
+                "assert_rd_written",
                 &mut cb,
                 &UInt::from_const_unchecked(
                     Value::new_unchecked(expected_rd_written)
@@ -184,7 +180,7 @@ mod test {
         );
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(

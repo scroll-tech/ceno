@@ -22,16 +22,13 @@ fn imm_j(imm: i32) -> u32 {
 }
 #[test]
 fn test_opcode_jal() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "jal",
-            |cb| {
-                let config = JalInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("jal", |cb| {
+            let config = JalInstruction::<GoldilocksExt2>::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -67,16 +64,13 @@ fn test_opcode_jal() {
 
 #[test]
 fn test_opcode_jalr() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "jalr",
-            |cb| {
-                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("jalr", |cb| {
+            let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -119,16 +113,13 @@ fn imm_u(imm: u32) -> u32 {
 }
 #[test]
 fn test_opcode_lui() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "lui",
-            |cb| {
-                let config = LuiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("lui", |cb| {
+            let config = LuiInstruction::<GoldilocksExt2>::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -163,16 +154,13 @@ fn test_opcode_lui() {
 
 #[test]
 fn test_opcode_auipc() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "auipc",
-            |cb| {
-                let config = AuipcInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("auipc", |cb| {
+            let config = AuipcInstruction::<GoldilocksExt2>::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 

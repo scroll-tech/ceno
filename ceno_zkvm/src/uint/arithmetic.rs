@@ -25,17 +25,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let mut c = UIntLimbs::<M, C, E>::new_as_empty();
 
         // allocate witness cells and do range checks for carries
-        c.alloc_carry_unchecked(
-            || "add_carry",
-            circuit_builder,
-            with_overflow,
-            Self::NUM_CELLS,
-        )?;
+        c.alloc_carry_unchecked("add_carry", circuit_builder, with_overflow, Self::NUM_CELLS)?;
         let Some(carries) = &c.carries else {
             return Err(ZKVMError::CircuitError);
         };
         carries.iter().enumerate().try_for_each(|(i, carry)| {
-            circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
+            circuit_builder.assert_bit(format!("carry_{i}_in_as_bit"), carry.expr())
         })?;
 
         // perform add operation
@@ -60,7 +55,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     }
 
                     circuit_builder
-                        .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb_expr.clone())?;
+                        .assert_ux::<_, C>(format!("limb_{i}_in_{C}"), limb_expr.clone())?;
                     Ok(limb_expr)
                 })
                 .collect::<Result<Vec<Expression<E>>, ZKVMError>>()?,
@@ -69,14 +64,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         Ok(c)
     }
 
-    pub fn add_const<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn add_const<Name: Into<String>>(
         &self,
-        name_fn: N,
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         constant: Expression<E>,
         with_overflow: bool,
     ) -> Result<Self, ZKVMError> {
-        circuit_builder.namespace(name_fn, |cb| {
+        circuit_builder.namespace(name, |cb| {
             let Expression::Constant(c) = constant else {
                 panic!("addend is not a constant type");
             };
@@ -94,14 +89,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     /// Little-endian addition.
-    pub fn add<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn add<Name: Into<String>>(
         &self,
-        name_fn: N,
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         addend: &UIntLimbs<M, C, E>,
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
-        circuit_builder.namespace(name_fn, |cb| {
+        circuit_builder.namespace(name, |cb| {
             self.internal_add(cb, &addend.expr(), with_overflow)
         })
     }
@@ -121,15 +116,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         };
         // with high limb, overall cell will be double
         let c_limbs: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_limbs, i| {
-            let limb = circuit_builder.create_witin(|| format!("limb_{i}"))?;
-            circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
+            let limb = circuit_builder.create_witin(format!("limb_{i}"))?;
+            circuit_builder.assert_ux::<_, C>(format!("limb_{i}_in_{C}"), limb.expr())?;
             c_limbs.push(limb);
             Result::<Vec<WitIn>, ZKVMError>::Ok(c_limbs)
         })?;
         let c_carries: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_carries, i| {
             // skip last carry if with_overflow == false
             if i != num_limbs - 1 || with_overflow {
-                let carry = circuit_builder.create_witin(|| format!("carry_{i}"))?;
+                let carry = circuit_builder.create_witin(format!("carry_{i}"))?;
                 c_carries.push(carry);
             }
             Result::<Vec<WitIn>, ZKVMError>::Ok(c_carries)
@@ -141,7 +136,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .map(|(i, carry)| {
                 AssertLTConfig::construct_circuit(
                     circuit_builder,
-                    || format!("carry_{i}_in_less_than"),
+                    format!("carry_{i}_in_less_than"),
                     carry.expr(),
                     (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
                     Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
@@ -150,26 +145,22 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .collect::<Result<Vec<AssertLTConfig>, ZKVMError>>()?;
 
         // creating a witness constrained as expression to reduce overall degree
-        let mut swap_witin = |name: &str,
-                              u: &mut UIntLimbs<M, C, E>|
-         -> Result<Vec<Expression<E>>, ZKVMError> {
-            if u.is_expr() {
-                circuit_builder.namespace(
-                    || name.to_owned(),
-                    |cb| {
+        let mut swap_witin =
+            |name: &str, u: &mut UIntLimbs<M, C, E>| -> Result<Vec<Expression<E>>, ZKVMError> {
+                if u.is_expr() {
+                    circuit_builder.namespace(name.to_owned(), |cb| {
                         let existing_expr = u.expr();
                         // this will overwrite existing expressions
-                        u.replace_limbs_with_witin(|| "replace_limbs_with_witin".to_string(), cb)?;
+                        u.replace_limbs_with_witin("replace_limbs_with_witin".to_string(), cb)?;
                         // check if the new witness equals the existing expression
                         izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
-                            cb.require_equal(|| "new_witin_equal_expr".to_string(), lhs, rhs)
+                            cb.require_equal("new_witin_equal_expr".to_string(), lhs, rhs)
                         })?;
                         Ok(())
-                    },
-                )?;
-            }
-            Ok(u.expr())
-        };
+                    })?;
+                }
+                Ok(u.expr())
+            };
 
         let a_expr = swap_witin("lhs", self)?;
         let b_expr = swap_witin("rhs", multiplier)?;
@@ -202,7 +193,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 result_c[i] =
                     result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C.into();
             }
-            circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
+            circuit_builder.require_zero(format!("mul_zero_{i}"), result_c[i].clone())?;
             Ok::<(), ZKVMError>(())
         })?;
 
@@ -213,31 +204,28 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         ))
     }
 
-    pub fn mul<const M2: usize, NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn mul<const M2: usize, Name: Into<String>>(
         &mut self,
-        name_fn: N,
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UIntLimbs<M, C, E>,
         with_overflow: bool,
     ) -> Result<UIntLimbs<M2, C, E>, ZKVMError> {
-        circuit_builder.namespace(name_fn, |cb| {
-            self.internal_mul(cb, multiplier, with_overflow)
-        })
+        circuit_builder.namespace(name, |cb| self.internal_mul(cb, multiplier, with_overflow))
     }
 
-    pub fn mul_add<const M2: usize, NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn mul_add<const M2: usize, Name: Into<String>>(
         &mut self,
-        name_fn: N,
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UIntLimbs<M, C, E>,
         addend: &UIntLimbs<M, C, E>,
         with_overflow: bool,
     ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
-        circuit_builder.namespace(name_fn, |cb| {
-            let mul = cb.namespace(
-                || "mul",
-                |cb| self.internal_mul::<M2>(cb, multiplier, with_overflow),
-            )?;
+        circuit_builder.namespace(name, |cb| {
+            let mul = cb.namespace("mul", |cb| {
+                self.internal_mul::<M2>(cb, multiplier, with_overflow)
+            })?;
             let mul_lo_or_hi = if M2 == 2 * M {
                 // hi limb
                 let (_, mul_hi) = mul.as_lo_hi()?;
@@ -246,22 +234,21 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 // lo limb
                 UIntLimbs::from_exprs_unchecked(mul.expr())?
             };
-            let add = cb.namespace(
-                || "add",
-                |cb| mul_lo_or_hi.internal_add(cb, &addend.expr(), with_overflow),
-            )?;
+            let add = cb.namespace("add", |cb| {
+                mul_lo_or_hi.internal_add(cb, &addend.expr(), with_overflow)
+            })?;
             Ok((add, mul))
         })
     }
 
     /// Check two UIntLimbs are equal
-    pub fn require_equal<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn require_equal<Name: Into<String>>(
         &self,
-        name_fn: N,
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, C, E>,
     ) -> Result<(), ZKVMError> {
-        circuit_builder.require_equal(name_fn, self.value(), rhs.value())
+        circuit_builder.require_equal(name, self.value(), rhs.value())
     }
 
     pub fn is_equal(
@@ -283,7 +270,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .iter()
             .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
 
-        let sum_flag = create_witin_from_expr!(|| "sum_flag", circuit_builder, false, sum_expr)?;
+        let sum_flag = create_witin_from_expr!("sum_flag", circuit_builder, false, sum_expr)?;
         let (is_equal, diff_inv) =
             circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
         Ok(IsEqualConfig {
@@ -305,7 +292,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
     where
         E: ExtensionField<BaseField = F>,
     {
-        let high_limb_no_msb = circuit_builder.create_witin(|| "high_limb_mask")?;
+        let high_limb_no_msb = circuit_builder.create_witin("high_limb_mask")?;
         let high_limb = self.limbs[Self::NUM_CELLS - 1].expr();
 
         circuit_builder.lookup_and_byte(
@@ -316,7 +303,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         let inv_128 = F::from(128).invert().unwrap();
         let msb = (high_limb - high_limb_no_msb.expr()) * Expression::Constant(inv_128);
-        let msb = create_witin_from_expr!(|| "msb", circuit_builder, false, msb)?;
+        let msb = create_witin_from_expr!("msb", circuit_builder, false, msb)?;
         Ok(MsbConfig {
             msb,
             high_limb_no_msb,
@@ -331,21 +318,21 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
     ) -> Result<UIntLtuConfig, ZKVMError> {
         let n_bytes = Self::NUM_CELLS;
         let indexes: Vec<WitIn> = (0..n_bytes)
-            .map(|_| circuit_builder.create_witin(|| "index"))
+            .map(|_| circuit_builder.create_witin("index"))
             .collect::<Result<_, ZKVMError>>()?;
 
         // indicate the first non-zero byte index i_0 of a[i] - b[i]
         // from high to low
         //        indexes
         //            .iter()
-        //            .try_for_each(|idx| circuit_builder.assert_bit(|| "bit assert", idx.expr()))?;
+        //            .try_for_each(|idx| circuit_builder.assert_bit("bit assert", idx.expr()))?;
         //        let index_sum = indexes
         //            .iter()
         //            .fold(Expression::from(0), |acc, idx| acc + idx.expr());
-        // circuit_builder.assert_bit(|| "bit assert", index_sum)?;
+        // circuit_builder.assert_bit("bit assert", index_sum)?;
 
         // equal zero if a==b, otherwise equal (a[i_0]-b[i_0])^{-1}
-        let byte_diff_inv = circuit_builder.create_witin(|| "byte_diff_inverse")?;
+        let byte_diff_inv = circuit_builder.create_witin("byte_diff_inverse")?;
 
         // define accumulated index sum from high to low
         let si_expr: Vec<Expression<E>> = indexes
@@ -361,7 +348,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .rev()
             .enumerate()
             .map(|(i, expr)| {
-                create_witin_from_expr!(|| format!("si_expr_{i}"), circuit_builder, false, expr)
+                create_witin_from_expr!(format!("si_expr_{i}"), circuit_builder, false, expr)
             })
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
@@ -372,7 +359,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .enumerate()
             .try_for_each(|(i, ((flag, a), b))| {
                 circuit_builder.require_zero(
-                    || format!("byte diff {i} zero check"),
+                    format!("byte diff {i} zero check"),
                     a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
                 )
             })?;
@@ -397,18 +384,18 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         // check the first byte difference has a inverse
         // unwrap is safe because vector len > 0
         let lhs_ne_byte =
-            create_witin_from_expr!(|| "lhs_ne_byte", circuit_builder, false, sa.clone())?;
+            create_witin_from_expr!("lhs_ne_byte", circuit_builder, false, sa.clone())?;
         let rhs_ne_byte =
-            create_witin_from_expr!(|| "rhs_ne_byte", circuit_builder, false, sb.clone())?;
+            create_witin_from_expr!("rhs_ne_byte", circuit_builder, false, sb.clone())?;
         let index_ne = si.first().unwrap();
         circuit_builder.require_zero(
-            || "byte inverse check",
+            "byte inverse check",
             lhs_ne_byte.expr() * byte_diff_inv.expr()
                 - rhs_ne_byte.expr() * byte_diff_inv.expr()
                 - index_ne.expr(),
         )?;
 
-        let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
+        let is_ltu = circuit_builder.create_witin("is_ltu")?;
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
         circuit_builder.lookup_ltu_byte(lhs_ne_byte.expr(), rhs_ne_byte.expr(), is_ltu.expr())?;
         Ok(UIntLtuConfig {
@@ -426,8 +413,8 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLtConfig, ZKVMError> {
-        let is_lt = circuit_builder.create_witin(|| "is_lt")?;
-        // circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
+        let is_lt = circuit_builder.create_witin("is_lt")?;
+        // circuit_builder.assert_bit("assert_bit", is_lt.expr())?;
 
         let lhs_msb = self.msb_decompose(circuit_builder)?;
         let rhs_msb = rhs.msb_decompose(circuit_builder)?;
@@ -446,7 +433,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         let (msb_is_equal, msb_diff_inv) =
             circuit_builder.is_equal(lhs_msb.msb.expr(), rhs_msb.msb.expr())?;
         circuit_builder.require_zero(
-            || "is lt zero check",
+            "is lt zero check",
             lhs_msb.msb.expr() - lhs_msb.msb.expr() * rhs_msb.msb.expr()
                 + msb_is_equal.expr() * is_ltu.is_ltu.expr()
                 - is_lt.expr(),
@@ -598,18 +585,18 @@ mod tests {
             const_b: Option<u64>,
             overflow: bool,
         ) {
-            let mut cs = ConstraintSystem::new(|| "test_add");
+            let mut cs = ConstraintSystem::new("test_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let uint_a = UIntLimbs::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
+            let uint_a = UIntLimbs::<M, C, E>::new("uint_a", &mut cb).unwrap();
             let uint_c = if const_b.is_none() {
-                let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
-                uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
+                let uint_b = UIntLimbs::<M, C, E>::new("uint_b", &mut cb).unwrap();
+                uint_a.add("uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
                 let const_b = Expression::Constant(const_b.unwrap().into());
                 uint_a
-                    .add_const(|| "uint_c", &mut cb, const_b, overflow)
+                    .add_const("uint_c", &mut cb, const_b, overflow)
                     .unwrap()
             };
 
@@ -791,14 +778,14 @@ mod tests {
                 )
             }
 
-            let mut cs = ConstraintSystem::new(|| "test_mul");
+            let mut cs = ConstraintSystem::new("test_mul");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
 
-            let mut uint_a = UIntLimbs::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
-            let mut uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
+            let mut uint_a = UIntLimbs::<M, C, E>::new("uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<M, C, E>::new("uint_b", &mut cb).unwrap();
             let uint_c: UIntLimbs<M, C, E> = uint_a
-                .mul(|| "uint_c", &mut cb, &mut uint_b, overflow)
+                .mul("uint_c", &mut cb, &mut uint_b, overflow)
                 .unwrap();
 
             let wit_end_idx = if overflow {
@@ -922,19 +909,18 @@ mod tests {
             .concat()
             .into_arc_mle();
 
-            let mut cs = ConstraintSystem::new(|| "test_add_mul");
+            let mut cs = ConstraintSystem::new("test_add_mul");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-            let uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
-            let mut uint_c = uint_a.add(|| "uint_c", &mut cb, &uint_b, false).unwrap();
-            let mut uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let uint_e: UIntLimbs<64, 16, E> = uint_c
-                .mul(|| "uint_e", &mut cb, &mut uint_d, false)
-                .unwrap();
+            let uint_a = UIntLimbs::<64, 16, E>::new("uint_a", &mut cb).unwrap();
+            let uint_b = UIntLimbs::<64, 16, E>::new("uint_b", &mut cb).unwrap();
+            let mut uint_c = uint_a.add("uint_c", &mut cb, &uint_b, false).unwrap();
+            let mut uint_d = UIntLimbs::<64, 16, E>::new("uint_d", &mut cb).unwrap();
+            let uint_e: UIntLimbs<64, 16, E> =
+                uint_c.mul("uint_e", &mut cb, &mut uint_d, false).unwrap();
             let expected_e = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![3u64, 5, 2, 0]);
             expected_e
-                .require_equal(|| "assert_g", &mut cb, &uint_e)
+                .require_equal("assert_g", &mut cb, &uint_e)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
@@ -970,21 +956,20 @@ mod tests {
             .concat()
             .into_arc_mle();
 
-            let mut cs = ConstraintSystem::new(|| "test_add_mul2");
+            let mut cs = ConstraintSystem::new("test_add_mul2");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-            let uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
-            let mut uint_c = uint_a.add(|| "uint_c", &mut cb, &uint_b, false).unwrap();
-            let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let uint_e = UIntLimbs::<64, 16, E>::new(|| "uint_e", &mut cb).unwrap();
-            let mut uint_f = uint_d.add(|| "uint_f", &mut cb, &uint_e, false).unwrap();
-            let uint_g: UIntLimbs<64, 16, E> = uint_c
-                .mul(|| "unit_g", &mut cb, &mut uint_f, false)
-                .unwrap();
+            let uint_a = UIntLimbs::<64, 16, E>::new("uint_a", &mut cb).unwrap();
+            let uint_b = UIntLimbs::<64, 16, E>::new("uint_b", &mut cb).unwrap();
+            let mut uint_c = uint_a.add("uint_c", &mut cb, &uint_b, false).unwrap();
+            let uint_d = UIntLimbs::<64, 16, E>::new("uint_d", &mut cb).unwrap();
+            let uint_e = UIntLimbs::<64, 16, E>::new("uint_e", &mut cb).unwrap();
+            let mut uint_f = uint_d.add("uint_f", &mut cb, &uint_e, false).unwrap();
+            let uint_g: UIntLimbs<64, 16, E> =
+                uint_c.mul("unit_g", &mut cb, &mut uint_f, false).unwrap();
             let expected_g = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![9u64, 12, 4, 0]);
             expected_g
-                .require_equal(|| "assert_g", &mut cb, &uint_g)
+                .require_equal("assert_g", &mut cb, &uint_g)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
@@ -1010,20 +995,18 @@ mod tests {
             .concat()
             .into_arc_mle();
 
-            let mut cs = ConstraintSystem::new(|| "test_mul_add");
+            let mut cs = ConstraintSystem::new("test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-            let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
-            let uint_c = uint_a
-                .mul(|| "uint_c", &mut cb, &mut uint_b, false)
-                .unwrap();
-            let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
-            let uint_e = uint_c.add(|| "uint_e", &mut cb, &uint_d, false).unwrap();
+            let mut uint_a = UIntLimbs::<64, 16, E>::new("uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<64, 16, E>::new("uint_b", &mut cb).unwrap();
+            let uint_c = uint_a.mul("uint_c", &mut cb, &mut uint_b, false).unwrap();
+            let uint_d = UIntLimbs::<64, 16, E>::new("uint_d", &mut cb).unwrap();
+            let uint_e = uint_c.add("uint_e", &mut cb, &uint_d, false).unwrap();
 
             let expected_e = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![3u64, 4, 1, 0]);
             expected_e
-                .require_equal(|| "assert_e", &mut cb, &uint_e)
+                .require_equal("assert_e", &mut cb, &uint_e)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
@@ -1050,19 +1033,19 @@ mod tests {
             .concat()
             .into_arc_mle();
 
-            let mut cs = ConstraintSystem::new(|| "test_mul_add");
+            let mut cs = ConstraintSystem::new("test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-            let mut uint_a = UIntLimbs::<64, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let mut uint_b = UIntLimbs::<64, 16, E>::new(|| "uint_b", &mut cb).unwrap();
-            let uint_d = UIntLimbs::<64, 16, E>::new(|| "uint_d", &mut cb).unwrap();
+            let mut uint_a = UIntLimbs::<64, 16, E>::new("uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<64, 16, E>::new("uint_b", &mut cb).unwrap();
+            let uint_d = UIntLimbs::<64, 16, E>::new("uint_d", &mut cb).unwrap();
             let (uint_e, _): (_, UIntLimbs<64, 16, E>) = uint_a
-                .mul_add(|| "uint_e", &mut cb, &mut uint_b, &uint_d, false)
+                .mul_add("uint_e", &mut cb, &mut uint_b, &uint_d, false)
                 .unwrap();
 
             let expected_e = UIntLimbs::<64, 16, E>::from_const_unchecked(vec![3u64, 4, 1, 0]);
             expected_e
-                .require_equal(|| "assert_e", &mut cb, &uint_e)
+                .require_equal("assert_e", &mut cb, &uint_e)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
@@ -1088,18 +1071,17 @@ mod tests {
             .concat()
             .into_arc_mle();
 
-            let mut cs = ConstraintSystem::new(|| "test_mul_add");
+            let mut cs = ConstraintSystem::new("test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-            let mut uint_a = UIntLimbs::<32, 16, E>::new(|| "uint_a", &mut cb).unwrap();
-            let mut uint_b = UIntLimbs::<32, 16, E>::new(|| "uint_b", &mut cb).unwrap();
-            let uint_c: UIntLimbs<32, 16, E> = uint_a
-                .mul(|| "mul_add", &mut cb, &mut uint_b, true)
-                .unwrap();
+            let mut uint_a = UIntLimbs::<32, 16, E>::new("uint_a", &mut cb).unwrap();
+            let mut uint_b = UIntLimbs::<32, 16, E>::new("uint_b", &mut cb).unwrap();
+            let uint_c: UIntLimbs<32, 16, E> =
+                uint_a.mul("mul_add", &mut cb, &mut uint_b, true).unwrap();
 
             let expected_c = UIntLimbs::<32, 16, E>::from_const_unchecked(ret.limbs.to_vec());
             expected_c
-                .require_equal(|| "assert_g", &mut cb, &uint_c)
+                .require_equal("assert_g", &mut cb, &uint_c)
                 .unwrap();
 
             MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
