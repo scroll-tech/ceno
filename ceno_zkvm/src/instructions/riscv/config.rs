@@ -229,10 +229,7 @@ impl AssertSignedLtConfig {
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        let is_lt = lhs < rhs;
-        self.config
-            .assign_instance::<E>(instance, lkm, is_lt, lhs, rhs)?;
-        Ok(())
+        self.config.assign_instance::<E>(instance, lkm, lhs, rhs)
     }
 }
 
@@ -273,8 +270,7 @@ impl SignedLtConfig {
     ) -> Result<(), ZKVMError> {
         let is_lt = lhs < rhs;
         set_val!(instance, self.is_lt, is_lt as u64);
-        self.config
-            .assign_instance::<E>(instance, lkm, is_lt, lhs as SWord, rhs as SWord)?;
+        self.config.assign_instance::<E>(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 }
@@ -337,7 +333,6 @@ impl InnerSignedLtConfig {
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
-        is_signed_lt: bool,
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
@@ -358,7 +353,7 @@ impl InnerSignedLtConfig {
         )?;
 
         self.config
-            .assign_instance_signed(instance, lkm, is_signed_lt, lhs, rhs)?;
+            .assign_instance_signed(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 }
