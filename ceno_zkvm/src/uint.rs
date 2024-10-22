@@ -285,9 +285,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
             shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| {
-                shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8).into())
-            });
+            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8)));
             shift_pows
         };
         let combined_limbs = x
@@ -317,9 +315,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
             shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| {
-                shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8).into())
-            });
+            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8)));
             shift_pows
         };
         let split_limbs = x
@@ -605,7 +601,7 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
             .chunks(2)
             .map(|chunk| {
                 let (a, b) = (chunk[0].clone(), chunk[1].clone());
-                a + b * 256.into()
+                a + b * 256
             })
             .collect_vec();
         u16_limbs.try_into().expect("four limbs with M=32 and C=8")

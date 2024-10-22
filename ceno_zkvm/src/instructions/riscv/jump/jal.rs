@@ -54,7 +54,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
         circuit_builder.require_equal(
             || "jal rd_written",
             rd_written.value(),
-            j_insn.vm_state.pc.expr() + PC_STEP_SIZE.into(),
+            j_insn.vm_state.pc.expr() + PC_STEP_SIZE,
         )?;
 
         Ok(JalConfig { j_insn, rd_written })

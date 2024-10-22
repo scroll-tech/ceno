@@ -68,12 +68,12 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         circuit_builder.require_equal(
             || "rs1+imm = next_pc_unrounded + overflow*2^32",
             rs1_read.value() + imm.expr(),
-            next_pc_addr.expr_unaligned() + overflow.expr() * (1u64 << 32).into(),
+            next_pc_addr.expr_unaligned() + overflow.expr() * (1u64 << 32),
         )?;
 
         circuit_builder.require_zero(
             || "overflow_0_or_pm1",
-            overflow.expr() * (overflow.expr() + (-1).into()) * (overflow.expr() + 1.into()),
+            overflow.expr() * (overflow.expr() - 1) * (overflow.expr() + 1),
         )?;
 
         circuit_builder.require_equal(
@@ -86,7 +86,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         circuit_builder.require_equal(
             || "rd_written = pc+4",
             rd_written.value(),
-            i_insn.vm_state.pc.expr() + PC_STEP_SIZE.into(),
+            i_insn.vm_state.pc.expr() + PC_STEP_SIZE,
         )?;
 
         Ok(JalrConfig {

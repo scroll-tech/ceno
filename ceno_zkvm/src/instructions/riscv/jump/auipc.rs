@@ -56,7 +56,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         circuit_builder.require_equal(
             || "imm+pc = rd_written+2^32*overflow",
             imm.expr() + u_insn.vm_state.pc.expr(),
-            rd_written.value() + overflow_bit.expr() * (1u64 << 32).into(),
+            rd_written.value() + overflow_bit.expr() * (1u64 << 32),
         )?;
 
         Ok(AuipcConfig {

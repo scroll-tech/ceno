@@ -42,10 +42,10 @@ impl<E: ExtensionField> StateInOut<E> {
             let next_pc = circuit_builder.create_witin(|| "next_pc")?;
             (Some(next_pc), next_pc.expr())
         } else {
-            (None, pc.expr() + PC_STEP_SIZE.into())
+            (None, pc.expr() + PC_STEP_SIZE)
         };
         let ts = circuit_builder.create_witin(|| "ts")?;
-        let next_ts = ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize).into();
+        let next_ts = ts.expr() + Tracer::SUBCYCLES_PER_INSN;
         circuit_builder.state_in(pc.expr(), ts.expr())?;
         circuit_builder.state_out(next_pc_expr, next_ts)?;
 
@@ -93,7 +93,7 @@ impl<E: ExtensionField> ReadRS1<E> {
             || "read_rs1",
             id,
             prev_ts.expr(),
-            cur_ts.expr() + (Tracer::SUBCYCLE_RS1 as usize).into(),
+            cur_ts.expr() + Tracer::SUBCYCLE_RS1,
             rs1_read,
         )?;
 
@@ -148,7 +148,7 @@ impl<E: ExtensionField> ReadRS2<E> {
             || "read_rs2",
             id,
             prev_ts.expr(),
-            cur_ts.expr() + (Tracer::SUBCYCLE_RS2 as usize).into(),
+            cur_ts.expr() + Tracer::SUBCYCLE_RS2,
             rs2_read,
         )?;
 
@@ -204,7 +204,7 @@ impl<E: ExtensionField> WriteRD<E> {
             || "write_rd",
             id,
             prev_ts.expr(),
-            cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
+            cur_ts.expr() + Tracer::SUBCYCLE_RD,
             prev_value.register_expr(),
             rd_written,
         )?;
@@ -263,7 +263,7 @@ impl<E: ExtensionField> ReadMEM<E> {
             || "read_memory",
             &mem_addr,
             prev_ts.expr(),
-            cur_ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
             mem_read,
         )?;
 
@@ -320,7 +320,7 @@ impl<E: ExtensionField> WriteMEM<E> {
             || "write_memory",
             &mem_addr,
             prev_ts.expr(),
-            cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
+            cur_ts.expr() + Tracer::SUBCYCLE_RD,
             prev_value.memory_expr(),
             mem_written,
         )?;
@@ -399,7 +399,7 @@ impl<E: ExtensionField> MemAddr<E> {
     /// Represent the address aligned to 4 bytes.
     pub fn expr_align4(&self) -> AddressExpr<E> {
         let low_bits = self.low_bit_exprs();
-        self.addr.address_expr() - low_bits[1].clone() * 2.into() - low_bits[0].clone()
+        self.addr.address_expr() - low_bits[1].clone() * 2 - low_bits[0].clone()
     }
 
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
@@ -427,9 +427,9 @@ impl<E: ExtensionField> MemAddr<E> {
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
         // Express the value of the low bits.
-        let low_sum = (n_zeros..Self::N_LOW_BITS)
+        let low_sum: Expression<E> = (n_zeros..Self::N_LOW_BITS)
             .zip_eq(low_bits.iter())
-            .map(|(pos, bit)| bit.expr() * (1 << pos).into())
+            .map(|(pos, bit)| bit.expr() * (1 << pos))
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
