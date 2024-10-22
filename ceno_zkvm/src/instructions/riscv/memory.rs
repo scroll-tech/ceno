@@ -5,4 +5,4 @@ pub mod store;
 #[cfg(test)]
 mod test;
 
-pub use store::{SbInstruction, StoreConfig, ShInstruction, SwInstruction};
+pub use store::{SbInstruction, ShInstruction, StoreConfig, SwInstruction};

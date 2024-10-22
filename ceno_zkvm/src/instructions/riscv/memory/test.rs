@@ -34,25 +34,26 @@ fn impl_opcode_sb(shift: u32) {
     let insn_code = encode_rv32(InsnKind::SB, 2, 3, 4, shift);
     let prev_mem_value = 0x40302010;
     let rs2_word = Word::from(0x12345678_u32);
-    let (raw_witin, lkm) = SbInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-        StepRecord::new_s_instruction(
-            12,
-            MOCK_PC_START,
-            insn_code,
-            Word::from(0x4000000_u32),
-            rs2_word,
-            WriteOp {
-                addr: ByteAddr(0x4000000 + shift),
-                value: Change {
-                    before: prev_mem_value,
-                    after: sb(prev_mem_value, rs2_word, shift),
+    let (raw_witin, lkm) =
+        SbInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_s_instruction(
+                12,
+                MOCK_PC_START,
+                insn_code,
+                Word::from(0x4000000_u32),
+                rs2_word,
+                WriteOp {
+                    addr: ByteAddr(0x4000000 + shift),
+                    value: Change {
+                        before: prev_mem_value,
+                        after: sb(prev_mem_value, rs2_word, shift),
+                    },
+                    previous_cycle: 4,
                 },
-                previous_cycle: 4,
-            },
-            8,
-        ),
-    ])
-    .unwrap();
+                8,
+            ),
+        ])
+        .unwrap();
 
     MockProver::assert_satisfied(
         &cb,
