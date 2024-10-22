@@ -321,6 +321,14 @@ impl<E: ExtensionField> Sum for Expression<E> {
     }
 }
 
+impl<E: ExtensionField> Sub<Expression<E>> for u64 {
+    type Output = Expression<E>;
+
+    fn sub(self, rhs: Expression<E>) -> Expression<E> {
+        Expression::Constant(E::BaseField::from(self)) - rhs
+    }
+}
+
 impl<E: ExtensionField> Sub for Expression<E> {
     type Output = Expression<E>;
     fn sub(self, rhs: Expression<E>) -> Expression<E> {
