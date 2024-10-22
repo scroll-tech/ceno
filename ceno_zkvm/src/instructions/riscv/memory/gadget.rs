@@ -29,7 +29,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         let select =
             |bit: &Expression<E>, when_true: &Expression<E>, when_false: &Expression<E>| {
                 bit.clone() * when_true.clone()
-                    + (E::BaseField::from(1).expr() - bit.clone()) * when_false.clone()
+                    + (1 - bit.clone()) * when_false.clone()
             };
 
         let alloc_bytes = |cb: &mut CircuitBuilder<E>,
@@ -43,7 +43,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
 
                     Ok(byte)
                 })
-                .collect::<Result<Vec<WitIn>, ZKVMError>>()
+                .collect()
         };
 
         let decompose_limb = |cb: &mut CircuitBuilder<E>,
@@ -59,9 +59,10 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 bytes
                     .iter()
                     .enumerate()
-                    .fold(Expression::ZERO, |acc, (idx, byte)| {
-                        acc + E::BaseField::from(1 << (idx * 8)).expr() * byte.expr()
-                    }),
+                    .map(|(idx, byte)| {
+                        (1 << (idx * 8)) * byte.expr()
+                    })
+                    .sum(),
             )?;
 
             Ok(bytes)
