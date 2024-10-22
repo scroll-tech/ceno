@@ -110,30 +110,31 @@ where
         Spec: 'a;
 
     /// Decide if the proof is trivial, and if so, output it.
-    fn trivial_proof<'a>(prover_inputs: &Self::ProverInputs<'a>) -> Option<BasefoldProof<E, Spec>>;
+    fn trivial_proof(prover_inputs: &Self::ProverInputs<'_>) -> Option<BasefoldProof<E, Spec>>;
 
     /// Generate:
     /// 1. the point to open (not necessarily the same as the original point)
     /// 2. the batching coefficients:
     ///    2.1 the outer coefficients, i.e., batching polys across different comms
     ///    2.2 the inner coefficients, i.e., batching polys inside each comm
-    fn prepare_commit_phase_input<'a>(
+    fn prepare_commit_phase_input(
         pp: &BasefoldProverParams<E, Spec>,
-        prover_inputs: &Self::ProverInputs<'a>,
+        prover_inputs: &Self::ProverInputs<'_>,
         transcript: &mut Transcript<E>,
     ) -> Result<CommitPhaseInput<E>, Error>;
 
-    fn check_trivial_proof<'a>(
-        verifier_inputs: &Self::VerifierInputs<'a>,
+    fn check_trivial_proof(
+        verifier_inputs: &Self::VerifierInputs<'_>,
         proof: &BasefoldProof<E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
 
-    fn check_sizes<'a>(verifier_inputs: &Self::VerifierInputs<'a>);
+    fn check_sizes(verifier_inputs: &Self::VerifierInputs<'_>);
 
-    fn prepare_sumcheck_target_and_point_batching_coeffs<'a>(
+    #[allow(clippy::type_complexity)]
+    fn prepare_sumcheck_target_and_point_batching_coeffs(
         vp: &BasefoldVerifierParams<E, Spec>,
-        verifier_inputs: &Self::VerifierInputs<'a>,
+        verifier_inputs: &Self::VerifierInputs<'_>,
         proof: &BasefoldProof<E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<(E, Vec<E>, Vec<E>, Vec<E>), Error>;
@@ -281,7 +282,8 @@ where
         // Encode the polynomials. Simultaneously get:
         //  (1) The evaluations over the hypercube (just a clone of the input)
         //  (2) The encoding of the coefficient vector (need an interpolation)
-        let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
+
+        match Self::get_poly_bh_evals_and_codeword(pp, poly) {
             PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
                 let codeword_tree = MerkleTree::<E, Spec::Hasher>::from_leaves(codeword, 2);
 
@@ -309,9 +311,7 @@ where
                 })
             }
             PolyEvalsCodeword::TooBig(num_vars) => Err(Error::PolynomialTooLarge(num_vars)),
-        };
-
-        ret
+        }
     }
 
     /// Implement the Polynomial Commitment Scheme present in the BaseFold paper
@@ -374,9 +374,9 @@ where
     ///     positions are (i >> k) and (i >> k) XOR 1.
     /// (c) The verifier checks that the folding has been correctly computed
     ///     at these positions.
-    fn open_inner<'a, Strategy: BasefoldStrategy<E, Spec>>(
+    fn open_inner<Strategy: BasefoldStrategy<E, Spec>>(
         pp: &BasefoldProverParams<E, Spec>,
-        prover_inputs: &Strategy::ProverInputs<'a>,
+        prover_inputs: &Strategy::ProverInputs<'_>,
         transcript: &mut Transcript<E>,
     ) -> Result<BasefoldProof<E, Spec>, Error> {
         if let Some(proof) = Strategy::trivial_proof(prover_inputs) {
@@ -437,9 +437,9 @@ where
         })
     }
 
-    fn verify_inner<'a, Strategy: BasefoldStrategy<E, Spec>>(
+    fn verify_inner<Strategy: BasefoldStrategy<E, Spec>>(
         vp: &BasefoldVerifierParams<E, Spec>,
-        verifier_inputs: &Strategy::VerifierInputs<'a>,
+        verifier_inputs: &Strategy::VerifierInputs<'_>,
         proof: &BasefoldProof<E, Spec>,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {

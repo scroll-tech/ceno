@@ -385,11 +385,11 @@ pub mod test_util {
     ) -> Vec<Pcs::CommitmentWithData> {
         polys
             .iter()
-            .map(|poly| Pcs::commit_and_write(&pp, &poly, transcript).unwrap())
+            .map(|poly| Pcs::commit_and_write(pp, poly, transcript).unwrap())
             .collect_vec()
     }
 
-    pub fn vecs_as_slices<'a, T>(values: &'a Vec<Vec<T>>) -> Vec<&'a [T]> {
+    pub fn vecs_as_slices<T>(values: &[Vec<T>]) -> Vec<&[T]> {
         values.iter().map(|vec| vec.as_slice()).collect::<Vec<_>>()
     }
 

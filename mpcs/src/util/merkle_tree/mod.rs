@@ -134,7 +134,7 @@ where
     }
 
     pub fn root_ref(&self) -> &H::Digest {
-        &self.inner.root_ref()
+        self.inner.root_ref()
     }
 
     pub fn height(&self) -> usize {
@@ -442,6 +442,10 @@ where
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn as_ext(&self) -> Vec<E> {
         match &self.0 {
             FieldType::Ext(leaves) => leaves.clone(),
@@ -578,10 +582,10 @@ where
     pub fn left(&self) -> FieldType<E> {
         match self {
             BatchLeavesPair::Ext(x) => {
-                FieldType::Ext(x.iter().map(|(x, _)| x.clone()).collect::<Vec<_>>())
+                FieldType::Ext(x.iter().map(|(x, _)| *x).collect::<Vec<_>>())
             }
             BatchLeavesPair::Base(x) => {
-                FieldType::Base(x.iter().map(|(x, _)| x.clone()).collect::<Vec<_>>())
+                FieldType::Base(x.iter().map(|(x, _)| *x).collect::<Vec<_>>())
             }
         }
     }
@@ -589,10 +593,10 @@ where
     pub fn right(&self) -> FieldType<E> {
         match self {
             BatchLeavesPair::Ext(x) => {
-                FieldType::Ext(x.iter().map(|(_, y)| y.clone()).collect::<Vec<_>>())
+                FieldType::Ext(x.iter().map(|(_, y)| *y).collect::<Vec<_>>())
             }
             BatchLeavesPair::Base(x) => {
-                FieldType::Base(x.iter().map(|(_, y)| y.clone()).collect::<Vec<_>>())
+                FieldType::Base(x.iter().map(|(_, y)| *y).collect::<Vec<_>>())
             }
         }
     }

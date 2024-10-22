@@ -120,9 +120,9 @@ where
         let comm = verifier_inputs.comm;
 
         if comm.root() == merkle_tree.root() {
-            return Ok(());
+            Ok(())
         } else {
-            return Err(Error::MerkleRootMismatch);
+            Err(Error::MerkleRootMismatch)
         }
     }
 

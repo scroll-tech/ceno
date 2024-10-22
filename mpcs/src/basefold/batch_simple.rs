@@ -149,9 +149,9 @@ where
         let merkle_tree =
             MerkleTree::<_, Spec::Hasher>::from_batch_leaves(trivial_proof.clone(), 2);
         if comm.root() == merkle_tree.root() {
-            return Ok(());
+            Ok(())
         } else {
-            return Err(Error::MerkleRootMismatch);
+            Err(Error::MerkleRootMismatch)
         }
     }
 

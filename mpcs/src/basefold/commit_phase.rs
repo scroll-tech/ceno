@@ -52,6 +52,7 @@ where
 }
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
+#[allow(clippy::type_complexity)]
 pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, CPS: CommitPhaseStrategy<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
@@ -230,7 +231,7 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
 >(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     level: usize,
-    values: &Vec<E>,
+    values: &[E],
     additional_values: impl Fn(usize) -> E + Sync,
     challenge: E,
 ) -> Vec<E>

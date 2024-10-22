@@ -37,9 +37,11 @@ impl<F: SmallField> TryFrom<Vec<F>> for KeccakDigest {
     fn try_from(value: Vec<F>) -> Result<Self, Self::Error> {
         let mut output = [0u8; 32];
         if value.len() != 4 {
-            return Err(format!("can only create digest from 4 elements"));
+            return Err("can only create digest from 4 elements".to_string());
         }
-        FRead { iter: value.iter() }.read(&mut output).unwrap();
+        FRead { iter: value.iter() }
+            .read_exact(&mut output)
+            .unwrap();
         Ok(KeccakDigest(output))
     }
 }
@@ -72,7 +74,7 @@ where
     }
 
     fn hash_two_digests(a: &Self::Digest, b: &Self::Digest) -> Self::Digest {
-        let input = a.0.iter().chain(&b.0).map(|x| *x).collect::<Vec<_>>();
+        let input = a.0.iter().chain(&b.0).copied().collect::<Vec<_>>();
         let mut output = [0u8; 32];
         keccak_256(input.as_slice(), &mut output);
         KeccakDigest(output)

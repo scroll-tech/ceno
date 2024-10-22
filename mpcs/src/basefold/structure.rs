@@ -125,7 +125,7 @@ where
     pub fn par_iter_batch_codewords<'a>(
         &'a self,
         coeffs: &'a [E],
-    ) -> impl ParallelIterator<Item = E> + IndexedParallelIterator + 'a {
+    ) -> impl IndexedParallelIterator<Item = E> + 'a {
         (0..self.codeword_size()).into_par_iter().map(|i| {
             self.get_codeword_entry_ext(i)
                 .par_iter()
