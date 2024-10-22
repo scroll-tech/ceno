@@ -14,7 +14,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, StepRecord, Word};
+use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -133,6 +133,12 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
         let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
+        let addr = ByteAddr::from(
+            step.rs1()
+                .unwrap()
+                .value
+                .wrapping_add(step.insn().imm_or_funct7()),
+        );
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
@@ -143,13 +149,11 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             .prev_memory_value
             .assign_value(instance, prev_mem_value);
 
-        config.memory_addr.assign_instance(
-            instance,
-            lk_multiplicity,
-            Word::from(memory_op.addr),
-        )?;
+        config
+            .memory_addr
+            .assign_instance(instance, lk_multiplicity, addr.into())?;
         if let Some(change) = config.word_change.as_ref() {
-            change.assign_instance::<E>(instance, lk_multiplicity, step)?;
+            change.assign_instance::<E>(instance, lk_multiplicity, step, addr.shift())?;
         }
 
         Ok(())

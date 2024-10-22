@@ -49,10 +49,10 @@ pub trait EmuContext {
     fn store_register(&mut self, idx: RegIdx, data: Word) -> Result<()>;
 
     // Load from memory
-    fn load_memory(&mut self, addr: ByteAddr) -> Result<Word>;
+    fn load_memory(&mut self, addr: WordAddr) -> Result<Word>;
 
     // Store to memory
-    fn store_memory(&mut self, addr: ByteAddr, data: Word) -> Result<()>;
+    fn store_memory(&mut self, addr: WordAddr, data: Word) -> Result<()>;
 
     // Get the value of a register without side-effects.
     fn peek_register(&self, idx: RegIdx) -> Word;
@@ -63,7 +63,7 @@ pub trait EmuContext {
     // Load from memory, in the context of instruction fetching.
     // Only called after check_insn_load returns true.
     fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        self.load_memory(pc.baddr())
+        self.load_memory(pc)
     }
 
     // Check access for instruction load
@@ -748,7 +748,7 @@ impl Emulator {
             return ctx.trap(TrapCause::LoadAccessFault(addr));
         }
         let shift = 8 * (addr.0 & 3);
-        let data = ctx.load_memory(addr)?;
+        let data = ctx.load_memory(addr.waddr())?;
         let out = match kind {
             InsnKind::LB => {
                 let mut out = (data >> shift) & 0xff;
@@ -823,7 +823,7 @@ impl Emulator {
             }
             _ => unreachable!(),
         }
-        ctx.store_memory(addr, data)?;
+        ctx.store_memory(addr.waddr(), data)?;
         ctx.set_pc(ctx.get_pc() + WORD_SIZE);
         Ok(true)
     }

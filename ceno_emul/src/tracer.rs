@@ -35,7 +35,7 @@ pub struct StepRecord {
 pub struct MemOp<T> {
     /// Virtual Memory Address.
     /// For registers, get it from `CENO_PLATFORM.register_vma(idx)`.
-    pub addr: ByteAddr,
+    pub addr: WordAddr,
     /// The Word read, or the Change<Word> to be written.
     pub value: T,
     /// The cycle when this memory address was last accessed before this operation.
@@ -288,14 +288,14 @@ impl Tracer {
                 self.record.rs1 = Some(ReadOp {
                     addr,
                     value,
-                    previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_RS1),
+                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS1),
                 });
             }
             (Some(_), None) => {
                 self.record.rs2 = Some(ReadOp {
                     addr,
                     value,
-                    previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_RS2),
+                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS2),
                 });
             }
             _ => unimplemented!("Only two register reads are supported"),
@@ -311,15 +311,15 @@ impl Tracer {
         self.record.rd = Some(WriteOp {
             addr,
             value,
-            previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_RD),
+            previous_cycle: self.track_access(addr, Self::SUBCYCLE_RD),
         });
     }
 
-    pub fn load_memory(&mut self, addr: ByteAddr, value: Word) {
+    pub fn load_memory(&mut self, addr: WordAddr, value: Word) {
         self.store_memory(addr, Change::new(value, value));
     }
 
-    pub fn store_memory(&mut self, addr: ByteAddr, value: Change<Word>) {
+    pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
         if self.record.memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
         }
@@ -327,7 +327,7 @@ impl Tracer {
         self.record.memory_op = Some(WriteOp {
             addr,
             value,
-            previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_MEM),
+            previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
         });
     }
 

@@ -165,14 +165,11 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
+        shift: u32,
     ) -> Result<(), ZKVMError> {
-        // memory_addr, prev_value, rs2_value,
         let memory_op = step.memory_op().clone().unwrap();
         let prev_value = Value::new_unchecked(memory_op.value.before);
         let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
-
-        let shift = memory_op.addr.shift();
-        assert!(shift <= 0x03);
 
         let low_bits = [shift & 1, (shift >> 1) & 1];
         let prev_limb = prev_value.as_u16_limbs()[low_bits[1] as usize];

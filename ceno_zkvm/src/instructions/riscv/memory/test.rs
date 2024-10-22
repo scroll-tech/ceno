@@ -3,7 +3,7 @@ use crate::{
     instructions::{Instruction, riscv::memory::SbInstruction},
     scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
-use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, Word, WriteOp, encode_rv32};
+use ceno_emul::{Change, InsnKind, StepRecord, Word, WordAddr, WriteOp, encode_rv32};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
@@ -43,7 +43,7 @@ fn impl_opcode_sb(shift: u32) {
                 Word::from(0x4000000_u32),
                 rs2_word,
                 WriteOp {
-                    addr: ByteAddr(0x4000000 + shift),
+                    addr: WordAddr::from(0x4000000),
                     value: Change {
                         before: prev_mem_value,
                         after: sb(prev_mem_value, rs2_word, shift),
