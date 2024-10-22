@@ -33,8 +33,8 @@ impl EcallInstructionConfig {
 
         cb.state_in(pc.expr(), ts.expr())?;
         cb.state_out(
-            next_pc.map_or(pc.expr() + PC_STEP_SIZE.into(), |next_pc| next_pc),
-            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize).into(),
+            next_pc.map_or(pc.expr() + PC_STEP_SIZE, |next_pc| next_pc),
+            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize),
         )?;
 
         cb.lk_fetch(&InsnRecord::new(
@@ -54,7 +54,7 @@ impl EcallInstructionConfig {
             || "write x5",
             E::BaseField::from(CENO_PLATFORM.reg_ecall() as u64),
             prev_x5_ts.expr(),
-            ts.expr() + (Tracer::SUBCYCLE_RS1 as usize).into(),
+            ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),
             syscall_ret_value.map_or(syscall_id, |v| v),
         )?;
