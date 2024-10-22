@@ -15,6 +15,7 @@ ff_ext = { path = "../ff_ext" }
 generic-array = { version = "0.14", features = ["serde"] }
 goldilocks.workspace = true
 itertools.workspace = true
+keccak-hash = "0.11.0"
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
@@ -25,7 +26,6 @@ rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
-keccak-hash = "0.11.0"
 
 [dev-dependencies]
 criterion.workspace = true
