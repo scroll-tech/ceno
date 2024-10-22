@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::Transcript;
 
@@ -297,11 +297,11 @@ pub enum Error {
 
 mod basefold;
 pub use basefold::{
-    coset_fft, fft, fft_root_table, one_level_eval_hc, one_level_interp_hc, Basecode,
-    BasecodeDefaultSpec, Basefold, BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams,
-    BasefoldCommitment, BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams,
-    BasefoldRSKeccakParams, BasefoldRSPoseidonParams, BasefoldSpec, EncodingScheme, RSCode,
-    RSCodeDefaultSpec,
+    Basecode, BasecodeDefaultSpec, Basefold, BasefoldBasecodeKeccakParams,
+    BasefoldBasecodePoseidonParams, BasefoldCommitment, BasefoldCommitmentWithData,
+    BasefoldDefault, BasefoldParams, BasefoldRSKeccakParams, BasefoldRSPoseidonParams,
+    BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table,
+    one_level_eval_hc, one_level_interp_hc,
 };
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
@@ -471,7 +471,7 @@ pub mod test_util {
                 let values: Vec<E> = evals
                     .iter()
                     .map(Evaluation::value)
-                    .map(|x| *x)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
@@ -504,7 +504,7 @@ pub mod test_util {
                 let values: Vec<E> = evals
                     .iter()
                     .map(Evaluation::value)
-                    .map(|x| *x)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 

@@ -13,14 +13,14 @@ use rayon::{
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
 #[cfg(feature = "non_pow2_rayon_thread")]
-use crate::local_thread_pool::{create_local_pool_once, LOCAL_THREAD_POOL};
+use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
 
 use crate::{
     entered_span, exit_span,
     structs::{IOPProof, IOPProverMessage, IOPProverState},
     util::{
-        barycentric_weights, ceil_log2, extrapolate, merge_sumcheck_polys, AdditiveArray,
-        AdditiveVec,
+        AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
+        merge_sumcheck_polys,
     },
 };
 
@@ -50,13 +50,10 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverState {
-                    poly: polys[0].clone(),
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverState {
+                poly: polys[0].clone(),
+                ..Default::default()
+            });
         }
         let start = start_timer!(|| "sum check prove");
 
@@ -485,13 +482,10 @@ impl<E: ExtensionField> IOPProverState<E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverState {
-                    poly,
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverState {
+                poly,
+                ..Default::default()
+            });
         }
         let start = start_timer!(|| "sum check prove");
 

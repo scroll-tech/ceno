@@ -4,16 +4,16 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::{constants::UInt, u_insn::UInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, u_insn::UInstructionConfig},
     },
     set_val,
     witness::LkMultiplicity,
-    Value,
 };
 
 pub struct AuipcConfig<E: ExtensionField> {

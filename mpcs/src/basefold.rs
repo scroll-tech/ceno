@@ -1,4 +1,5 @@
 use crate::{
+    Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
     sum_check::{
         classic::{ClassicSumCheck, Coefficients, CoefficientsProver, SumcheckProof},
         eq_xy_eval,
@@ -9,7 +10,6 @@ use crate::{
         merkle_tree::{Hasher, MerkleTree},
         plonky2_util::reverse_index_bits_in_place_field_type,
     },
-    Error, Evaluation, PolynomialCommitmentScheme,
 };
 use ark_std::{end_timer, start_timer};
 use basic::BasicBasefoldStrategy;
@@ -22,12 +22,12 @@ pub use encoding::{
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use query_phase::{prover_query_phase, verifier_query_phase, QueryCheckStrategy};
+use query_phase::{QueryCheckStrategy, prover_query_phase, verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::BasefoldSpec;
 use transcript::Transcript;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
 
@@ -47,7 +47,7 @@ pub use structure::{
     BasefoldRSKeccakParams, BasefoldRSPoseidonParams, BasefoldVerifierParams,
 };
 mod commit_phase;
-use commit_phase::{commit_phase, CommitPhaseStrategy};
+use commit_phase::{CommitPhaseStrategy, commit_phase};
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;

@@ -1,15 +1,15 @@
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{
-            constants::UInt, im_insn::IMInstructionConfig, s_insn::SInstructionConfig,
-            RIVInstruction,
-        },
         Instruction,
+        riscv::{
+            RIVInstruction, constants::UInt, im_insn::IMInstructionConfig,
+            s_insn::SInstructionConfig,
+        },
     },
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -61,7 +61,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for StoreInstruction<E
             &imm.value(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
-            memory_addr.memory_expr(),
+            memory_addr.address_expr(),
             memory_value,
         )?;
 
@@ -138,7 +138,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             &imm.value(),
             rs1_read.register_expr(),
             memory_read.memory_expr(),
-            memory_addr.memory_expr(),
+            memory_addr.address_expr(),
             memory_value,
         )?;
 

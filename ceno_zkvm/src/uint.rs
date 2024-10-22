@@ -4,7 +4,7 @@ mod logic;
 pub mod util;
 
 use crate::{
-    chip_handler::{MemoryExpr, RegisterExpr},
+    chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
@@ -585,6 +585,11 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
         u16_limbs.try_into().expect("two limbs with M=32 and C=16")
     }
 
+    /// Interpret this UInt as a memory address.
+    pub fn address_expr(&self) -> AddressExpr<E> {
+        self.value()
+    }
+
     /// Return a value suitable for memory read/write. From [u16; 2] limbs
     pub fn memory_expr(&self) -> MemoryExpr<E> {
         let u16_limbs = self.expr();
@@ -831,7 +836,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
 mod tests {
 
     mod value {
-        use crate::{witness::LkMultiplicity, Value};
+        use crate::{Value, witness::LkMultiplicity};
         #[test]
         fn test_add() {
             let a = Value::new_unchecked(1u32);

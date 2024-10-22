@@ -1,6 +1,6 @@
 use crate::utils::const_min;
 
-use super::{util::max_carry_word_for_multiplication, UIntLimbs};
+use super::{UIntLimbs, util::max_carry_word_for_multiplication};
 
 pub const BYTE_BIT_WIDTH: usize = 8;
 

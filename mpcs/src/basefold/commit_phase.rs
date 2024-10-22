@@ -6,14 +6,14 @@ use super::{
 use crate::{
     basefold::sumcheck::sum_check_first_round,
     util::{
-        arithmetic::{interpolate2_weights, interpolate_over_boolean_hypercube},
+        arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
         field_type_as_ext, log2_strict,
         merkle_tree::{Hasher, MerkleTree},
     },
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
@@ -217,14 +217,11 @@ where
     }
     end_timer!(timer);
 
-    (
-        trees,
-        BasefoldCommitPhaseProof {
-            sumcheck_messages,
-            roots,
-            final_message,
-        },
-    )
+    (trees, BasefoldCommitPhaseProof {
+        sumcheck_messages,
+        roots,
+        final_message,
+    })
 }
 
 pub(crate) fn basefold_one_round_by_interpolation_weights<

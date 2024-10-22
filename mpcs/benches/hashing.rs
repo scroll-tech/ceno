@@ -1,5 +1,5 @@
 use ark_std::test_rng;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use mpcs::util::merkle_tree::{Hasher, KeccakHasher, PoseidonHasher};

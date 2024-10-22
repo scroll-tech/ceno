@@ -5,11 +5,11 @@ use crate::{
     expression::{ToExpr, WitIn},
     gadgets::AssertLTConfig,
     instructions::{
+        Instruction,
         riscv::{
             constants::{ECALL_HALT_OPCODE, EXIT_PC},
             ecall_insn::EcallInstructionConfig,
         },
-        Instruction,
     },
     set_val,
     witness::LkMultiplicity,
