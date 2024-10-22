@@ -1,6 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use multilinear_extensions::{mle::FieldType, virtual_poly_v2::ArcMultilinearExtension};
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -17,7 +17,7 @@ where
 {
     pub(crate) fn batch_commit_inner(
         pp: &BasefoldProverParams<E, Spec>,
-        polys: &[ArcMultilinearExtension<E>],
+        polys: &[DenseMultilinearExtension<E>],
     ) -> Result<BasefoldCommitmentWithData<E>, Error> {
         // assumptions
         // 1. there must be at least one polynomial

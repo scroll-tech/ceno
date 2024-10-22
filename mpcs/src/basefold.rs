@@ -31,7 +31,10 @@ use transcript::Transcript;
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
+    virtual_poly::build_eq_x_r_vec,
+};
 
 use rand_chacha::ChaCha8Rng;
 use rayon::{
@@ -144,7 +147,7 @@ where
     /// for said polynomial
     fn get_poly_bh_evals_and_codeword(
         pp: &BasefoldProverParams<E, Spec>,
-        poly: &ArcMultilinearExtension<E>,
+        poly: &DenseMultilinearExtension<E>,
     ) -> PolyEvalsCodeword<E> {
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
@@ -262,7 +265,7 @@ where
 
     pub(crate) fn commit_inner(
         pp: &BasefoldProverParams<E, Spec>,
-        poly: &ArcMultilinearExtension<E>,
+        poly: &DenseMultilinearExtension<E>,
     ) -> Result<BasefoldCommitmentWithData<E>, Error>
     where
         E: Serialize + DeserializeOwned,
@@ -555,7 +558,7 @@ where
 
     fn commit(
         pp: &Self::ProverParam,
-        poly: &ArcMultilinearExtension<E>,
+        poly: &DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
         let timer = start_timer!(|| "Basefold::commit");
         let ret = Self::commit_inner(pp, poly);
@@ -566,7 +569,7 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[ArcMultilinearExtension<E>],
+        polys: &[DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithData, Error> {
         Self::batch_commit_inner(pp, polys)
     }
