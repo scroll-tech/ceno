@@ -306,7 +306,7 @@ impl InnerSignedLtConfig {
         rhs: &UInt<E>,
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
-        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::C - 1)) - 1).into();
+        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         // Extract the sign bit.
         let is_lhs_neg = IsLtConfig::construct_circuit(
             cb,
@@ -352,7 +352,7 @@ impl InnerSignedLtConfig {
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        let max_signed_limb = (1u64 << (UInt::<E>::C - 1)) - 1;
+        let max_signed_limb = (1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1;
         let lhs_value = Value::new_unchecked(lhs as Word);
         let rhs_value = Value::new_unchecked(rhs as Word);
         self.is_lhs_neg.assign_instance(
