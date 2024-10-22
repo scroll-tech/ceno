@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Cycle, Word};
+use ceno_emul::{Addr, Cycle, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -12,7 +12,7 @@ use super::ram_impl::RamTableConfig;
 
 #[derive(Clone, Debug)]
 pub struct MemInitRecord {
-    pub addr: Word,
+    pub addr: Addr,
     pub value: Word,
 }
 
@@ -28,18 +28,15 @@ pub trait RamTable {
 
     fn len() -> usize;
 
+    fn addr(entry_index: usize) -> Addr;
+
     fn init_state() -> Vec<MemInitRecord> {
         (0..Self::len())
             .map(|i| MemInitRecord {
-                addr: i as u32,
+                addr: Self::addr(i),
                 value: 0,
             })
             .collect()
-    }
-
-    #[inline(always)]
-    fn addr(entry_index: usize) -> u32 {
-        entry_index as u32
     }
 }
 
@@ -49,8 +46,8 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
     for RamTableCircuit<E, RAM>
 {
     type TableConfig = RamTableConfig<RAM>;
-    type FixedInput = Option<Vec<MemInitRecord>>;
-    type WitnessInput = Vec<MemFinalRecord>;
+    type FixedInput = [MemInitRecord];
+    type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
         format!("RAM_{:?}", RAM::RAM_TYPE)
@@ -66,13 +63,9 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
-        input: &Self::FixedInput,
+        init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
-        let mut table = if let Some(init_v) = input.as_ref() {
-            config.gen_init_state(num_fixed, init_v)
-        } else {
-            config.gen_init_state(num_fixed, &RAM::init_state())
-        };
+        let mut table = config.gen_init_state(num_fixed, init_v);
         Self::padding_zero(&mut table, num_fixed).expect("padding error");
         table
     }

@@ -5,13 +5,14 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{MemFinalRecord, ProgramTableCircuit, RamTable, RegTable, RegTableCircuit},
+    tables::{MemFinalRecord, ProgramTableCircuit, initial_memory, initial_registers},
 };
 use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, StepRecord, Tracer, VMState, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, RegIdx, StepRecord, Tracer, VMState,
+    WordAddr,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -111,15 +112,15 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let reg_config = zkvm_cs.register_table_circuit::<RegTableCircuit<E>>();
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
     for instance_num_vars in args.start..args.end {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
 
+        let program_data: &[u32] = &[];
+
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
             &zkvm_cs,
@@ -130,18 +131,16 @@ fn main() {
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         // vm.x4 += vm.x1
         let reg_init = {
-            let mut reg_init = RegTable::init_state();
+            let mut reg_init = initial_registers();
             reg_init[1].value = 1;
             reg_init[2].value = u32::MAX;
             reg_init[3].value = step_loop;
             reg_init
         };
 
-        zkvm_fixed_traces.register_table_circuit::<RegTableCircuit<E>>(
-            &zkvm_cs,
-            reg_config.clone(),
-            &Some(reg_init.clone()),
-        );
+        let mem_init = initial_memory(program_data);
+
+        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
 
         let pk = zkvm_cs
             .clone()
@@ -156,11 +155,14 @@ fn main() {
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
 
-        vm.init_register_unsafe(1usize, 1);
-        vm.init_register_unsafe(2usize, u32::MAX); // -1 in two's complement
-        vm.init_register_unsafe(3usize, step_loop);
+        for record in &reg_init {
+            vm.init_register_unsafe(record.addr as RegIdx, record.value);
+        }
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
+        }
+        for record in &mem_init {
+            vm.init_memory(record.addr.into(), record.value);
         }
 
         let all_records = vm
@@ -195,10 +197,6 @@ fn main() {
             .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
             .unwrap();
         zkvm_witness.finalize_lk_multiplicities();
-        // assign table circuits
-        config
-            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
-            .unwrap();
 
         // Find the final register values and cycles.
         let reg_final = reg_init
@@ -213,10 +211,23 @@ fn main() {
             })
             .collect_vec();
 
-        // assign register finalization.
-        zkvm_witness
-            .assign_table_circuit::<RegTableCircuit<E>>(&zkvm_cs, &reg_config, &reg_final)
+        // Find the final memory values and cycles.
+        let mem_final = mem_init
+            .iter()
+            .map(|rec| {
+                let vma: WordAddr = rec.addr.into();
+                MemFinalRecord {
+                    value: vm.peek_memory(vma),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec();
+
+        // assign table circuits
+        config
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final)
             .unwrap();
+
         // assign program circuit
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(

@@ -58,7 +58,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 UINT_LIMBS,
             )?;
 
-            let next_ts = ts + 1.into();
+            let next_ts = ts + 1;
 
             Ok((next_ts, lt_cfg))
         })
@@ -109,7 +109,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 UINT_LIMBS,
             )?;
 
-            let next_ts = ts + 1.into();
+            let next_ts = ts + 1;
 
             Ok((next_ts, lt_cfg))
         })
