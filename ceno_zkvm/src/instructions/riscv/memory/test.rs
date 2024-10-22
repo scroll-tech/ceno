@@ -10,11 +10,7 @@ use multilinear_extensions::mle::IntoMLEs;
 
 fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
     let shift = (shift * 8) as usize;
-    let mut data = prev;
-    data ^= data & (0xff << shift);
-    data |= (rs2 & 0xff) << shift;
-
-    data
+    prev & !(0xff << shift) | ((rs2 & 0xff) << shift)
 }
 
 fn impl_opcode_sb(shift: u32) {

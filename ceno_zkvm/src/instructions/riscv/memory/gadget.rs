@@ -10,6 +10,7 @@ use crate::{
 use ceno_emul::StepRecord;
 use ff::Field;
 use ff_ext::ExtensionField;
+use itertools::izip;
 use std::mem::MaybeUninit;
 
 pub struct MemWordChange<const N_ZEROS: usize> {
@@ -177,13 +178,10 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         let prev_limb = prev_value.as_u16_limbs()[low_bits[1] as usize];
         let rs2_limb = rs2_value.as_u16_limbs()[0];
 
-        self.prev_limb_bytes
-            .iter()
-            .zip(prev_limb.to_le_bytes())
-            .for_each(|(col, byte)| {
-                set_val!(instance, *col, E::BaseField::from(byte as u64));
-                lk_multiplicity.assert_ux::<8>(byte as u64);
-            });
+        for (&col, byte) in izip!(&self.prev_limb_bytes, prev_limb.to_le_bytes()) {
+            set_val!(instance, col, E::BaseField::from(byte as u64));
+            lk_multiplicity.assert_ux::<8>(byte as u64);
+        }
 
         set_val!(
             instance,
