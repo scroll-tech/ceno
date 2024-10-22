@@ -2,8 +2,7 @@ mod gadget;
 pub mod load;
 pub mod store;
 
-#[allow(unused_imports)]
-pub use store::{StoreByte, StoreConfig, StoreHalf, StoreWord};
-
 #[cfg(test)]
 mod test;
+
+pub use store::{SbInstruction, StoreConfig, ShInstruction, SwInstruction};

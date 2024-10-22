@@ -1,6 +1,6 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::{Instruction, riscv::memory::StoreByte},
+    instructions::{Instruction, riscv::memory::SbInstruction},
     scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
 use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, Word, WriteOp, encode_rv32};
@@ -24,7 +24,7 @@ fn impl_opcode_sb(shift: u32) {
         .namespace(
             || "sb",
             |cb| {
-                let config = StoreByte::construct_circuit(cb);
+                let config = SbInstruction::construct_circuit(cb);
                 Ok(config)
             },
         )
@@ -34,7 +34,7 @@ fn impl_opcode_sb(shift: u32) {
     let insn_code = encode_rv32(InsnKind::SB, 2, 3, 4, shift);
     let prev_mem_value = 0x40302010;
     let rs2_word = Word::from(0x12345678_u32);
-    let (raw_witin, lkm) = StoreByte::assign_instances(&config, cb.cs.num_witin as usize, vec![
+    let (raw_witin, lkm) = SbInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
         StepRecord::new_s_instruction(
             12,
             MOCK_PC_START,

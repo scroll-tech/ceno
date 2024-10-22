@@ -38,8 +38,7 @@ impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
 
-#[allow(dead_code)]
-pub type StoreWord<E> = StoreInstruction<E, SWOp, 2>;
+pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
 
 pub struct SHOp;
 
@@ -47,8 +46,7 @@ impl RIVInstruction for SHOp {
     const INST_KIND: InsnKind = InsnKind::SH;
 }
 
-#[allow(dead_code)]
-pub type StoreHalf<E> = StoreInstruction<E, SHOp, 1>;
+pub type ShInstruction<E> = StoreInstruction<E, SHOp, 1>;
 
 pub struct SBOp;
 
@@ -56,8 +54,7 @@ impl RIVInstruction for SBOp {
     const INST_KIND: InsnKind = InsnKind::SB;
 }
 
-#[allow(dead_code)]
-pub type StoreByte<E> = StoreInstruction<E, SBOp, 0>;
+pub type SbInstruction<E> = StoreInstruction<E, SBOp, 0>;
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     for StoreInstruction<E, I, N_ZEROS>
