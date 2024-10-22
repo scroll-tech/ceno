@@ -129,11 +129,7 @@ fn bench_batch_vlmp_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSchem
 
             let mut transcript = T::new(b"BaseFold");
             let polys = gen_rand_polys(|i| num_vars - log2_ceil((i >> 1) + 1), batch_size, is_base);
-            let comms = commit_polys_individually::<E, Pcs>(
-                &pp,
-                &polys,
-                &mut transcript,
-            );
+            let comms = commit_polys_individually::<E, Pcs>(&pp, &polys, &mut transcript);
 
             let points = get_points_from_challenge(
                 |i| num_vars - log2_ceil(i + 1),
@@ -266,9 +262,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
             let polys = gen_rand_polys(|_| num_vars, batch_size, is_base);
-            let comm =
-                Pcs::batch_commit_and_write(&pp, &polys, &mut transcript)
-                    .unwrap();
+            let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
@@ -370,12 +364,7 @@ fn bench_batch_vlop_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSchem
             let (polys, comms) = (0..batch_size_outer)
                 .map(|i| {
                     let polys = gen_rand_polys(|_| num_vars - i, batch_size_inner, is_base);
-                    let comm = Pcs::batch_commit_and_write(
-                        &pp,
-                        &polys,
-                        &mut transcript,
-                    )
-                    .unwrap();
+                    let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
                     (polys, comm)
                 })
                 .collect::<(Vec<_>, Vec<_>)>();

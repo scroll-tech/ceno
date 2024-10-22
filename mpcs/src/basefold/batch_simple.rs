@@ -3,19 +3,19 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec, virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::{
+    Error,
     basefold::CommitPhaseInput,
     util::{arithmetic::inner_product, field_type_index_ext, merkle_tree::MerkleTree},
-    Error,
 };
 
 use super::{
-    commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
     BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
-    BasefoldStrategy, BasefoldVerifierParams,
+    BasefoldStrategy, BasefoldVerifierParams, commit_phase::CommitPhaseStrategy,
+    query_phase::QueryCheckStrategy, structure::BasefoldProof,
 };
 
 pub(crate) struct ProverInputs<'a, E: ExtensionField, Spec: BasefoldSpec<E>>
@@ -69,8 +69,14 @@ where
 {
     type CommitPhaseStrategy = BatchSimpleCommitPhaseStrategy;
     type QueryCheckStrategy = BatchSimpleQueryCheckStrategy;
-    type ProverInputs<'a> = ProverInputs<'a, E, Spec> where Spec: 'a;
-    type VerifierInputs<'a> = VerifierInputs<'a, E, Spec> where Spec: 'a;
+    type ProverInputs<'a>
+        = ProverInputs<'a, E, Spec>
+    where
+        Spec: 'a;
+    type VerifierInputs<'a>
+        = VerifierInputs<'a, E, Spec>
+    where
+        Spec: 'a;
 
     #[allow(unused)]
     fn trivial_proof(prover_inputs: &ProverInputs<'_, E, Spec>) -> Option<BasefoldProof<E, Spec>> {

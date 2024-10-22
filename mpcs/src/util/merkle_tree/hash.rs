@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::util::{field_type_iter_base, field_type_iter_range_base};

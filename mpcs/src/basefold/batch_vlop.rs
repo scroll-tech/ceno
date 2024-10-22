@@ -5,18 +5,18 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec, virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::{
-    util::{arithmetic::inner_product, field_type_index_ext, log2_strict},
     Error,
+    util::{arithmetic::inner_product, field_type_index_ext, log2_strict},
 };
 
 use super::{
-    commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
     BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
-    BasefoldStrategy, BasefoldVerifierParams, CommitPhaseInput,
+    BasefoldStrategy, BasefoldVerifierParams, CommitPhaseInput, commit_phase::CommitPhaseStrategy,
+    query_phase::QueryCheckStrategy, structure::BasefoldProof,
 };
 
 pub(crate) struct ProverInputs<'a, E: ExtensionField, Spec: BasefoldSpec<E>>
@@ -70,8 +70,14 @@ where
 {
     type CommitPhaseStrategy = BatchVLOPCommitPhaseStrategy;
     type QueryCheckStrategy = BatchVLOPQueryCheckStrategy;
-    type ProverInputs<'a> = ProverInputs<'a, E, Spec> where Spec: 'a;
-    type VerifierInputs<'a> = VerifierInputs<'a, E, Spec> where Spec: 'a;
+    type ProverInputs<'a>
+        = ProverInputs<'a, E, Spec>
+    where
+        Spec: 'a;
+    type VerifierInputs<'a>
+        = VerifierInputs<'a, E, Spec>
+    where
+        Spec: 'a;
 
     #[allow(unused)]
     fn trivial_proof(prover_inputs: &ProverInputs<'_, E, Spec>) -> Option<BasefoldProof<E, Spec>> {
@@ -303,7 +309,8 @@ where
 }
 
 pub(crate) struct BatchVLOPQueryCheckStrategy;
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> QueryCheckStrategy<E, Spec> for BatchVLOPQueryCheckStrategy
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> QueryCheckStrategy<E, Spec>
+    for BatchVLOPQueryCheckStrategy
 where
     E::BaseField: Serialize + DeserializeOwned,
 {

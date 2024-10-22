@@ -3,8 +3,8 @@ use std::io::{BufReader, Read};
 use ff_ext::ExtensionField;
 
 use goldilocks::SmallField;
-use keccak_hash::{keccak_256, keccak_buffer, H256};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use keccak_hash::{H256, keccak_256, keccak_buffer};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use super::Hasher;
@@ -88,8 +88,8 @@ mod tests {
     use crate::util::{
         field_type_index_base,
         merkle_tree::{
-            hash_leaves_group, hash_two_leaves_batch, BatchLeavesPair, MerkleTree,
-            SingleLeavesGroup,
+            BatchLeavesPair, MerkleTree, SingleLeavesGroup, hash_leaves_group,
+            hash_two_leaves_batch,
         },
     };
 
@@ -112,10 +112,9 @@ mod tests {
         assert_eq!(merkle_tree.leaf_group_num(), 4);
         assert_eq!(merkle_tree.leaf_group_size(), 2);
         for i in 0..leaves.len() {
-            assert_eq!(
-                merkle_tree.get_leaf_as_base(i),
-                vec![field_type_index_base(&leaves, i)]
-            );
+            assert_eq!(merkle_tree.get_leaf_as_base(i), vec![
+                field_type_index_base(&leaves, i)
+            ]);
         }
         for i in 0..(leaves.len() >> 1) {
             let path = merkle_tree.merkle_path_without_leaf_sibling_or_root(i << 1);
@@ -168,13 +167,10 @@ mod tests {
         assert_eq!(merkle_tree.leaf_group_num(), 4);
         assert_eq!(merkle_tree.leaf_group_size(), 2);
         for i in 0..leaves.len() {
-            assert_eq!(
-                merkle_tree.get_leaf_as_base(i),
-                vec![
-                    field_type_index_base(&leaves[0], i),
-                    field_type_index_base(&leaves[1], i)
-                ]
-            );
+            assert_eq!(merkle_tree.get_leaf_as_base(i), vec![
+                field_type_index_base(&leaves[0], i),
+                field_type_index_base(&leaves[1], i)
+            ]);
         }
         for i in 0..(leaves.len() >> 1) {
             let path = merkle_tree.merkle_path_without_leaf_sibling_or_root(i << 1);
