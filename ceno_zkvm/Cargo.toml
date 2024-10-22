@@ -32,6 +32,7 @@ generic_static = "0.2"
 rand.workspace = true
 tempfile = "3.13"
 thread_local = "1.1"
+bumpalo = "3.16"
 
 [dev-dependencies]
 base64 = "0.22"
