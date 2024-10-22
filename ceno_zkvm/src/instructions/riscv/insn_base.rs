@@ -427,9 +427,9 @@ impl<E: ExtensionField> MemAddr<E> {
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
         // Express the value of the low bits.
-        let low_sum = (n_zeros..Self::N_LOW_BITS)
+        let low_sum: Expression<E> = (n_zeros..Self::N_LOW_BITS)
             .zip_eq(low_bits.iter())
-            .map(|(pos, bit)| bit.expr() * (1_usize << pos))
+            .map(|(pos, bit)| bit.expr() * (1 << pos))
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
