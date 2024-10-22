@@ -364,12 +364,12 @@ impl<E: ExtensionField> MemAddr<E> {
         Self::construct(cb, 0)
     }
 
-    /// An address which is range-checked, and aligned to 2 bits. Bit 0 is constant 0. Bit 1 is variable.
+    /// An address which is range-checked, and aligned to 2 bytes. Bit 0 is constant 0. Bit 1 is variable.
     pub fn construct_align2(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         Self::construct(cb, 1)
     }
 
-    /// An address which is range-checked, and aligned to 4 bits. Bits 0 and 1 are constant 0.
+    /// An address which is range-checked, and aligned to 4 bytes. Bits 0 and 1 are constant 0.
     pub fn construct_align4(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
         Self::construct(cb, 2)
     }
@@ -379,12 +379,12 @@ impl<E: ExtensionField> MemAddr<E> {
         self.addr.address_expr()
     }
 
-    /// Represent the address aligned to 2 bits.
+    /// Represent the address aligned to 2 bytes.
     pub fn expr_align2(&self) -> AddressExpr<E> {
         self.addr.address_expr() - self.low_bit_exprs()[0].clone()
     }
 
-    /// Represent the address aligned to 4 bits.
+    /// Represent the address aligned to 4 bytes.
     pub fn expr_align4(&self) -> AddressExpr<E> {
         let low_bits = self.low_bit_exprs();
         self.addr.address_expr() - low_bits[1].clone() * 2.into() - low_bits[0].clone()
