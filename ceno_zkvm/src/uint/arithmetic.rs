@@ -55,8 +55,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         limb_expr = limb_expr.clone() + carry.unwrap().expr();
                     }
                     if next_carry.is_some() {
-                        limb_expr =
-                            limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C.into();
+                        limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
                     }
 
                     circuit_builder
@@ -199,8 +198,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 result_c[i] = result_c[i].clone() + carry.unwrap().expr();
             }
             if next_carry.is_some() {
-                result_c[i] =
-                    result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C.into();
+                result_c[i] = result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
             }
             circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
             Ok::<(), ZKVMError>(())

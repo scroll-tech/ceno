@@ -52,7 +52,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             || "read x10",
             E::BaseField::from(ceno_emul::CENO_PLATFORM.reg_arg0() as u64),
             prev_x10_ts.expr(),
-            ecall_cfg.ts.expr() + (Tracer::SUBCYCLE_RS2 as usize).into(),
+            ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
         )?;
 

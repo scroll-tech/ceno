@@ -701,14 +701,14 @@ mod tests {
             let c = cb.create_witin(|| "c")?;
 
             // degree 1
-            cb.require_equal(|| "a + 1 == b", b.expr(), a.expr() + 1.into())?;
-            cb.require_zero(|| "c - 2 == 0", c.expr() - 2.into())?;
+            cb.require_equal(|| "a + 1 == b", b.expr(), a.expr() + 1)?;
+            cb.require_zero(|| "c - 2 == 0", c.expr() - 2)?;
 
             // degree > 1
             let d = cb.create_witin(|| "d")?;
             cb.require_zero(
                 || "d*d - 6*d + 9 == 0",
-                d.expr() * d.expr() - d.expr() * 6.into() + 9.into(),
+                d.expr() * d.expr() - d.expr() * 6 + 9,
             )?;
 
             Ok(Self { a, b, c })
