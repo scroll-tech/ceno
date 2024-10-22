@@ -552,8 +552,7 @@ mod test {
             cb.require_equal(|| "", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
             cb.require_equal(|| "", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
         }
-
-        let res = MockProver::run(
+        MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
                 .de_interleaving()
@@ -562,9 +561,10 @@ mod test {
                 .map(|v| v.into())
                 .collect_vec(),
             &[],
+            if is_ok { &[] } else { &["mid_u14"] },
+            None,
             None,
         );
-        assert_eq!(res.is_ok(), is_ok, "{:?}", res);
         Ok(())
     }
 }
