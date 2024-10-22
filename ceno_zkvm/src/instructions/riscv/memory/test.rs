@@ -17,13 +17,7 @@ fn impl_opcode_sb(shift: u32) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "sb",
-            |cb| {
-                let config = StoreByte::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace(|| "sb", |cb| Ok(StoreByte::construct_circuit(cb)))
         .unwrap()
         .unwrap();
 
