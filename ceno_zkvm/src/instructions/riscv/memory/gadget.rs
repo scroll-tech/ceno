@@ -27,11 +27,6 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         prev_word: &UInt<E>,
         rs2_word: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
-        let select =
-            |bit: &Expression<E>, when_true: &Expression<E>, when_false: &Expression<E>| {
-                bit.clone() * when_true.clone() + (1 - bit.clone()) * when_false.clone()
-            };
-
         let alloc_bytes = |cb: &mut CircuitBuilder<E>,
                            anno: &str,
                            num_bytes: usize|
@@ -66,6 +61,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
             Ok(bytes)
         };
 
+        assert_eq!(UInt::NUM_LIMBS, 2);
         // for sb (n_zeros = 0)
         match N_ZEROS {
             0 => {
@@ -75,10 +71,11 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 let prev_limbs = prev_word.expr();
                 let rs2_limbs = rs2_word.expr();
 
-                // degree == 2
-                let prev_target_limb = select(&low_bits[1], &prev_limbs[1], &prev_limbs[0]);
-
+                // degree 2 expression
+                let prev_target_limb = cb.select(&low_bits[1], &prev_limbs[1], &prev_limbs[0]);
                 let prev_limb_bytes = decompose_limb(cb, "prev_limb", &prev_target_limb, 2)?;
+
+                // extract the least significant byte from u16 limb
                 let rs2_limb_bytes = alloc_bytes(cb, "rs2_limb[0]", 1)?;
                 let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
                 cb.assert_ux::<_, _, 8>(
@@ -86,28 +83,24 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     u8_base_inv.expr() * (rs2_limbs[0].clone() - rs2_limb_bytes[0].expr()),
                 )?;
 
+                // alloc a new witIn to cache degree 2 expression
                 let expected_limb_change = cb.create_witin(|| "expected_limb_change")?;
-                cb.require_equal(
+                cb.condition_require_equal(
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
-                    // degree 2 expression
-                    select(
-                        &low_bits[0],
-                        &((1 << 8) * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr())),
-                        &(rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr()),
-                    ),
+                    low_bits[0].clone(),
                     expected_limb_change.expr(),
+                    (1 << 8) * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()),
+                    rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr(),
                 )?;
 
+                // alloc a new witIn to cache degree 2 expression
                 let expected_change = cb.create_witin(|| "expected_change")?;
-                cb.require_equal(
+                cb.condition_require_equal(
                     || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
-                    // degree 2 expression
-                    select(
-                        &low_bits[1],
-                        &((1 << 16) * expected_limb_change.expr()),
-                        &expected_limb_change.expr(),
-                    ),
+                    low_bits[1].clone(),
                     expected_change.expr(),
+                    (1 << 16) * expected_limb_change.expr(),
+                    expected_limb_change.expr(),
                 )?;
 
                 Ok(MemWordChange {
@@ -126,15 +119,14 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
 
                 let expected_change = cb.create_witin(|| "expected_change")?;
 
-                cb.require_equal(
+                // alloc a new witIn to cache degree 2 expression
+                cb.condition_require_equal(
                     || "expected_change = select(low_bits[1], 2^16*(limb_change))",
                     // degree 2 expression
-                    select(
-                        &low_bits[1],
-                        &((1 << 16) * (rs2_limbs[0].clone() - prev_limbs[1].clone())),
-                        &(rs2_limbs[0].clone() - prev_limbs[0].clone()),
-                    ),
+                    low_bits[1].clone(),
                     expected_change.expr(),
+                    (1 << 16) * (rs2_limbs[0].clone() - prev_limbs[1].clone()),
+                    rs2_limbs[0].clone() - prev_limbs[0].clone(),
                 )?;
 
                 Ok(MemWordChange {
