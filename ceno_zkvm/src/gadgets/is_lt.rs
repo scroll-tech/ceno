@@ -156,7 +156,7 @@ impl InnerLtConfig {
             .map(|(record, beta)| beta * record.expr())
             .sum::<Expression<E>>();
 
-        let range = Self::range(max_num_u16_limbs).into();
+        let range = Self::range(max_num_u16_limbs);
 
         cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
