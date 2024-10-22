@@ -8,8 +8,6 @@ version.workspace = true
 aes = "0.8"
 ark-std.workspace = true
 bitvec = "1.0"
-blake2 = "0.10"
-blake2b_simd = "1.0"
 ctr = "0.9"
 ff.workspace = true
 ff_ext = { path = "../ff_ext" }
@@ -26,13 +24,10 @@ rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
-sha3 = "0.10"
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
 criterion.workspace = true
-gkr = { path = "../gkr" }
-simple-frontend = { path = "../simple-frontend" }
 
 [features]
 benchmark = ["parallel"]
