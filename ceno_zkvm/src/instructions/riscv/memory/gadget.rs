@@ -61,7 +61,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
             Ok(bytes)
         };
 
-        assert_eq!(UInt::NUM_LIMBS, 2);
+        assert_eq!(UInt::<E>::NUM_LIMBS, 2);
         // for sb (n_zeros = 0)
         match N_ZEROS {
             0 => {
