@@ -91,10 +91,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     select(
                         &low_bits[0],
-                        &(E::BaseField::from(1 << 8).expr()
-                            * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr())),
-                        &(E::BaseField::from(1).expr()
-                            * (rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr())),
+                        &((1 << 8) * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr())),
+                        &(rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr()),
                     ),
                     expected_limb_change.expr(),
                 )?;
@@ -105,8 +103,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     select(
                         &low_bits[1],
-                        &(E::BaseField::from(1 << 16).expr() * expected_limb_change.expr()),
-                        &(E::BaseField::from(1).expr() * expected_limb_change.expr()),
+                        &((1 << 16) * expected_limb_change.expr()),
+                        &expected_limb_change.expr(),
                     ),
                     expected_change.expr(),
                 )?;
@@ -132,10 +130,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     select(
                         &low_bits[1],
-                        &(E::BaseField::from(1 << 16).expr()
-                            * (rs2_limbs[0].clone() - prev_limbs[1].clone())),
-                        &(E::BaseField::from(1).expr()
-                            * (rs2_limbs[0].clone() - prev_limbs[0].clone())),
+                        &((1 << 16) * (rs2_limbs[0].clone() - prev_limbs[1].clone())),
+                        &(rs2_limbs[0].clone() - prev_limbs[0].clone()),
                     ),
                     expected_change.expr(),
                 )?;
