@@ -195,7 +195,7 @@ pub fn field_type_iter_base<E: ExtensionField>(
 pub fn field_type_iter_range_base<'a, E: ExtensionField>(
     values: &'a FieldType<E>,
     range: impl IntoIterator<Item = usize> + 'a,
-) -> impl Iterator<Item = &E::BaseField> + 'a {
+) -> impl Iterator<Item = &'a E::BaseField> + 'a {
     match values {
         FieldType::Ext(coeffs) => {
             Either::Left(range.into_iter().flat_map(|i| coeffs[i].as_bases()))

@@ -1,5 +1,5 @@
 use crate::{
-    Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
+    Error, Evaluation, PolynomialCommitmentScheme,
     sum_check::{
         classic::{ClassicSumCheck, Coefficients, CoefficientsProver, SumcheckProof},
         eq_xy_eval,

@@ -6,8 +6,7 @@ use goldilocks::GoldilocksExt2;
 
 use itertools::Itertools;
 use mpcs::{
-    Basefold, BasefoldRSParams, BasefoldRSPoseidonParams, BasefoldSpec, EncodingScheme,
-    PolynomialCommitmentScheme,
+    Basefold, BasefoldRSPoseidonParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme,
     util::{
         arithmetic::interpolate_field_type_over_boolean_hypercube,
         plonky2_util::reverse_index_bits_in_place_field_type,
