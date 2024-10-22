@@ -157,8 +157,7 @@ impl EmuContext for VMState {
     /// Store a memory word and record this operation.
     fn store_memory(&mut self, addr: ByteAddr, after: Word) -> Result<()> {
         let before = self.peek_memory(addr.waddr());
-        self.tracer
-            .store_memory(addr, Change { after, before });
+        self.tracer.store_memory(addr, Change { after, before });
         self.memory.insert(addr.waddr(), after);
         Ok(())
     }
