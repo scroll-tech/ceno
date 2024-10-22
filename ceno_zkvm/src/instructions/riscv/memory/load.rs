@@ -40,7 +40,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let imm = UInt::new(|| "imm", circuit_builder)?;
-        let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
+        let memory_read = UInt::new(|| "memory_read", circuit_builder)?;
 
         let (memory_addr, memory_value) = match I::INST_KIND {
             InsnKind::LW => (
@@ -75,7 +75,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
-        let memory_read = Value::new_unchecked(step.memory_op().unwrap().value.before);
+        let memory_read = Value::new(step.memory_op().unwrap().value.before, lk_multiplicity);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
         config
