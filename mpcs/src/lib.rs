@@ -30,14 +30,14 @@ pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    poly: &ArcMultilinearExtension<E>,
+    poly: &DenseMultilinearExtension<E>,
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::commit(pp, poly)
 }
 
 pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    poly: &ArcMultilinearExtension<E>,
+    poly: &DenseMultilinearExtension<E>,
     transcript: &mut Transcript<E>,
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::commit_and_write(pp, poly, transcript)
@@ -45,14 +45,14 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[ArcMultilinearExtension<E>],
+    polys: &[DenseMultilinearExtension<E>],
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::batch_commit(pp, polys)
 }
 
 pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[ArcMultilinearExtension<E>],
+    polys: &[DenseMultilinearExtension<E>],
     transcript: &mut Transcript<E>,
 ) -> Result<Pcs::CommitmentWithData, Error> {
     Pcs::batch_commit_and_write(pp, polys, transcript)
@@ -124,12 +124,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn commit(
         pp: &Self::ProverParam,
-        poly: &ArcMultilinearExtension<E>,
+        poly: &DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithData, Error>;
 
     fn commit_and_write(
         pp: &Self::ProverParam,
-        poly: &ArcMultilinearExtension<E>,
+        poly: &DenseMultilinearExtension<E>,
         transcript: &mut Transcript<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
         let comm = Self::commit(pp, poly)?;
@@ -146,12 +146,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[ArcMultilinearExtension<E>],
+        polys: &[DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithData, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        polys: &[ArcMultilinearExtension<E>],
+        polys: &[DenseMultilinearExtension<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
         let comm = Self::batch_commit(pp, polys)?;
@@ -303,7 +303,9 @@ pub use basefold::{
     BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table,
     one_level_eval_hc, one_level_interp_hc,
 };
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::{
+    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+};
 
 #[doc(hidden)]
 pub mod test_util {
@@ -315,8 +317,10 @@ pub mod test_util {
     use crate::PolynomialCommitmentScheme;
     use ff_ext::ExtensionField;
     use itertools::Itertools;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
+    #[cfg(test)]
     use multilinear_extensions::{
-        mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+        mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
     use transcript::Transcript;
@@ -329,27 +333,27 @@ pub mod test_util {
         Pcs::trim(&param, poly_size).unwrap()
     }
 
-    pub fn gen_rand_poly<'a, E: ExtensionField>(
+    pub fn gen_rand_poly<E: ExtensionField>(
         num_vars: usize,
         base: bool,
-    ) -> ArcMultilinearExtension<'a, E> {
+    ) -> DenseMultilinearExtension<E> {
         if base {
-            ArcMultilinearExtension::from(DenseMultilinearExtension::random(num_vars, &mut OsRng))
+            DenseMultilinearExtension::random(num_vars, &mut OsRng)
         } else {
-            ArcMultilinearExtension::from(DenseMultilinearExtension::from_evaluations_ext_vec(
+            DenseMultilinearExtension::from_evaluations_ext_vec(
                 num_vars,
                 (0..(1 << num_vars))
                     .map(|_| E::random(&mut OsRng))
                     .collect_vec(),
-            ))
+            )
         }
     }
 
-    pub fn gen_rand_polys<'a, E: ExtensionField>(
+    pub fn gen_rand_polys<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
         batch_size: usize,
         base: bool,
-    ) -> Vec<ArcMultilinearExtension<'a, E>> {
+    ) -> Vec<DenseMultilinearExtension<E>> {
         (0..batch_size)
             .map(|i| gen_rand_poly(num_vars(i), base))
             .collect_vec()
@@ -376,7 +380,7 @@ pub mod test_util {
 
     pub fn commit_polys_individually<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         pp: &Pcs::ProverParam,
-        polys: &[ArcMultilinearExtension<E>],
+        polys: &[DenseMultilinearExtension<E>],
         transcript: &mut Transcript<E>,
     ) -> Vec<Pcs::CommitmentWithData> {
         polys
@@ -405,6 +409,7 @@ pub mod test_util {
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let eval = poly.evaluate(point.as_slice());
+                let poly = ArcMultilinearExtension::from(poly);
                 transcript.append_field_element_ext(&eval);
 
                 (
@@ -437,6 +442,10 @@ pub mod test_util {
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
     {
+        use multilinear_extensions::{
+            mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+        };
+
         for num_vars in num_vars_start..num_vars_end {
             let batch_size = 4;
             let num_points = batch_size >> 1;
@@ -474,6 +483,11 @@ pub mod test_util {
                     .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
+
+                let polys = polys
+                    .iter()
+                    .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                    .collect_vec();
 
                 let proof = Pcs::batch_open_vlmp(
                     &pp,
@@ -544,6 +558,10 @@ pub mod test_util {
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
 
+                let polys = polys
+                    .iter()
+                    .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                    .collect_vec();
                 let proof =
                     Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
                         .unwrap();
@@ -606,6 +624,16 @@ pub mod test_util {
                             .collect_vec();
                         transcript.append_field_element_exts(&evals);
                         evals
+                    })
+                    .collect_vec();
+
+                let polys = polys
+                    .iter()
+                    .map(|polys| {
+                        polys
+                            .iter()
+                            .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                            .collect_vec()
                     })
                     .collect_vec();
 

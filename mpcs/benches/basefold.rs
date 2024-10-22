@@ -3,17 +3,18 @@ use std::time::Duration;
 use criterion::*;
 use goldilocks::GoldilocksExt2;
 
-use itertools::{chain, Itertools};
+use itertools::{Itertools, chain};
 use mpcs::{
+    Basefold, BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams, BasefoldRSKeccakParams,
+    BasefoldRSPoseidonParams, Evaluation, PolynomialCommitmentScheme,
     test_util::{
         commit_polys_individually, gen_rand_poly, gen_rand_polys, get_point_from_challenge,
         get_points_from_challenge, setup_pcs, vecs_as_slices,
     },
     util::plonky2_util::log2_ceil,
-    Basefold, BasefoldBasecodeKeccakParams, BasefoldBasecodePoseidonParams, BasefoldRSKeccakParams,
-    BasefoldRSPoseidonParams, Evaluation, PolynomialCommitmentScheme,
 };
 
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension};
 use transcript::Transcript;
 
 type PcsGoldilocksRSCodePoseidon = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
@@ -68,6 +69,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
         let eval = poly.evaluate(point.as_slice());
         transcript.append_field_element_ext(&eval);
         let transcript_for_bench = transcript.clone();
+        let poly = ArcMultilinearExtension::from(poly);
         let proof = Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
 
         group.bench_function(BenchmarkId::new("open", format!("{}", num_vars)), |b| {
@@ -127,7 +129,11 @@ fn bench_batch_vlmp_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSchem
 
             let mut transcript = T::new(b"BaseFold");
             let polys = gen_rand_polys(|i| num_vars - log2_ceil((i >> 1) + 1), batch_size, is_base);
-            let comms = commit_polys_individually::<E, Pcs>(&pp, &polys, &mut transcript);
+            let comms = commit_polys_individually::<E, Pcs>(
+                &pp,
+                &polys,
+                &mut transcript,
+            );
 
             let points = get_points_from_challenge(
                 |i| num_vars - log2_ceil(i + 1),
@@ -149,6 +155,10 @@ fn bench_batch_vlmp_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSchem
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
+            let polys = polys
+                .iter()
+                .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                .collect::<Vec<_>>();
             let proof = Pcs::batch_open_vlmp(
                 &pp,
                 &polys,
@@ -256,7 +266,9 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
             let polys = gen_rand_polys(|_| num_vars, batch_size, is_base);
-            let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+            let comm =
+                Pcs::batch_commit_and_write(&pp, &polys, &mut transcript)
+                    .unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
@@ -270,6 +282,10 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
             transcript.append_field_element_exts(&evals);
             let transcript_for_bench = transcript.clone();
+            let polys = polys
+                .iter()
+                .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                .collect::<Vec<_>>();
             let proof = Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
                 .unwrap();
 
@@ -354,7 +370,12 @@ fn bench_batch_vlop_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSchem
             let (polys, comms) = (0..batch_size_outer)
                 .map(|i| {
                     let polys = gen_rand_polys(|_| num_vars - i, batch_size_inner, is_base);
-                    let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                    let comm = Pcs::batch_commit_and_write(
+                        &pp,
+                        &polys,
+                        &mut transcript,
+                    )
+                    .unwrap();
                     (polys, comm)
                 })
                 .collect::<(Vec<_>, Vec<_>)>();
@@ -372,6 +393,15 @@ fn bench_batch_vlop_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSchem
                 })
                 .collect_vec();
             let transcript_for_bench = transcript.clone();
+            let polys = polys
+                .iter()
+                .map(|polys| {
+                    polys
+                        .iter()
+                        .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                        .collect_vec()
+                })
+                .collect_vec();
 
             let proof = Pcs::batch_open_vlop(
                 &pp,
