@@ -1,12 +1,23 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::{Instruction, riscv::memory::SbInstruction},
+    instructions::{
+        Instruction,
+        riscv::{
+            RIVInstruction,
+            memory::{
+                SbInstruction, ShInstruction, SwInstruction,
+                store::{SBOp, SHOp, SWOp},
+            },
+        },
+    },
     scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
-use ceno_emul::{Change, InsnKind, StepRecord, Word, WordAddr, WriteOp, encode_rv32};
+use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, Word, WriteOp, encode_rv32};
+use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use multilinear_extensions::mle::IntoMLEs;
+use std::hash::Hash;
 
 fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
     let shift = (shift * 8) as usize;
@@ -17,43 +28,65 @@ fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
     data
 }
 
-fn impl_opcode_sb(shift: u32) {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+fn sh(prev: Word, rs2: Word, shift: u32) -> Word {
+    assert_eq!(shift & 1, 0);
+    let shift = (shift * 8) as usize;
+    let mut data = prev;
+
+    data ^= data & (0xffff << shift);
+    data |= (rs2 & 0xffff) << shift;
+
+    data
+}
+
+fn sw(_prev: Word, rs2: Word) -> Word {
+    rs2
+}
+
+fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: u32) {
+    let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
         .namespace(
-            || "sb",
+            || Inst::name(),
             |cb| {
-                let config = SbInstruction::construct_circuit(cb);
+                let config = Inst::construct_circuit(cb);
                 Ok(config)
             },
         )
         .unwrap()
         .unwrap();
 
-    let insn_code = encode_rv32(InsnKind::SB, 2, 3, 4, shift);
+    let insn_code = encode_rv32(I::INST_KIND, 2, 3, 0, imm);
     let prev_mem_value = 0x40302010;
     let rs2_word = Word::from(0x12345678_u32);
-    let (raw_witin, lkm) =
-        SbInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-            StepRecord::new_s_instruction(
-                12,
-                MOCK_PC_START,
-                insn_code,
-                Word::from(0x4000000_u32),
-                rs2_word,
-                WriteOp {
-                    addr: WordAddr::from(0x4000000),
-                    value: Change {
-                        before: prev_mem_value,
-                        after: sb(prev_mem_value, rs2_word, shift),
-                    },
-                    previous_cycle: 4,
+    let rs1_word = Word::from(0x4000000_u32);
+    let unaligned_addr = ByteAddr::from(rs1_word.wrapping_add(imm));
+    let new_mem_value = match I::INST_KIND {
+        InsnKind::SB => sb(prev_mem_value, rs2_word, unaligned_addr.shift()),
+        InsnKind::SH => sh(prev_mem_value, rs2_word, unaligned_addr.shift()),
+        InsnKind::SW => sw(prev_mem_value, rs2_word),
+        x => unreachable!("{:?} is not store instruction", x),
+    };
+    let (raw_witin, lkm) = Inst::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        StepRecord::new_s_instruction(
+            12,
+            MOCK_PC_START,
+            insn_code,
+            rs1_word,
+            rs2_word,
+            WriteOp {
+                addr: unaligned_addr.waddr(),
+                value: Change {
+                    before: prev_mem_value,
+                    after: new_mem_value,
                 },
-                8,
-            ),
-        ])
-        .unwrap();
+                previous_cycle: 4,
+            },
+            8,
+        ),
+    ])
+    .unwrap();
 
     MockProver::assert_satisfied(
         &cb,
@@ -69,10 +102,36 @@ fn impl_opcode_sb(shift: u32) {
     );
 }
 
+fn impl_opcode_sb(imm: u32) {
+    impl_opcode_store::<GoldilocksExt2, SBOp, SbInstruction<GoldilocksExt2>>(imm)
+}
+
+fn impl_opcode_sh(imm: u32) {
+    assert_eq!(imm & 0x01, 0);
+    impl_opcode_store::<GoldilocksExt2, SHOp, ShInstruction<GoldilocksExt2>>(imm)
+}
+
+fn impl_opcode_sw(imm: u32) {
+    assert_eq!(imm & 0x03, 0);
+    impl_opcode_store::<GoldilocksExt2, SWOp, SwInstruction<GoldilocksExt2>>(imm)
+}
+
 #[test]
 fn test_sb() {
     impl_opcode_sb(0);
-    impl_opcode_sb(1);
-    impl_opcode_sb(2);
-    impl_opcode_sb(3);
+    impl_opcode_sb(5);
+    impl_opcode_sb(10);
+    impl_opcode_sb(15);
+}
+
+#[test]
+fn test_sh() {
+    impl_opcode_sh(0);
+    impl_opcode_sh(2);
+}
+
+#[test]
+fn test_sw() {
+    impl_opcode_sw(0);
+    impl_opcode_sw(4);
 }

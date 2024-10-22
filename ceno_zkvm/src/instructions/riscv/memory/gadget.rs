@@ -13,11 +13,9 @@ use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
 pub struct MemWordChange<const N_ZEROS: usize> {
-    // decompose limb into bytes iff N_ZEROS == 0
     prev_limb_bytes: Vec<WitIn>,
     rs2_limb_bytes: Vec<WitIn>,
 
-    // its length + N_ZEROS equals to 2
     expected_changes: Vec<WitIn>,
 }
 
@@ -137,9 +135,9 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     select(
                         &low_bits[1],
                         &(E::BaseField::from(1 << 16).expr()
-                            * (rs2_limbs[1].clone() - prev_limbs[1].clone())),
+                            * (rs2_limbs[0].clone() - prev_limbs[1].clone())),
                         &(E::BaseField::from(1).expr()
-                            * (rs2_limbs[1].clone() - prev_limbs[0].clone())),
+                            * (rs2_limbs[0].clone() - prev_limbs[0].clone())),
                     ),
                     expected_change.expr(),
                 )?;
@@ -175,26 +173,25 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         let prev_limb = prev_value.as_u16_limbs()[low_bits[1] as usize];
         let rs2_limb = rs2_value.as_u16_limbs()[0];
 
-        self.prev_limb_bytes
-            .iter()
-            .zip(prev_limb.to_le_bytes())
-            .for_each(|(col, byte)| {
-                set_val!(instance, *col, E::BaseField::from(byte as u64));
-                lk_multiplicity.assert_ux::<8>(byte as u64);
-            });
-
-        set_val!(
-            instance,
-            self.rs2_limb_bytes[0],
-            E::BaseField::from(rs2_limb.to_le_bytes()[0] as u64)
-        );
-
-        rs2_limb.to_le_bytes().into_iter().for_each(|byte| {
-            lk_multiplicity.assert_ux::<8>(byte as u64);
-        });
-
         match N_ZEROS {
             0 => {
+                self.prev_limb_bytes
+                    .iter()
+                    .zip(prev_limb.to_le_bytes())
+                    .for_each(|(col, byte)| {
+                        set_val!(instance, *col, E::BaseField::from(byte as u64));
+                        lk_multiplicity.assert_ux::<8>(byte as u64);
+                    });
+
+                set_val!(
+                    instance,
+                    self.rs2_limb_bytes[0],
+                    E::BaseField::from(rs2_limb.to_le_bytes()[0] as u64)
+                );
+
+                rs2_limb.to_le_bytes().into_iter().for_each(|byte| {
+                    lk_multiplicity.assert_ux::<8>(byte as u64);
+                });
                 let change = if low_bits[0] == 0 {
                     E::BaseField::from(rs2_limb.to_le_bytes()[0] as u64)
                         - E::BaseField::from(prev_limb.to_le_bytes()[0] as u64)
