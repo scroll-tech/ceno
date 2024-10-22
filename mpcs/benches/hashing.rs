@@ -1,25 +1,30 @@
 use ark_std::test_rng;
 use criterion::{criterion_group, criterion_main, Criterion};
 use ff::Field;
-use goldilocks::Goldilocks;
-use mpcs::util::hash::{hash_two_digests, Digest};
-use poseidon::poseidon_hash::PoseidonHash;
+use goldilocks::{Goldilocks, GoldilocksExt2};
+use mpcs::util::merkle_tree::{Hasher, PoseidonHasher};
 
 fn random_ceno_goldy() -> Goldilocks {
     Goldilocks::random(&mut test_rng())
 }
-pub fn criterion_benchmark(c: &mut Criterion) {
-    let left = Digest(vec![random_ceno_goldy(); 4].try_into().unwrap());
-    let right = Digest(vec![random_ceno_goldy(); 4].try_into().unwrap());
-    c.bench_function("ceno hash 2 to 1", |bencher| {
-        bencher.iter(|| hash_two_digests(&left, &right))
+
+pub fn criterion_benchmark_poseidon(c: &mut Criterion) {
+    criterion_benchmark::<PoseidonHasher>(c, "poseidon");
+}
+
+pub fn criterion_benchmark<H: Hasher<GoldilocksExt2>>(c: &mut Criterion, id: &str) {
+    let mut group = c.benchmark_group(format!("hashing_{}", id,));
+    let left: H::Digest = H::Digest::try_from(vec![random_ceno_goldy(); 4]).unwrap();
+    let right: H::Digest = H::Digest::try_from(vec![random_ceno_goldy(); 4]).unwrap();
+    group.bench_function("hash 2 to 1", |bencher| {
+        bencher.iter(|| H::hash_two_digests(&left, &right))
     });
 
     let values = (0..60).map(|_| random_ceno_goldy()).collect::<Vec<_>>();
-    c.bench_function("ceno hash 60 to 1", |bencher| {
-        bencher.iter(|| PoseidonHash::hash_or_noop(&values))
+    group.bench_function("hash 60 to 1", |bencher| {
+        bencher.iter(|| H::hash_slice_base(&values))
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group!(benches, criterion_benchmark_poseidon);
 criterion_main!(benches);
