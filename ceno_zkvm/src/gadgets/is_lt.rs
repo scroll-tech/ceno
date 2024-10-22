@@ -196,13 +196,10 @@ impl InnerLtConfig {
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        // convert to i64 to avoid substract overflow
-        // convert to abs to simplify ((diff_abs as u32) as u64)
-        let diff_abs = (rhs as i64 - lhs as i64).unsigned_abs();
         let diff = if is_signed_lt {
-            Self::range(self.diff.len()) - diff_abs
+            Self::range(self.diff.len()) - lhs.abs_diff(rhs) as u64
         } else {
-            diff_abs
+            lhs.abs_diff(rhs) as u64
         };
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
@@ -223,7 +220,6 @@ pub fn cal_lt_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) ->
         - rhs)
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AssertSignedLtConfig {
     config: InnerSignedLtConfig,

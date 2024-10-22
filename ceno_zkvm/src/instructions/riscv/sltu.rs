@@ -35,6 +35,7 @@ impl RIVInstruction for SLTUOp {
 }
 pub type SltuInstruction<E> = ArithInstruction<E, SLTUOp>;
 
+// TODO combine with SLT
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
 
