@@ -122,16 +122,29 @@ fn test_sb() {
     impl_opcode_sb(5);
     impl_opcode_sb(10);
     impl_opcode_sb(15);
+
+    let neg_one = u32::MAX;
+    for i in 0..4 {
+        impl_opcode_sb(neg_one - i);
+    }
 }
 
 #[test]
 fn test_sh() {
     impl_opcode_sh(0);
     impl_opcode_sh(2);
+
+    let neg_two = u32::MAX - 1;
+    for i in [0, 2] {
+        impl_opcode_sh(neg_two - i)
+    }
 }
 
 #[test]
 fn test_sw() {
     impl_opcode_sw(0);
     impl_opcode_sw(4);
+
+    let neg_four = u32::MAX - 3;
+    impl_opcode_sw(neg_four);
 }
