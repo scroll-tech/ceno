@@ -28,8 +28,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
     ) -> Result<Self, ZKVMError> {
         let select =
             |bit: &Expression<E>, when_true: &Expression<E>, when_false: &Expression<E>| {
-                bit.clone() * when_true.clone()
-                    + (1 - bit.clone()) * when_false.clone()
+                bit.clone() * when_true.clone() + (1 - bit.clone()) * when_false.clone()
             };
 
         let alloc_bytes = |cb: &mut CircuitBuilder<E>,
@@ -59,9 +58,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 bytes
                     .iter()
                     .enumerate()
-                    .map(|(idx, byte)| {
-                        (1 << (idx * 8)) * byte.expr()
-                    })
+                    .map(|(idx, byte)| (1 << (idx * 8)) * byte.expr())
                     .sum(),
             )?;
 
