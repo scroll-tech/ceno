@@ -35,9 +35,7 @@ pub struct StepRecord {
 pub struct MemOp<T> {
     /// Virtual Memory Address.
     /// For registers, get it from `CENO_PLATFORM.register_vma(idx)`.
-    pub addr: WordAddr,
-    /// The actual memory address in bytes minus addr
-    pub shift: u32,
+    pub addr: ByteAddr,
     /// The Word read, or the Change<Word> to be written.
     pub value: T,
     /// The cycle when this memory address was last accessed before this operation.
@@ -178,19 +176,16 @@ impl StepRecord {
             insn_code,
             rs1: rs1_read.map(|rs1| ReadOp {
                 addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
-                shift: 0,
                 value: rs1,
                 previous_cycle,
             }),
             rs2: rs2_read.map(|rs2| ReadOp {
                 addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
-                shift: 0,
                 value: rs2,
                 previous_cycle,
             }),
             rd: rd.map(|rd| WriteOp {
                 addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
-                shift: 0,
                 value: rd,
                 previous_cycle,
             }),
@@ -292,17 +287,15 @@ impl Tracer {
             (None, None) => {
                 self.record.rs1 = Some(ReadOp {
                     addr,
-                    shift: 0,
                     value,
-                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS1),
+                    previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_RS1),
                 });
             }
             (Some(_), None) => {
                 self.record.rs2 = Some(ReadOp {
                     addr,
-                    shift: 0,
                     value,
-                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS2),
+                    previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_RS2),
                 });
             }
             _ => unimplemented!("Only two register reads are supported"),
@@ -317,26 +310,24 @@ impl Tracer {
         let addr = CENO_PLATFORM.register_vma(idx).into();
         self.record.rd = Some(WriteOp {
             addr,
-            shift: 0,
             value,
-            previous_cycle: self.track_access(addr, Self::SUBCYCLE_RD),
+            previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_RD),
         });
     }
 
-    pub fn load_memory(&mut self, addr: WordAddr, shift: u32, value: Word) {
-        self.store_memory(addr, shift, Change::new(value, value));
+    pub fn load_memory(&mut self, addr: ByteAddr, value: Word) {
+        self.store_memory(addr, Change::new(value, value));
     }
 
-    pub fn store_memory(&mut self, addr: WordAddr, shift: u32, value: Change<Word>) {
+    pub fn store_memory(&mut self, addr: ByteAddr, value: Change<Word>) {
         if self.record.memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
         }
 
         self.record.memory_op = Some(WriteOp {
             addr,
-            shift,
             value,
-            previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
+            previous_cycle: self.track_access(addr.waddr(), Self::SUBCYCLE_MEM),
         });
     }
 

@@ -171,9 +171,10 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         let prev_value = Value::new_unchecked(memory_op.value.before);
         let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
 
-        assert!(memory_op.shift <= 0x03);
+        let shift = memory_op.addr.shift();
+        assert!(shift <= 0x03);
 
-        let low_bits = [memory_op.shift & 1, (memory_op.shift >> 1) & 1];
+        let low_bits = [shift & 1, (shift >> 1) & 1];
         let prev_limb = prev_value.as_u16_limbs()[low_bits[1] as usize];
         let rs2_limb = rs2_value.as_u16_limbs()[0];
 

@@ -14,7 +14,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, StepRecord};
+use ceno_emul::{InsnKind, StepRecord, Word};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -146,10 +146,11 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             .prev_memory_value
             .assign_value(instance, prev_mem_value);
 
-        let addr_unaligned = memory_op.addr.baddr().0 + memory_op.shift;
-        config
-            .memory_addr
-            .assign_instance(instance, lk_multiplicity, addr_unaligned)?;
+        config.memory_addr.assign_instance(
+            instance,
+            lk_multiplicity,
+            Word::from(memory_op.addr),
+        )?;
         if let Some(change) = config.word_change.as_ref() {
             change.assign_instance::<E>(instance, lk_multiplicity, step)?;
         }

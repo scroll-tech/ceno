@@ -42,8 +42,7 @@ fn impl_opcode_sb(shift: u32) {
             Word::from(0x4000000_u32),
             rs2_word,
             WriteOp {
-                addr: ByteAddr(0x4000000).waddr(),
-                shift,
+                addr: ByteAddr(0x4000000 + shift),
                 value: Change {
                     before: prev_mem_value,
                     after: sb(prev_mem_value, rs2_word, shift),
