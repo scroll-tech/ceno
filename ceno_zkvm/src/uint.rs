@@ -88,7 +88,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder.namespace(name_fn, |cb| {
             Ok(UIntLimbs {
                 limbs: UintLimb::WitIn(
-                    (0..Self::NUM_CELLS)
+                    (0..Self::NUM_LIMBS)
                         .map(|i| {
                             let w = cb.create_witin(|| format!("limb_{i}"))?;
                             if is_check {
@@ -112,7 +112,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         carries: Option<Vec<WitIn>>,
         carries_auxiliary_lt_config: Option<Vec<AssertLTConfig>>,
     ) -> Self {
-        assert!(limbs.len() == Self::NUM_CELLS);
+        assert!(limbs.len() == Self::NUM_LIMBS);
         if let Some(carries) = &carries {
             let diff = limbs.len() - carries.len();
             assert!(
@@ -131,12 +131,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// take vector of primative type and instantiate witnesses
     pub fn from_const_unchecked<T: Into<u64>>(limbs: Vec<T>) -> Self {
-        assert!(limbs.len() == Self::NUM_CELLS);
+        assert!(limbs.len() == Self::NUM_LIMBS);
         UIntLimbs {
             limbs: UintLimb::Expression(
                 limbs
                     .into_iter()
-                    .take(Self::NUM_CELLS)
+                    .take(Self::NUM_LIMBS)
                     .map(|limb| Expression::Constant(E::BaseField::from(limb.into())))
                     .collect::<Vec<Expression<E>>>(),
             ),
@@ -159,8 +159,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         expr_limbs: Vec<Expression<E>>,
     ) -> Self {
-        assert_eq!(expr_limbs.len(), Self::NUM_CELLS);
-        let limbs = (0..Self::NUM_CELLS)
+        assert_eq!(expr_limbs.len(), Self::NUM_LIMBS);
+        let limbs = (0..Self::NUM_LIMBS)
             .map(|i| {
                 let w = circuit_builder.create_witin(|| "wit for limb").unwrap();
                 circuit_builder
@@ -208,10 +208,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     pub fn assign_limbs(&self, instance: &mut [MaybeUninit<E::BaseField>], limbs_values: &[u16]) {
         assert!(
-            limbs_values.len() <= Self::NUM_CELLS,
+            limbs_values.len() <= Self::NUM_LIMBS,
             "assign input length mismatch. input_len={}, NUM_CELLS={}",
             limbs_values.len(),
-            Self::NUM_CELLS
+            Self::NUM_LIMBS
         );
         if let UintLimb::WitIn(wires) = &self.limbs {
             for (wire, limb) in wires.iter().zip(
@@ -351,7 +351,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 expr_limbs
                     .into_iter()
                     .chain(std::iter::repeat(Expression::ZERO))
-                    .take(Self::NUM_CELLS)
+                    .take(Self::NUM_LIMBS)
                     .collect_vec(),
             ),
             carries: None,
@@ -369,7 +369,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         if let UintLimb::Expression(_) = self.limbs {
             circuit_builder.namespace(name_fn, |cb| {
                 self.limbs = UintLimb::WitIn(
-                    (0..Self::NUM_CELLS)
+                    (0..Self::NUM_LIMBS)
                         .map(|i| {
                             let w = cb.create_witin(|| format!("limb_{i}"))?;
                             cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
@@ -534,13 +534,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for 
     type Error = UtilError;
 
     fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
-        if limbs.len() != Self::NUM_CELLS {
+        if limbs.len() != Self::NUM_LIMBS {
             return Err(UtilError::UIntError(format!(
                 "cannot construct UIntLimbs<{}, {}> from {} cells, requires {} cells",
                 M,
                 C,
                 limbs.len(),
-                Self::NUM_CELLS
+                Self::NUM_LIMBS
             )));
         }
 
