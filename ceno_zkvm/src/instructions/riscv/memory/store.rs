@@ -87,8 +87,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         }?;
 
         if cfg!(feature = "forbid_overflow") {
-            let MAX_RAM_ADDR = u32::MAX - 0x7FF; // max positive imm is 0x7FF
-            let MIN_RAM_ADDR = 0x800; // min negative imm is -0x800
+            const MAX_RAM_ADDR: u32 = u32::MAX - 0x7FF; // max positive imm is 0x7FF
+            const MIN_RAM_ADDR: u32 = 0x800; // min negative imm is -0x800
             assert!(
                 !CENO_PLATFORM.can_write(MAX_RAM_ADDR + 1)
                     && !CENO_PLATFORM.can_write(MIN_RAM_ADDR - 1)
