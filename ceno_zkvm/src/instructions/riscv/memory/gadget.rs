@@ -5,6 +5,7 @@ use crate::{
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::{constants::UInt, insn_base::MemAddr},
     set_val,
+    uint::UintLimb,
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
@@ -202,6 +203,95 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
             }
             _ => unreachable!("N_ZEROS cannot be larger than 1"),
         }
+
+        Ok(())
+    }
+}
+
+pub struct SignedExtConfig {
+    // most significant bit
+    msb: WitIn,
+    n_bits: usize,
+}
+
+impl SignedExtConfig {
+    pub fn construct_limb<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        val: Expression<E>,
+    ) -> Result<Self, ZKVMError> {
+        Self::construct_circuit(cb, 16, val)
+    }
+
+    pub fn construct_byte<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        val: Expression<E>,
+    ) -> Result<Self, ZKVMError> {
+        Self::construct_circuit(cb, 8, val)
+    }
+
+    fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        n_bits: usize,
+        val: Expression<E>, // it's assumed that val is within [0, 2^N_BITS)
+    ) -> Result<Self, ZKVMError> {
+        assert!(n_bits == 8 || n_bits == 16);
+
+        let msb = cb.create_witin(|| "msb")?;
+        // require msb is boolean
+        cb.assert_bit(|| "msb is boolean", msb.expr())?;
+
+        // assert 2*val - msb*2^N_BITS is within range [0, 2^N_BITS)
+        // - if val < 2^(N_BITS-1), then 2*val < 2^N_BITS, msb can only be zero.
+        // - otherwise, 2*val >= 2^N_BITS, then msb can only be one.
+        match n_bits {
+            8 => cb.assert_ux::<_, _, 8>(
+                || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
+                2 * val - msb.expr() * (1 << n_bits),
+            )?,
+            16 => cb.assert_ux::<_, _, 16>(
+                || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
+                2 * val - msb.expr() * (1 << n_bits),
+            )?,
+            _ => unreachable!("unsupported n_bits = {}", n_bits),
+        }
+
+        Ok(SignedExtConfig { msb, n_bits })
+    }
+
+    pub fn sext_value<E: ExtensionField>(&self, val: Expression<E>) -> UInt<E> {
+        assert_eq!(UInt::<E>::LIMB_BITS, 16);
+
+        let mut ret = UInt::new_as_empty();
+        match self.n_bits {
+            8 => {
+                ret.limbs = UintLimb::Expression(vec![
+                    self.msb.expr() * 0xff00 + val,
+                    self.msb.expr() * 0xffff,
+                ]);
+            }
+            16 => {
+                ret.limbs = UintLimb::Expression(vec![val, self.msb.expr() * 0xffff]);
+            }
+            _ => unreachable!("unsupported N_BITS = {}", self.n_bits),
+        }
+
+        ret
+    }
+
+    pub fn assign_instance<E: ExtensionField>(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
+        val: u64,
+    ) -> Result<(), ZKVMError> {
+        let msb = val >> (self.n_bits - 1);
+
+        match self.n_bits {
+            8 => lk_multiplicity.assert_ux::<8>(2 * val - (msb << self.n_bits)),
+            16 => lk_multiplicity.assert_ux::<16>(2 * val - (msb << self.n_bits)),
+            _ => unreachable!("unsupported n_bits = {}", self.n_bits),
+        }
+        set_val!(instance, self.msb, E::BaseField::from(msb));
 
         Ok(())
     }
