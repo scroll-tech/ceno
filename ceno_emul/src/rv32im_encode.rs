@@ -8,7 +8,7 @@ const MASK_8_BITS: u32 = 0xFF;
 const MASK_10_BITS: u32 = 0x3FF;
 const MASK_12_BITS: u32 = 0xFFF;
 
-pub fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> u32 {
+pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> u32 {
     match kind.codes().format {
         InsnFormat::R => encode_r(kind, rs1, rs2, rd),
         InsnFormat::I => encode_i(kind, rs1, rd, imm),
@@ -23,7 +23,7 @@ pub fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> u32
 //        25    20    15       12   7       0
 // +------+-----+-----+--------+----+-------+
 // funct7 | rs2 | rs1 | funct3 | rd | opcode
-fn encode_r(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> u32 {
+const fn encode_r(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> u32 {
     let rs2 = rs2 & MASK_5_BITS; // 5-bits mask
     let rs1 = rs1 & MASK_5_BITS;
     let rd = rd & MASK_5_BITS;
@@ -37,7 +37,7 @@ fn encode_r(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> u32 {
 //           20    15       12   7       0
 // +---------+-----+--------+----+-------+
 // imm[0:11] | rs1 | funct3 | rd | opcode
-fn encode_i(kind: InsnKind, rs1: u32, rd: u32, imm: u32) -> u32 {
+const fn encode_i(kind: InsnKind, rs1: u32, rd: u32, imm: u32) -> u32 {
     let rs1 = rs1 & MASK_5_BITS;
     let rd = rd & MASK_5_BITS;
     let func3 = kind.codes().func3;
@@ -50,7 +50,7 @@ fn encode_i(kind: InsnKind, rs1: u32, rd: u32, imm: u32) -> u32 {
 //           25    20    15       12         7       0
 // +---------+-----+-----+--------+----------+-------+
 // imm[5:11] | rs2 | rs1 | funct3 | imm[0:4] | opcode
-fn encode_s(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
+const fn encode_s(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
     let rs2 = rs2 & MASK_5_BITS;
     let rs1 = rs1 & MASK_5_BITS;
     let func3 = kind.codes().func3;
@@ -64,7 +64,7 @@ fn encode_s(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
 //         31          25    20    15       12         8         7       0
 // +-------+-----------+-----+-----+--------+----------+---------+-------+
 // imm[12] | imm[5:10] | rs2 | rs1 | funct3 | imm[1:4] | imm[11] | opcode
-fn encode_b(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
+const fn encode_b(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
     let rs2 = rs2 & MASK_5_BITS;
     let rs1 = rs1 & MASK_5_BITS;
     let func3 = kind.codes().func3;
@@ -85,7 +85,7 @@ fn encode_b(kind: InsnKind, rs1: u32, rs2: u32, imm: u32) -> u32 {
 //         31          21        20           12   7       0
 // +-------+-----------+---------+------------+----+-------+
 // imm[20] | imm[1:10] | imm[11] | imm[12:19] | rd | opcode
-fn encode_j(kind: InsnKind, rd: u32, imm: u32) -> u32 {
+const fn encode_j(kind: InsnKind, rd: u32, imm: u32) -> u32 {
     let rd = rd & MASK_5_BITS;
     let opcode = kind.codes().opcode;
     let imm_1_10 = (imm >> 1) & MASK_10_BITS; // skip imm[0]
@@ -102,6 +102,6 @@ fn encode_j(kind: InsnKind, rd: u32, imm: u32) -> u32 {
 //            12   7        0
 // +----------+----+--------+
 // imm[12:31] | rd | opcode
-fn encode_u(kind: InsnKind, rd: u32, imm: u32) -> u32 {
+const fn encode_u(kind: InsnKind, rd: u32, imm: u32) -> u32 {
     (imm >> 12) << 12 | (rd & MASK_5_BITS) << 7 | kind.codes().opcode
 }
