@@ -12,7 +12,7 @@ use const_env::from_env;
 
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext,
-    InsnKind::{EANY, LUI, LW},
+    InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
     StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
@@ -50,12 +50,13 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
         encode_rv32(LW, 10, 0, 1, 0),                          // lw x1, 0(x10)
         encode_rv32(LW, 10, 0, 2, 4),                          // lw x2, 4(x10)
         encode_rv32(LW, 10, 0, 3, 8),                          // lw x3, 8(x10)
-        // func7   rs2   rs1   f3  rd    opcode
-        0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
-        0b_0000000_00011_00010_000_00011_0110011, // add x3, x3, x2 <=> addi x3, x3, -1
-        0b_1_111111_00011_00000_110_1100_1_1100011, // bltu x0, x3, -8
-        0b_0_0000000010_0_00000000_00001_1101111, // jal x1, 4
-        ECALL_HALT,                               // ecall halt
+        // Main loop.
+        encode_rv32(ADD, 1, 4, 4, 0),              // add x4, x1, x4
+        encode_rv32(ADD, 2, 3, 3, 0),              // add x3, x2, x3
+        encode_rv32(BLTU, 0, 3, 0, -8_i32 as u32), // bltu x0, x3, -8
+        // End.
+        encode_rv32(JAL, 0, 0, 1, 4), // jal x1, 4
+        ECALL_HALT,                   // ecall halt
     );
     program
 };
