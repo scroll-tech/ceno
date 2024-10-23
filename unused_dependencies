@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euxo pipefail
+# cargo udeps --workspace --all-targets --all-features --exclude ceno_rt --exclude singer-pro
+# cargo udeps --workspace --tests --examples --exclude ceno_rt --exclude singer-pro
+cargo udeps --workspace --tests --benches --examples --exclude ceno_rt --exclude singer-pro $@
+
+# [target.'cfg(example)'.dependencies]

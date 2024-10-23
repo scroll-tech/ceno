@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euxo pipefail
+# ../tools/update_examples
+time cargo test --release --package ceno_emul --test test_elf -- \
+    --exact --show-output \
+    test_ceno_rt_sort test_ceno_rt_mem test_ceno_rt_alloc test_ceno_rt_mini
+
+# time cargo test --release --package ceno_emul --test test_elf -- test_ceno_rt_mem --exact --show-output 

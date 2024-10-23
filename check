@@ -1,0 +1,6 @@
+#!/bin/bash
+RUSTFLAGS="-D warnings" \
+cargo check --workspace --all-targets --exclude ceno_rt || echo $?
+
+# RUSTFLAGS="-D warnings" \
+# cargo make clippy

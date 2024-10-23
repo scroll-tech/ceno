@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euxo pipefail
+
+(
+  cd examples
+  cargo build --release --examples
+)
+
+dir="ceno_emul/tests/data/"
+mkdir --parent "${dir}"
+find examples/target/riscv32im-unknown-none-elf/release/examples/ -type f -executable -not -name '*-*' -print0 | xargs -0 --replace="{}" cp "{}" "${dir}"
+
+# cp target/riscv32im-unknown-none-elf/release/examples/ceno_rt_* ../ceno_emul/tests/data/

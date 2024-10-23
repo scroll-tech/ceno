@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+
+profile=dev
+# profile=release
+# output="out"
+# export RUSTFLAGS="-Z sanitizer=thread"
+
+
+# time cargo build --profile="${profile}" --package ceno_zkvm --example riscv_opcodes
+# for run in {1..10}; do
+#     # cargo run --profile="${profile}" --package ceno_zkvm --example riscv_opcodes -- --start 10 --end 11
+#     target/debug/examples/riscv_opcodes --start 16 --end 17
+# done
+
+cargo test --no-run --package ceno_zkvm --lib -- tables::range::range_impl::tests::test_generate_fixed_traces --exact --show-output 
+time cargo test --package ceno_zkvm --lib -- tables::range::range_impl::tests::test_generate_fixed_traces --exact --show-output 

@@ -1,0 +1,11 @@
+#!/bin/bash
+"cargo" "clippy" \
+  "--workspace" "--all-targets" \
+  "--exclude" "ceno_rt" \
+
+
+  # "--" "-D" "warnings" \
+  # -D clippy::pedantic
+
+  # -A dead_code \
+  # -A unused_variables
