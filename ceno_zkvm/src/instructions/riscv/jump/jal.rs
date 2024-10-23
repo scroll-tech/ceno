@@ -3,15 +3,15 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::ToExpr,
     instructions::{
-        riscv::{constants::UInt, j_insn::JInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, j_insn::JInstructionConfig},
     },
     witness::LkMultiplicity,
-    Value,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 
@@ -54,7 +54,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
         circuit_builder.require_equal(
             || "jal rd_written",
             rd_written.value(),
-            j_insn.vm_state.pc.expr() + PC_STEP_SIZE.into(),
+            j_insn.vm_state.pc.expr() + PC_STEP_SIZE,
         )?;
 
         Ok(JalConfig { j_insn, rd_written })

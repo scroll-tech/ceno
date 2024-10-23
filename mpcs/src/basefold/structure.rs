@@ -6,7 +6,7 @@ use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::mle::FieldType;
 
@@ -15,11 +15,11 @@ use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
 use super::{
+    Basecode, BasecodeDefaultSpec,
     query_phase::{
         BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
         SimpleBatchQueriesResultWithMerklePath,
     },
-    Basecode, BasecodeDefaultSpec,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

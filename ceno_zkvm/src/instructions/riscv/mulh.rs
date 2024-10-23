@@ -4,9 +4,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
+    RIVInstruction,
     constants::{UInt, UIntMul},
     r_insn::RInstructionConfig,
-    RIVInstruction,
 };
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
@@ -117,7 +117,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -127,7 +127,7 @@ mod test {
         chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_MULHU, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     #[test]
@@ -150,20 +150,20 @@ mod test {
         let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
 
         // values assignment
-        let (raw_witin, _) = MulhuInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_MULHU,
-                MOCK_PROGRAM[18],
-                a.as_u64() as u32,
-                b.as_u64() as u32,
-                Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
-                0,
-            )],
-        )
-        .unwrap();
+        let insn_code = encode_rv32(InsnKind::MULHU, 2, 3, 4, 0);
+        let (raw_witin, lkm) =
+            MulhuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    a.as_u64() as u32,
+                    b.as_u64() as u32,
+                    Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         // verify value write to register, which is only hi
         let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());
@@ -183,7 +183,9 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
+            Some(lkm),
         );
     }
 }

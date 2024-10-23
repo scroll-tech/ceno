@@ -14,18 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
-use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
+use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 
 pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
-
-    // Handle halt
-    fn halt(&mut self, pc: ByteAddr);
 
     // Handle a machine return
     fn mret(&self) -> Result<bool>;

@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use ark_std::Zero;
 use ff_ext::ExtensionField;
 use gkr::structs::{Circuit, CircuitWitness};
-use itertools::{chain, izip, Itertools};
+use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -24,13 +24,6 @@ impl<'a, E: ExtensionField> Default for CircuitGraphBuilder<'a, E> {
 }
 
 impl<'a, E: ExtensionField> CircuitGraphBuilder<'a, E> {
-    pub fn new() -> Self {
-        Self {
-            graph: Default::default(),
-            witness: Default::default(),
-        }
-    }
-
     /// Add a new node indicating the predecessors and generate the witness.
     /// Return the index of the new node. sources has the same number as the
     /// input witnesses. If some witness is not source, then the corresponding

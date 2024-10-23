@@ -1,7 +1,7 @@
 use crate::structs::ChipChallenges;
 use ff::Field;
 use ff_ext::ExtensionField;
-use simple_frontend::structs::{Cell, CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
+use simple_frontend::structs::{CellId, CircuitBuilder, ExtCellId, MixedCell, WitnessId};
 
 pub struct RAMHandler<Ext: ExtensionField> {
     read_records: Vec<ExtCellId<Ext>>,
@@ -51,7 +51,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         value: &[CellId],
     ) {
         let item_rlc = circuit_builder.create_ext_cell();
-        let items = vec![old_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
+        let items = [old_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
         circuit_builder.rlc(&item_rlc, &items, self.challenge.record_item_rlc());
 
         let out = circuit_builder.create_ext_cell();
@@ -67,7 +67,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         value: &[MixedCell<Ext>],
     ) {
         let item_rlc = circuit_builder.create_ext_cell();
-        let items = vec![old_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
+        let items = [old_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
         circuit_builder.rlc_mixed(&item_rlc, &items, self.challenge.record_item_rlc());
 
         let out = circuit_builder.create_ext_cell();
@@ -109,7 +109,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         value: &[CellId],
     ) {
         let item_rlc = circuit_builder.create_ext_cell();
-        let items = vec![curr_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
+        let items = [curr_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
         circuit_builder.rlc(&item_rlc, &items, self.challenge.record_item_rlc());
 
         let out = circuit_builder.create_ext_cell();
@@ -125,7 +125,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         value: &[MixedCell<Ext>],
     ) {
         let item_rlc = circuit_builder.create_ext_cell();
-        let items = vec![curr_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
+        let items = [curr_ts.to_vec(), key.to_vec(), value.to_vec()].concat();
         circuit_builder.rlc_mixed(&item_rlc, &items, self.challenge.record_item_rlc());
 
         let out = circuit_builder.create_ext_cell();
@@ -133,6 +133,7 @@ impl<Ext: ExtensionField> RAMHandler<Ext> {
         self.write_records.push(out);
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn finalize(
         &mut self,
         circuit_builder: &mut CircuitBuilder<Ext>,
@@ -158,7 +159,7 @@ fn pad_and_generate_output_witness<Ext: ExtensionField>(
     } else {
         pad_with_one(circuit_builder, records);
         Some((
-            circuit_builder.create_witness_out_from_exts(&records),
+            circuit_builder.create_witness_out_from_exts(records),
             records.len(),
         ))
     }

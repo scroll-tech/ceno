@@ -317,7 +317,7 @@ impl<E: ExtensionField> Add for Expression<E> {
 
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
-        iter.fold(Expression::Constant(E::BaseField::ZERO), |acc, x| acc + x)
+        iter.fold(Expression::ZERO, |acc, x| acc + x)
     }
 }
 
@@ -441,6 +441,42 @@ impl<E: ExtensionField> Sub for Expression<E> {
         }
     }
 }
+
+macro_rules! binop_instances {
+    ($op: ident, $fun: ident, ($($t:ty),*)) => {
+        $(impl<E: ExtensionField> $op<Expression<E>> for $t {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+                Expression::<E>::from(self).$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<$t> for Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: $t) -> Expression<E> {
+                self.$fun(Expression::<E>::from(rhs))
+            }
+        })*
+    };
+}
+
+binop_instances!(
+    Add,
+    add,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
+binop_instances!(
+    Sub,
+    sub,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
+binop_instances!(
+    Mul,
+    mul,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
 
 impl<E: ExtensionField> Mul for Expression<E> {
     type Output = Expression<E>;
@@ -638,6 +674,20 @@ impl<E: ExtensionField> ToExpr<E> for &WitIn {
     }
 }
 
+impl<E: ExtensionField> ToExpr<E> for Fixed {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::Fixed(*self)
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &Fixed {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::Fixed(**self)
+    }
+}
+
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
@@ -703,7 +753,7 @@ pub mod fmt {
     pub fn expr<E: ExtensionField>(
         expression: &Expression<E>,
         wtns: &mut Vec<WitnessId>,
-        add_prn_sum: bool,
+        add_parens_sum: bool,
     ) -> String {
         match expression {
             Expression::WitIn(wit_in) => {
@@ -728,12 +778,18 @@ pub mod fmt {
                     s
                 }
             }
-            Expression::Constant(constant) => base_field::<E>(constant, true).to_string(),
+            Expression::Constant(constant) => {
+                base_field::<E::BaseField>(constant, true).to_string()
+            }
             Expression::Fixed(fixed) => format!("{:?}", fixed),
             Expression::Instance(i) => format!("{:?}", i),
             Expression::Sum(left, right) => {
                 let s = format!("{} + {}", expr(left, wtns, false), expr(right, wtns, false));
-                if add_prn_sum { format!("({})", s) } else { s }
+                if add_parens_sum {
+                    format!("({})", s)
+                } else {
+                    s
+                }
             }
             Expression::Product(left, right) => {
                 format!("{} * {}", expr(left, wtns, true), expr(right, wtns, true))
@@ -745,7 +801,11 @@ pub mod fmt {
                     expr(x, wtns, true),
                     expr(b, wtns, false)
                 );
-                if add_prn_sum { format!("({})", s) } else { s }
+                if add_parens_sum {
+                    format!("({})", s)
+                } else {
+                    s
+                }
             }
         }
     }
@@ -757,7 +817,7 @@ pub mod fmt {
         let data = field
             .as_bases()
             .iter()
-            .map(|b| base_field::<E>(b, false))
+            .map(|b| base_field::<E::BaseField>(b, false))
             .collect::<Vec<String>>();
         let only_one_limb = field.as_bases()[1..].iter().all(|&x| x == 0.into());
 
@@ -768,29 +828,26 @@ pub mod fmt {
         }
     }
 
-    pub fn base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
+    pub fn base_field<F: SmallField>(base_field: &F, add_parens: bool) -> String {
         let value = base_field.to_canonical_u64();
 
-        if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
+        if value > F::MODULUS_U64 - u16::MAX as u64 {
             // beautiful format for negative number > -65536
-            prn(format!("-{}", E::BaseField::MODULUS_U64 - value), add_prn)
+            parens(format!("-{}", F::MODULUS_U64 - value), add_parens)
         } else if value < u16::MAX as u64 {
             format!("{value}")
         } else {
             // hex
-            if value > E::BaseField::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
-                prn(
-                    format!("-{:#x}", E::BaseField::MODULUS_U64 - value),
-                    add_prn,
-                )
+            if value > F::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
+                parens(format!("-{:#x}", F::MODULUS_U64 - value), add_parens)
             } else {
                 format!("{value:#x}")
             }
         }
     }
 
-    pub fn prn(s: String, add_prn: bool) -> String {
-        if add_prn { format!("({})", s) } else { s }
+    pub fn parens(s: String, add_parens: bool) -> String {
+        if add_parens { format!("({})", s) } else { s }
     }
 
     #[cfg(test)]
@@ -801,18 +858,17 @@ pub mod fmt {
         wits_in_name: &[String],
     ) -> String {
         use itertools::Itertools;
+        use multilinear_extensions::mle::FieldType;
 
         wtns.iter()
             .sorted()
             .map(|wt_id| {
                 let wit = &wits_in[*wt_id as usize];
                 let name = &wits_in_name[*wt_id as usize];
-                let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
-                    field(&e[inst_id])
-                } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                    base_field::<E>(&bf[inst_id], true)
-                } else {
-                    "Unknown".to_string()
+                let value_fmt = match wit.evaluations() {
+                    FieldType::Base(vec) => base_field::<E::BaseField>(&vec[inst_id], true),
+                    FieldType::Ext(vec) => field(&vec[inst_id]),
+                    FieldType::Unreachable => unreachable!(),
                 };
                 format!("  WitIn({wt_id})={value_fmt} {name:?}")
             })
@@ -826,7 +882,7 @@ mod tests {
 
     use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
 
-    use super::{fmt, Expression, ToExpr};
+    use super::{Expression, ToExpr, fmt};
     use ff::Field;
 
     #[test]

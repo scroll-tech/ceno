@@ -3,13 +3,13 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::AssertLTConfig,
     instructions::{
+        Instruction,
         riscv::{
             constants::{ECALL_HALT_OPCODE, EXIT_PC},
             ecall_insn::EcallInstructionConfig,
         },
-        Instruction,
     },
     set_val,
     witness::LkMultiplicity,
@@ -21,7 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
-    lt_x10_cfg: IsLtConfig,
+    lt_x10_cfg: AssertLTConfig,
 }
 
 pub struct HaltInstruction<E>(PhantomData<E>);
@@ -52,7 +52,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             || "read x10",
             E::BaseField::from(ceno_emul::CENO_PLATFORM.reg_arg0() as u64),
             prev_x10_ts.expr(),
-            ecall_cfg.ts.expr() + (Tracer::SUBCYCLE_RS2 as usize).into(),
+            ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
         )?;
 

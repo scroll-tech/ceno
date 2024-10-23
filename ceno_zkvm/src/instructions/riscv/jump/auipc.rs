@@ -4,16 +4,16 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::{constants::UInt, u_insn::UInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, u_insn::UInstructionConfig},
     },
     set_val,
     witness::LkMultiplicity,
-    Value,
 };
 
 pub struct AuipcConfig<E: ExtensionField> {
@@ -56,7 +56,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         circuit_builder.require_equal(
             || "imm+pc = rd_written+2^32*overflow",
             imm.expr() + u_insn.vm_state.pc.expr(),
-            rd_written.value() + overflow_bit.expr() * (1u64 << 32).into(),
+            rd_written.value() + overflow_bit.expr() * (1u64 << 32),
         )?;
 
         Ok(AuipcConfig {

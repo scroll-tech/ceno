@@ -4,9 +4,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
-    constants::{UInt, UINT_LIMBS},
-    r_insn::RInstructionConfig,
     RIVInstruction,
+    constants::{UINT_LIMBS, UInt},
+    r_insn::RInstructionConfig,
 };
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsLtConfig,
@@ -54,7 +54,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "rs1 < rs2",
             rs1_read.value(),
             rs2_read.value(),
-            None,
             UINT_LIMBS,
         )?;
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
@@ -105,7 +104,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord, Word, CENO_PLATFORM};
+    use ceno_emul::{Change, StepRecord, Word, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
@@ -115,7 +114,7 @@ mod test {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_SLTU, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     fn verify(name: &'static str, rs1: Word, rs2: Word, rd: Word) {
@@ -132,21 +131,20 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let idx = (MOCK_PC_SLTU.0 - CENO_PLATFORM.pc_start()) / 4;
-        let (raw_witin, _) = SltuInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SLTU,
-                MOCK_PROGRAM[idx as usize],
-                rs1,
-                rs2,
-                Change::new(0, rd),
-                0,
-            )],
-        )
-        .unwrap();
+        let insn_code = encode_rv32(InsnKind::SLTU, 2, 3, 4, 0);
+        let (raw_witin, lkm) =
+            SltuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    rs1,
+                    rs2,
+                    Change::new(0, rd),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
@@ -157,14 +155,16 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied(
-            &mut cb,
+            &cb,
             &raw_witin
                 .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
+            Some(lkm),
         );
     }
 
@@ -182,10 +182,12 @@ mod test {
 
     #[test]
     fn test_sltu_random() {
+        // TODO(Matthias): use property pased testing.
+        // Like eg https://docs.rs/proptest/latest/proptest/
         let mut rng = rand::thread_rng();
         let a: u32 = rng.gen();
         let b: u32 = rng.gen();
         verify("random 1", a, b, (a < b) as u32);
-        verify("random 2", b, a, !(a < b) as u32);
+        verify("random 2", b, a, (a >= b) as u32);
     }
 }
