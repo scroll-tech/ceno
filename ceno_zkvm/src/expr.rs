@@ -10,8 +10,7 @@ use std::ops::Add;
 // This test serves as a little demo of the prototype so far:
 #[test]
 fn test_expr() {
-    use goldilocks::{Goldilocks, GoldilocksExt2};
-    type E = GoldilocksExt2;
+    type E = goldilocks::GoldilocksExt2;
 
     // We can do consts without a builder:
 
