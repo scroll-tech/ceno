@@ -210,7 +210,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 .wrapping_add(step.insn().imm_or_funct7()),
         );
         let shift = unaligned_addr.shift();
-        let addr_low_bits = vec![shift & 0x01, (shift >> 1) & 0x01];
+        let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];
         let target_limb = memory_read.as_u16_limbs()[addr_low_bits[1] as usize];
         let mut target_limb_bytes = target_limb.to_le_bytes();
 
