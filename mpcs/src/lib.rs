@@ -661,7 +661,7 @@ pub mod test_util {
                 let mut transcript = Transcript::new(b"BaseFold");
                 comms
                     .iter()
-                    .for_each(|comm| Pcs::write_commitment(&comm, &mut transcript).unwrap());
+                    .for_each(|comm| Pcs::write_commitment(comm, &mut transcript).unwrap());
 
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 evals.iter().for_each(|evals| {
