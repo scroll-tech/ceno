@@ -461,7 +461,6 @@ pub fn prove_keccak256<'a, E: ExtensionField>(
     {
         use crate::structs::CircuitWitness;
         use multilinear_extensions::mle::IntoMLE;
-
         let all_zero: Vec<DenseMultilinearExtension<E>> = vec![
             vec![E::BaseField::ZERO; 25 * 64],
             vec![E::BaseField::ZERO; 17 * 64],

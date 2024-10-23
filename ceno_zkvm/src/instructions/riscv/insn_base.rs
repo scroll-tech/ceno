@@ -1,14 +1,15 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
-use super::constants::{UInt, PC_STEP_SIZE};
+use super::constants::{UInt, PC_STEP_SIZE, UINT_LIMBS};
 use crate::{
     chip_handler::{
-        GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
+        GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
+        RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::{Expression, ToExpr, WitIn},
     gadgets::IsLtConfig,
     set_val,
     uint::Value,
@@ -235,6 +236,124 @@ impl<E: ExtensionField> WriteRD<E> {
             lk_multiplicity,
             step.rd().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RD,
+        )?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ReadMEM<E: ExtensionField> {
+    pub prev_ts: WitIn,
+    pub lt_cfg: IsLtConfig,
+    _field_type: PhantomData<E>,
+}
+
+impl<E: ExtensionField> ReadMEM<E> {
+    pub fn construct_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+        mem_addr: MemoryExpr<E>,
+        mem_read: [Expression<E>; UINT_LIMBS],
+        cur_ts: WitIn,
+    ) -> Result<Self, ZKVMError> {
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
+        let (_, lt_cfg) = circuit_builder.memory_read(
+            || "read_memory",
+            &mem_addr,
+            prev_ts.expr(),
+            cur_ts.expr() + (Tracer::SUBCYCLE_MEM as usize).into(),
+            mem_read,
+        )?;
+
+        Ok(ReadMEM {
+            prev_ts,
+            lt_cfg,
+            _field_type: PhantomData,
+        })
+    }
+
+    pub fn assign_instance(
+        &self,
+        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        // Memory state
+        set_val!(
+            instance,
+            self.prev_ts,
+            step.memory_op().unwrap().previous_cycle
+        );
+
+        // Memory read
+        self.lt_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.memory_op().unwrap().previous_cycle,
+            step.cycle() + Tracer::SUBCYCLE_MEM,
+        )?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct WriteMEM<E: ExtensionField> {
+    pub prev_ts: WitIn,
+    pub prev_value: UInt<E>,
+    pub lt_cfg: IsLtConfig,
+}
+
+impl<E: ExtensionField> WriteMEM<E> {
+    pub fn construct_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+        mem_addr: MemoryExpr<E>,
+        mem_written: [Expression<E>; UINT_LIMBS],
+        cur_ts: WitIn,
+    ) -> Result<Self, ZKVMError> {
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
+        let prev_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
+
+        let (_, lt_cfg) = circuit_builder.memory_write(
+            || "write_memory",
+            &mem_addr,
+            prev_ts.expr(),
+            cur_ts.expr() + (Tracer::SUBCYCLE_RD as usize).into(),
+            prev_value.memory_expr(),
+            mem_written,
+        )?;
+
+        Ok(WriteMEM {
+            prev_ts,
+            prev_value,
+            lt_cfg,
+        })
+    }
+
+    pub fn assign_instance(
+        &self,
+        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        set_val!(
+            instance,
+            self.prev_ts,
+            step.memory_op().unwrap().previous_cycle
+        );
+
+        // Memory State
+        self.prev_value.assign_value(
+            instance,
+            Value::new_unchecked(step.memory_op().unwrap().value.before),
+        );
+
+        // Memory Write
+        self.lt_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            step.memory_op().unwrap().previous_cycle,
+            step.cycle() + Tracer::SUBCYCLE_MEM,
         )?;
 
         Ok(())

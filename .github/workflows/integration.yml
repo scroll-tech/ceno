@@ -22,13 +22,13 @@ jobs:
           paths_ignore: '["**/README.md"]'
           do_not_skip: '["pull_request", "workflow_dispatch", "schedule", "merge_group"]'
 
-  lints:
+  integration:
     needs: [skip_check]
     if: |
       github.event.pull_request.draft == false &&
       (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
 
-    name: Various lints
+    name: Integration testing
     timeout-minutes: 30
     runs-on: ubuntu-latest
 
@@ -51,12 +51,9 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: dtolnay/rust-toolchain@nightly
 
       - name: Run example
-        uses: actions-rs/cargo@v1
         env:
           RAYON_NUM_THREADS: 2
-        with:
-          command: run
-          args: --package ceno_zkvm --example riscv_opcodes --target ${{ matrix.target }} -- --start 10 --end 11
-
+        run: cargo run --package ceno_zkvm --example riscv_opcodes --target ${{ matrix.target }} -- --start 10 --end 11

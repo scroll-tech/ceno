@@ -128,6 +128,8 @@ impl<E: ExtensionField> IOPProverState<E> {
             virtual_poly_1.merge(&tmp);
         }
 
+        // TODO(Matthias, by 2024-11-01): review whether we can replace this function.
+        #[allow(deprecated)]
         let (sumcheck_proof_1, prover_state) =
             SumcheckStateV2::prove_parallel(virtual_poly_1, transcript);
         let eval_point_1 = sumcheck_proof_1.point.clone();

@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, ToExpr},
     gadgets::IsLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
 };
@@ -57,10 +57,10 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
+        value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
@@ -68,10 +68,10 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: &WitIn,
+        memory_addr: &MemoryExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
-        prev_values: crate::chip_handler::MemoryExpr<E>,
-        value: crate::chip_handler::MemoryExpr<E>,
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, IsLtConfig), ZKVMError>;
 }
