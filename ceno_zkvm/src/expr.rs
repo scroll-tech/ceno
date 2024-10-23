@@ -7,6 +7,35 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use std::ops::Add;
 
+// This test serves as a little demo of the prototype so far:
+#[test]
+fn test_expr() {
+    use goldilocks::{Goldilocks, GoldilocksExt2};
+    type E = GoldilocksExt2;
+
+    // We can do consts without a builder:
+
+    let a = Expr::<'_, E>::from(1);
+    let b = Expr::<'_, E>::from(2);
+    let c = a + b;
+    println!("{:?}", c);
+
+    // But we can also use a builder to create more complex expressions.
+    // The same context that already tracks fixed, witnesses and instances can also track the builder.
+    let builder = ExprBuilder::default();
+
+    // TODO: implement support for witin, fixed, instance
+    // Here we just create one out of thin air for the demonstration.
+    let x = builder.wit_in(5);
+    println!("{:?}", a);
+    let y = x + c;
+    println!("{:?}", y);
+
+    // Notice how we can use `x` multiple times without worrying about cloning, and we can also use literals like `10`:
+    let z = x + 10 + y;
+    println!("{:?}", z);
+}
+
 /// Contains a reference to [`ExprTree`] that is managed by [`ExprBuilder`].
 #[derive(Clone, Copy, Debug)]
 pub enum Expr<'a, E: ExtensionField> {
@@ -156,15 +185,18 @@ impl ExprBuilder {
         self.intern(ExprTree::Constant(constant))
     }
 
-    // fn lit_tree<V>(&self, value: V) -> CompoundExpr<'_, V> {
-    //     self.intern(ExprTree::Literal { value })
-    // }
+    /// Create a `Constant` Expr
+    pub fn constant<E: ExtensionField>(&self, value: E::BaseField) -> Expr<'_, E> {
+        self.wrap(self.constant_tree(value))
+    }
 
-    // /// Create a `Constant` Expr
-    // pub fn constant<V>(&self, value: i64) -> Expr<'_, V> { self.wrap(self.constant_tree(value)) }
-
-    // /// Create a `Literal` Expr
-    // pub fn lit<V>(&self, value: V) -> Expr<'_, V> { self.wrap(self.lit_tree(value)) }
+    /// Create a `Fixed` Expr
+    ///
+    /// TODO: don't just create these out of thin air, hook it up with whatever hands out witness ids already.
+    /// TODO: implement support for witin, fixed, instance
+    pub fn wit_in<E: ExtensionField>(&self, id: WitnessId) -> Expr<'_, E> {
+        self.wrap(self.intern(ExprTree::WitIn(id)))
+    }
 }
 
 impl<'a, E: ExtensionField> Add for Expr<'a, E> {
@@ -265,24 +297,3 @@ binop_instances!(
     add,
     (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
 );
-
-#[test]
-fn test_expr() {
-    use goldilocks::{Goldilocks, GoldilocksExt2};
-    type E = GoldilocksExt2;
-
-    let a = Expr::<'_, E>::from(1);
-    let b = Expr::<'_, E>::from(2);
-    let c = a + b;
-    println!("{:?}", c);
-
-    let builder = ExprBuilder::default();
-    let expr: CompoundExpr<'_, E> = builder.constant_tree(Goldilocks::from(1));
-    let x = builder.wrap(expr);
-    println!("{:?}", a);
-    let y = x + c;
-    println!("{:?}", y);
-
-    let z = x + 10 + y;
-    println!("{:?}", z);
-}
