@@ -240,6 +240,32 @@ impl<'a, E: ExtensionField> Add for Expr<'a, E> {
     }
 }
 
+macro_rules! binop_instances {
+    ($op: ident, $fun: ident, ($($t:ty),*)) => {
+        $(impl<'a, E: ExtensionField> $op<Expr<'a, E>> for $t {
+            type Output = Expr<'a, E>;
+
+            fn $fun(self, rhs: Expr<'a, E>) -> Expr<'a, E> {
+                Expr::<'a, E>::from(self).$fun(rhs)
+            }
+        }
+
+        impl<'a, E: ExtensionField> $op<$t> for Expr<'a, E> {
+            type Output = Expr<'a, E>;
+
+            fn $fun(self, rhs: $t) -> Expr<'a, E> {
+                self.$fun(Expr::<'a, E>::from(rhs))
+            }
+        })*
+    };
+}
+
+binop_instances!(
+    Add,
+    add,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
+
 #[test]
 fn test_expr() {
     use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -252,8 +278,11 @@ fn test_expr() {
 
     let builder = ExprBuilder::default();
     let expr: CompoundExpr<'_, E> = builder.constant_tree(Goldilocks::from(1));
-    let a = builder.wrap(expr);
+    let x = builder.wrap(expr);
     println!("{:?}", a);
-    let b = a + c;
-    println!("{:?}", b);
+    let y = x + c;
+    println!("{:?}", y);
+
+    let z = x + 10 + y;
+    println!("{:?}", z);
 }
