@@ -5,6 +5,8 @@
 //! Usage:
 //! Specify an instruction with `trait RIVInstruction` and define a `DummyInstruction` like so:
 //!
+//!     use ceno_zkvm::instructions::riscv::{arith::AddOp, dummy::DummyInstruction};
+//!
 //!     type AddDummy<E> = DummyInstruction<E, AddOp>;
 
 mod dummy_circuit;

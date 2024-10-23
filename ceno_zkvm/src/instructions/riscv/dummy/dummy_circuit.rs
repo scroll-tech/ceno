@@ -54,7 +54,7 @@ pub struct DummyConfig<E: ExtensionField> {
     rs2: Option<(ReadRS2<E>, UInt<E>)>,
     rd: Option<(WriteRD<E>, UInt<E>)>,
 
-    mem_addr_val: Option<(UInt<E>, UInt<E>)>,
+    mem_addr_val: Option<(WitIn, UInt<E>)>,
     mem_read: Option<ReadMEM<E>>,
     mem_write: Option<WriteMEM<E>>,
 
@@ -121,7 +121,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         // Memory
         let mem_addr_val = if with_mem_read || with_mem_write {
             Some((
-                UInt::new_unchecked(|| "mem_addr", circuit_builder)?,
+                circuit_builder.create_witin(|| "mem_addr")?,
                 UInt::new_unchecked(|| "mem_val", circuit_builder)?,
             ))
         } else {
@@ -131,7 +131,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         let mem_read = if with_mem_read {
             Some(ReadMEM::construct_circuit(
                 circuit_builder,
-                mem_addr_val.as_ref().unwrap().0.memory_expr(),
+                mem_addr_val.as_ref().unwrap().0.expr(),
                 mem_addr_val.as_ref().unwrap().1.memory_expr(),
                 vm_state.ts,
             )?)
@@ -142,7 +142,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         let mem_write = if with_mem_write {
             Some(WriteMEM::construct_circuit(
                 circuit_builder,
-                mem_addr_val.as_ref().unwrap().0.memory_expr(),
+                mem_addr_val.as_ref().unwrap().0.expr(),
                 mem_addr_val.as_ref().unwrap().1.memory_expr(),
                 vm_state.ts,
             )?)
@@ -210,7 +210,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         // Memory
         if let Some((mem_addr, mem_val)) = &self.mem_addr_val {
             let mem_op = step.memory_op().expect("memory operation");
-            mem_addr.assign_value(instance, Value::new_unchecked(mem_op.addr));
+            set_val!(instance, mem_addr, u64::from(mem_op.addr));
             mem_val.assign_value(instance, Value::new_unchecked(mem_op.value.after));
         }
         if let Some(mem_read) = &self.mem_read {
