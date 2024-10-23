@@ -12,16 +12,16 @@ use std::ops::Add;
 fn test_expr() {
     type E = goldilocks::GoldilocksExt2;
 
+    // We generally need a 'builder' for complex expressions.
+    // The same context that already tracks fixed, witnesses and instances can also track the builder.
+    let builder = ExprBuilder::default();
+
     // We can do consts without a builder:
 
     let a = Expr::<'_, E>::from(1);
-    let b = Expr::<'_, E>::from(2);
+    let b = 2;
     let c = a + b;
     println!("{:?}", c);
-
-    // But we can also use a builder to create more complex expressions.
-    // The same context that already tracks fixed, witnesses and instances can also track the builder.
-    let builder = ExprBuilder::default();
 
     // TODO: implement support for witin, fixed, instance
     // Here we just create one out of thin air for the demonstration.
