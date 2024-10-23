@@ -30,8 +30,8 @@ fn test_expr() {
     let y = x + c;
     println!("{:?}", y);
 
-    // Notice how we can use `x` multiple times without worrying about cloning, and we can also use literals like `10`:
-    let z = x + 10 + y;
+    // Notice how we can use `x` and `y` multiple times without worrying about cloning, and we can also use literals like `10`:
+    let z = x + 10 + y + y;
     println!("{:?}", z);
 }
 
