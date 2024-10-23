@@ -45,11 +45,12 @@ serde_json.workspace = true
 glob = "0.3"
 
 [features]
-default = ["riv32"]
+default = ["riv32", "forbid_overflow"]
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 non_pow2_rayon_thread = []
 riv32 = []
 riv64 = []
+forbid_overflow = []
 
 [[bench]]
 harness = false

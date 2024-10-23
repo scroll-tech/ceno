@@ -14,7 +14,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{ByteAddr, InsnKind, StepRecord};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -74,10 +74,10 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
 
         let memory_addr = match I::INST_KIND {
             InsnKind::SW => MemAddr::construct_align4(circuit_builder),
@@ -85,6 +85,15 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             InsnKind::SB => MemAddr::construct_unaligned(circuit_builder),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }?;
+
+        if cfg!(feature = "forbid_overflow") {
+            let MAX_RAM_ADDR = u32::MAX - 0x7FF; // max positive imm is 0x7FF
+            let MIN_RAM_ADDR = 0x800; // min negative imm is -0x800
+            assert!(
+                !CENO_PLATFORM.can_write(MAX_RAM_ADDR + 1)
+                    && !CENO_PLATFORM.can_write(MIN_RAM_ADDR - 1)
+            );
+        }
         circuit_builder.require_equal(
             || "memory_addr = rs1_read + imm",
             memory_addr.expr_unaligned(),

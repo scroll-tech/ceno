@@ -13,3 +13,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 ceno-examples = { path = "../examples-builder" }
+
+[features]
+default = ["forbid_overflow"]
+forbid_overflow = []

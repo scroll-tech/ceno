@@ -29,7 +29,11 @@ impl Platform {
     }
 
     pub const fn ram_end(&self) -> Addr {
-        0xFFFF_FFFF
+        if cfg!(feature = "forbid_overflow") {
+            0xFFFF_F800
+        } else {
+            0xFFFF_FFFF
+        }
     }
 
     pub fn is_ram(&self, addr: Addr) -> bool {
