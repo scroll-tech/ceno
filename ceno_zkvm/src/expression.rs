@@ -35,7 +35,6 @@ pub enum Expression<E: ExtensionField> {
     Sum(Box<Expression<E>>, Box<Expression<E>>),
     /// This is the product of two polynomials
     Product(Box<Expression<E>>, Box<Expression<E>>),
-    // TODO(Matthias): Why is this one special, instead of build from `Sum` and `Product`?
     /// This is x, a, b expr to represent ax + b polynomial
     /// and x is one of wit / fixed / instance, a and b are either constant or challenge
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
