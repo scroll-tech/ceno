@@ -162,23 +162,6 @@ impl ExprBuilder {
         }
     }
 
-    // /// Convenience method for creating `BinOp` nodes
-    // fn bin_op<'a, E: ExtensionField>(
-    //     &'a self,
-    //     op: BinOp,
-    //     left: CompoundExpr<'a, E>,
-    //     right: CompoundExpr<'a, E>,
-    // ) -> CompoundExpr<'a, E> {
-    //     let expr_tree = ExprTree::BinOp { op, left, right };
-    //     self.intern(expr_tree)
-    // }
-
-    // /// Convenience method for creating `UnaOp` nodes
-    // fn una_op<'a, V>(&'a self, op: UnaOp, expr: CompoundExpr<'a, V>) -> CompoundExpr<'a, V> {
-    //     let expr_tree = ExprTree::UnaOp { op, expr };
-    //     self.intern(expr_tree)
-    // }
-
     /// Allocate Constant Expr Tree in the Expr Builder
     fn constant_tree<E: ExtensionField>(&self, constant: E::BaseField) -> CompoundExpr<'_, E> {
         self.intern(ExprTree::Constant(constant))
