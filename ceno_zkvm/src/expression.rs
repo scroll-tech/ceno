@@ -317,7 +317,7 @@ impl<E: ExtensionField> Add for Expression<E> {
 
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
-        iter.fold(Expression::Constant(E::BaseField::ZERO), |acc, x| acc + x)
+        iter.fold(Expression::ZERO, |acc, x| acc + x)
     }
 }
 
@@ -441,6 +441,42 @@ impl<E: ExtensionField> Sub for Expression<E> {
         }
     }
 }
+
+macro_rules! binop_instances {
+    ($op: ident, $fun: ident, ($($t:ty),*)) => {
+        $(impl<E: ExtensionField> $op<Expression<E>> for $t {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+                Expression::<E>::from(self).$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<$t> for Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: $t) -> Expression<E> {
+                self.$fun(Expression::<E>::from(rhs))
+            }
+        })*
+    };
+}
+
+binop_instances!(
+    Add,
+    add,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
+binop_instances!(
+    Sub,
+    sub,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
+binop_instances!(
+    Mul,
+    mul,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
 
 impl<E: ExtensionField> Mul for Expression<E> {
     type Output = Expression<E>;

@@ -6,24 +6,26 @@ pub const BYTE_BIT_WIDTH: usize = 8;
 
 use ff_ext::ExtensionField;
 
-impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
-    pub const M: usize = M;
-    pub const C: usize = C;
+impl<const TOTAL_BITS: usize, const CAPACITY: usize, E: ExtensionField>
+    UIntLimbs<TOTAL_BITS, CAPACITY, E>
+{
+    pub const TOTAL_BITS: usize = TOTAL_BITS;
+    pub const LIMB_BITS: usize = CAPACITY;
 
-    /// Determines the maximum number of bits that should be represented in each cell
-    /// independent of the cell capacity `C`.
-    /// If M < C i.e. total bit < cell capacity, the maximum_usable_cell_capacity
-    /// is actually M.
-    /// but if M >= C then maximum_usable_cell_capacity = C
-    pub const MAX_CELL_BIT_WIDTH: usize = const_min(M, C);
+    /// Determines the maximum number of bits that should be represented in each limb
+    /// independent of the limb capacity.
+    /// If total bits < limb capacity, the maximum_usable_limb_capacity
+    /// is actually 'total bits'.
+    /// but if total bits >= limb capacity then maximum_usable_limb_capacity = 'limb capacity'.
+    pub const MAX_LIMB_BIT_WIDTH: usize = const_min(TOTAL_BITS, CAPACITY);
 
-    /// `NUM_CELLS` represent the minimum number of cells each of size `C` needed
-    /// to hold `M` total bits
-    pub const NUM_CELLS: usize = M.div_ceil(C);
+    /// `NUM_LIMBS` represent the minimum number of limbs needed
+    /// to hold total bits
+    pub const NUM_LIMBS: usize = TOTAL_BITS.div_ceil(CAPACITY);
 
     /// Max carry value during degree 2 limb multiplication
     pub const MAX_DEGREE_2_MUL_CARRY_VALUE: u64 =
-        max_carry_word_for_multiplication(2, Self::M, Self::C);
+        max_carry_word_for_multiplication(2, Self::TOTAL_BITS, Self::LIMB_BITS);
 
     /// Min bits to cover MAX_DEGREE_2_MUL_CARRY_VALUE
     pub const MAX_DEGREE_2_MUL_CARRY_BITS: usize = {
@@ -33,5 +35,5 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// Min number of u16 limb to cover max carry value
     pub const MAX_DEGREE_2_MUL_CARRY_U16_LIMB: usize =
-        (Self::MAX_DEGREE_2_MUL_CARRY_BITS + 15) / 16;
+        Self::MAX_DEGREE_2_MUL_CARRY_BITS.div_ceil(16);
 }
