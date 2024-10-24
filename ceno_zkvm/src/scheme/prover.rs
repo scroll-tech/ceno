@@ -655,7 +655,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             cs.r_table_expressions
                 .iter()
                 .zip_eq(cs.w_table_expressions.iter())
-                .all(|(r, w)| r.table_len == w.table_len)
+                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
         // main constraint: lookup denominator and numerator record witness inference

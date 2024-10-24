@@ -5,7 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{MemFinalRecord, ProgramTableCircuit, initial_memory, initial_registers},
+    tables::{MemFinalRecord, ProgramTableCircuit, init_program_data, initial_registers},
 };
 use clap::Parser;
 use const_env::from_env;
@@ -137,7 +137,7 @@ fn main() {
         );
 
         let reg_init = initial_registers();
-        let mem_init = initial_memory(program_data);
+        let mem_init = init_program_data(program_data);
 
         config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
 

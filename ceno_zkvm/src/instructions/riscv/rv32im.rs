@@ -3,7 +3,7 @@ use crate::{
     instructions::Instruction,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, MemFinalRecord, MemInitRecord, MemTableCircuit,
+        AndTableCircuit, LtuTableCircuit, MemCircuit, MemFinalRecord, MemInitRecord,
         RegTableCircuit, TableCircuit, U16TableCircuit,
     },
 };
@@ -34,7 +34,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // RW tables.
     pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub mem_config: <MemTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub mem_config: <MemCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 
 impl<E: ExtensionField> Rv32imConfig<E> {
@@ -54,7 +54,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // RW tables
         let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
-        let mem_config = cs.register_table_circuit::<MemTableCircuit<E>>();
+        let mem_config = cs.register_table_circuit::<MemCircuit<E>>();
 
         Self {
             add_config,
@@ -91,7 +91,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, self.ltu_config.clone(), &());
 
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, self.reg_config.clone(), reg_init);
-        fixed.register_table_circuit::<MemTableCircuit<E>>(cs, self.mem_config.clone(), mem_init);
+        fixed.register_table_circuit::<MemCircuit<E>>(cs, self.mem_config.clone(), mem_init);
     }
 
     pub fn assign_opcode_circuit(
@@ -156,7 +156,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .unwrap();
         // assign memory finalization.
         witness
-            .assign_table_circuit::<MemTableCircuit<E>>(cs, &self.mem_config, mem_final)
+            .assign_table_circuit::<MemCircuit<E>>(cs, &self.mem_config, mem_final)
             .unwrap();
         Ok(())
     }

@@ -468,13 +468,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.r_table_expressions
                 .iter()
                 .zip_eq(cs.w_table_expressions.iter())
-                .all(|(r, w)| r.table_len == w.table_len)
+                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
         let is_skip_same_point_sumcheck = cs
             .r_table_expressions
             .iter()
             .chain(cs.w_table_expressions.iter())
-            .map(|rw| rw.table_len)
+            .map(|rw| rw.table_spec.len)
             .chain(cs.lk_table_expressions.iter().map(|lk| lk.table_len))
             .all_equal();
 
@@ -487,7 +487,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .r_table_expressions
             .iter()
             .flat_map(|r| {
-                let num_vars = ceil_log2(r.table_len);
+                let num_vars = ceil_log2(r.table_spec.len);
                 [num_vars, num_vars]
             })
             .chain(

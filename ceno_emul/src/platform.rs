@@ -24,6 +24,24 @@ impl Platform {
         (self.rom_start()..=self.rom_end()).contains(&addr)
     }
 
+    // TODO figure out proper region for program_data
+    pub const fn program_data_start(&self) -> Addr {
+        0x3000_0000
+    }
+
+    pub const fn program_data_end(&self) -> Addr {
+        0x3000_1000 - 1
+    }
+
+    // TODO figure out a proper region for public io
+    pub const fn public_io_start(&self) -> Addr {
+        0x3000_1000
+    }
+
+    pub const fn public_io_end(&self) -> Addr {
+        0x3000_2000 - 1
+    }
+
     pub const fn ram_start(&self) -> Addr {
         0x8000_0000
     }

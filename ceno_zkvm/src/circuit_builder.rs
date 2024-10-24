@@ -1,3 +1,4 @@
+use ceno_emul::Addr;
 use itertools::Itertools;
 use std::{collections::HashMap, marker::PhantomData};
 
@@ -73,9 +74,24 @@ pub struct LogupTableExpression<E: ExtensionField> {
 }
 
 #[derive(Clone, Debug)]
+pub enum SetTableType {
+    FixedAddr,
+    DynamicAddr,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTableSpec {
+    pub table_type: SetTableType,
+    pub offset: Addr,
+    pub len: usize,
+}
+
+#[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
     pub values: Expression<E>,
-    pub table_len: usize,
+
+    // define struct instead of enum for its usage in ConstrainSystem + recursive verifier
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
@@ -307,7 +323,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
@@ -322,7 +338,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         );
         self.r_table_expressions.push(SetTableExpression {
             values: rlc_record,
-            table_len,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.r_table_expressions_namespace_map.push(path);
@@ -333,7 +349,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
@@ -348,7 +364,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         );
         self.w_table_expressions.push(SetTableExpression {
             values: rlc_record,
-            table_len,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.w_table_expressions_namespace_map.push(path);

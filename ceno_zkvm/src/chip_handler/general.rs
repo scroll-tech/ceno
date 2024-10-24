@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     instructions::riscv::constants::{
@@ -87,27 +87,27 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.r_table_record(name_fn, table_len, rlc_record)
+        self.cs.r_table_record(name_fn, table_spec, rlc_record)
     }
 
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.w_table_record(name_fn, table_len, rlc_record)
+        self.cs.w_table_record(name_fn, table_spec, rlc_record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
