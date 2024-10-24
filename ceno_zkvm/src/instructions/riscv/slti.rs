@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use ceno_emul::{InsnKind, SWord, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
+use super::{constants::UInt, i_insn::IInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -35,19 +35,13 @@ pub struct InstructionConfig<E: ExtensionField> {
     signed_lt: SignedLtConfig,
 }
 
-pub struct LtImmInstruction<E, I>(PhantomData<(E, I)>);
+pub struct SltiInstruction<E>(PhantomData<E>);
 
-pub struct SLTIOp;
-impl RIVInstruction for SLTIOp {
-    const INST_KIND: InsnKind = InsnKind::SLTI;
-}
-pub type SltiInstruction<E> = LtImmInstruction<E, SLTIOp>;
-
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LtImmInstruction<E, I> {
+impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
     type InstructionConfig = InstructionConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", I::INST_KIND)
+        format!("{:?}", InsnKind::SLTI)
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -67,7 +61,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LtImmInstruction<E
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
-            I::INST_KIND,
+            InsnKind::SLTI,
             &imm.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
