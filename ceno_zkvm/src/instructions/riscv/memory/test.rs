@@ -5,8 +5,11 @@ use crate::{
         riscv::{
             RIVInstruction,
             memory::{
-                SbInstruction, ShInstruction, SwInstruction,
-                load::{LbInstruction, LbOp, LbuInstruction, LbuOp},
+                LwInstruction, SbInstruction, ShInstruction, SwInstruction,
+                load::{
+                    LbInstruction, LbOp, LbuInstruction, LbuOp, LhInstruction, LhOp,
+                    LhuInstruction, LhuOp, LwOp,
+                },
                 store::{SBOp, SHOp, SWOp},
             },
         },
@@ -250,6 +253,12 @@ fn test_lb() {
     impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(1);
     impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(2);
     impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(3);
+
+    let neg_one = u32::MAX;
+    // imm = -1, -2, -3
+    for i in 0..3 {
+        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(neg_one - i);
+    }
 }
 
 #[test]
@@ -258,4 +267,43 @@ fn test_lbu() {
     impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(1);
     impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(2);
     impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(3);
+
+    let neg_one = u32::MAX;
+    // imm = -1, -2, -3
+    for i in 0..3 {
+        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(neg_one - i);
+    }
+}
+
+#[test]
+fn test_lh() {
+    impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(0);
+    impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(2);
+    impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(4);
+
+    let neg_two = u32::MAX - 1;
+    // imm = -2, -4
+    for i in [0, 2] {
+        impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(neg_two - i);
+    }
+}
+
+#[test]
+fn test_lhu() {
+    impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(0);
+    impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(2);
+    impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(4);
+
+    let neg_two = u32::MAX - 1;
+    // imm = -2, -4
+    for i in [0, 2] {
+        impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(neg_two - i);
+    }
+}
+
+#[test]
+fn test_lw() {
+    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(0);
+    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(4);
+    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(u32::MAX - 3); // imm = -4
 }
