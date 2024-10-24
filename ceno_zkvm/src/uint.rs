@@ -588,8 +588,7 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
 
     /// Return a value suitable for memory read/write. From [u16; 2] limbs
     pub fn memory_expr(&self) -> MemoryExpr<E> {
-        let u16_limbs = self.expr();
-        u16_limbs.try_into().expect("two limbs with M=32 and C=16")
+        self.value()
     }
 }
 

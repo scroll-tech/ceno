@@ -109,11 +109,16 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig
             .with_min_len(MIN_PAR_SIZE)
             .zip(init_mem.into_par_iter())
             .for_each(|(row, rec)| {
-                // Assign value limbs.
-                self.init_v.iter().enumerate().for_each(|(l, limb)| {
-                    let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                    set_fixed_val!(row, limb, (val as u64).into());
-                });
+                if self.init_v.len() == 1 {
+                    // Assign value directly.
+                    set_fixed_val!(row, self.init_v[0], (rec.value as u64).into());
+                } else {
+                    // Assign value limbs.
+                    self.init_v.iter().enumerate().for_each(|(l, limb)| {
+                        let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                        set_fixed_val!(row, limb, (val as u64).into());
+                    });
+                }
                 set_fixed_val!(row, self.addr, (rec.addr as u64).into());
             });
 
@@ -365,11 +370,16 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .with_min_len(MIN_PAR_SIZE)
             .zip(final_mem.into_par_iter())
             .for_each(|(row, rec)| {
-                // Assign value limbs.
-                self.final_v.iter().enumerate().for_each(|(l, limb)| {
-                    let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                    set_val!(row, limb, val as u64);
-                });
+                if self.final_v.len() == 1 {
+                    // Assign value directly.
+                    set_val!(row, self.final_v[0], rec.value as u64);
+                } else {
+                    // Assign value limbs.
+                    self.final_v.iter().enumerate().for_each(|(l, limb)| {
+                        let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                        set_val!(row, limb, val as u64);
+                    });
+                }
                 set_val!(row, self.final_cycle, rec.cycle);
             });
 
