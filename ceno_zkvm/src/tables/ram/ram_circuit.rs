@@ -26,6 +26,8 @@ pub trait NonVolatileTable {
     const V_LIMBS: usize;
     const RW: bool;
 
+    fn name() -> &'static str;
+
     fn len() -> usize;
 
     fn offset() -> Addr;
@@ -92,7 +94,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}", NVRAM::RAM_TYPE)
+        format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {

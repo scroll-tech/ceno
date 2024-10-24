@@ -62,8 +62,6 @@ pub enum RAMType {
     GlobalState,
     Register,
     Memory,
-    ProgramData,
-    PublicIO,
 }
 
 /// A point is a vector of num_var length

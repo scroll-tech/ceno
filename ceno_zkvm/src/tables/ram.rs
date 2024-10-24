@@ -40,6 +40,10 @@ impl NonVolatileTable for RegTable {
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
     const RW: bool = true;
 
+    fn name() -> &'static str {
+        "RegTable"
+    }
+
     fn len() -> usize {
         32 // register size 32
     }
@@ -59,9 +63,13 @@ pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
 pub struct ProgramDataTable;
 
 impl NonVolatileTable for ProgramDataTable {
-    const RAM_TYPE: RAMType = RAMType::ProgramData;
+    const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const RW: bool = false; // read only
+
+    fn name() -> &'static str {
+        "ProgramDataTable"
+    }
 
     fn addr(entry_index: usize) -> Addr {
         Self::offset() + (entry_index * WORD_SIZE) as Addr
@@ -84,9 +92,13 @@ pub type ProgramDataCircuit<E> = NonVolatileRamCircuit<E, ProgramDataTable>;
 pub struct PubIOTable;
 
 impl NonVolatileTable for PubIOTable {
-    const RAM_TYPE: RAMType = RAMType::PublicIO;
+    const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const RW: bool = false; // read only
+
+    fn name() -> &'static str {
+        "PubIOTable"
+    }
 
     fn addr(entry_index: usize) -> Addr {
         Self::offset() + (entry_index * WORD_SIZE) as Addr
