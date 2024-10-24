@@ -29,7 +29,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                         Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
                         memory_addr.clone(),
                     ],
-                    value.to_vec(),
+                    vec![value.clone()],
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -41,7 +41,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                         Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
                         memory_addr.clone(),
                     ],
-                    value.to_vec(),
+                    vec![value],
                     vec![ts.clone()],
                 ]
                 .concat(),
@@ -58,7 +58,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 UINT_LIMBS,
             )?;
 
-            let next_ts = ts + 1.into();
+            let next_ts = ts + 1;
 
             Ok((next_ts, lt_cfg))
         })
@@ -81,7 +81,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                         Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
                         memory_addr.clone(),
                     ],
-                    prev_values.to_vec(),
+                    vec![prev_values],
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -93,7 +93,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                         Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
                         memory_addr.clone(),
                     ],
-                    value.to_vec(),
+                    vec![value],
                     vec![ts.clone()],
                 ]
                 .concat(),
@@ -109,7 +109,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 UINT_LIMBS,
             )?;
 
-            let next_ts = ts + 1.into();
+            let next_ts = ts + 1;
 
             Ok((next_ts, lt_cfg))
         })

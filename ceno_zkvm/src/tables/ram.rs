@@ -13,7 +13,7 @@ pub struct MemTable;
 
 impl RamTable for MemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = UINT_LIMBS; // See `MemoryExpr`.
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
 
     fn len() -> usize {
         // TODO figure out better way to define memory entry count

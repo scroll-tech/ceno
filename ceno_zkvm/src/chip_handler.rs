@@ -52,8 +52,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
 pub type AddressExpr<E> = Expression<E>;
 
 /// The common representation of a memory value.
-/// Format: `[u16; UINT_LIMBS]`, least-significant-first.
-pub type MemoryExpr<E> = [Expression<E>; UINT_LIMBS];
+pub type MemoryExpr<E> = Expression<E>;
 
 pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     #[allow(dead_code)]
