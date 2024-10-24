@@ -208,7 +208,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
 /// define public io and read-only
 /// init value set by instance
 #[derive(Clone, Debug)]
-pub struct PIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
+pub struct PubIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
     addr: Fixed,
 
     final_cycle: WitIn,
@@ -216,7 +216,7 @@ pub struct PIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
     phantom: PhantomData<NVRAM>,
 }
 
-impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PIOTableConfig<NVRAM> {
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {

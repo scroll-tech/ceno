@@ -8,7 +8,7 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileTableConfig, PIOTableConfig};
+use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileTableConfig, PubIOTableConfig};
 
 #[derive(Clone, Debug)]
 pub struct MemInitRecord {
@@ -82,17 +82,17 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 }
 
-pub struct PIRamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct PubIOCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, RORAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
-    for PIRamCircuit<E, RORAM>
+impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
+    for PubIOCircuit<E, NVRAM>
 {
-    type TableConfig = PIOTableConfig<RORAM>;
+    type TableConfig = PubIOTableConfig<NVRAM>;
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}", RORAM::RAM_TYPE)
+        format!("RAM_{:?}", NVRAM::RAM_TYPE)
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
@@ -140,7 +140,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
     for DynVolatileRamCircuit<E, DVRAM>
 {
     type TableConfig = DynVolatileRamTableConfig<DVRAM>;
-    type FixedInput = [MemInitRecord];
+    type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
