@@ -5,15 +5,18 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::prover::ZKVMProver,
     state::GlobalState,
-    tables::{MemFinalRecord, ProgramTableCircuit, init_program_data, initial_registers},
+    tables::{
+        DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_program_data,
+        initial_registers,
+    },
 };
 use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext,
+    Addr, ByteAddr, CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
-    StepRecord, Tracer, VMState, WordAddr, encode_rv32,
+    StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -137,9 +140,14 @@ fn main() {
         );
 
         let reg_init = initial_registers();
-        let mem_init = init_program_data(program_data);
+        let program_data_init = init_program_data(program_data);
 
-        config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
+        config.generate_fixed_traces(
+            &zkvm_cs,
+            &mut zkvm_fixed_traces,
+            &reg_init,
+            &program_data_init,
+        );
 
         let pk = zkvm_cs
             .clone()
@@ -157,7 +165,7 @@ fn main() {
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
-        for record in &mem_init {
+        for record in &program_data_init {
             vm.init_memory(record.addr.into(), record.value);
         }
 
@@ -185,6 +193,8 @@ fn main() {
             Tracer::SUBCYCLES_PER_INSN as u32,
             EXIT_PC as u32,
             end_cycle,
+            // TODO use correct public_io
+            vec![1, 2],
         );
 
         let mut zkvm_witness = ZKVMWitnesses::default();
@@ -207,11 +217,26 @@ fn main() {
             })
             .collect_vec();
 
-        // Find the final memory values and cycles.
-        let mem_final = mem_init
+        // Find the final program_data cycles.
+        let program_data_final = program_data_init
             .iter()
             .map(|rec| {
                 let vma: WordAddr = rec.addr.into();
+                MemFinalRecord {
+                    value: rec.value,
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec();
+
+        // Find the final mem data and cycles.
+        // TODO retrieve max address access property and avoid scan whole address space
+        // as we already support non-uniform proving of memory
+        let mem_start = MemTable::offset();
+        let mem_end = mem_start + (MemTable::max_len() * WORD_SIZE) as Addr;
+        let mem_final = (mem_start..mem_end)
+            .map(|addr| {
+                let vma = ByteAddr::from(addr).waddr();
                 MemFinalRecord {
                     value: vm.peek_memory(vma),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
@@ -221,7 +246,13 @@ fn main() {
 
         // assign table circuits
         config
-            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final)
+            .assign_table_circuit(
+                &zkvm_cs,
+                &mut zkvm_witness,
+                &reg_final,
+                &mem_final,
+                &program_data_final,
+            )
             .unwrap();
 
         // assign program circuit
@@ -255,8 +286,8 @@ fn main() {
 
         let transcript = Transcript::new(b"riscv");
         // change public input maliciously should cause verifier to reject proof
-        zkvm_proof.pv[0] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
-        zkvm_proof.pv[1] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
+        zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
+        zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
 
         // capture panic message, if have
         let default_hook = panic::take_hook();

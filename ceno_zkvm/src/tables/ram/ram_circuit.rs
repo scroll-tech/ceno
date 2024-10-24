@@ -8,7 +8,7 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileRamTableConfig};
+use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileRamTableConfig, PIOTableConfig};
 
 #[derive(Clone, Debug)]
 pub struct MemInitRecord {
@@ -69,6 +69,46 @@ impl<E: ExtensionField, NVRAM: NonVolatileRamTable + Send + Sync + Clone> TableC
     ) -> RowMajorMatrix<E::BaseField> {
         // assume returned table is well-formed include padding
         config.gen_init_state(num_fixed, init_v)
+    }
+
+    fn assign_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        final_v: &Self::WitnessInput,
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        // assume returned table is well-formed include padding
+        config.assign_instances(num_witin, final_v)
+    }
+}
+
+pub struct PIRamCircuit<E, R>(PhantomData<(E, R)>);
+
+impl<E: ExtensionField, NVRAM: NonVolatileRamTable + Send + Sync + Clone> TableCircuit<E>
+    for PIRamCircuit<E, NVRAM>
+{
+    type TableConfig = PIOTableConfig<NVRAM>;
+    type FixedInput = ();
+    type WitnessInput = [MemFinalRecord];
+
+    fn name() -> String {
+        format!("RAM_{:?}", NVRAM::RAM_TYPE)
+    }
+
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
+        cb.namespace(
+            || Self::name(),
+            |cb| Self::TableConfig::construct_circuit(cb),
+        )
+    }
+
+    fn generate_fixed_traces(
+        config: &Self::TableConfig,
+        num_fixed: usize,
+        _init_v: &Self::FixedInput,
+    ) -> RowMajorMatrix<E::BaseField> {
+        // assume returned table is well-formed include padding
+        config.gen_init_state(num_fixed)
     }
 
     fn assign_instances(

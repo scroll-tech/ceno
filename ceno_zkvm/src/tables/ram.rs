@@ -5,8 +5,7 @@ use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
 
 mod ram_circuit;
 mod ram_impl;
-use ram_circuit::DynVolatileRamTable;
-pub use ram_circuit::{MemFinalRecord, MemInitRecord};
+pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord};
 
 /// offset: RAM_START, addr dynamic size, max_addr = RAM_END, all initial value 0
 #[derive(Clone)]
@@ -14,7 +13,7 @@ pub struct MemTable;
 
 impl DynVolatileRamTable for MemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = UINT_LIMBS; // See `MemoryExpr`.
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
 
     fn addr(entry_index: usize) -> Addr {
         Self::offset() + (entry_index * WORD_SIZE) as Addr
@@ -60,8 +59,33 @@ pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
 pub struct ProgramDataTable;
 
 impl NonVolatileRamTable for ProgramDataTable {
-    const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = UINT_LIMBS; // See `MemoryExpr`.
+    const RAM_TYPE: RAMType = RAMType::ProgramData;
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+
+    fn addr(entry_index: usize) -> Addr {
+        Self::offset() + (entry_index * WORD_SIZE) as Addr
+    }
+
+    fn len() -> usize {
+        // +1 for start is inclusive
+        (CENO_PLATFORM.program_data_end() - CENO_PLATFORM.program_data_start() + 1) as usize
+            / WORD_SIZE
+    }
+
+    fn offset() -> Addr {
+        CENO_PLATFORM.program_data_start()
+    }
+}
+
+pub type ProgramDataCircuit<E> = NonVolatileRamCircuit<E, ProgramDataTable>;
+
+/// offset: DATA_START, addr dynamic size, max_addr = DATA_END with initial value
+#[derive(Clone)]
+pub struct PubIOTable;
+
+impl NonVolatileRamTable for PubIOTable {
+    const RAM_TYPE: RAMType = RAMType::PublicIO;
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
 
     fn addr(entry_index: usize) -> Addr {
         Self::offset() + (entry_index * WORD_SIZE) as Addr
@@ -72,11 +96,11 @@ impl NonVolatileRamTable for ProgramDataTable {
     }
 
     fn offset() -> Addr {
-        CENO_PLATFORM.program_data_start()
+        CENO_PLATFORM.public_io_start()
     }
 }
 
-pub type ProgramDataCircuit<E> = NonVolatileRamCircuit<E, ProgramDataTable>;
+pub type PubIOCircuit<E> = NonVolatileRamCircuit<E, PubIOTable>;
 
 pub fn initial_registers() -> Vec<MemInitRecord> {
     RegTable::init_state()

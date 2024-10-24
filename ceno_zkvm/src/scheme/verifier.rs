@@ -15,6 +15,7 @@ use transcript::Transcript;
 
 use crate::{
     error::ZKVMError,
+    expression::Instance,
     instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
@@ -46,7 +47,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
-        let pi = &vm_proof.pv;
 
         // require ecall/halt proof to exist
         {
@@ -63,9 +63,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // including public input to transcript
-        pi.iter().for_each(|v| transcript.append_field_element(v));
+        let pi_evals = &vm_proof.pi_evals;
 
+        // TODO fix soundness: construct raw public input by ourself and trustless from proff
+        // including public input to transcript
+        vm_proof
+            .raw_pi
+            .iter()
+            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+
+        izip!(&vm_proof.raw_pi, pi_evals)
+            .enumerate()
+            .try_for_each(|(i, (raw, eval))| {
+                // verify constant poly. Non constant will be verify in respective proof accordingly
+                if raw.len() == 1 && E::from(raw[0]) != *eval {
+                    Err(ZKVMError::VerifyError(format!(
+                        "pub input on index {i} mismatch  {raw:?} != {eval:?}"
+                    )))
+                } else {
+                    Ok(())
+                }
+            })?;
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {
             if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
@@ -108,7 +126,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &opcode_proof,
-                pi,
+                pi_evals,
                 transcript,
                 NUM_FANIN,
                 &point_eval,
@@ -147,7 +165,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &table_proof,
-                &vm_proof.pv,
+                &vm_proof.raw_pi,
+                &vm_proof.pi_evals,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
@@ -179,7 +198,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let initial_global_state = eval_by_expr_with_instance(
             &[],
             &[],
-            pi,
+            pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
         );
@@ -187,7 +206,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let finalize_global_state = eval_by_expr_with_instance(
             &[],
             &[],
-            pi,
+            pi_evals,
             &challenges,
             &self.vk.finalize_global_state_expr,
         );
@@ -208,7 +227,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E, PCS>,
-        pi: &[E::BaseField],
+        pi: &[E],
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -457,7 +476,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E, PCS>,
-        pi: &[E::BaseField],
+        raw_pi: &[Vec<E::BaseField>],
+        pi: &[E],
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -659,15 +679,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
-        PCS::simple_batch_verify(
-            vp,
-            circuit_vk.fixed_commit.as_ref().unwrap(),
-            &input_opening_point,
-            &proof.fixed_in_evals,
-            &proof.fixed_opening_proof,
-            transcript,
-        )
-        .map_err(ZKVMError::PCSError)?;
+        // assume public input is tiny vector, so we evaluate it directly without PCS
+        for &Instance(idx) in cs.instance_name_map.keys() {
+            let poly = raw_pi[idx].to_vec().into_mle();
+            let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
+            let eval = pi[idx];
+            if expected_eval != eval {
+                return Err(ZKVMError::VerifyError(format!(
+                    "pub input on index {idx} mismatch  {expected_eval:?} != {eval:?}"
+                )));
+            }
+            tracing::debug!(
+                "[table {name}] verified public inputs on index {idx} with point {input_opening_point:?}",
+            );
+        }
+
+        if circuit_vk.fixed_commit.is_some() {
+            let Some(fixed_opening_proof) = &proof.fixed_opening_proof else {
+                return Err(ZKVMError::VerifyError(
+                    "fixed openning proof shoudn't be none".into(),
+                ));
+            };
+            PCS::simple_batch_verify(
+                vp,
+                circuit_vk.fixed_commit.as_ref().unwrap(),
+                &input_opening_point,
+                &proof.fixed_in_evals,
+                fixed_opening_proof,
+                transcript,
+            )
+            .map_err(ZKVMError::PCSError)?;
+        }
+
         tracing::debug!(
             "[table {}] verified opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
             name,

@@ -172,6 +172,111 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig
     }
 }
 
+/// define public io and read-only
+#[derive(Clone, Debug)]
+pub struct PIOTableConfig<NVRAM: NonVolatileRamTable + Send + Sync + Clone> {
+    addr: Fixed,
+
+    final_cycle: WitIn,
+
+    phantom: PhantomData<NVRAM>,
+}
+
+impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> PIOTableConfig<NVRAM> {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<Self, ZKVMError> {
+        let init_v = cb.query_public_io()?;
+        let addr = cb.create_fixed(|| "addr")?;
+
+        let final_cycle = cb.create_witin(|| "final_cycle")?;
+
+        let init_table = cb.rlc_chip_record(
+            [
+                vec![(NVRAM::RAM_TYPE as usize).into()],
+                vec![Expression::Fixed(addr)],
+                vec![init_v.expr()],
+                vec![Expression::ZERO], // Initial cycle.
+            ]
+            .concat(),
+        );
+
+        let final_table = cb.rlc_chip_record(
+            [
+                // a v t
+                vec![(NVRAM::RAM_TYPE as usize).into()],
+                vec![Expression::Fixed(addr)],
+                vec![init_v.expr()],
+                vec![final_cycle.expr()],
+            ]
+            .concat(),
+        );
+
+        cb.w_table_record(
+            || "init_table",
+            SetTableSpec {
+                table_type: SetTableType::FixedAddr,
+                offset: NVRAM::offset(),
+                len: NVRAM::len(),
+            },
+            init_table,
+        )?;
+        cb.r_table_record(
+            || "final_table",
+            SetTableSpec {
+                table_type: SetTableType::FixedAddr,
+                offset: NVRAM::offset(),
+                len: NVRAM::len(),
+            },
+            final_table,
+        )?;
+
+        Ok(Self {
+            addr,
+            final_cycle,
+            phantom: PhantomData,
+        })
+    }
+
+    /// assign to fixed address
+    pub fn gen_init_state<F: SmallField>(&self, num_fixed: usize) -> RowMajorMatrix<F> {
+        assert!(NVRAM::len().is_power_of_two());
+
+        // for ram in memory offline check
+        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_fixed);
+        assert_eq!(init_table.num_padding_instances(), 0);
+
+        init_table
+            .par_iter_mut()
+            .enumerate()
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|(i, row)| {
+                set_fixed_val!(row, self.addr, (NVRAM::addr(i) as u64).into());
+            });
+        init_table
+    }
+
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    pub fn assign_instances<F: SmallField>(
+        &self,
+        num_witness: usize,
+        final_mem: &[MemFinalRecord],
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+        assert!(final_mem.len() == NVRAM::len());
+        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
+
+        final_table
+            .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
+            .zip(final_mem.into_par_iter())
+            .for_each(|(row, rec)| {
+                set_val!(row, self.final_cycle, rec.cycle);
+            });
+
+        Ok(final_table)
+    }
+}
+
 /// DynVolatileRamTableConfig with all init value as 0
 /// dynamic address as witin, relied on augment of knowledge to prove address form
 /// initial value

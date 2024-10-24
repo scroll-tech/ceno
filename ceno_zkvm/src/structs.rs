@@ -62,6 +62,7 @@ pub enum RAMType {
     GlobalState,
     Register,
     Memory,
+    ProgramData,
     PublicIO,
 }
 
