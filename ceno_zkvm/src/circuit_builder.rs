@@ -90,7 +90,7 @@ pub struct SetTableSpec {
 pub struct SetTableExpression<E: ExtensionField> {
     pub values: Expression<E>,
 
-    // define struct instead of enum for its usage in ConstrainSystem + recursive verifier
+    // TODO diffentiate enum/struct, for which option is more friendly to be processed by ConstrainSystem + recursive verifier
     pub table_spec: SetTableSpec,
 }
 
