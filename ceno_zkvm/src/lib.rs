@@ -2,8 +2,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(variant_count)]
 
-extern crate core;
-
 pub mod error;
 pub mod instructions;
 pub mod scheme;
