@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use ceno_emul::{InsnKind, SWord, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
+use super::{constants::UInt, r_insn::RInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::SignedLtConfig,
     instructions::Instruction, uint::Value, witness::LkMultiplicity,
@@ -12,7 +12,7 @@ use core::mem::MaybeUninit;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
-pub struct ArithConfig<E: ExtensionField> {
+pub struct SltConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -23,20 +23,14 @@ pub struct ArithConfig<E: ExtensionField> {
     signed_lt: SignedLtConfig,
 }
 
-pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
-
-pub struct SLTOp;
-impl RIVInstruction for SLTOp {
-    const INST_KIND: InsnKind = InsnKind::SLT;
-}
-pub type SltInstruction<E> = ArithInstruction<E, SLTOp>;
+pub struct SltInstruction<E>(PhantomData<E>);
 
 // TODO combine with SLTU
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
-    type InstructionConfig = ArithConfig<E>;
+impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
+    type InstructionConfig = SltConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", I::INST_KIND)
+        format!("{:?}", InsnKind::SLT)
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -49,13 +43,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
-            I::INST_KIND,
+            InsnKind::SLT,
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             rd_written.register_expr(),
         )?;
 
-        Ok(ArithConfig {
+        Ok(SltConfig {
             r_insn,
             rs1_read,
             rs2_read,
