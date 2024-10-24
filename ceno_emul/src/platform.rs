@@ -25,11 +25,25 @@ impl Platform {
     }
 
     pub const fn ram_start(&self) -> Addr {
-        0x8000_0000
+        let ram_start = 0x8000_0000;
+        if cfg!(feature = "forbid_overflow") {
+            // -1<<11 == 0x800 is the smallest negative 'immediate'
+            // offset we can have in memory instructions.
+            // So if we stay away from it, we are safe.
+            assert!(ram_start >= 0x800);
+        }
+        ram_start
     }
 
     pub const fn ram_end(&self) -> Addr {
-        0xFFFF_FFFF
+        if cfg!(feature = "forbid_overflow") {
+            // (1<<11) - 1 == 0x7ff is the largest positive 'immediate'
+            // offset we can have in memory instructions.
+            // So if we stay away from it, we are safe.
+            u32::MAX - 0x7FF
+        } else {
+            0xFFFF_FFFF
+        }
     }
 
     pub fn is_ram(&self, addr: Addr) -> bool {
