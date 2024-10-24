@@ -747,8 +747,8 @@ impl Emulator {
         if !ctx.check_data_load(addr) {
             return ctx.trap(TrapCause::LoadAccessFault(addr));
         }
-        let shift = 8 * (addr.0 & 3);
         let data = ctx.load_memory(addr.waddr())?;
+        let shift = 8 * (addr.0 & 3);
         let out = match kind {
             InsnKind::LB => {
                 let mut out = (data >> shift) & 0xff;
