@@ -65,7 +65,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let pi_evals = &vm_proof.pi_evals;
 
-        // TODO fix soundness: construct raw public input by ourself and trustless from proff
+        // TODO fix soundness: construct raw public input by ourself and trustless from proof
         // including public input to transcript
         vm_proof
             .raw_pi
@@ -75,7 +75,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         izip!(&vm_proof.raw_pi, pi_evals)
             .enumerate()
             .try_for_each(|(i, (raw, eval))| {
-                // verify constant poly. Non constant will be verify in respective proof accordingly
+                // verify constant poly. Other polys will be verify in respective proof accordingly
                 if raw.len() == 1 && E::from(raw[0]) != *eval {
                     Err(ZKVMError::VerifyError(format!(
                         "pub input on index {i} mismatch  {raw:?} != {eval:?}"

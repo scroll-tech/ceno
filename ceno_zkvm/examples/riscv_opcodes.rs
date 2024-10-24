@@ -48,11 +48,11 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
     declare_program!(
         program,
-        // Load parameters from initial RAM.
-        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.ram_start()), // lui x10, program_data
-        encode_rv32(LW, 10, 0, 1, 0),                          // lw x1, 0(x10)
-        encode_rv32(LW, 10, 0, 2, 4),                          // lw x2, 4(x10)
-        encode_rv32(LW, 10, 0, 3, 8),                          // lw x3, 8(x10)
+        // TODO load data from public io
+        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.program_data_start()), // lui x10, program_data
+        encode_rv32(LW, 10, 0, 1, 0),                                   // lw x1, 0(x10)
+        encode_rv32(LW, 10, 0, 2, 4),                                   // lw x2, 4(x10)
+        encode_rv32(LW, 10, 0, 3, 8),                                   // lw x3, 8(x10)
         // Main loop.
         encode_rv32(ADD, 1, 4, 4, 0),              // add x4, x1, x4
         encode_rv32(ADD, 2, 3, 3, 0),              // add x3, x2, x3
@@ -129,6 +129,7 @@ fn main() {
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
 
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
+        // TODO replace with public io
         let program_data: &[u32] = &[1, u32::MAX, step_loop];
 
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -162,12 +163,15 @@ fn main() {
         let mut vm = VMState::new(CENO_PLATFORM);
         let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
 
+        // init program
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
+        // init program data
         for record in &program_data_init {
             vm.init_memory(record.addr.into(), record.value);
         }
+        // TODO init public i/o mem
 
         let all_records = vm
             .iter_until_halt()
@@ -228,6 +232,8 @@ fn main() {
                 }
             })
             .collect_vec();
+
+        // TODO Find the final public io cycles.
 
         // Find the final mem data and cycles.
         // TODO retrieve max address access property and avoid scan whole address space

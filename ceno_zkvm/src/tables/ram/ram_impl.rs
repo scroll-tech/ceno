@@ -6,7 +6,7 @@ use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    circuit_builder::{CircuitBuilder, SetTableSpec, SetTableType},
+    circuit_builder::{CircuitBuilder, SetTableAddrType, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
@@ -17,21 +17,22 @@ use crate::{
 
 use super::{
     MemInitRecord,
-    ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileRamTable},
+    ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileTable},
 };
 
-/// NonVolatileRamTableConfig define a non-volatile memory with init value and read-only
+/// define a non-volatile memory with init value
 #[derive(Clone, Debug)]
-pub struct NonVolatileRamTableConfig<NVRAM: NonVolatileRamTable + Send + Sync + Clone> {
+pub struct NonVolatileTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
     init_v: Vec<Fixed>,
     addr: Fixed,
 
+    final_v: Option<Vec<WitIn>>,
     final_cycle: WitIn,
 
     phantom: PhantomData<NVRAM>,
 }
 
-impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig<NVRAM> {
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
@@ -41,6 +42,15 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig
         let addr = cb.create_fixed(|| "addr")?;
 
         let final_cycle = cb.create_witin(|| "final_cycle")?;
+        let final_v = if NVRAM::RW {
+            Some(
+                (0..NVRAM::V_LIMBS)
+                    .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
+                    .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+            )
+        } else {
+            None
+        };
 
         let init_table = cb.rlc_chip_record(
             [
@@ -57,7 +67,10 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig
                 // a v t
                 vec![(NVRAM::RAM_TYPE as usize).into()],
                 vec![Expression::Fixed(addr)],
-                init_v.iter().map(|v| v.expr()).collect_vec(),
+                final_v
+                    .as_ref()
+                    .map(|v_limb| v_limb.iter().map(|v| v.expr()).collect_vec())
+                    .unwrap_or_else(|| init_v.iter().map(|v| v.expr()).collect_vec()),
                 vec![final_cycle.expr()],
             ]
             .concat(),
@@ -66,24 +79,27 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig
         cb.w_table_record(
             || "init_table",
             SetTableSpec {
-                table_type: SetTableType::FixedAddr,
+                addr_type: SetTableAddrType::FixedAddr,
                 offset: NVRAM::offset(),
                 len: NVRAM::len(),
+                rw: NVRAM::RW,
             },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
             SetTableSpec {
-                table_type: SetTableType::FixedAddr,
+                addr_type: SetTableAddrType::FixedAddr,
                 offset: NVRAM::offset(),
                 len: NVRAM::len(),
+                rw: NVRAM::RW,
             },
             final_table,
         )?;
 
         Ok(Self {
             init_v,
+            final_v,
             addr,
             final_cycle,
             phantom: PhantomData,
@@ -159,6 +175,18 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig
             .with_min_len(MIN_PAR_SIZE)
             .zip(final_mem.into_par_iter())
             .for_each(|(row, rec)| {
+                if let Some(final_v) = &self.final_v {
+                    if final_v.len() == 1 {
+                        // Assign value directly.
+                        set_val!(row, final_v[0], rec.value as u64);
+                    } else {
+                        // Assign value limbs.
+                        final_v.iter().enumerate().for_each(|(l, limb)| {
+                            let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                            set_val!(row, limb, val as u64);
+                        });
+                    }
+                }
                 set_val!(row, self.final_cycle, rec.cycle);
             });
 
@@ -178,8 +206,9 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> NonVolatileRamTableConfig
 }
 
 /// define public io and read-only
+/// init value set by instance
 #[derive(Clone, Debug)]
-pub struct PIOTableConfig<NVRAM: NonVolatileRamTable + Send + Sync + Clone> {
+pub struct PIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
     addr: Fixed,
 
     final_cycle: WitIn,
@@ -187,10 +216,11 @@ pub struct PIOTableConfig<NVRAM: NonVolatileRamTable + Send + Sync + Clone> {
     phantom: PhantomData<NVRAM>,
 }
 
-impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> PIOTableConfig<NVRAM> {
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PIOTableConfig<NVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
+        assert!(!NVRAM::RW); // must be read only
         let init_v = cb.query_public_io()?;
         let addr = cb.create_fixed(|| "addr")?;
 
@@ -220,18 +250,20 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> PIOTableConfig<NVRAM> {
         cb.w_table_record(
             || "init_table",
             SetTableSpec {
-                table_type: SetTableType::FixedAddr,
+                addr_type: SetTableAddrType::FixedAddr,
                 offset: NVRAM::offset(),
                 len: NVRAM::len(),
+                rw: NVRAM::RW,
             },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
             SetTableSpec {
-                table_type: SetTableType::FixedAddr,
+                addr_type: SetTableAddrType::FixedAddr,
                 offset: NVRAM::offset(),
                 len: NVRAM::len(),
+                rw: NVRAM::RW,
             },
             final_table,
         )?;
@@ -282,9 +314,8 @@ impl<NVRAM: NonVolatileRamTable + Send + Sync + Clone> PIOTableConfig<NVRAM> {
     }
 }
 
-/// DynVolatileRamTableConfig with all init value as 0
+/// volatile with all init value as 0
 /// dynamic address as witin, relied on augment of knowledge to prove address form
-/// initial value
 #[derive(Clone, Debug)]
 pub struct DynVolatileRamTableConfig<DVRAM: DynVolatileRamTable + Send + Sync + Clone> {
     addr: WitIn,
@@ -330,18 +361,20 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb.w_table_record(
             || "init_table",
             SetTableSpec {
-                table_type: SetTableType::DynamicAddr,
+                addr_type: SetTableAddrType::DynamicAddr,
                 offset: DVRAM::offset(),
                 len: DVRAM::max_len(),
+                rw: true,
             },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
             SetTableSpec {
-                table_type: SetTableType::DynamicAddr,
+                addr_type: SetTableAddrType::DynamicAddr,
                 offset: DVRAM::offset(),
                 len: DVRAM::max_len(),
+                rw: true,
             },
             final_table,
         )?;

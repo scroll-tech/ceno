@@ -1,5 +1,5 @@
 use ceno_emul::{Addr, CENO_PLATFORM, WORD_SIZE, Word};
-use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileRamTable};
+use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileTable};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
 
@@ -35,9 +35,10 @@ pub type MemCircuit<E> = DynVolatileRamCircuit<E, MemTable>;
 #[derive(Clone)]
 pub struct RegTable;
 
-impl NonVolatileRamTable for RegTable {
+impl NonVolatileTable for RegTable {
     const RAM_TYPE: RAMType = RAMType::Register;
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
+    const RW: bool = true;
 
     fn len() -> usize {
         32 // register size 32
@@ -54,13 +55,13 @@ impl NonVolatileRamTable for RegTable {
 
 pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
 
-/// offset: DATA_START, addr dynamic size, max_addr = DATA_END with initial value
 #[derive(Clone)]
 pub struct ProgramDataTable;
 
-impl NonVolatileRamTable for ProgramDataTable {
+impl NonVolatileTable for ProgramDataTable {
     const RAM_TYPE: RAMType = RAMType::ProgramData;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const RW: bool = false; // read only
 
     fn addr(entry_index: usize) -> Addr {
         Self::offset() + (entry_index * WORD_SIZE) as Addr
@@ -79,20 +80,21 @@ impl NonVolatileRamTable for ProgramDataTable {
 
 pub type ProgramDataCircuit<E> = NonVolatileRamCircuit<E, ProgramDataTable>;
 
-/// offset: DATA_START, addr dynamic size, max_addr = DATA_END with initial value
 #[derive(Clone)]
 pub struct PubIOTable;
 
-impl NonVolatileRamTable for PubIOTable {
+impl NonVolatileTable for PubIOTable {
     const RAM_TYPE: RAMType = RAMType::PublicIO;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const RW: bool = false; // read only
 
     fn addr(entry_index: usize) -> Addr {
         Self::offset() + (entry_index * WORD_SIZE) as Addr
     }
 
     fn len() -> usize {
-        todo!()
+        // +1 for start is inclusive
+        (CENO_PLATFORM.public_io_end() - CENO_PLATFORM.public_io_start() + 1) as usize / WORD_SIZE
     }
 
     fn offset() -> Addr {
@@ -106,10 +108,10 @@ pub fn initial_registers() -> Vec<MemInitRecord> {
     RegTable::init_state()
 }
 
-pub fn init_program_data(ram_content: &[Word]) -> Vec<MemInitRecord> {
-    let mut mem_init = ProgramDataTable::init_state();
-    for (i, value) in ram_content.iter().enumerate() {
-        mem_init[i].value = *value;
+pub fn init_program_data(program_data_content: &[Word]) -> Vec<MemInitRecord> {
+    let mut program_data_init = ProgramDataTable::init_state();
+    for (i, value) in program_data_content.iter().enumerate() {
+        program_data_init[i].value = *value;
     }
-    mem_init
+    program_data_init
 }

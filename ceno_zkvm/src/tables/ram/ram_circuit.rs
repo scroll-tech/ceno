@@ -8,7 +8,7 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileRamTableConfig, PIOTableConfig};
+use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileTableConfig, PIOTableConfig};
 
 #[derive(Clone, Debug)]
 pub struct MemInitRecord {
@@ -21,10 +21,10 @@ pub struct MemFinalRecord {
     pub value: Word,
 }
 
-/// trait to define a NonVolatileRamTable with initial value
-pub trait NonVolatileRamTable {
+pub trait NonVolatileTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
+    const RW: bool;
 
     fn len() -> usize;
 
@@ -44,10 +44,10 @@ pub trait NonVolatileRamTable {
 
 pub struct NonVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, NVRAM: NonVolatileRamTable + Send + Sync + Clone> TableCircuit<E>
+impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
     for NonVolatileRamCircuit<E, NVRAM>
 {
-    type TableConfig = NonVolatileRamTableConfig<NVRAM>;
+    type TableConfig = NonVolatileTableConfig<NVRAM>;
     type FixedInput = [MemInitRecord];
     type WitnessInput = [MemFinalRecord];
 
@@ -84,15 +84,15 @@ impl<E: ExtensionField, NVRAM: NonVolatileRamTable + Send + Sync + Clone> TableC
 
 pub struct PIRamCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, NVRAM: NonVolatileRamTable + Send + Sync + Clone> TableCircuit<E>
-    for PIRamCircuit<E, NVRAM>
+impl<E: ExtensionField, RORAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
+    for PIRamCircuit<E, RORAM>
 {
-    type TableConfig = PIOTableConfig<NVRAM>;
+    type TableConfig = PIOTableConfig<RORAM>;
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}", NVRAM::RAM_TYPE)
+        format!("RAM_{:?}", RORAM::RAM_TYPE)
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
