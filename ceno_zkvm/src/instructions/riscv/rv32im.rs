@@ -4,12 +4,11 @@ use crate::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, LtuTableCircuit, MemFinalRecord, MemInitRecord, MemTableCircuit,
-        RegTableCircuit, TableCircuit, U16TableCircuit,
+        RegTableCircuit, TableCircuit, U14TableCircuit, U16TableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use crate::tables::U14TableCircuit;
 
 use super::{
     arith::AddInstruction,
