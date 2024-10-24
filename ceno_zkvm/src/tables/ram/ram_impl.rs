@@ -80,7 +80,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "init_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                offset: NVRAM::offset(),
+                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
             },
@@ -90,7 +90,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "final_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                offset: NVRAM::offset(),
+                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
             },
@@ -251,7 +251,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "init_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                offset: NVRAM::offset(),
+                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
             },
@@ -261,7 +261,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "final_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                offset: NVRAM::offset(),
+                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
             },
@@ -362,7 +362,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             || "init_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
-                offset: DVRAM::offset(),
+                offset: DVRAM::OFFSET_ADDR,
                 len: DVRAM::max_len(),
                 rw: true,
             },
@@ -372,7 +372,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             || "final_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
-                offset: DVRAM::offset(),
+                offset: DVRAM::OFFSET_ADDR,
                 len: DVRAM::max_len(),
                 rw: true,
             },

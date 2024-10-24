@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Addr, Cycle, Word};
+use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -25,14 +25,18 @@ pub trait NonVolatileTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
     const RW: bool;
+    const OFFSET_ADDR: Addr;
+    const END_ADDR: Addr;
 
     fn name() -> &'static str;
 
-    fn len() -> usize;
+    fn len() -> usize {
+        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+    }
 
-    fn offset() -> Addr;
-
-    fn addr(entry_index: usize) -> Addr;
+    fn addr(entry_index: usize) -> Addr {
+        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+    }
 
     fn init_state() -> Vec<MemInitRecord> {
         (0..Self::len())
@@ -54,7 +58,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}", NVRAM::RAM_TYPE)
+        format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
@@ -129,11 +133,18 @@ pub trait DynVolatileRamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
 
-    fn max_len() -> usize;
+    const OFFSET_ADDR: Addr;
+    const END_ADDR: Addr;
 
-    fn offset() -> Addr;
+    fn name() -> &'static str;
 
-    fn addr(entry_index: usize) -> Addr;
+    fn max_len() -> usize {
+        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+    }
+
+    fn addr(entry_index: usize) -> Addr {
+        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+    }
 }
 
 pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);

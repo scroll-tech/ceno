@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, WORD_SIZE, Word};
+use ceno_emul::{Addr, CENO_PLATFORM, Word};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileTable};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
@@ -14,18 +14,11 @@ pub struct MemTable;
 impl DynVolatileRamTable for MemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const OFFSET_ADDR: Addr = CENO_PLATFORM.ram_start();
+    const END_ADDR: Addr = CENO_PLATFORM.ram_end() + 1;
 
-    fn addr(entry_index: usize) -> Addr {
-        Self::offset() + (entry_index * WORD_SIZE) as Addr
-    }
-
-    fn max_len() -> usize {
-        // +1 for start is inclusive
-        (CENO_PLATFORM.ram_end() - CENO_PLATFORM.ram_start() + 1) as usize / WORD_SIZE
-    }
-
-    fn offset() -> Addr {
-        CENO_PLATFORM.ram_start()
+    fn name() -> &'static str {
+        "MemTable"
     }
 }
 
@@ -39,6 +32,8 @@ impl NonVolatileTable for RegTable {
     const RAM_TYPE: RAMType = RAMType::Register;
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
     const RW: bool = true;
+    const OFFSET_ADDR: Addr = 0;
+    const END_ADDR: Addr = 0;
 
     fn name() -> &'static str {
         "RegTable"
@@ -46,14 +41,6 @@ impl NonVolatileTable for RegTable {
 
     fn len() -> usize {
         32 // register size 32
-    }
-
-    fn addr(entry_index: usize) -> Addr {
-        entry_index as Addr
-    }
-
-    fn offset() -> Addr {
-        0
     }
 }
 
@@ -66,23 +53,11 @@ impl NonVolatileTable for ProgramDataTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const RW: bool = false; // read only
+    const OFFSET_ADDR: Addr = CENO_PLATFORM.program_data_start();
+    const END_ADDR: Addr = CENO_PLATFORM.program_data_end() + 1;
 
     fn name() -> &'static str {
         "ProgramDataTable"
-    }
-
-    fn addr(entry_index: usize) -> Addr {
-        Self::offset() + (entry_index * WORD_SIZE) as Addr
-    }
-
-    fn len() -> usize {
-        // +1 for start is inclusive
-        (CENO_PLATFORM.program_data_end() - CENO_PLATFORM.program_data_start() + 1) as usize
-            / WORD_SIZE
-    }
-
-    fn offset() -> Addr {
-        CENO_PLATFORM.program_data_start()
     }
 }
 
@@ -95,22 +70,11 @@ impl NonVolatileTable for PubIOTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const RW: bool = false; // read only
+    const OFFSET_ADDR: Addr = CENO_PLATFORM.public_io_start();
+    const END_ADDR: Addr = CENO_PLATFORM.public_io_end() + 1;
 
     fn name() -> &'static str {
         "PubIOTable"
-    }
-
-    fn addr(entry_index: usize) -> Addr {
-        Self::offset() + (entry_index * WORD_SIZE) as Addr
-    }
-
-    fn len() -> usize {
-        // +1 for start is inclusive
-        (CENO_PLATFORM.public_io_end() - CENO_PLATFORM.public_io_start() + 1) as usize / WORD_SIZE
-    }
-
-    fn offset() -> Addr {
-        CENO_PLATFORM.public_io_start()
     }
 }
 

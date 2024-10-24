@@ -14,9 +14,9 @@ use clap::Parser;
 use const_env::from_env;
 
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, EmuContext,
+    ByteAddr, CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
-    StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, encode_rv32,
+    StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -238,8 +238,8 @@ fn main() {
         // Find the final mem data and cycles.
         // TODO retrieve max address access property and avoid scan whole address space
         // as we already support non-uniform proving of memory
-        let mem_start = MemTable::offset();
-        let mem_end = mem_start + (MemTable::max_len() * WORD_SIZE) as Addr;
+        let mem_start = MemTable::OFFSET_ADDR;
+        let mem_end = MemTable::END_ADDR;
         let mem_final = (mem_start..mem_end)
             .map(|addr| {
                 let vma = ByteAddr::from(addr).waddr();
