@@ -18,6 +18,7 @@ pub struct LoadConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
     imm: UInt<E>,
     memory_read: UInt<E>,
+    memory_addr: UInt<E>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
@@ -27,6 +28,7 @@ pub struct LWOp;
 impl RIVInstruction for LWOp {
     const INST_KIND: InsnKind = InsnKind::LW;
 }
+pub type LwInstruction<E> = LoadInstruction<E, LWOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
@@ -65,6 +67,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             rs1_read,
             memory_read,
             imm,
+            memory_addr,
         })
     }
 
@@ -77,12 +80,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let memory_read = Value::new(step.memory_op().unwrap().value.before, lk_multiplicity);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+        let memory_addr = rs1.add(&imm, lk_multiplicity, true);
 
         config
             .im_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs1_read.assign_value(instance, rs1);
         config.memory_read.assign_value(instance, memory_read);
+        config
+            .memory_addr
+            .assign_add_outcome(instance, &memory_addr);
         config.imm.assign_value(instance, imm);
 
         Ok(())
