@@ -1,5 +1,3 @@
-#![allow(dead_code)] // TODO: remove after BLT, BEQ, …
-
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
