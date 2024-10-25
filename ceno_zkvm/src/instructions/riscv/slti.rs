@@ -139,12 +139,18 @@ mod test {
     use ceno_emul::{Change, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
 
+    use itertools::Itertools;
     use rand::Rng;
+    // Not sure.
+    use multilinear_extensions::mle::IntoMLEs;
 
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
+        instructions::{
+            Instruction,
+            riscv::test_utils::{i32_extra, imm_i},
+        },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
@@ -259,5 +265,16 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    }
+
+    use proptest::{prelude::Strategy, proptest};
+    proptest! {
+        #[test]
+        fn test_slti_prop(
+            a in i32_extra(),
+            b in i32_extra().prop_map(|x| x & 0x7FF),
+        ) {
+            verify("random 1", a, b, (a < b) as u32);
+        }
     }
 }
