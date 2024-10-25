@@ -236,10 +236,10 @@ fn main() {
         // TODO Find the final public io cycles.
 
         // Find the final mem data and cycles.
-        // TODO retrieve max address access property and avoid scan whole address space
+        // TODO retrieve max address access
         // as we already support non-uniform proving of memory
         let mem_start = MemTable::OFFSET_ADDR;
-        let mem_end = MemTable::END_ADDR;
+        let mem_end = MemTable::OFFSET_ADDR + (1 << 10);
         let mem_final = (mem_start..mem_end)
             .map(|addr| {
                 let vma = ByteAddr::from(addr).waddr();

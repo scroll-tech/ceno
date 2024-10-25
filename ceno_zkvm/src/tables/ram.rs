@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, Word};
+use ceno_emul::{Addr, CENO_PLATFORM, WORD_SIZE, Word};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileTable};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
@@ -19,6 +19,11 @@ impl DynVolatileRamTable for MemTable {
 
     fn name() -> &'static str {
         "MemTable"
+    }
+
+    fn max_len() -> usize {
+        let max_size = (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE;
+        1 << (31 - max_size.leading_zeros()) // prev_power_of_2
     }
 }
 
@@ -41,6 +46,10 @@ impl NonVolatileTable for RegTable {
 
     fn len() -> usize {
         32 // register size 32
+    }
+
+    fn addr(entry_index: usize) -> Addr {
+        entry_index as Addr
     }
 }
 

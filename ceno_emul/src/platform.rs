@@ -64,8 +64,19 @@ impl Platform {
         }
     }
 
+    // TODO costly function and need optimisation
     pub fn is_ram(&self, addr: Addr) -> bool {
         (self.ram_start()..=self.ram_end()).contains(&addr)
+    }
+
+    // TODO costly function and need optimisation
+    pub fn is_pub_io(&self, addr: Addr) -> bool {
+        (self.public_io_start()..=self.public_io_end()).contains(&addr)
+    }
+
+    // TODO costly function and need optimisation
+    pub fn is_program_data(&self, addr: Addr) -> bool {
+        (self.program_data_start()..=self.program_data_end()).contains(&addr)
     }
 
     /// Virtual address of a register.
@@ -93,7 +104,7 @@ impl Platform {
     // Permissions.
 
     pub fn can_read(&self, addr: Addr) -> bool {
-        self.is_rom(addr) || self.is_ram(addr)
+        self.is_rom(addr) || self.is_ram(addr) || self.is_pub_io(addr) || self.is_program_data(addr)
     }
 
     pub fn can_write(&self, addr: Addr) -> bool {
