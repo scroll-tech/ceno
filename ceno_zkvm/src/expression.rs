@@ -321,7 +321,7 @@ impl<E: ExtensionField> Sum for Expression<E> {
     }
 }
 
-impl<E: ExtensionField> Product<Expression<E>> for Expression<E> {
+impl<E: ExtensionField> Product for Expression<E> {
     fn product<I: Iterator<Item = Expression<E>>>(iter: I) -> Self {
         iter.fold(Expression::ONE, |acc, x| acc * x)
     }
