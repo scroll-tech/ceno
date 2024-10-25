@@ -176,9 +176,16 @@ impl ExprBuilder {
     /// Create a `Fixed` Expr
     ///
     /// TODO: don't just create these out of thin air, hook it up with whatever hands out witness ids already.
-    /// TODO: implement support for witin, fixed, instance
     pub fn wit_in<E: ExtensionField>(&self, id: WitnessId) -> Expr<'_, E> {
         self.wrap(self.intern(ExprTree::WitIn(id)))
+    }
+
+    pub fn fixed<E: ExtensionField>(&self, id: Fixed) -> Expr<'_, E> {
+        self.wrap(self.intern(ExprTree::Fixed(id)))
+    }
+
+    pub fn instance<E: ExtensionField>(&self, id: Instance) -> Expr<'_, E> {
+        self.wrap(self.intern(ExprTree::Instance(id)))
     }
 }
 
