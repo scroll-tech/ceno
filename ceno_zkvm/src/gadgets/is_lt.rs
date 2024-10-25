@@ -111,7 +111,7 @@ impl InnerLtConfig {
         1u64 << (u16::BITS as usize * max_num_u16_limbs)
     }
 
-    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display>(
+    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: Name,
         lhs: Expression<E>,
@@ -119,7 +119,6 @@ impl InnerLtConfig {
         is_lt_expr: Expression<E>,
         max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
-        let name: String = name.into();
         assert!(max_num_u16_limbs >= 1);
 
         let mut witin_u16 = |var_name: String| -> Result<WitIn, ZKVMError> {
