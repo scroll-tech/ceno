@@ -3,12 +3,15 @@ use std::marker::PhantomData;
 use ceno_emul::{InsnKind, SWord, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{constants::UInt, i_insn::IInstructionConfig};
+use super::{
+    constants::{UINT_LIMBS, UInt},
+    i_insn::IInstructionConfig,
+};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
-    gadgets::SignedLtConfig,
+    expression::{Expression, ToExpr, WitIn},
+    gadgets::{InnerLtConfig, IsLtConfig, SignedLtConfig},
     instructions::Instruction,
     set_val,
     tables::InsnRecord,
@@ -46,15 +49,32 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm_uint = UInt::new_unchecked(|| "imm_uint", cb)?;
         let imm = cb.create_witin(|| "imm")?;
+        let is_lt = cb.create_witin(|| "is_lt")?;
 
-        let lt = SignedLtConfig::construct_circuit(cb, || "rs1 < imm_uint", &rs1_read, &imm_uint)?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
+        // Extract the sign bit.
+        let is_lhs_neg = IsLtConfig::construct_circuit(
+            cb,
+            || "lhs_msb",
+            max_signed_limb_expr.clone(),
+            rs1_read.expr().last().unwrap().clone(), // msb limb
+            1,
+        )?;
 
-        // Constrain imm == imm_uint by converting imm_uint to a field element
-        let imm_field_expr = imm_uint.to_field_expr(lt.config.is_rhs_neg.expr());
-        cb.require_equal(|| "imm_uint == imm", imm_field_expr, imm.expr())?;
+        // Convert rs1_read to field arithmetic.
+        let rs1_read_in_field = rs1_read.to_field_expr(is_lhs_neg.expr());
+
+        let config = InnerLtConfig::construct_circuit(
+            cb,
+            format!("(rs1_read < imm)"),
+            rs1_read_in_field,
+            imm.expr(),
+            is_lt.expr(),
+            UINT_LIMBS,
+        )?;
+
+        let rd_written = UInt::from_exprs_unchecked(vec![is_lt.expr()])?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
