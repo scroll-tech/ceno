@@ -63,18 +63,13 @@ impl<E: ExtensionField> Expression<E> {
         }
     }
 
-    fn combine(terms: Vec<Term<E>>) -> Vec<Term<E>> {
+    fn combine(mut terms: Vec<Term<E>>) -> Vec<Term<E>> {
+        for Term { vars, .. } in &mut terms {
+            vars.sort();
+        }
         terms
             .into_iter()
-            .map(|Term { coeff, mut vars }| {
-                (
-                    {
-                        vars.sort();
-                        vars
-                    },
-                    coeff,
-                )
-            })
+            .map(|Term { coeff, vars }| (vars, coeff))
             .into_group_map()
             .into_iter()
             .map(|(vars, coeffs)| Term {
