@@ -22,10 +22,16 @@ pub struct MemFinalRecord {
     pub value: Word,
 }
 
+/// - **Non-Volatile**: The initial values can be set to any arbitrary value.
+///
+/// **Special Note**:
+/// Setting `WRITABLE = false` does not strictly enforce immutability in this protocol.
+/// it only guarantees that the initial and final values remain invariant,
+/// allowing for temporary modifications within the lifecycle.
 pub trait NonVolatileTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
-    const RW: bool;
+    const WRITABLE: bool;
     const OFFSET_ADDR: Addr;
     const END_ADDR: Addr;
 
@@ -49,6 +55,7 @@ pub trait NonVolatileTable {
     }
 }
 
+/// non-volatile indicates initial value is configurable
 pub struct NonVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
@@ -129,7 +136,9 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 }
 
-/// trait to define a DynVolatileRamTable
+/// - **Dynamic**: The address space is bounded within a specific range,
+///   though the range itself may be dynamically determined per proof.
+/// - **Volatile**: The initial values are set to `0`
 pub trait DynVolatileRamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;

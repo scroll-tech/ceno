@@ -87,7 +87,6 @@ pub struct SetTableSpec {
     pub addr_witin_id: Option<usize>,
     pub offset: Addr,
     pub len: usize,
-    pub rw: bool,
 }
 
 #[derive(Clone, Debug)]

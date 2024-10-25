@@ -42,7 +42,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         let addr = cb.create_fixed(|| "addr")?;
 
         let final_cycle = cb.create_witin(|| "final_cycle")?;
-        let final_v = if NVRAM::RW {
+        let final_v = if NVRAM::WRITABLE {
             Some(
                 (0..NVRAM::V_LIMBS)
                     .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
@@ -83,7 +83,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                 addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
-                rw: NVRAM::RW,
             },
             init_table,
         )?;
@@ -94,7 +93,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                 addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
-                rw: NVRAM::RW,
             },
             final_table,
         )?;
@@ -207,7 +205,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
     }
 }
 
-/// define public io and read-only
+/// define public io
 /// init value set by instance
 #[derive(Clone, Debug)]
 pub struct PubIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
@@ -222,7 +220,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        assert!(!NVRAM::RW); // must be read only
+        assert!(!NVRAM::WRITABLE);
         let init_v = cb.query_public_io()?;
         let addr = cb.create_fixed(|| "addr")?;
 
@@ -256,7 +254,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
                 addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
-                rw: NVRAM::RW,
             },
             init_table,
         )?;
@@ -267,7 +264,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
                 addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
-                rw: NVRAM::RW,
             },
             final_table,
         )?;
@@ -369,7 +365,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                 addr_witin_id: Some(addr.id.into()),
                 offset: DVRAM::OFFSET_ADDR,
                 len: DVRAM::max_len(),
-                rw: true,
             },
             init_table,
         )?;
@@ -380,7 +375,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                 addr_witin_id: Some(addr.id.into()),
                 offset: DVRAM::OFFSET_ADDR,
                 len: DVRAM::max_len(),
-                rw: true,
             },
             final_table,
         )?;

@@ -37,7 +37,7 @@ pub struct RegTable;
 impl NonVolatileTable for RegTable {
     const RAM_TYPE: RAMType = RAMType::Register;
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
-    const RW: bool = true;
+    const WRITABLE: bool = true;
     const OFFSET_ADDR: Addr = 0;
     const END_ADDR: Addr = 0;
 
@@ -62,7 +62,7 @@ pub struct ProgramDataTable;
 impl NonVolatileTable for ProgramDataTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
-    const RW: bool = false; // read only
+    const WRITABLE: bool = false;
     const OFFSET_ADDR: Addr = CENO_PLATFORM.program_data_start();
     const END_ADDR: Addr = CENO_PLATFORM.program_data_end() + 1;
 
@@ -79,7 +79,7 @@ pub struct PubIOTable;
 impl NonVolatileTable for PubIOTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
-    const RW: bool = false; // read only
+    const WRITABLE: bool = false;
     const OFFSET_ADDR: Addr = CENO_PLATFORM.public_io_start();
     const END_ADDR: Addr = CENO_PLATFORM.public_io_end() + 1;
 
