@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
@@ -170,3 +171,5 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         Ok(())
     }
 }
+=======
+>>>>>>> origin/master

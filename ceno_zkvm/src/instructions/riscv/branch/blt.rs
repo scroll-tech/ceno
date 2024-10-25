@@ -7,11 +7,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
+    gadgets::SignedLtConfig,
     instructions::{
         Instruction,
-        riscv::{
-            RIVInstruction, b_insn::BInstructionConfig, config::SignedLtConfig, constants::UInt,
-        },
+        riscv::{RIVInstruction, b_insn::BInstructionConfig, constants::UInt},
     },
     witness::LkMultiplicity,
 };

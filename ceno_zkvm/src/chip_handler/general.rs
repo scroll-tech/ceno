@@ -188,6 +188,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         })
     }
 
+    pub fn select(
+        &mut self,
+        cond: &Expression<E>,
+        when_true: &Expression<E>,
+        when_false: &Expression<E>,
+    ) -> Expression<E> {
+        cond.clone() * when_true.clone() + (1 - cond.clone()) * when_false.clone()
+    }
+
     pub(crate) fn assert_ux<Name, const C: usize>(
         &mut self,
         name: Name,

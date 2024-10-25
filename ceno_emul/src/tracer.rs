@@ -70,6 +70,7 @@ impl StepRecord {
             Some(rs1_read),
             Some(rs2_read),
             Some(rd),
+            None,
             prev_cycle,
         )
     }
@@ -88,6 +89,7 @@ impl StepRecord {
             insn_code,
             Some(rs1_read),
             Some(rs2_read),
+            None,
             None,
             prev_cycle,
         )
@@ -108,6 +110,7 @@ impl StepRecord {
             Some(rs1_read),
             None,
             Some(rd),
+            None,
             prev_cycle,
         )
     }
@@ -120,7 +123,7 @@ impl StepRecord {
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
     }
 
     pub fn new_j_instruction(
@@ -130,9 +133,32 @@ impl StepRecord {
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
     }
 
+    pub fn new_s_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_code: u32,
+        rs1_read: Word,
+        rs2_read: Word,
+        memory_op: WriteOp,
+        prev_cycle: Cycle,
+    ) -> StepRecord {
+        let pc = Change::new(pc, pc + PC_STEP_SIZE);
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            Some(rs1_read),
+            Some(rs2_read),
+            None,
+            Some(memory_op),
+            prev_cycle,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn new_insn(
         cycle: Cycle,
         pc: Change<ByteAddr>,
@@ -140,6 +166,7 @@ impl StepRecord {
         rs1_read: Option<Word>,
         rs2_read: Option<Word>,
         rd: Option<Change<Word>>,
+        memory_op: Option<WriteOp>,
         previous_cycle: Cycle,
     ) -> StepRecord {
         let insn = DecodedInstruction::new(insn_code);
@@ -162,7 +189,7 @@ impl StepRecord {
                 value: rd,
                 previous_cycle,
             }),
-            memory_op: None,
+            memory_op,
         }
     }
 

@@ -19,10 +19,11 @@ pub struct SInstructionConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     rs1: ReadRS1<E>,
     rs2: ReadRS2<E>,
-    mem_write: WriteMEM<E>,
+    mem_write: WriteMEM,
 }
 
 impl<E: ExtensionField> SInstructionConfig<E> {
+    #[allow(clippy::too_many_arguments)]
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
@@ -30,7 +31,8 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         memory_addr: AddressExpr<E>,
-        memory_value: MemoryExpr<E>,
+        prev_memory_value: MemoryExpr<E>,
+        new_memory_value: MemoryExpr<E>,
     ) -> Result<Self, ZKVMError> {
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
@@ -51,8 +53,13 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         ))?;
 
         // Memory
-        let mem_write =
-            WriteMEM::construct_circuit(circuit_builder, memory_addr, memory_value, vm_state.ts)?;
+        let mem_write = WriteMEM::construct_circuit(
+            circuit_builder,
+            memory_addr,
+            prev_memory_value,
+            new_memory_value,
+            vm_state.ts,
+        )?;
 
         Ok(SInstructionConfig {
             vm_state,
@@ -72,7 +79,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
         self.rs2.assign_instance(instance, lk_multiplicity, step)?;
         self.mem_write
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance::<E>(instance, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
