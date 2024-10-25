@@ -63,7 +63,7 @@ impl IsLtConfig {
         self.is_lt.expr()
     }
 
-    pub fn construct_circuit<E: ExtensionField, Name: Into<String>>(
+    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display>(
         cb: &mut CircuitBuilder<E>,
         name: Name,
         lhs: Expression<E>,
@@ -71,7 +71,6 @@ impl IsLtConfig {
         max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
         cb.namespace("is_lt", |cb| {
-            let name: String = name.into();
             let is_lt = cb.create_witin(format!("{name} is_lt witin"))?;
             cb.assert_bit("is_lt_bit", is_lt.expr())?;
 
