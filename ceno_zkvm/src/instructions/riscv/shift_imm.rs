@@ -139,7 +139,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 // if msb == 1 then rd_written = two_compliment(div_config.dividend) + !rem_is_zero
                 // else rd_written = div_config.dividend
                 circuit_builder.condition_require_zero(
-                    || "srai pre shift",
+                    || "srai post shift",
                     msb_expr,
                     rd_written.value() + unsigned_result.value()
                         - Expression::Constant((1 << 32).into())
