@@ -37,7 +37,7 @@ impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct SrlOp;
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;

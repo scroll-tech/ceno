@@ -17,7 +17,7 @@ pub struct SltConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     rd_written: UInt<E>,
 
     signed_lt: SignedLtConfig,
