@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use super::Expression;
 use Expression::*;
