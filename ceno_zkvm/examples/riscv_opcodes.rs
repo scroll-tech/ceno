@@ -48,7 +48,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
     declare_program!(
         program,
-        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io_start()), // lui x10, program_data
+        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io_start()), // lui x10, public_io
         encode_rv32(LW, 10, 0, 1, 0),                                // lw x1, 0(x10)
         encode_rv32(LW, 10, 0, 2, 4),                                // lw x2, 4(x10)
         encode_rv32(LW, 10, 0, 3, 8),                                // lw x3, 8(x10)
@@ -133,6 +133,7 @@ fn main() {
     );
 
     let reg_init = initial_registers();
+    // Define program constant here
     let program_data: &[u32] = &[];
     let program_data_init = init_program_data(program_data);
 
@@ -166,12 +167,8 @@ fn main() {
         for (i, inst) in PROGRAM_CODE.iter().enumerate() {
             vm.init_memory(pc_start + i, *inst);
         }
-        // init program data
-        for record in &program_data_init {
-            vm.init_memory(record.addr.into(), record.value);
-        }
-        // init public i/o mem
-        for record in &public_io_init {
+        // init mmio
+        for record in program_data_init.iter().chain(public_io_init.iter()) {
             vm.init_memory(record.addr.into(), record.value);
         }
 
