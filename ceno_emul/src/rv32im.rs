@@ -88,7 +88,6 @@ pub struct Emulator {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
@@ -218,7 +217,6 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
     pub fn from_raw(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> Self {
         // limit the range of inputs
         let rs2 = rs2 & 0x1f; // 5bits mask
