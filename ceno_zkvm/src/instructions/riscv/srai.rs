@@ -141,11 +141,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             Value::new_unchecked(rs1_read.as_u32())
         };
 
-        let unsigned_result = if msb == 1 {
-            Value::new(unsigned_number.as_u32() / imm.as_u32(), lk_multiplicity)
-        } else {
-            Value::new(unsigned_number.as_u32() / imm.as_u32(), lk_multiplicity)
-        };
+        let unsigned_result = Value::new(unsigned_number.as_u32() / imm.as_u32(), lk_multiplicity);
 
         let remainder = Value::new(unsigned_number.as_u32() % imm.as_u32(), lk_multiplicity);
 
@@ -214,11 +210,11 @@ mod test {
 
         // negative rs1
         // imm = 3
-        verify_srai(3, (-(32 as i32)) as u32, (-(32 as i32) >> 3) as u32);
-        verify_srai(3, (-(33 as i32)) as u32, ((-(33 as i32)) >> 3) as u32);
+        verify_srai(3, (-32_i32) as u32, (-32_i32 >> 3) as u32);
+        verify_srai(3, (-33_i32) as u32, ((-33_i32) >> 3) as u32);
         // imm = 31
-        verify_srai(31, (-(32 as i32)) as u32, (-(32 as i32) >> 31) as u32);
-        verify_srai(31, (-(33 as i32)) as u32, (-(33 as i32) >> 31) as u32);
+        verify_srai(31, (-32_i32) as u32, (-32_i32 >> 31) as u32);
+        verify_srai(31, (-33_i32) as u32, (-33_i32 >> 31) as u32);
     }
 
     fn verify_srai(imm: u32, rs1_read: u32, expected_rd_written: u32) {
