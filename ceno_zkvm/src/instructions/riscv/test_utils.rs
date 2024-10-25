@@ -18,11 +18,7 @@ pub fn imm_j(imm: i32) -> u32 {
 
 #[cfg(test)]
 fn imm_with_max_valid_bits(imm: i32, bits: u32) -> u32 {
-    if imm.is_negative() {
-        (2i32.pow(bits) + imm) as u32
-    } else {
-        imm as u32
-    }
+    imm as u32 & !(u32::MAX << bits)
 }
 
 #[cfg(test)]
