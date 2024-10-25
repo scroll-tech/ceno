@@ -110,12 +110,14 @@ mod test {
 
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
-    use rand::Rng;
 
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::test_utils::imm_i},
+        instructions::{
+            Instruction,
+            riscv::test_utils::{i32_extra, imm_i},
+        },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
@@ -195,12 +197,14 @@ mod test {
         verify("lt = false, imm lower bondary", i32::MAX, -2048, 0);
     }
 
-    #[test]
-    fn test_slti_random() {
-        let mut rng = rand::thread_rng();
-        let a: i32 = rng.gen();
-        let b: i32 = rng.gen::<i32>() % 2048;
-        println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify("random 1", a, b, (a < b) as u32);
+    use proptest::{prelude::Strategy, proptest};
+    proptest! {
+        #[test]
+        fn test_slti_prop(
+            a in i32_extra(),
+            b in i32_extra().prop_map(|x| x & 0x7FF),
+        ) {
+            verify("random 1", a, b, (a < b) as u32);
+        }
     }
 }

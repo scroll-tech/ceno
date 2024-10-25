@@ -39,6 +39,7 @@ cfg-if.workspace = true
 const_env.workspace = true
 criterion.workspace = true
 pprof.workspace = true
+proptest.workspace = true
 serde_json.workspace = true
 
 [build-dependencies]
