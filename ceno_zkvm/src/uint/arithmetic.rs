@@ -307,7 +307,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 16, E> {
             high_limb_no_msb.expr() * Expression::Constant(2.into()), // TODO 2.into() doesn't work
         )?;
 
-        circuit_builder.require_bool(|| "msb require_bool", msb.expr())?;
+        circuit_builder.assert_bit(|| "msb require_bool", msb.expr())?;
 
         circuit_builder.require_equal(
             || "msb check",

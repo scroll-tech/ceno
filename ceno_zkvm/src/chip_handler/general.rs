@@ -158,20 +158,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
-    pub fn require_bool<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.namespace(
-            || "require_bool",
-            |cb| {
-                cb.cs
-                    .require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
-            },
-        )
-    }
-
     pub fn require_equal<NR, N>(
         &mut self,
         name_fn: N,
