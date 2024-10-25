@@ -3,6 +3,7 @@ use itertools::{Itertools, chain, iproduct};
 
 use super::Expression;
 use Expression::*;
+use std::iter::Sum;
 
 impl<E: ExtensionField> Expression<E> {
     pub(super) fn to_monomial_form_inner(&self) -> Self {
@@ -62,13 +63,10 @@ impl<E: ExtensionField> Expression<E> {
     }
 }
 
-use std::iter::Sum;
-
 impl<E: ExtensionField> Sum<Term<E>> for Expression<E> {
     fn sum<I: Iterator<Item = Term<E>>>(iter: I) -> Self {
-        iter.map(|term| term.vars.into_iter().fold(term.coeff, |a, b| a * b))
-            .reduce(|a, b| a + b)
-            .unwrap_or(Expression::ZERO)
+        iter.map(|term| term.coeff * term.vars.into_iter().product::<Expression<_>>())
+            .sum()
     }
 }
 
