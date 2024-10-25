@@ -85,7 +85,6 @@ impl<E: ExtensionField> Expression<E> {
     }
 }
 
-// TODO(Matthias): What's the meaning of `Term`?  Add a doc comment.
 #[derive(Clone, Debug)]
 struct Term<E: ExtensionField> {
     coeff: Expression<E>,
