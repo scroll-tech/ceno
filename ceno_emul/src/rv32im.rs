@@ -326,7 +326,7 @@ impl DecodedInstruction {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI | SW | LW,
+                kind: SLLI | SRLI | SRAI | ADDI,
                 ..
             } => false,
             _ => self.top_bit != 0,
