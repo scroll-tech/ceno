@@ -50,14 +50,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let mut imm = UInt::new(|| "imm", circuit_builder)?;
 
-        // Note: `imm` is set to 2**imm (upto 32 bit) just for SRLI for efficient verification
+        // Note: `imm` is set to 2**imm (upto 32 bit) just for efficient verification
         // Goal is to constrain:
         // rs1 == rd_written * imm + remainder
         let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
             InsnKind::SLLI => {
                 let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = rs1_read.mul(
-                    || "rd_written = rs1_read * pow2_rs2_low5",
+                    || "rd_written = rs1_read * imm",
                     circuit_builder,
                     &mut imm,
                     true,
