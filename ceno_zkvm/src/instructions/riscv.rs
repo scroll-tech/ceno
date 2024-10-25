@@ -16,6 +16,7 @@ pub mod logic_imm;
 pub mod mulh;
 pub mod shift;
 pub mod shift_imm;
+pub mod slt;
 pub mod sltu;
 
 mod b_insn;
@@ -28,7 +29,7 @@ mod u_insn;
 mod ecall_insn;
 
 mod im_insn;
-mod mem;
+mod memory;
 mod s_insn;
 #[cfg(test)]
 mod test;

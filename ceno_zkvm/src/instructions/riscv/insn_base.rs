@@ -6,7 +6,7 @@ use itertools::Itertools;
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
     chip_handler::{
-        AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations,
+        AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
         RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
@@ -255,7 +255,7 @@ impl<E: ExtensionField> ReadMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: AddressExpr<E>,
-        mem_read: [Expression<E>; UINT_LIMBS],
+        mem_read: Expression<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
@@ -300,39 +300,34 @@ impl<E: ExtensionField> ReadMEM<E> {
 }
 
 #[derive(Debug)]
-pub struct WriteMEM<E: ExtensionField> {
+pub struct WriteMEM {
     pub prev_ts: WitIn,
-    pub prev_value: UInt<E>,
     pub lt_cfg: AssertLTConfig,
 }
 
-impl<E: ExtensionField> WriteMEM<E> {
-    pub fn construct_circuit(
+impl WriteMEM {
+    pub fn construct_circuit<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: AddressExpr<E>,
-        mem_written: [Expression<E>; UINT_LIMBS],
+        prev_value: MemoryExpr<E>,
+        new_value: MemoryExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
-        let prev_value = UInt::new_unchecked(|| "prev_memory_value", circuit_builder)?;
 
         let (_, lt_cfg) = circuit_builder.memory_write(
             || "write_memory",
             &mem_addr,
             prev_ts.expr(),
-            cur_ts.expr() + Tracer::SUBCYCLE_RD,
-            prev_value.memory_expr(),
-            mem_written,
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
+            prev_value,
+            new_value,
         )?;
 
-        Ok(WriteMEM {
-            prev_ts,
-            prev_value,
-            lt_cfg,
-        })
+        Ok(WriteMEM { prev_ts, lt_cfg })
     }
 
-    pub fn assign_instance(
+    pub fn assign_instance<E: ExtensionField>(
         &self,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
@@ -344,13 +339,6 @@ impl<E: ExtensionField> WriteMEM<E> {
             step.memory_op().unwrap().previous_cycle
         );
 
-        // Memory State
-        self.prev_value.assign_value(
-            instance,
-            Value::new_unchecked(step.memory_op().unwrap().value.before),
-        );
-
-        // Memory Write
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
