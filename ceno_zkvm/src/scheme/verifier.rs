@@ -519,6 +519,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             // dynamic: respect prover hint
             SetTableAddrType::DynamicAddr => {
+                // check number of vars doesn't exceed max len in dynamic table
                 assert!((1 << hint_num_vars) <= r.table_spec.len);
                 [*hint_num_vars, *hint_num_vars]
             }
