@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 use ceno_emul::{InsnKind, SWord, StepRecord, Word};
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
 
 use super::{
     constants::{UINT_LIMBS, UInt},
@@ -12,7 +11,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{IsLtConfig, SignedLtConfig},
+    gadgets::IsLtConfig,
     instructions::Instruction,
     set_val,
     tables::InsnRecord,
@@ -57,12 +56,11 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction2<E> {
             rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
             1,
         )?;
-        let rs1_field_expr = rs1_read.to_field_expr(is_rs1_neg.expr());
 
         let lt = IsLtConfig::construct_circuit(
             cb,
             || "rs1 < imm",
-            rs1_field_expr,
+            rs1_read.to_field_expr(is_rs1_neg.expr()),
             imm.expr(),
             UINT_LIMBS,
         )?;
@@ -108,12 +106,13 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction2<E> {
             *rs1_value.limbs.last().unwrap() as u64,
         )?;
 
+        let imm = step.insn().imm_or_funct7();
         let imm_field = InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn());
         set_val!(instance, config.imm, imm_field);
 
         config
             .lt
-            .assign_instance(instance, lkm, imm_field.to_canonical_u64(), rs1 as u64)?;
+            .assign_instance_signed(instance, lkm, rs1 as SWord, imm as SWord)?;
 
         Ok(())
     }
@@ -126,7 +125,6 @@ mod test {
 
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
-    use rand::Rng;
 
     use super::*;
     use crate::{

@@ -113,6 +113,19 @@ impl IsLtConfig {
         self.config.assign_instance(instance, lkm, lhs, rhs)?;
         Ok(())
     }
+
+    pub fn assign_instance_signed<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        lhs: SWord,
+        rhs: SWord,
+    ) -> Result<(), ZKVMError> {
+        set_val!(instance, self.is_lt, (lhs < rhs) as u64);
+        self.config
+            .assign_instance_signed(instance, lkm, lhs, rhs)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
