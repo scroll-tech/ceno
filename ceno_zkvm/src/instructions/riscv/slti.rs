@@ -7,7 +7,7 @@ use super::{constants::UInt, i_insn::IInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{ToExpr, WitIn},
     gadgets::SignedLtConfig,
     instructions::Instruction,
     set_val,
@@ -20,7 +20,6 @@ use core::mem::MaybeUninit;
 #[derive(Debug)]
 pub struct InstructionConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
-
     rs1_read: UInt<E>,
 
     // `imm` data is a field element (which is a u64 data since we're using Goldilock)
@@ -54,9 +53,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
 
         // Constrain imm == imm_uint by converting imm_uint to a field element
-        // Convert two's complement representation into field arithmetic.
-        let neg_shift = -Expression::Constant((1_u64 << 32).into());
-        let imm_field_expr = imm_uint.value() + lt.config.is_rhs_neg.expr() * neg_shift.clone();
+        let imm_field_expr = imm_uint.to_field_expr(lt.config.is_rhs_neg.expr());
         cb.require_equal(|| "imm_uint == imm", imm_field_expr, imm.expr())?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
