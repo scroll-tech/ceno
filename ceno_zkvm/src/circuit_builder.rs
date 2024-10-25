@@ -82,6 +82,7 @@ pub enum SetTableAddrType {
 #[derive(Clone, Debug)]
 pub struct SetTableSpec {
     pub addr_type: SetTableAddrType,
+    pub addr_witin_id: Option<usize>,
     pub offset: Addr,
     pub len: usize,
     pub rw: bool,
@@ -89,7 +90,7 @@ pub struct SetTableSpec {
 
 #[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
-    pub values: Expression<E>,
+    pub expr: Expression<E>,
 
     // TODO diffentiate enum/struct, for which option is more friendly to be processed by ConstrainSystem + recursive verifier
     pub table_spec: SetTableSpec,
@@ -338,7 +339,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             rlc_record.degree()
         );
         self.r_table_expressions.push(SetTableExpression {
-            values: rlc_record,
+            expr: rlc_record,
             table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
@@ -364,7 +365,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             rlc_record.degree()
         );
         self.w_table_expressions.push(SetTableExpression {
-            values: rlc_record,
+            expr: rlc_record,
             table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());

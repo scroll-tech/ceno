@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ark_std::iterable::Iterable;
+use ceno_emul::WORD_SIZE;
 use ff_ext::ExtensionField;
 
 use itertools::{Itertools, interleave, izip};
@@ -14,6 +15,7 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
+    circuit_builder::SetTableAddrType,
     error::ZKVMError,
     expression::Instance,
     instructions::{Instruction, riscv::ecall::HaltInstruction},
@@ -22,7 +24,10 @@ use crate::{
         utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{eq_eval_less_or_equal_than, get_challenge_pows, next_pow2_instance_padding},
+    utils::{
+        eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows,
+        next_pow2_instance_padding,
+    },
 };
 
 use super::{
@@ -501,21 +506,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        // TODO probably move expected_max_rounds to verifier key
-        let expected_rounds = cs
-            // w_table_expression round match with r_table_expression so check any of them sufficient
-            .r_table_expressions
-            .iter()
-            .flat_map(|r| {
+        let expected_rounds = izip!(
+            // w_table_expression round match with r_table_expression so it fine to check either of them
+            &cs.r_table_expressions,
+            &proof.rw_hints_num_vars
+        )
+        .flat_map(|(r, hint_num_vars)| match r.table_spec.addr_type {
+            // fixed address: get number of round from vk
+            SetTableAddrType::FixedAddr => {
                 let num_vars = ceil_log2(r.table_spec.len);
                 [num_vars, num_vars]
-            })
-            .chain(
-                cs.lk_table_expressions
-                    .iter()
-                    .map(|l| ceil_log2(l.table_len)),
-            )
-            .collect_vec();
+            }
+            // dynamic: respect prover hint
+            SetTableAddrType::DynamicAddr => {
+                assert!((1 << hint_num_vars) <= r.table_spec.len);
+                [*hint_num_vars, *hint_num_vars]
+            }
+        })
+        .chain(
+            cs.lk_table_expressions
+                .iter()
+                .map(|l| ceil_log2(l.table_len)),
+        )
+        .collect_vec();
         let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
         let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
             TowerVerify::verify(
@@ -658,7 +671,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &cs.r_table_expressions, // r
             &cs.w_table_expressions, // w
         )
-        .map(|rw| &rw.values)
+        .map(|rw| &rw.expr)
         .chain(
             cs.lk_table_expressions
                 .iter()
@@ -677,6 +690,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             return Err(ZKVMError::VerifyError(
                 "record evaluate != expected_evals".into(),
             ));
+        }
+
+        // verify dynamic address evaluation
+        // TODO we can also skip their mpcs proof
+        for r_table in cs.r_table_expressions.iter() {
+            match r_table.table_spec.addr_type {
+                SetTableAddrType::FixedAddr => (),
+                SetTableAddrType::DynamicAddr => {
+                    let offset = r_table.table_spec.offset;
+                    let expected_eval = eval_wellform_address_vec(
+                        offset as u64,
+                        WORD_SIZE as u64,
+                        &input_opening_point,
+                    );
+                    if expected_eval
+                        != proof.wits_in_evals[r_table.table_spec.addr_witin_id.unwrap()]
+                    {
+                        return Err(ZKVMError::VerifyError(
+                            "dynamic addr evaluate != expected_evals".into(),
+                        ));
+                    }
+                }
+            }
         }
 
         // assume public input is tiny vector, so we evaluate it directly without PCS

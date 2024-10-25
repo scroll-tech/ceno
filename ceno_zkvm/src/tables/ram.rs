@@ -7,7 +7,6 @@ mod ram_circuit;
 mod ram_impl;
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord};
 
-/// offset: RAM_START, addr dynamic size, max_addr = RAM_END, all initial value 0
 #[derive(Clone)]
 pub struct MemTable;
 

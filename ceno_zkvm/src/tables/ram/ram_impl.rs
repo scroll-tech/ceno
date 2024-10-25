@@ -80,6 +80,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "init_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
+                addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
@@ -90,6 +91,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "final_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
+                addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
@@ -251,6 +253,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "init_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
+                addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
@@ -261,6 +264,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "final_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
+                addr_witin_id: None,
                 offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
                 rw: NVRAM::RW,
@@ -358,10 +362,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .concat(),
         );
 
+        println!("circuit addr_witin_id {:?}", addr.id);
         cb.w_table_record(
             || "init_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
+                addr_witin_id: Some(addr.id.into()),
                 offset: DVRAM::OFFSET_ADDR,
                 len: DVRAM::max_len(),
                 rw: true,
@@ -372,6 +378,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             || "final_table",
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
+                addr_witin_id: Some(addr.id.into()),
                 offset: DVRAM::OFFSET_ADDR,
                 len: DVRAM::max_len(),
                 rw: true,
@@ -403,6 +410,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .with_min_len(MIN_PAR_SIZE)
             .zip(final_mem.into_par_iter())
             .for_each(|(row, rec)| {
+                set_val!(row, self.addr, rec.addr as u64);
                 if self.final_v.len() == 1 {
                     // Assign value directly.
                     set_val!(row, self.final_v[0], rec.value as u64);

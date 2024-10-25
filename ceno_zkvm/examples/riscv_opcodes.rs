@@ -215,6 +215,7 @@ fn main() {
                 let index = rec.addr as usize;
                 let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
                 MemFinalRecord {
+                    addr: rec.addr,
                     value: vm.peek_register(index),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
@@ -227,6 +228,7 @@ fn main() {
             .map(|rec| {
                 let vma: WordAddr = rec.addr.into();
                 MemFinalRecord {
+                    addr: rec.addr,
                     value: rec.value,
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
@@ -238,12 +240,13 @@ fn main() {
         // Find the final mem data and cycles.
         // TODO retrieve max address access
         // as we already support non-uniform proving of memory
-        let mem_start = MemTable::OFFSET_ADDR;
-        let mem_end = MemTable::OFFSET_ADDR + (1 << 10);
-        let mem_final = (mem_start..mem_end)
-            .map(|addr| {
-                let vma = ByteAddr::from(addr).waddr();
+        let num_entry = 1 << 3;
+        let mem_final = (0..num_entry)
+            .map(|entry_index| {
+                let byte_addr = ByteAddr::from(MemTable::addr(entry_index));
+                let vma = byte_addr.waddr();
                 MemFinalRecord {
+                    addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }

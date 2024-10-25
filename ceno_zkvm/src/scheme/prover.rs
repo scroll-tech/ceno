@@ -5,7 +5,7 @@ use std::{
 };
 
 use ff::Field;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -21,6 +21,7 @@ use sumcheck::{
 use transcript::Transcript;
 
 use crate::{
+    circuit_builder::SetTableAddrType,
     error::ZKVMError,
     expression::Instance,
     scheme::{
@@ -682,8 +683,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_table_expressions
             .par_iter()
-            .map(|r| &r.values)
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.values))
+            .map(|r| &r.expr)
+            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
             .chain(
                 cs.lk_table_expressions
                     .par_iter()
@@ -1011,6 +1012,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
         exit_span!(span);
 
+        // collect dynamic address of rw for dynamic address application
+        // for fix address, we just fill 0, as verifier will derive it from vk
+        let rw_hints_num_vars = izip!(&cs.r_table_expressions, r_set_wit.iter())
+            .map(|(t, mle)| match t.table_spec.addr_type {
+                // for fixed address, prover
+                SetTableAddrType::FixedAddr => 0,
+                SetTableAddrType::DynamicAddr => mle.num_vars(),
+            })
+            .collect_vec();
+        // TODO implement mechanism to skip commitment
+
         let span = entered_span!("pcs_opening");
         let (fixed_opening_proof, fixed_commit) = if !fixed.is_empty() {
             (
@@ -1072,6 +1084,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 tower_proof,
                 fixed_in_evals,
                 fixed_opening_proof,
+                rw_hints_num_vars,
                 wits_in_evals,
                 wits_commit,
                 wits_opening_proof,

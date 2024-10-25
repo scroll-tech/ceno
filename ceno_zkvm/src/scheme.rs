@@ -58,6 +58,8 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
     pub tower_proof: TowerProofs<E>,
 
+    // num_vars hint for dynamic address in rw
+    pub rw_hints_num_vars: Vec<usize>,
     pub fixed_in_evals: Vec<E>,
     pub fixed_opening_proof: Option<PCS::Proof>,
     pub wits_commit: PCS::Commitment,

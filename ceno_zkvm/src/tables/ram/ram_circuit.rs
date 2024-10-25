@@ -17,6 +17,7 @@ pub struct MemInitRecord {
 }
 
 pub struct MemFinalRecord {
+    pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
 }
