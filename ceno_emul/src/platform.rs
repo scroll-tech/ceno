@@ -64,17 +64,14 @@ impl Platform {
         }
     }
 
-    // TODO costly function and need optimisation
     pub fn is_ram(&self, addr: Addr) -> bool {
         (self.ram_start()..=self.ram_end()).contains(&addr)
     }
 
-    // TODO costly function and need optimisation
     pub fn is_pub_io(&self, addr: Addr) -> bool {
         (self.public_io_start()..=self.public_io_end()).contains(&addr)
     }
 
-    // TODO costly function and need optimisation
     pub fn is_program_data(&self, addr: Addr) -> bool {
         (self.program_data_start()..=self.program_data_end()).contains(&addr)
     }
