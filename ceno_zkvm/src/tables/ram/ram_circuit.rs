@@ -89,10 +89,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 }
 
-pub struct PubIOCircuit<E, R>(PhantomData<(E, R)>);
+pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
-    for PubIOCircuit<E, NVRAM>
+    for PubIORamCircuit<E, NVRAM>
 {
     type TableConfig = PubIOTableConfig<NVRAM>;
     type FixedInput = ();

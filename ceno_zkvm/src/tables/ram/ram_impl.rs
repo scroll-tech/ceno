@@ -362,7 +362,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .concat(),
         );
 
-        println!("circuit addr_witin_id {:?}", addr.id);
         cb.w_table_record(
             || "init_table",
             SetTableSpec {

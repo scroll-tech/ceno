@@ -1,5 +1,7 @@
 use ceno_emul::{Addr, CENO_PLATFORM, WORD_SIZE, Word};
-use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileTable};
+use ram_circuit::{
+    DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileTable, PubIORamCircuit,
+};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
 
@@ -21,8 +23,8 @@ impl DynVolatileRamTable for MemTable {
     }
 
     fn max_len() -> usize {
-        let max_size = (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE;
-        1 << (31 - max_size.leading_zeros()) // prev_power_of_2
+        let max_size = (Self::END_ADDR - Self::OFFSET_ADDR) / WORD_SIZE as Addr;
+        1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 }
 
@@ -86,7 +88,7 @@ impl NonVolatileTable for PubIOTable {
     }
 }
 
-pub type PubIOCircuit<E> = NonVolatileRamCircuit<E, PubIOTable>;
+pub type PubIOCircuit<E> = PubIORamCircuit<E, PubIOTable>;
 
 pub fn initial_registers() -> Vec<MemInitRecord> {
     RegTable::init_state()
@@ -98,4 +100,12 @@ pub fn init_program_data(program_data_content: &[Word]) -> Vec<MemInitRecord> {
         program_data_init[i].value = *value;
     }
     program_data_init
+}
+
+pub fn init_public_io(init_public_io: &[Word]) -> Vec<MemInitRecord> {
+    let mut pubio_table = PubIOTable::init_state();
+    for (i, value) in init_public_io.iter().enumerate() {
+        pubio_table[i].value = *value;
+    }
+    pubio_table
 }
