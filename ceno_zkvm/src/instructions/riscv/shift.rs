@@ -31,14 +31,16 @@ pub struct ShiftConfig<E: ExtensionField> {
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 struct SllOp;
+#[cfg(test)]
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 struct SrlOp;
+#[cfg(test)]
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
 }
