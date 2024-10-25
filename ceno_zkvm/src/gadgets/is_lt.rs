@@ -20,7 +20,7 @@ use crate::{
 pub struct AssertLTConfig(InnerLtConfig);
 
 impl AssertLTConfig {
-    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display>(
+    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: Name,
         lhs: Expression<E>,
@@ -63,7 +63,7 @@ impl IsLtConfig {
         self.is_lt.expr()
     }
 
-    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display>(
+    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: Name,
         lhs: Expression<E>,
