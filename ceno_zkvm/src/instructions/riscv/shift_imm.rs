@@ -24,8 +24,10 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     imm: UInt<E>,
     rd_written: UInt<E>,
 
-    // SRAI
+    // SLLI and SRAI
     rs1_read: Option<UInt<E>>,
+
+    // SRAI
     msb_config: Option<MsbConfig>,
     remainder_is_zero: Option<WitIn>,
     remainder_diff_inverse: Option<WitIn>,
@@ -105,9 +107,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 // 4. Convert to rd_written based on MSB
                 let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-
                 let remainder = UInt::new(|| "remainder", circuit_builder)?;
-
                 let mut unsigned_result = UInt::new(|| "unsigned_result", circuit_builder)?;
 
                 let (remainder_is_zero, remainder_diff_inverse) =
@@ -204,7 +204,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     unsigned_result: None,
                 })
             }
-
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }
     }
@@ -219,6 +218,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
         config.imm.assign_value(instance, imm.clone());
+        config
+            .i_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+
         match I::INST_KIND {
             InsnKind::SLLI => {
                 let rd_written = rs1_read.mul(&imm, lk_multiplicity, true);
@@ -250,7 +253,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
                 let unsigned_result =
                     Value::new(unsigned_number.as_u32() / imm.as_u32(), lk_multiplicity);
-
                 let remainder =
                     Value::new(unsigned_number.as_u32() % imm.as_u32(), lk_multiplicity);
 
@@ -261,14 +263,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     &unsigned_result,
                     &remainder,
                 )?;
-
                 config
                     .rs1_read
                     .as_ref()
                     .unwrap()
                     .assign_value(instance, rs1_read);
                 config.rd_written.assign_value(instance, rd_written);
-
                 set_val!(
                     instance,
                     config.remainder_is_zero.as_ref().unwrap(),
@@ -285,7 +285,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     .as_ref()
                     .unwrap()
                     .assign_value(instance, remainder);
-
                 config
                     .unsigned_result
                     .as_ref()
@@ -312,11 +311,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }
-
-        config
-            .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
         Ok(())
     }
 }
@@ -393,15 +387,15 @@ mod test {
                 encode_rv32(InsnKind::SLLI, 2, 0, 4, imm),
                 rs1_read << imm,
             ),
-            InsnKind::SRLI => (
-                "SRLI",
-                encode_rv32(InsnKind::SRLI, 2, 3, 4, 0),
-                rs1_read >> imm,
-            ),
             InsnKind::SRAI => (
                 "SRAI",
                 encode_rv32(InsnKind::SRAI, 2, 0, 4, imm),
                 (rs1_read as i32 >> imm as i32) as u32,
+            ),
+            InsnKind::SRLI => (
+                "SRLI",
+                encode_rv32(InsnKind::SRLI, 2, 3, 4, 0),
+                rs1_read >> imm,
             ),
             _ => unreachable!(),
         };
