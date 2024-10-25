@@ -73,6 +73,8 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub table_len: usize,
 }
 
+// TODO encaptulate few information of table spec to SetTableAddrType value
+// once confirm syntax is friendly and parsed by recursive verifier
 #[derive(Clone, Debug)]
 pub enum SetTableAddrType {
     FixedAddr,
@@ -92,7 +94,8 @@ pub struct SetTableSpec {
 pub struct SetTableExpression<E: ExtensionField> {
     pub expr: Expression<E>,
 
-    // TODO diffentiate enum/struct, for which option is more friendly to be processed by ConstrainSystem + recursive verifier
+    // TODO make decision to have enum/struct
+    // for which option is more friendly to be processed by ConstrainSystem + recursive verifier
     pub table_spec: SetTableSpec,
 }
 

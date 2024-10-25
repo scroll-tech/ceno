@@ -61,7 +61,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let mut vm_proof = ZKVMProof::empty(pi);
 
-        // including public input to transcript
+        // including raw public input to transcript
         vm_proof
             .raw_pi
             .iter()
@@ -1012,7 +1012,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
         exit_span!(span);
 
-        // collect dynamic address of rw for dynamic address application
+        // (non uniform) collect dynamic address hints as witness for verifier
         // for fix address, we just fill 0, as verifier will derive it from vk
         let rw_hints_num_vars = izip!(&cs.r_table_expressions, r_set_wit.iter())
             .map(|(t, mle)| match t.table_spec.addr_type {

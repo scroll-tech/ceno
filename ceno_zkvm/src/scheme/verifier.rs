@@ -71,16 +71,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let pi_evals = &vm_proof.pi_evals;
 
         // TODO fix soundness: construct raw public input by ourself and trustless from proof
-        // including public input to transcript
+        // including raw public input to transcript
         vm_proof
             .raw_pi
             .iter()
             .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
 
+        // verify constant poly(s) evaluation result match
+        // we can evaluate at this moment because constant always evaluate to same value
+        // non-constant poly(s) will be verified in respective (table) proof accordingly
         izip!(&vm_proof.raw_pi, pi_evals)
             .enumerate()
             .try_for_each(|(i, (raw, eval))| {
-                // verify constant poly. Other polys will be verify in respective proof accordingly
                 if raw.len() == 1 && E::from(raw[0]) != *eval {
                     Err(ZKVMError::VerifyError(format!(
                         "pub input on index {i} mismatch  {raw:?} != {eval:?}"
@@ -519,7 +521,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             // dynamic: respect prover hint
             SetTableAddrType::DynamicAddr => {
-                // check number of vars doesn't exceed max len in dynamic table
+                // check number of vars doesn't exceed max len defined in vk
+                // this is important to prevent address overlapping
                 assert!((1 << hint_num_vars) <= r.table_spec.len);
                 [*hint_num_vars, *hint_num_vars]
             }
@@ -693,7 +696,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
-        // verify dynamic address evaluation
+        // verify dynamic address evaluation succinctly
         // TODO we can also skip their mpcs proof
         for r_table in cs.r_table_expressions.iter() {
             match r_table.table_spec.addr_type {
@@ -716,7 +719,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // assume public input is tiny vector, so we evaluate it directly without PCS
+        // assume public io is tiny vector, so we evaluate it directly without PCS
         for &Instance(idx) in cs.instance_name_map.keys() {
             let poly = raw_pi[idx].to_vec().into_mle();
             let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
@@ -731,6 +734,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             );
         }
 
+        // do optional check of fixed_commitment openings by vk
         if circuit_vk.fixed_commit.is_some() {
             let Some(fixed_opening_proof) = &proof.fixed_opening_proof else {
                 return Err(ZKVMError::VerifyError(
