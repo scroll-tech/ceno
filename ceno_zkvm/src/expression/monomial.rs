@@ -1,6 +1,4 @@
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use std::cmp::Ordering;
 
 use super::Expression;
 use Expression::*;
@@ -87,64 +85,11 @@ impl<E: ExtensionField> Expression<E> {
     }
 }
 
+// TODO(Matthias): What's the meaning of `Term`?  Add a doc comment.
 #[derive(Clone, Debug)]
 struct Term<E: ExtensionField> {
     coeff: Expression<E>,
     vars: Vec<Expression<E>>,
-}
-
-// Define a lexicographic order for expressions. It compares the types first, then the arguments left-to-right.
-impl<E: ExtensionField> Ord for Expression<E> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        use Ordering::*;
-
-        match (self, other) {
-            (Fixed(a), Fixed(b)) => a.cmp(b),
-            (WitIn(a), WitIn(b)) => a.cmp(b),
-            (Instance(a), Instance(b)) => a.cmp(b),
-            (Challenge(a, b, c, d), Challenge(e, f, g, h)) => {
-                let cmp = a.cmp(e);
-                if cmp == Equal {
-                    let cmp = b.cmp(f);
-                    if cmp == Equal {
-                        let cmp = cmp_ext(c, g);
-                        if cmp == Equal { cmp_ext(d, h) } else { cmp }
-                    } else {
-                        cmp
-                    }
-                } else {
-                    cmp
-                }
-            }
-            (Fixed(_), _) => Less,
-            (Instance(_), Fixed(_)) => Greater,
-            (Instance(_), _) => Less,
-            (WitIn(_), Fixed(_)) => Greater,
-            (WitIn(_), Instance(_)) => Greater,
-            (WitIn(_), _) => Less,
-            (Challenge(..), Fixed(_)) => Greater,
-            (Challenge(..), Instance(_)) => Greater,
-            (Challenge(..), WitIn(_)) => Greater,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<E: ExtensionField> PartialOrd for Expression<E> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-#[allow(dead_code)]
-fn cmp_field<F: SmallField>(a: &F, b: &F) -> Ordering {
-    a.to_canonical_u64().cmp(&b.to_canonical_u64())
-}
-
-fn cmp_ext<E: ExtensionField>(a: &E, b: &E) -> Ordering {
-    let a = a.as_bases().iter().map(|f| f.to_canonical_u64());
-    let b = b.as_bases().iter().map(|f| f.to_canonical_u64());
-    a.cmp(b)
 }
 
 #[cfg(test)]

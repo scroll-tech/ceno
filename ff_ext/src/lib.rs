@@ -21,10 +21,11 @@ pub trait ExtensionField:
     + for<'a> AddAssign<&'a Self::BaseField>
     + for<'a> SubAssign<&'a Self::BaseField>
     + for<'a> MulAssign<&'a Self::BaseField>
+    + Ord
 {
     const DEGREE: usize;
 
-    type BaseField: SmallField + FromUniformBytes<64> + Poseidon;
+    type BaseField: SmallField + FromUniformBytes<64> + Poseidon + Ord;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 
