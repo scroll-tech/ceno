@@ -66,7 +66,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let (remainder_is_zero, remainder_diff_inverse) =
             circuit_builder.is_equal(remainder.value(), Expression::ZERO)?;
 
-        // Note: `imm` is set to 2**imm (upto 32 bit) just for SRLI for efficient verification
+        // Note: `imm` is set to 2**imm (upto 32 bit) just for efficient verification
         // Goal is to constrain:
         // unsigned_number == rd_written * imm + remainder
         let div_config = DivConfig::construct_circuit(
