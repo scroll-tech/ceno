@@ -166,8 +166,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.namespace(
             || "require_bool",
             |cb| {
-                let temp = (expr.clone() - Expression::ONE) * expr;
-                cb.cs.require_zero(name_fn, temp)
+                cb.cs
+                    .require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
             },
         )
     }
