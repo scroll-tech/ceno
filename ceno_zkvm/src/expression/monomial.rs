@@ -1,5 +1,6 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
+use itertools::Itertools;
 use std::cmp::Ordering;
 
 use super::Expression;
@@ -65,17 +66,24 @@ impl<E: ExtensionField> Expression<E> {
     }
 
     fn combine(terms: Vec<Term<E>>) -> Vec<Term<E>> {
-        let mut res: Vec<Term<E>> = vec![];
-        for mut term in terms {
-            term.vars.sort();
-
-            if let Some(res_term) = res.iter_mut().find(|res_term| res_term.vars == term.vars) {
-                res_term.coeff = res_term.coeff.clone() + term.coeff.clone();
-            } else {
-                res.push(term);
-            }
-        }
-        res
+        terms
+            .into_iter()
+            .map(|Term { coeff, mut vars }| {
+                (
+                    {
+                        vars.sort();
+                        vars
+                    },
+                    coeff,
+                )
+            })
+            .into_group_map()
+            .into_iter()
+            .map(|(vars, coeffs)| Term {
+                coeff: coeffs.into_iter().sum(),
+                vars,
+            })
+            .collect()
     }
 
     fn sum_terms(terms: Vec<Term<E>>) -> Self {
