@@ -249,7 +249,7 @@ fn main() {
         // Find the final mem data and cycles.
         // TODO retrieve max address access
         // as we already support non-uniform proving of memory
-        let num_entry = 1 << 3;
+        let num_entry = 1 << 12;
         let mem_final = (0..num_entry)
             .map(|entry_index| {
                 let byte_addr = ByteAddr::from(MemTable::addr(entry_index));
