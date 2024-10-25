@@ -8,7 +8,6 @@ use ceno_zkvm::{
     tables::{MemFinalRecord, ProgramTableCircuit, initial_memory, initial_registers},
 };
 use clap::Parser;
-use const_env::from_env;
 
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext,
@@ -27,9 +26,6 @@ use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
-
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
 
 const PROGRAM_SIZE: usize = 512;
 // For now, we assume registers
@@ -79,27 +75,6 @@ fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
-
-    let max_threads = {
-        if !RAYON_NUM_THREADS.is_power_of_two() {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            {
-                use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
-                let max_thread_id = 1 << ceil_log2(RAYON_NUM_THREADS);
-                create_local_pool_once(1 << ceil_log2(RAYON_NUM_THREADS), true);
-                max_thread_id
-            }
-        } else {
-            RAYON_NUM_THREADS
-        }
-    };
 
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
@@ -237,7 +212,7 @@ fn main() {
 
         let transcript = Transcript::new(b"riscv");
         let mut zkvm_proof = prover
-            .create_proof(zkvm_witness, pi, max_threads, transcript)
+            .create_proof(zkvm_witness, pi, transcript)
             .expect("create_proof failed");
 
         println!(
