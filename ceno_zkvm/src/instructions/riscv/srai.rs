@@ -6,15 +6,18 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
+    expression::{Expression, ToExpr, WitIn},
     gadgets::DivConfig,
     instructions::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
+    set_val,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
+use ff::Field;
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -26,6 +29,8 @@ pub struct InstructionConfig<E: ExtensionField> {
     rd_written: UInt<E>,
     msb_config: MsbConfig,
     remainder: UInt<E>,
+    remainder_is_zero: WitIn,
+    remainder_diff_inverse: WitIn,
     div_config: DivConfig<E>,
     unsigned_result: UInt<E>,
 }
@@ -58,6 +63,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
         let mut unsigned_result = UInt::new(|| "unsigned_result", circuit_builder)?;
         let remainder = UInt::new(|| "remainder", circuit_builder)?;
+        let (remainder_is_zero, remainder_diff_inverse) =
+            circuit_builder.is_equal(remainder.value(), Expression::ZERO)?;
 
         // Note: `imm` is set to 2**imm (upto 32 bit) just for SRLI for efficient verification
         // Goal is to constrain:
@@ -84,8 +91,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
         circuit_builder.require_zero(
             || "srai post shift",
-            // if msb == 1 then rd_written = two_compliment(div_config.dividend)
-            msb_expr.clone() * (rd_written.value() + unsigned_result.value() - Expression::Constant((1 << 32).into()))
+            // if msb == 1 then rd_written = two_compliment(div_config.dividend) + !rem_is_zero
+            msb_expr.clone() * (rd_written.value() + unsigned_result.value() - Expression::Constant((1 << 32).into()) + (Expression::ONE - remainder_is_zero.expr()))
             // else rd_written = div_config.dividend
                 + (Expression::ONE - msb_expr) * (rd_written.value() - unsigned_result.value()),
         )?;
@@ -106,6 +113,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             rd_written,
             msb_config,
             remainder,
+            remainder_is_zero,
+            remainder_diff_inverse,
             div_config,
             unsigned_result,
         })
@@ -133,17 +142,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         };
 
         let unsigned_result = if msb == 1 {
-            Value::new(
-                ((-(unsigned_number.as_u32() as i32)) / (-(imm.as_u32() as i32))) as u32,
-                lk_multiplicity,
-            )
+            Value::new(unsigned_number.as_u32() / imm.as_u32(), lk_multiplicity)
         } else {
             Value::new(unsigned_number.as_u32() / imm.as_u32(), lk_multiplicity)
         };
-        println!(
-            "unsigned_result: {:?}",
-            ((-(unsigned_number.as_u32() as i32)) / (-(imm.as_u32() as i32))) as u32
-        );
 
         let remainder = Value::new(unsigned_number.as_u32() % imm.as_u32(), lk_multiplicity);
 
@@ -159,6 +161,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         config.imm.assign_value(instance, imm);
         config.rd_written.assign_value(instance, rd_written);
 
+        set_val!(
+            instance,
+            config.remainder_is_zero,
+            (remainder.as_u64() == 0) as u64
+        );
+        let remainder_f = i64_to_base::<E::BaseField>(remainder.as_u64() as i64);
+        set_val!(
+            instance,
+            config.remainder_diff_inverse,
+            remainder_f.invert().unwrap_or(E::BaseField::ZERO)
+        );
         config.remainder.assign_value(instance, remainder);
 
         config
@@ -195,31 +208,20 @@ mod test {
         // imm = 3
         verify_srai(3, 32, 32 >> 3);
         verify_srai(3, 33, 33 >> 3);
-        // // imm = 31
+        // imm = 31
         verify_srai(31, 32, 32 >> 31);
         verify_srai(31, 33, 33 >> 31);
 
         // negative rs1
         // imm = 3
-        // verify_srai(3, (-(32 as i32)) as u32, (-(32 as i32) >> 3) as u32);
-        // verify_srai(3, (-(33 as i32)) as u32, ((-(33 as i32)) >> 3) as u32);
+        verify_srai(3, (-(32 as i32)) as u32, (-(32 as i32) >> 3) as u32);
+        verify_srai(3, (-(33 as i32)) as u32, ((-(33 as i32)) >> 3) as u32);
         // imm = 31
-        // verify_srai(31, (-(32 as i32)) as u32, (-(32 as i32) >> 31) as u32);
-        // verify_srai(31, (-(33 as i32)) as u32, (-(33 as i32) >> 31) as u32);
+        verify_srai(31, (-(32 as i32)) as u32, (-(32 as i32) >> 31) as u32);
+        verify_srai(31, (-(33 as i32)) as u32, (-(33 as i32) >> 31) as u32);
     }
 
     fn verify_srai(imm: u32, rs1_read: u32, expected_rd_written: u32) {
-        println!("test imm: {}", imm);
-        println!(
-            "test rs1_read: {} {}",
-            rs1_read,
-            (-(rs1_read as i32)) as u32
-        );
-        println!(
-            "test expected_rd_written: {} {}",
-            expected_rd_written,
-            (-(expected_rd_written as i32)) as u32
-        );
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
