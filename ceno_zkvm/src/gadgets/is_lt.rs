@@ -271,7 +271,7 @@ impl AssertSignedLtConfig {
 #[derive(Debug)]
 pub struct SignedLtConfig {
     is_lt: WitIn,
-    pub config: InnerSignedLtConfig,
+    config: InnerSignedLtConfig,
 }
 
 impl SignedLtConfig {
@@ -318,9 +318,9 @@ impl SignedLtConfig {
 }
 
 #[derive(Debug)]
-pub struct InnerSignedLtConfig {
-    pub is_lhs_neg: IsLtConfig,
-    pub is_rhs_neg: IsLtConfig,
+struct InnerSignedLtConfig {
+    is_lhs_neg: IsLtConfig,
+    is_rhs_neg: IsLtConfig,
     config: InnerLtConfig,
 }
 

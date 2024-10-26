@@ -1,14 +1,17 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{InsnKind, SWord, StepRecord};
+use ceno_emul::{InsnKind, SWord, StepRecord, Word};
 use ff_ext::ExtensionField;
 
-use super::{constants::UInt, i_insn::IInstructionConfig};
+use super::{
+    constants::{UINT_LIMBS, UInt},
+    i_insn::IInstructionConfig,
+};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
-    gadgets::SignedLtConfig,
+    expression::{Expression, ToExpr, WitIn},
+    gadgets::IsLtConfig,
     instructions::Instruction,
     set_val,
     tables::InsnRecord,
@@ -20,18 +23,14 @@ use core::mem::MaybeUninit;
 #[derive(Debug)]
 pub struct InstructionConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
-    rs1_read: UInt<E>,
 
-    // `imm` data is a field element (which is a u64 data since we're using Goldilock)
-    // and `imm` is used as an lookup argument in the instruction lookup.
-    // However, our current gadgets (IsLtConfig or SignedLtConfig) don't support a field element comparison.
-    // That's the reason why we add `imm_uint` to compare `rs1_read` in SignedLtConfig.
+    rs1_read: UInt<E>,
     imm: WitIn,
-    imm_uint: UInt<E>,
     #[allow(dead_code)]
     rd_written: UInt<E>,
 
-    signed_lt: SignedLtConfig,
+    is_rs1_neg: IsLtConfig,
+    lt: IsLtConfig,
 }
 
 pub struct SltiInstruction<E>(PhantomData<E>);
@@ -46,15 +45,25 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm_uint = UInt::new_unchecked(|| "imm_uint", cb)?;
         let imm = cb.create_witin(|| "imm")?;
 
-        let lt = SignedLtConfig::construct_circuit(cb, || "rs1 < imm_uint", &rs1_read, &imm_uint)?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
+        let is_rs1_neg = IsLtConfig::construct_circuit(
+            cb,
+            || "lhs_msb",
+            max_signed_limb_expr.clone(),
+            rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
+            1,
+        )?;
 
-        // Constrain imm == imm_uint by converting imm_uint to a field element
-        let imm_field_expr = imm_uint.to_field_expr(lt.config.is_rhs_neg.expr());
-        cb.require_equal(|| "imm_uint == imm", imm_field_expr, imm.expr())?;
+        let lt = IsLtConfig::construct_circuit(
+            cb,
+            || "rs1 < imm",
+            rs1_read.to_field_expr(is_rs1_neg.expr()),
+            imm.expr(),
+            UINT_LIMBS,
+        )?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
@@ -68,10 +77,10 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         Ok(InstructionConfig {
             i_insn,
             rs1_read,
-            imm_uint,
             imm,
             rd_written,
-            signed_lt: lt,
+            is_rs1_neg,
+            lt,
         })
     }
 
@@ -84,20 +93,25 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         config.i_insn.assign_instance(instance, lkm, step)?;
 
         let rs1 = step.rs1().unwrap().value;
+        let max_signed_limb = (1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1;
+        let rs1_value = Value::new_unchecked(rs1 as Word);
         config
             .rs1_read
             .assign_value(instance, Value::new_unchecked(rs1));
+        config.is_rs1_neg.assign_instance(
+            instance,
+            lkm,
+            max_signed_limb,
+            *rs1_value.limbs.last().unwrap() as u64,
+        )?;
 
         let imm = step.insn().imm_or_funct7();
         let imm_field = InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn());
         set_val!(instance, config.imm, imm_field);
-        config
-            .imm_uint
-            .assign_value(instance, Value::new_unchecked(imm));
 
         config
-            .signed_lt
-            .assign_instance::<E>(instance, lkm, rs1 as SWord, imm as SWord)?;
+            .lt
+            .assign_instance_signed(instance, lkm, rs1 as SWord, imm as SWord)?;
 
         Ok(())
     }
