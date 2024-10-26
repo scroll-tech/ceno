@@ -4,17 +4,15 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::DivConfig,
+    gadgets::{AssertLTConfig, DivConfig},
     instructions::{
         Instruction,
         riscv::{config::MsbInput, constants::UInt, i_insn::IInstructionConfig},
     },
     set_val,
-    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-use ff::Field;
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -29,9 +27,8 @@ pub struct ShiftImmConfig<E: ExtensionField> {
 
     // SRAI
     msb_config: Option<MsbConfig>,
-    remainder_is_zero: Option<WitIn>,
-    remainder_diff_inverse: Option<WitIn>,
-    unsigned_result: Option<UInt<E>>,
+    outflow: Option<WitIn>,
+    assert_lt_config: Option<AssertLTConfig>,
 
     // SRLI
     remainder: Option<UInt<E>>,
@@ -95,56 +92,34 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     remainder: None,
                     div_config: None,
                     msb_config: None,
-                    remainder_is_zero: None,
-                    remainder_diff_inverse: None,
-                    unsigned_result: None,
+                    outflow: None,
+                    assert_lt_config: None,
                 })
             }
             InsnKind::SRAI => {
-                // 1. Get the MSB.
-                // 2. Convert to unsigned number based on MSB
-                // 3. Shift on the unsigned number to get unsigned result
-                // 4. Convert to rd_written based on MSB
                 let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let remainder = UInt::new(|| "remainder", circuit_builder)?;
-                let mut unsigned_result = UInt::new(|| "unsigned_result", circuit_builder)?;
-
-                let (remainder_is_zero, remainder_diff_inverse) =
-                    circuit_builder.is_equal(remainder.value(), Expression::ZERO)?;
-
-                // unsigned_number == rd_written * imm + remainder
-                let div_config = DivConfig::construct_circuit(
-                    circuit_builder,
-                    || "srai_div",
-                    &mut imm,
-                    &mut unsigned_result,
-                    &remainder,
-                )?;
-                let unsigned_number = &div_config.dividend;
 
                 let msb_config = rs1_read.msb_decompose(circuit_builder)?;
                 let msb_expr: Expression<E> = msb_config.msb.expr();
 
-                // if msb == 1 then unsigned_number = two_compliment(rs1_read)
-                // else unsigned_number = rs1_read
-                circuit_builder.condition_require_zero(
-                    || "srai pre shift",
-                    msb_expr.clone(),
-                    unsigned_number.value() + rs1_read.value()
-                        - Expression::Constant((1 << 32).into()),
-                    unsigned_number.value() - rs1_read.value(),
+                let ones = imm.value() - Expression::ONE;
+                let inflow = msb_expr * ones;
+
+                let outflow = circuit_builder.create_witin(|| "outflow")?;
+
+                let assert_lt_config = AssertLTConfig::construct_circuit(
+                    circuit_builder,
+                    || "outflow < imm",
+                    outflow.expr(),
+                    imm.value(),
+                    2,
                 )?;
 
-                // if msb == 1 then rd_written = two_compliment(div_config.dividend) + !rem_is_zero
-                // else rd_written = div_config.dividend
-                circuit_builder.condition_require_zero(
-                    || "srai post shift",
-                    msb_expr,
-                    rd_written.value() + unsigned_result.value()
-                        - Expression::Constant((1 << 32).into())
-                        + (Expression::ONE - remainder_is_zero.expr()),
-                    rd_written.value() - unsigned_result.value(),
+                circuit_builder.require_equal(
+                    || "srai check",
+                    rd_written.value() * imm.value() + outflow.expr(),
+                    inflow * Expression::Constant((1 << 32).into()) + rs1_read.value(),
                 )?;
 
                 let i_insn = IInstructionConfig::<E>::construct_circuit(
@@ -159,14 +134,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 Ok(ShiftImmConfig {
                     i_insn,
                     imm,
-                    rd_written,
-                    remainder: Some(remainder),
-                    div_config: Some(div_config),
                     rs1_read: Some(rs1_read),
+                    rd_written,
                     msb_config: Some(msb_config),
-                    remainder_is_zero: Some(remainder_is_zero),
-                    remainder_diff_inverse: Some(remainder_diff_inverse),
-                    unsigned_result: Some(unsigned_result),
+                    outflow: Some(outflow),
+                    assert_lt_config: Some(assert_lt_config),
+                    remainder: None,
+                    div_config: None,
                 })
             }
             InsnKind::SRLI => {
@@ -199,9 +173,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     div_config: Some(div_config),
                     rs1_read: None,
                     msb_config: None,
-                    remainder_is_zero: None,
-                    remainder_diff_inverse: None,
-                    unsigned_result: None,
+                    outflow: None,
+                    assert_lt_config: None,
                 })
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
@@ -236,7 +209,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             }
             InsnKind::SRAI => {
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-                let (msb, _) = MsbInput {
+                MsbInput {
                     limbs: &rs1_read.limbs,
                 }
                 .assign(
@@ -245,51 +218,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     lk_multiplicity,
                 );
 
-                let unsigned_number = if msb == 1 {
-                    Value::new_unchecked((-(rs1_read.as_u32() as i32)) as u32)
-                } else {
-                    Value::new_unchecked(rs1_read.as_u32())
-                };
+                let outflow = rs1_read.as_u32() & (imm.as_u32() - 1);
 
-                let unsigned_result =
-                    Value::new(unsigned_number.as_u32() / imm.as_u32(), lk_multiplicity);
-                let remainder =
-                    Value::new(unsigned_number.as_u32() % imm.as_u32(), lk_multiplicity);
-
-                config.div_config.as_ref().unwrap().assign_instance(
-                    instance,
-                    lk_multiplicity,
-                    &imm,
-                    &unsigned_result,
-                    &remainder,
-                )?;
                 config
                     .rs1_read
                     .as_ref()
                     .unwrap()
                     .assign_value(instance, rs1_read);
                 config.rd_written.assign_value(instance, rd_written);
-                set_val!(
+                set_val!(instance, config.outflow.as_ref().unwrap(), outflow as u64);
+                config.assert_lt_config.as_ref().unwrap().assign_instance(
                     instance,
-                    config.remainder_is_zero.as_ref().unwrap(),
-                    (remainder.as_u64() == 0) as u64
-                );
-                let remainder_f = i64_to_base::<E::BaseField>(remainder.as_u64() as i64);
-                set_val!(
-                    instance,
-                    config.remainder_diff_inverse.as_ref().unwrap(),
-                    remainder_f.invert().unwrap_or(E::BaseField::ZERO)
-                );
-                config
-                    .remainder
-                    .as_ref()
-                    .unwrap()
-                    .assign_value(instance, remainder);
-                config
-                    .unsigned_result
-                    .as_ref()
-                    .unwrap()
-                    .assign_value(instance, unsigned_result);
+                    lk_multiplicity,
+                    outflow as u64,
+                    imm.as_u64(),
+                )?;
             }
             InsnKind::SRLI => {
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
