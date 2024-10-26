@@ -23,8 +23,10 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
     rd_written: UInt<E>,
 
-    // SRAI and SRLI
+    // SRAI
     msb_config: Option<MsbConfig>,
+
+    // SRAI and SRLI
     outflow: Option<WitIn>,
     assert_lt_config: Option<AssertLTConfig>,
 }
@@ -92,13 +94,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
-                let msb_config = rs1_read.msb_decompose(circuit_builder)?;
-                let msb_expr: Expression<E> = msb_config.msb.expr();
-
-                let ones = imm.value() - Expression::ONE;
-                let inflow = match I::INST_KIND {
-                    InsnKind::SRAI => msb_expr * ones,
-                    InsnKind::SRLI => Expression::ZERO,
+                let (inflow, msb_config) = match I::INST_KIND {
+                    InsnKind::SRAI => {
+                        let msb_config = rs1_read.msb_decompose(circuit_builder)?;
+                        let msb_expr: Expression<E> = msb_config.msb.expr();
+                        let ones = imm.value() - Expression::ONE;
+                        (msb_expr * ones, Some(msb_config))
+                    }
+                    InsnKind::SRLI => (Expression::ZERO, None),
                     _ => unreachable!(),
                 };
 
@@ -132,7 +135,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     imm,
                     rs1_read,
                     rd_written,
-                    msb_config: Some(msb_config),
+                    msb_config,
                     outflow: Some(outflow),
                     assert_lt_config: Some(assert_lt_config),
                 })
@@ -165,14 +168,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             }
             InsnKind::SRAI | InsnKind::SRLI => {
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-                MsbInput {
-                    limbs: &rs1_read.limbs,
+
+                if I::INST_KIND == InsnKind::SRAI {
+                    MsbInput {
+                        limbs: &rs1_read.limbs,
+                    }
+                    .assign(
+                        instance,
+                        config.msb_config.as_ref().unwrap(),
+                        lk_multiplicity,
+                    );
                 }
-                .assign(
-                    instance,
-                    config.msb_config.as_ref().unwrap(),
-                    lk_multiplicity,
-                );
 
                 let outflow = rs1_read.as_u32() & (imm.as_u32() - 1);
 
