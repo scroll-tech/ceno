@@ -4,7 +4,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, DivConfig},
+    gadgets::AssertLTConfig,
     instructions::{
         Instruction,
         riscv::{config::MsbInput, constants::UInt, i_insn::IInstructionConfig},
@@ -20,19 +20,13 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
 
     imm: UInt<E>,
+    rs1_read: UInt<E>,
     rd_written: UInt<E>,
 
-    // SLLI and SRAI
-    rs1_read: Option<UInt<E>>,
-
-    // SRAI
+    // SRAI and SRLI
     msb_config: Option<MsbConfig>,
     outflow: Option<WitIn>,
     assert_lt_config: Option<AssertLTConfig>,
-
-    // SRLI
-    remainder: Option<UInt<E>>,
-    div_config: Option<DivConfig<E>>,
 }
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -87,16 +81,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 Ok(ShiftImmConfig {
                     i_insn,
                     imm,
+                    rs1_read,
                     rd_written,
-                    rs1_read: Some(rs1_read),
-                    remainder: None,
-                    div_config: None,
                     msb_config: None,
                     outflow: None,
                     assert_lt_config: None,
                 })
             }
-            InsnKind::SRAI => {
+            InsnKind::SRAI | InsnKind::SRLI => {
                 let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
@@ -104,7 +96,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 let msb_expr: Expression<E> = msb_config.msb.expr();
 
                 let ones = imm.value() - Expression::ONE;
-                let inflow = msb_expr * ones;
+                let inflow = match I::INST_KIND {
+                    InsnKind::SRAI => msb_expr * ones,
+                    InsnKind::SRLI => Expression::ZERO,
+                    _ => unreachable!(),
+                };
 
                 let outflow = circuit_builder.create_witin(|| "outflow")?;
 
@@ -134,47 +130,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 Ok(ShiftImmConfig {
                     i_insn,
                     imm,
-                    rs1_read: Some(rs1_read),
+                    rs1_read,
                     rd_written,
                     msb_config: Some(msb_config),
                     outflow: Some(outflow),
                     assert_lt_config: Some(assert_lt_config),
-                    remainder: None,
-                    div_config: None,
-                })
-            }
-            InsnKind::SRLI => {
-                // rs1 == rd_written * imm + remainder
-                let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let remainder = UInt::new(|| "remainder", circuit_builder)?;
-
-                let div_config = DivConfig::construct_circuit(
-                    circuit_builder,
-                    || "srli_div",
-                    &mut imm,
-                    &mut rd_written,
-                    &remainder,
-                )?;
-
-                let i_insn = IInstructionConfig::<E>::construct_circuit(
-                    circuit_builder,
-                    I::INST_KIND,
-                    &imm.value(),
-                    div_config.dividend.register_expr(),
-                    rd_written.register_expr(),
-                    false,
-                )?;
-
-                Ok(ShiftImmConfig {
-                    i_insn,
-                    imm,
-                    rd_written,
-                    remainder: Some(remainder),
-                    div_config: Some(div_config),
-                    rs1_read: None,
-                    msb_config: None,
-                    outflow: None,
-                    assert_lt_config: None,
                 })
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
@@ -198,16 +158,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         match I::INST_KIND {
             InsnKind::SLLI => {
                 let rd_written = rs1_read.mul(&imm, lk_multiplicity, true);
-                config
-                    .rs1_read
-                    .as_ref()
-                    .unwrap()
-                    .assign_value(instance, rs1_read);
+                config.rs1_read.assign_value(instance, rs1_read);
                 config
                     .rd_written
                     .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
             }
-            InsnKind::SRAI => {
+            InsnKind::SRAI | InsnKind::SRLI => {
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
                 MsbInput {
                     limbs: &rs1_read.limbs,
@@ -220,11 +176,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
                 let outflow = rs1_read.as_u32() & (imm.as_u32() - 1);
 
-                config
-                    .rs1_read
-                    .as_ref()
-                    .unwrap()
-                    .assign_value(instance, rs1_read);
+                config.rs1_read.assign_value(instance, rs1_read);
                 config.rd_written.assign_value(instance, rd_written);
                 set_val!(instance, config.outflow.as_ref().unwrap(), outflow as u64);
                 config.assert_lt_config.as_ref().unwrap().assign_instance(
@@ -233,24 +185,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     outflow as u64,
                     imm.as_u64(),
                 )?;
-            }
-            InsnKind::SRLI => {
-                let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-                let remainder = Value::new(rs1_read.as_u32() % imm.as_u32(), lk_multiplicity);
-
-                config.div_config.as_ref().unwrap().assign_instance(
-                    instance,
-                    lk_multiplicity,
-                    &imm,
-                    &rd_written,
-                    &remainder,
-                )?;
-                config.rd_written.assign_value(instance, rd_written);
-                config
-                    .remainder
-                    .as_ref()
-                    .unwrap()
-                    .assign_value(instance, remainder);
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }
@@ -313,6 +247,8 @@ mod test {
         // imm = 31
         verify::<SrliOp>("32 >> 31", 32, 31, 32 >> 31);
         verify::<SrliOp>("33 >> 31", 33, 31, 33 >> 31);
+        // rs1 top bit is 1
+        verify::<SrliOp>("-32 >> 3", (-32_i32) as u32, 3, (-32_i32) as u32 >> 3);
     }
 
     fn verify<I: RIVInstruction>(
@@ -337,7 +273,7 @@ mod test {
             ),
             InsnKind::SRLI => (
                 "SRLI",
-                encode_rv32(InsnKind::SRLI, 2, 3, 4, 0),
+                encode_rv32(InsnKind::SRLI, 2, 0, 4, imm),
                 rs1_read >> imm,
             ),
             _ => unreachable!(),
