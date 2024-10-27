@@ -40,7 +40,7 @@ fn test_opcode_jal() {
     let insn_code = encode_rv32(InsnKind::JAL, 0, 0, 4, imm_j(pc_offset));
     let (raw_witin, lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
-        cb.cs.num_witin as usize,
+        cb.cs.num_witin_fnord as usize,
         vec![StepRecord::new_j_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),
@@ -87,7 +87,7 @@ fn test_opcode_jalr() {
 
     let (raw_witin, lkm) = JalrInstruction::<GoldilocksExt2>::assign_instances(
         &config,
-        cb.cs.num_witin as usize,
+        cb.cs.num_witin_fnord as usize,
         vec![StepRecord::new_i_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),
@@ -136,7 +136,7 @@ fn test_opcode_lui() {
     let insn_code = encode_rv32(InsnKind::LUI, 0, 0, 4, imm_value);
     let (raw_witin, lkm) = LuiInstruction::<GoldilocksExt2>::assign_instances(
         &config,
-        cb.cs.num_witin as usize,
+        cb.cs.num_witin_fnord as usize,
         vec![StepRecord::new_u_instruction(
             4,
             MOCK_PC_START,
@@ -180,7 +180,7 @@ fn test_opcode_auipc() {
     let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm_value);
     let (raw_witin, lkm) = AuipcInstruction::<GoldilocksExt2>::assign_instances(
         &config,
-        cb.cs.num_witin as usize,
+        cb.cs.num_witin_fnord as usize,
         vec![StepRecord::new_u_instruction(
             4,
             MOCK_PC_START,

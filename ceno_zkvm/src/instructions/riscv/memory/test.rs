@@ -68,7 +68,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
         InsnKind::SW => sw(prev_mem_value, rs2_word),
         x => unreachable!("{:?} is not store instruction", x),
     };
-    let (raw_witin, lkm) = Inst::assign_instances(&config, cb.cs.num_witin as usize, vec![
+    let (raw_witin, lkm) = Inst::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
         StepRecord::new_s_instruction(
             12,
             MOCK_PC_START,

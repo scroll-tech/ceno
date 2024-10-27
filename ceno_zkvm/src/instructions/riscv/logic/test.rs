@@ -32,7 +32,7 @@ fn test_opcode_and() {
 
     let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
     let (raw_witin, lkm) =
-        AndInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        AndInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
             StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
@@ -83,7 +83,7 @@ fn test_opcode_or() {
 
     let insn_code = encode_rv32(InsnKind::OR, 2, 3, 4, 0);
     let (raw_witin, lkm) =
-        OrInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        OrInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
             StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
@@ -134,7 +134,7 @@ fn test_opcode_xor() {
 
     let insn_code = encode_rv32(InsnKind::XOR, 2, 3, 4, 0);
     let (raw_witin, lkm) =
-        XorInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        XorInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
             StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,

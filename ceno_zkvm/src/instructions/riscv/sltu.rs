@@ -134,7 +134,7 @@ mod test {
 
         let insn_code = encode_rv32(InsnKind::SLTU, 2, 3, 4, 0);
         let (raw_witin, lkm) =
-            SltuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            SltuInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,

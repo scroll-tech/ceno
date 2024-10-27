@@ -121,7 +121,7 @@ mod test {
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
-            cb.cs.num_witin as usize,
+            cb.cs.num_witin_fnord as usize,
             vec![StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
@@ -165,7 +165,7 @@ mod test {
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(-3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
-            cb.cs.num_witin as usize,
+            cb.cs.num_witin_fnord as usize,
             vec![StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),

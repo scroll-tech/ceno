@@ -198,7 +198,7 @@ mod test {
 
         let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
-            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            AddInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,
@@ -253,7 +253,7 @@ mod test {
 
         let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
-            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            AddInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,
@@ -308,7 +308,7 @@ mod test {
 
         let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, lkm) =
-            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            SubInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,
@@ -363,7 +363,7 @@ mod test {
 
         let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, _) =
-            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            SubInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,
@@ -413,7 +413,7 @@ mod test {
         // values assignment
         let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            MulInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,
@@ -460,7 +460,7 @@ mod test {
         // values assignment
         let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            MulInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,
@@ -511,7 +511,7 @@ mod test {
         // values assignment
         let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
         let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            MulInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
                 StepRecord::new_r_instruction(
                     3,
                     MOCK_PC_START,

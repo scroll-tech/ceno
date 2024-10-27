@@ -82,7 +82,7 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
-    pub num_witin: WitnessId,
+    pub num_witin_fnord: WitnessId,
     pub witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
@@ -134,7 +134,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
 impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(root_name_fn: N) -> Self {
         Self {
-            num_witin: 0,
+            num_witin_fnord: 0,
             witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
@@ -200,8 +200,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     ) -> Result<WitIn, ZKVMError> {
         let wit_in = WitIn {
             id: {
-                let id = self.num_witin;
-                self.num_witin += 1;
+                let id = self.num_witin_fnord;
+                self.num_witin_fnord += 1;
                 id
             },
         };

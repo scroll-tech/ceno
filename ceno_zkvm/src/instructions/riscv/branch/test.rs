@@ -47,7 +47,7 @@ fn impl_opcode_beq(equal: bool) {
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, imm(8));
     let pc_offset = if equal { 8 } else { PC_STEP_SIZE };
     let (raw_witin, lkm) =
-        BeqInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        BeqInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
             StepRecord::new_b_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
@@ -96,7 +96,7 @@ fn impl_opcode_bne(equal: bool) {
     let insn_code = encode_rv32(InsnKind::BNE, 2, 3, 0, imm(8));
     let pc_offset = if equal { PC_STEP_SIZE } else { 8 };
     let (raw_witin, lkm) =
-        BneInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        BneInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
             StepRecord::new_b_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
@@ -148,7 +148,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     let insn_code = encode_rv32(InsnKind::BLTU, 2, 3, 0, imm(-8));
     println!("{:#b}", insn_code);
     let (raw_witin, lkm) =
-        BltuInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+        BltuInstruction::assign_instances(&config, circuit_builder.cs.num_witin_fnord as usize, vec![
             StepRecord::new_b_instruction(
                 12,
                 Change::new(MOCK_PC_START, pc_after),
@@ -200,7 +200,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
 
     let insn_code = encode_rv32(InsnKind::BGEU, 2, 3, 0, imm(-8));
     let (raw_witin, lkm) =
-        BgeuInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+        BgeuInstruction::assign_instances(&config, circuit_builder.cs.num_witin_fnord as usize, vec![
             StepRecord::new_b_instruction(
                 12,
                 Change::new(MOCK_PC_START, pc_after),
@@ -253,7 +253,7 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
 
     let insn_code = encode_rv32(InsnKind::BLT, 2, 3, 0, imm(-8));
     let (raw_witin, lkm) =
-        BltInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+        BltInstruction::assign_instances(&config, circuit_builder.cs.num_witin_fnord as usize, vec![
             StepRecord::new_b_instruction(
                 12,
                 Change::new(MOCK_PC_START, pc_after),
@@ -306,7 +306,7 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
 
     let insn_code = encode_rv32(InsnKind::BGE, 2, 3, 0, imm(-8));
     let (raw_witin, lkm) =
-        BgeInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+        BgeInstruction::assign_instances(&config, circuit_builder.cs.num_witin_fnord as usize, vec![
             StepRecord::new_b_instruction(
                 12,
                 Change::new(MOCK_PC_START, pc_after),
