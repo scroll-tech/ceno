@@ -42,10 +42,7 @@ pub trait TableCircuit<E: ExtensionField> {
         input: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
 
-    fn padding_zero(
-        table: &mut RowMajorMatrix<E::BaseField>,
-        num_witin: usize,
-    ) -> Result<(), ZKVMError> {
+    fn padding_zero(table: &mut RowMajorMatrix<E::BaseField>, num_witin: usize) {
         // Fill the padding with zeros, if any.
         let num_padding_instances = table.num_padding_instances();
         if num_padding_instances > 0 {

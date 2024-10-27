@@ -32,13 +32,11 @@ pub struct RamTableConfig<RAM: RamTable + Send + Sync + Clone> {
 }
 
 impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
-    pub fn construct_circuit<E: ExtensionField>(
-        cb: &mut CircuitBuilder<E>,
-    ) -> Result<Self, ZKVMError> {
+    pub fn construct_circuit<E: ExtensionField>(cb: &mut CircuitBuilder<E>) -> Self {
         let init_v = (0..RAM::V_LIMBS)
             .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
-            .collect::<Result<Vec<Fixed>, ZKVMError>>()?;
-        let addr = cb.create_fixed(|| "addr")?;
+            .collect::<Vec<_>>();
+        let addr = cb.create_fixed(|| "addr");
 
         let final_v = (0..RAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
@@ -55,12 +53,13 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             .concat(),
         );
 
+        // Bah, why, oh why do that folding into random-linear-combination here, and then have to explicitly carry the length around?
         let final_table = cb.rlc_chip_record(
             [
                 // a v t
                 vec![(RAM::RAM_TYPE as usize).into()],
                 vec![Expression::Fixed(addr)],
-                final_v.iter().map(|v| v.expr()).collect_vec(),
+                final_v.iter().map(ToExpr::expr).collect_vec(),
                 vec![final_cycle.expr()],
             ]
             .concat(),

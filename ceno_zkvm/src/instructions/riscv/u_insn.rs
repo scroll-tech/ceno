@@ -29,7 +29,7 @@ impl<E: ExtensionField> UInstructionConfig<E> {
         insn_kind: InsnKind,
         imm: &Expression<E>,
         rd_written: RegisterExpr<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
 
@@ -55,7 +55,7 @@ impl<E: ExtensionField> UInstructionConfig<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         self.vm_state.assign_instance(instance, step)?;
         self.rd.assign_instance(instance, lk_multiplicity, step)?;
 

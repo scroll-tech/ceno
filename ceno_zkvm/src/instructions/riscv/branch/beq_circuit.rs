@@ -35,18 +35,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder);
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder);
 
         let equal = IsEqualConfig::construct_circuit(
             circuit_builder,
             || "rs1==rs2",
             rs2_read.value(),
             rs1_read.value(),
-        )?;
+        );
 
         let branch_taken_bit = match I::INST_KIND {
             InsnKind::BEQ => equal.expr(),
@@ -60,14 +58,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             branch_taken_bit,
-        )?;
+        );
 
-        Ok(BeqConfig {
+        BeqConfig {
             b_insn,
             rs1_read,
             rs2_read,
             equal,
-        })
+        }
     }
 
     fn assign_instance(
@@ -75,10 +73,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         config
             .b_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
 
         let rs1_read = step.rs1().unwrap().value;
         config
@@ -94,8 +92,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
             instance,
             E::BaseField::from(rs2_read as u64),
             E::BaseField::from(rs1_read as u64),
-        )?;
-
-        Ok(())
+        );
     }
 }

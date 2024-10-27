@@ -32,14 +32,14 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         rd_written: RegisterExpr<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         // State in and out
-        let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
+        let vm_state = StateInOut::construct_circuit(circuit_builder, false);
 
         // Registers
-        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
-        let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts)?;
-        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
+        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts);
+        let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts);
+        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts);
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
@@ -50,14 +50,14 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             rs1.id.expr(),
             rs2.id.expr(),
             insn_kind.codes().func7.into(),
-        ))?;
+        ));
 
-        Ok(RInstructionConfig {
+        RInstructionConfig {
             vm_state,
             rs1,
             rs2,
             rd,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -65,15 +65,13 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rs2.assign_instance(instance, lk_multiplicity, step)?;
-        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+    ) {
+        self.vm_state.assign_instance(instance, step);
+        self.rs1.assign_instance(instance, lk_multiplicity, step);
+        self.rs2.assign_instance(instance, lk_multiplicity, step);
+        self.rd.assign_instance(instance, lk_multiplicity, step);
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
-
-        Ok(())
     }
 }

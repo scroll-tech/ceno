@@ -7,7 +7,7 @@ use crate::{
 use super::GlobalStateRegisterMachineChipOperations;
 
 impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'a, E> {
-    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {
+    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) {
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(RAMType::GlobalState as u64)),
             pc,
@@ -18,7 +18,7 @@ impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for Circ
         self.read_record(|| "state_in", rlc_record)
     }
 
-    fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {
+    fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) {
         let items: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(RAMType::GlobalState as u64)),
             pc,

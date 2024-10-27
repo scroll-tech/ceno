@@ -33,16 +33,7 @@ fn test_opcode_beq() {
 fn impl_opcode_beq(equal: bool) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "beq",
-            |cb| {
-                let config = BeqInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(|| "beq", |cb| BeqInstruction::construct_circuit(cb));
 
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, imm(8));
     let pc_offset = if equal { 8 } else { PC_STEP_SIZE };
@@ -56,8 +47,7 @@ fn impl_opcode_beq(equal: bool) {
                 if equal { A } else { B },
                 0,
             ),
-        ])
-        .unwrap();
+        ]);
 
     MockProver::assert_satisfied(
         &cb,
@@ -82,16 +72,7 @@ fn test_opcode_bne() {
 fn impl_opcode_bne(equal: bool) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "bne",
-            |cb| {
-                let config = BneInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(|| "bne", |cb| BneInstruction::construct_circuit(cb));
 
     let insn_code = encode_rv32(InsnKind::BNE, 2, 3, 0, imm(8));
     let pc_offset = if equal { PC_STEP_SIZE } else { 8 };
@@ -105,8 +86,7 @@ fn impl_opcode_bne(equal: bool) {
                 if equal { A } else { B },
                 0,
             ),
-        ])
-        .unwrap();
+        ]);
 
     MockProver::assert_satisfied(
         &cb,
@@ -123,21 +103,20 @@ fn impl_opcode_bne(equal: bool) {
 }
 
 #[test]
-fn test_bltu_circuit() -> Result<(), ZKVMError> {
-    impl_bltu_circuit(false, 1, 0)?;
-    impl_bltu_circuit(false, 0, 0)?;
-    impl_bltu_circuit(false, 0xFFFF_FFFF, 0xFFFF_FFFF)?;
+fn test_bltu_circuit() {
+    impl_bltu_circuit(false, 1, 0);
+    impl_bltu_circuit(false, 0, 0);
+    impl_bltu_circuit(false, 0xFFFF_FFFF, 0xFFFF_FFFF);
 
-    impl_bltu_circuit(true, 0, 1)?;
-    impl_bltu_circuit(true, 0xFFFF_FFFE, 0xFFFF_FFFF)?;
-    impl_bltu_circuit(true, 0xEFFF_FFFF, 0xFFFF_FFFF)?;
-    Ok(())
+    impl_bltu_circuit(true, 0, 1);
+    impl_bltu_circuit(true, 0xFFFF_FFFE, 0xFFFF_FFFF);
+    impl_bltu_circuit(true, 0xEFFF_FFFF, 0xFFFF_FFFF);
 }
 
-fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
+fn impl_bltu_circuit(taken: bool, a: u32, b: u32) {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BltuInstruction::construct_circuit(&mut circuit_builder)?;
+    let config = BltuInstruction::construct_circuit(&mut circuit_builder);
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)
@@ -157,8 +136,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
                 b as Word,
                 10,
             ),
-        ])
-        .unwrap();
+        ]);
 
     MockProver::assert_satisfied(
         &circuit_builder,
@@ -172,25 +150,23 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         None,
         Some(lkm),
     );
-    Ok(())
 }
 
 #[test]
-fn test_bgeu_circuit() -> Result<(), ZKVMError> {
-    impl_bgeu_circuit(true, 1, 0)?;
-    impl_bgeu_circuit(true, 0, 0)?;
-    impl_bgeu_circuit(true, 0xFFFF_FFFF, 0xFFFF_FFFF)?;
+fn test_bgeu_circuit() {
+    impl_bgeu_circuit(true, 1, 0);
+    impl_bgeu_circuit(true, 0, 0);
+    impl_bgeu_circuit(true, 0xFFFF_FFFF, 0xFFFF_FFFF);
 
-    impl_bgeu_circuit(false, 0, 1)?;
-    impl_bgeu_circuit(false, 0xFFFF_FFFE, 0xFFFF_FFFF)?;
-    impl_bgeu_circuit(false, 0xEFFF_FFFF, 0xFFFF_FFFF)?;
-    Ok(())
+    impl_bgeu_circuit(false, 0, 1);
+    impl_bgeu_circuit(false, 0xFFFF_FFFE, 0xFFFF_FFFF);
+    impl_bgeu_circuit(false, 0xEFFF_FFFF, 0xFFFF_FFFF);
 }
 
-fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
+fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BgeuInstruction::construct_circuit(&mut circuit_builder)?;
+    let config = BgeuInstruction::construct_circuit(&mut circuit_builder);
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)
@@ -209,8 +185,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
                 b as Word,
                 10,
             ),
-        ])
-        .unwrap();
+        ]);
 
     MockProver::assert_satisfied(
         &circuit_builder,
@@ -224,26 +199,24 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         None,
         Some(lkm),
     );
-    Ok(())
 }
 
 #[test]
-fn test_blt_circuit() -> Result<(), ZKVMError> {
-    impl_blt_circuit(false, 0, 0)?;
-    impl_blt_circuit(true, 0, 1)?;
+fn test_blt_circuit() {
+    impl_blt_circuit(false, 0, 0);
+    impl_blt_circuit(true, 0, 1);
 
-    impl_blt_circuit(false, 1, -10)?;
-    impl_blt_circuit(false, -10, -10)?;
-    impl_blt_circuit(false, -9, -10)?;
-    impl_blt_circuit(true, -9, 1)?;
-    impl_blt_circuit(true, -10, -9)?;
-    Ok(())
+    impl_blt_circuit(false, 1, -10);
+    impl_blt_circuit(false, -10, -10);
+    impl_blt_circuit(false, -9, -10);
+    impl_blt_circuit(true, -9, 1);
+    impl_blt_circuit(true, -10, -9);
 }
 
-fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
+fn impl_blt_circuit(taken: bool, a: i32, b: i32) {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BltInstruction::construct_circuit(&mut circuit_builder)?;
+    let config = BltInstruction::construct_circuit(&mut circuit_builder);
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)
@@ -262,8 +235,7 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
                 b as Word,
                 10,
             ),
-        ])
-        .unwrap();
+        ]);
 
     MockProver::assert_satisfied(
         &circuit_builder,
@@ -277,26 +249,24 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         None,
         Some(lkm),
     );
-    Ok(())
 }
 
 #[test]
-fn test_bge_circuit() -> Result<(), ZKVMError> {
-    impl_bge_circuit(true, 0, 0)?;
-    impl_bge_circuit(false, 0, 1)?;
+fn test_bge_circuit() {
+    impl_bge_circuit(true, 0, 0);
+    impl_bge_circuit(false, 0, 1);
 
-    impl_bge_circuit(true, 1, -10)?;
-    impl_bge_circuit(true, -10, -10)?;
-    impl_bge_circuit(true, -9, -10)?;
-    impl_bge_circuit(false, -9, 1)?;
-    impl_bge_circuit(false, -10, -9)?;
-    Ok(())
+    impl_bge_circuit(true, 1, -10);
+    impl_bge_circuit(true, -10, -10);
+    impl_bge_circuit(true, -9, -10);
+    impl_bge_circuit(false, -9, 1);
+    impl_bge_circuit(false, -10, -9);
 }
 
-fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
+fn impl_bge_circuit(taken: bool, a: i32, b: i32) {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BgeInstruction::construct_circuit(&mut circuit_builder)?;
+    let config = BgeInstruction::construct_circuit(&mut circuit_builder);
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)
@@ -315,8 +285,7 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
                 b as Word,
                 10,
             ),
-        ])
-        .unwrap();
+        ]);
 
     MockProver::assert_satisfied(
         &circuit_builder,
@@ -330,5 +299,4 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         None,
         Some(lkm),
     );
-    Ok(())
 }

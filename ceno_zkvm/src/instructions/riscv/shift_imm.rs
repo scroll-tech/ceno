@@ -109,7 +109,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
         match I::INST_KIND {
             InsnKind::SLLI => {

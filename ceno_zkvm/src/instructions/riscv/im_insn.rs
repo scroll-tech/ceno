@@ -31,16 +31,16 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
         memory_read: MemoryExpr<E>,
         memory_addr: AddressExpr<E>,
         rd_written: RegisterExpr<E>,
-    ) -> Result<Self, ZKVMError> {
-        let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
+    ) -> Self {
+        let vm_state = StateInOut::construct_circuit(circuit_builder, false);
 
         // Registers
-        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
-        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
+        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts);
+        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts);
 
         // Memory
         let mem_read =
-            ReadMEM::construct_circuit(circuit_builder, memory_addr, memory_read, vm_state.ts)?;
+            ReadMEM::construct_circuit(circuit_builder, memory_addr, memory_read, vm_state.ts);
 
         // Fetch the instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
@@ -51,14 +51,14 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
             rs1.id.expr(),
             0.into(),
             imm.clone(),
-        ))?;
+        ));
 
-        Ok(IMInstructionConfig {
+        IMInstructionConfig {
             vm_state,
             rs1,
             rd,
             mem_read,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -66,16 +66,14 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+    ) {
+        self.vm_state.assign_instance(instance, step);
+        self.rs1.assign_instance(instance, lk_multiplicity, step);
+        self.rd.assign_instance(instance, lk_multiplicity, step);
         self.mem_read
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
-
-        Ok(())
     }
 }

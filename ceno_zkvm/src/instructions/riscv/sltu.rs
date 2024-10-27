@@ -81,7 +81,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         config.r_insn.assign_instance(instance, lkm, step)?;
 
         let rs1 = step.rs1().unwrap().value;

@@ -26,7 +26,7 @@ impl OpTableConfig {
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
         table_len: usize,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         let abc = [
             cb.create_fixed(|| "a")?,
             cb.create_fixed(|| "b")?,

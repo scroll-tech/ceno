@@ -46,16 +46,7 @@ fn sw(_prev: Word, rs2: Word) -> Word {
 fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: u32) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || Inst::name(),
-            |cb| {
-                let config = Inst::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(|| Inst::name(), |cb| Inst::construct_circuit(cb));
 
     let insn_code = encode_rv32(I::INST_KIND, 2, 3, 0, imm);
     let prev_mem_value = 0x40302010;
@@ -85,8 +76,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
             },
             8,
         ),
-    ])
-    .unwrap();
+    ]);
 
     MockProver::assert_satisfied(
         &cb,

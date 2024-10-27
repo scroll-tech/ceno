@@ -33,21 +33,19 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         format!("{:?}", InsnKind::AUIPC)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<AuipcConfig<E>, ZKVMError> {
-        let imm = circuit_builder.create_witin(|| "imm")?;
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> AuipcConfig<E> {
+        let imm = circuit_builder.create_witin(|| "imm");
+        let rd_written = UInt::new(|| "rd_written", circuit_builder);
 
         let u_insn = UInstructionConfig::construct_circuit(
             circuit_builder,
             InsnKind::AUIPC,
             &imm.expr(),
             rd_written.register_expr(),
-        )?;
+        );
 
-        let overflow_bit = circuit_builder.create_witin(|| "overflow_bit")?;
-        circuit_builder.assert_bit(|| "is_bit", overflow_bit.expr())?;
+        let overflow_bit = circuit_builder.create_witin(|| "overflow_bit");
+        circuit_builder.assert_bit(|| "is_bit", overflow_bit.expr());
 
         // assert: imm + pc = rd_written + overflow_bit * 2^32
         // valid formulation of mod 2^32 arithmetic because:
@@ -57,14 +55,14 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             || "imm+pc = rd_written+2^32*overflow",
             imm.expr() + u_insn.vm_state.pc.expr(),
             rd_written.value() + overflow_bit.expr() * (1u64 << 32),
-        )?;
+        );
 
-        Ok(AuipcConfig {
+        AuipcConfig {
             u_insn,
             imm,
             overflow_bit,
             rd_written,
-        })
+        }
     }
 
     fn assign_instance(
@@ -72,7 +70,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let pc: u32 = step.pc().before.0;
         let imm: u32 = step.insn().imm_or_funct7();
         let (sum, overflow) = pc.overflowing_add(imm);
@@ -85,8 +83,6 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
 
         config
             .u_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
-        Ok(())
+            .assign_instance(instance, lk_multiplicity, step);
     }
 }

@@ -31,12 +31,10 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         format!("{:?}", Self::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new(|| "imm", circuit_builder)?;
-        let rd_written = rs1_read.add(|| "rs1_read + imm", circuit_builder, &imm, true)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder);
+        let imm = UInt::new(|| "imm", circuit_builder);
+        let rd_written = rs1_read.add(|| "rs1_read + imm", circuit_builder, &imm, true);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -45,14 +43,14 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
-        )?;
+        );
 
-        Ok(InstructionConfig {
+        InstructionConfig {
             i_insn,
             rs1_read,
             imm,
             rd_written,
-        })
+        }
     }
 
     fn assign_instance(
@@ -60,7 +58,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
 
@@ -73,9 +71,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
-        Ok(())
+            .assign_instance(instance, lk_multiplicity, step);
     }
 }
 
@@ -107,16 +103,10 @@ mod test {
     fn test_opcode_addi() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "addi",
-                |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace(
+            || "addi",
+            |cb| AddiInstruction::<GoldilocksExt2>::construct_circuit(cb),
+        );
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
@@ -130,8 +120,7 @@ mod test {
                 Change::new(0, 1003),
                 0,
             )],
-        )
-        .unwrap();
+        );
 
         MockProver::assert_satisfied(
             &cb,
@@ -151,16 +140,10 @@ mod test {
     fn test_opcode_addi_sub() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "addi",
-                |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace(
+            || "addi",
+            |cb| AddiInstruction::<GoldilocksExt2>::construct_circuit(cb),
+        );
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(-3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
@@ -174,8 +157,7 @@ mod test {
                 Change::new(0, 997),
                 0,
             )],
-        )
-        .unwrap();
+        );
 
         MockProver::assert_satisfied(
             &cb,

@@ -49,7 +49,7 @@ pub struct SingerCircuitBuilder<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> SingerCircuitBuilder<E> {
-    pub fn new(challenges: ChipChallenges) -> Result<Self, ZKVMError> {
+    pub fn new(challenges: ChipChallenges) -> Self {
         let mut insts_circuits = Vec::with_capacity(256);
         for opcode in 0..=255 {
             insts_circuits.push(construct_instruction_circuits(opcode, challenges)?);

@@ -216,7 +216,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         config: &OC::InstructionConfig,
         records: Vec<StepRecord>,
-    ) -> Result<(), ZKVMError> {
+    ) {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
@@ -263,7 +263,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
         input: &TC::WitnessInput,
-    ) -> Result<(), ZKVMError> {
+    ) {
         assert!(self.combined_lk_mlt.is_some());
 
         let cs = cs.get_cs(&TC::name()).unwrap();

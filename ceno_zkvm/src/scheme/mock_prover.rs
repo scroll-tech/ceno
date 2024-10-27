@@ -709,9 +709,7 @@ mod tests {
     }
 
     impl AssertZeroCircuit {
-        pub fn construct_circuit(
-            cb: &mut CircuitBuilder<GoldilocksExt2>,
-        ) -> Result<Self, ZKVMError> {
+        pub fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
             let c = cb.create_witin(|| "c")?;
@@ -763,9 +761,7 @@ mod tests {
     }
 
     impl RangeCheckCircuit {
-        pub fn construct_circuit(
-            cb: &mut CircuitBuilder<GoldilocksExt2>,
-        ) -> Result<Self, ZKVMError> {
+        pub fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
             let a = cb.create_witin(|| "a")?;
             cb.assert_ux::<_, _, 5>(|| "assert u5", a.expr())?;
             Ok(Self { a })
@@ -846,7 +842,7 @@ mod tests {
     }
 
     impl AssertLtCircuit {
-        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
             let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
@@ -858,7 +854,7 @@ mod tests {
             instance: &mut [MaybeUninit<E::BaseField>],
             input: AssertLtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
-        ) -> Result<(), ZKVMError> {
+        ) {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
             self.lt_wtns
@@ -970,7 +966,7 @@ mod tests {
     }
 
     impl LtCircuit {
-        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
             let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
@@ -982,7 +978,7 @@ mod tests {
             instance: &mut [MaybeUninit<E::BaseField>],
             input: LtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
-        ) -> Result<(), ZKVMError> {
+        ) {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
             self.lt_wtns

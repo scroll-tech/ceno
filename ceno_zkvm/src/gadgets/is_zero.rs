@@ -24,26 +24,22 @@ impl IsZeroConfig {
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
         x: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         cb.namespace(name_fn, |cb| {
-            let is_zero = cb.create_witin(|| "is_zero")?;
-            let inverse = cb.create_witin(|| "inv")?;
+            let is_zero = cb.create_witin(|| "is_zero");
+            let inverse = cb.create_witin(|| "inv");
 
             // x==0 => is_zero=1
-            cb.require_one(|| "is_zero_1", is_zero.expr() + x.clone() * inverse.expr())?;
+            cb.require_one(|| "is_zero_1", is_zero.expr() + x.clone() * inverse.expr());
 
             // x!=0 => is_zero=0
-            cb.require_zero(|| "is_zero_0", is_zero.expr() * x.clone())?;
+            cb.require_zero(|| "is_zero_0", is_zero.expr() * x.clone());
 
-            Ok(IsZeroConfig { is_zero, inverse })
+            IsZeroConfig { is_zero, inverse }
         })
     }
 
-    pub fn assign_instance<F: SmallField>(
-        &self,
-        instance: &mut [MaybeUninit<F>],
-        x: F,
-    ) -> Result<(), ZKVMError> {
+    pub fn assign_instance<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], x: F) {
         let (is_zero, inverse) = if x.is_zero_vartime() {
             (F::ONE, F::ZERO)
         } else {
@@ -52,8 +48,6 @@ impl IsZeroConfig {
 
         set_val!(instance, self.is_zero, is_zero);
         set_val!(instance, self.inverse, inverse);
-
-        Ok(())
     }
 }
 
@@ -69,20 +63,11 @@ impl IsEqualConfig {
         name_fn: N,
         a: Expression<E>,
         b: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
-        Ok(IsEqualConfig(IsZeroConfig::construct_circuit(
-            cb,
-            name_fn,
-            a - b,
-        )?))
+    ) -> Self {
+        IsEqualConfig(IsZeroConfig::construct_circuit(cb, name_fn, a - b))
     }
 
-    pub fn assign_instance<F: SmallField>(
-        &self,
-        instance: &mut [MaybeUninit<F>],
-        a: F,
-        b: F,
-    ) -> Result<(), ZKVMError> {
+    pub fn assign_instance<F: SmallField>(&self, instance: &mut [MaybeUninit<F>], a: F, b: F) {
         self.0.assign_instance(instance, a - b)
     }
 }

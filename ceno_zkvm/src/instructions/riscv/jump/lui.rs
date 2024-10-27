@@ -29,10 +29,8 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
         format!("{:?}", InsnKind::LUI)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<LuiConfig<E>, ZKVMError> {
-        let rd_written = UInt::new(|| "rd_limbs", circuit_builder)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> LuiConfig<E> {
+        let rd_written = UInt::new(|| "rd_limbs", circuit_builder);
 
         // rd_written = imm, so just enforce that U-type immediate from program
         // table is equal to rd_written value
@@ -41,9 +39,9 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
             InsnKind::LUI,
             &rd_written.value(), // instruction immediate for program table lookup
             rd_written.register_expr(),
-        )?;
+        );
 
-        Ok(LuiConfig { u_insn, rd_written })
+        LuiConfig { u_insn, rd_written }
     }
 
     fn assign_instance(
@@ -51,14 +49,12 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         config
             .u_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
 
         let rd = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
         config.rd_written.assign_limbs(instance, rd.as_u16_limbs());
-
-        Ok(())
     }
 }

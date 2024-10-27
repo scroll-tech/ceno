@@ -17,9 +17,9 @@ pub mod utils;
 pub mod test;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
-    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
+    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>);
 
-    fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
+    fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>);
 }
 
 /// The common representation of a register value.
@@ -34,7 +34,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> (Expression<E>, AssertLTConfig);
 
     #[allow(clippy::too_many_arguments)]
     fn register_write(
@@ -45,7 +45,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> (Expression<E>, AssertLTConfig);
 }
 
 /// The common representation of a memory address.
@@ -63,7 +63,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> (Expression<E>, AssertLTConfig);
 
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
@@ -75,5 +75,5 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> (Expression<E>, AssertLTConfig);
 }

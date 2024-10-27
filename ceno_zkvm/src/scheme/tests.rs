@@ -76,7 +76,7 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
         instance: &mut [MaybeUninit<E::BaseField>],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, config.reg_id, E::BaseField::ONE);
 
         Ok(())

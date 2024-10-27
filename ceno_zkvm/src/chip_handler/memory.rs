@@ -20,7 +20,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
+    ) -> (Expression<E>, AssertLTConfig) {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -46,8 +46,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 ]
                 .concat(),
             );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            cb.read_record(|| "read_record", read_record);
+            cb.write_record(|| "write_record", write_record);
 
             // assert prev_ts < current_ts
             let lt_cfg = AssertLTConfig::construct_circuit(
@@ -56,11 +56,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 prev_ts,
                 ts.clone(),
                 UINT_LIMBS,
-            )?;
+            );
 
             let next_ts = ts + 1;
 
-            Ok((next_ts, lt_cfg))
+            (next_ts, lt_cfg)
         })
     }
 
@@ -72,7 +72,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
+    ) -> (Expression<E>, AssertLTConfig) {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -98,8 +98,8 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 ]
                 .concat(),
             );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            cb.read_record(|| "read_record", read_record);
+            cb.write_record(|| "write_record", write_record);
 
             let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,
@@ -107,11 +107,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 prev_ts,
                 ts.clone(),
                 UINT_LIMBS,
-            )?;
+            );
 
             let next_ts = ts + 1;
 
-            Ok((next_ts, lt_cfg))
+            (next_ts, lt_cfg)
         })
     }
 }

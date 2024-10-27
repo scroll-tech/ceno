@@ -32,13 +32,13 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rd_written: RegisterExpr<E>,
         branching: bool,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         // State in and out
-        let vm_state = StateInOut::construct_circuit(circuit_builder, branching)?;
+        let vm_state = StateInOut::construct_circuit(circuit_builder, branching);
 
         // Registers
-        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
-        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
+        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts);
+        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts);
 
         // TODO make imm representation consistent between instruction types
 
@@ -51,9 +51,9 @@ impl<E: ExtensionField> IInstructionConfig<E> {
             rs1.id.expr(),
             0.into(),
             imm.clone(),
-        ))?;
+        ));
 
-        Ok(IInstructionConfig { vm_state, rs1, rd })
+        IInstructionConfig { vm_state, rs1, rd }
     }
 
     pub fn assign_instance(
@@ -61,14 +61,12 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+    ) {
+        self.vm_state.assign_instance(instance, step);
+        self.rs1.assign_instance(instance, lk_multiplicity, step);
+        self.rd.assign_instance(instance, lk_multiplicity, step);
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
-
-        Ok(())
     }
 }
