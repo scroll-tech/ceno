@@ -5,7 +5,6 @@ use itertools::{Itertools, izip};
 use super::{UIntLimbs, UintLimb};
 use crate::{
     circuit_builder::CircuitBuilder,
-    create_witin_from_expr,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLTConfig,
@@ -281,7 +280,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .iter()
             .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
 
-        let sum_flag = create_witin_from_expr!(|| "sum_flag", circuit_builder, false, sum_expr)?;
+        let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
         let (is_equal, diff_inv) =
             circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
         Ok(IsEqualConfig {
@@ -314,7 +313,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         let inv_128 = F::from(128).invert().unwrap();
         let msb = (high_limb - high_limb_no_msb.expr()) * Expression::Constant(inv_128);
-        let msb = create_witin_from_expr!(|| "msb", circuit_builder, false, msb)?;
+        let msb = WitIn::from_expr(|| "msb", circuit_builder, msb, false)?;
         Ok(MsbConfig {
             msb,
             high_limb_no_msb,
@@ -359,7 +358,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .rev()
             .enumerate()
             .map(|(i, expr)| {
-                create_witin_from_expr!(|| format!("si_expr_{i}"), circuit_builder, false, expr)
+                WitIn::from_expr(|| format!("si_expr_{i}"), circuit_builder, expr, false)
             })
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
@@ -394,10 +393,8 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         // check the first byte difference has a inverse
         // unwrap is safe because vector len > 0
-        let lhs_ne_byte =
-            create_witin_from_expr!(|| "lhs_ne_byte", circuit_builder, false, sa.clone())?;
-        let rhs_ne_byte =
-            create_witin_from_expr!(|| "rhs_ne_byte", circuit_builder, false, sb.clone())?;
+        let lhs_ne_byte = WitIn::from_expr(|| "lhs_ne_byte", circuit_builder, sa.clone(), false)?;
+        let rhs_ne_byte = WitIn::from_expr(|| "rhs_ne_byte", circuit_builder, sb.clone(), false)?;
         let index_ne = si.first().unwrap();
         circuit_builder.require_zero(
             || "byte inverse check",

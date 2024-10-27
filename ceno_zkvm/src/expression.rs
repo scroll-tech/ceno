@@ -639,22 +639,6 @@ impl WitIn {
     }
 }
 
-#[macro_export]
-/// this is to avoid non-monomial expression
-macro_rules! create_witin_from_expr {
-    // Handle the case for a single expression
-    ($name:expr, $builder:expr, $debug:expr, $e:expr) => {
-        WitIn::from_expr($name, $builder, $e, $debug)
-    };
-    // Recursively handle multiple expressions and create a flat tuple with error handling
-    ($name:expr, $builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
-        {
-            // Return a Result tuple, handling errors
-            Ok::<_, ZKVMError>((WitIn::from_expr($name, $builder, $e, $debug)?, $(WitIn::from_expr($name, $builder, $rest)?),*))
-        }
-    };
-}
-
 pub trait ToExpr<E: ExtensionField> {
     type Output;
     fn expr(&self) -> Self::Output;
