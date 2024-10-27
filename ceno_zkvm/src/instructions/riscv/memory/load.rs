@@ -13,7 +13,6 @@ use crate::{
     },
     set_val,
     tables::InsnRecord,
-    uint::UintLimb,
     witness::LkMultiplicity,
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
@@ -145,11 +144,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 (Some(sext_config), rd_written)
             }
             InsnKind::LHU => {
-                let mut rd_written = UInt::new_as_empty();
-                rd_written.limbs =
-                    UintLimb::Expression(vec![Expression::ZERO, target_limb.unwrap().expr()]);
-
-                (None, rd_written)
+                (
+                    None,
+                    // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
+                    UInt::from_exprs_unchecked(vec![
+                        Expression::ZERO,
+                        target_limb.as_ref().map(|limb| limb.expr()).unwrap(),
+                    ])
+                    .unwrap(),
+                )
             }
             InsnKind::LB => {
                 let val = target_limb_bytes.clone().unwrap()[0];
@@ -159,13 +162,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 (Some(sext_config), rd_written)
             }
             InsnKind::LBU => {
-                let mut rd_written = UInt::new_as_empty();
-                rd_written.limbs = UintLimb::Expression(vec![
-                    Expression::ZERO,
-                    target_limb_bytes.clone().unwrap()[0].expr(),
-                ]);
-
-                (None, rd_written)
+                (
+                    None,
+                    // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
+                    UInt::from_exprs_unchecked(vec![
+                        Expression::ZERO,
+                        target_limb_bytes
+                            .as_ref()
+                            .map(|bytes| bytes[0].expr())
+                            .unwrap(),
+                    ])
+                    .unwrap(),
+                )
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };

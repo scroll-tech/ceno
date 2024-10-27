@@ -5,7 +5,6 @@ use crate::{
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::{constants::UInt, insn_base::MemAddr},
     set_val,
-    uint::UintLimb,
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
@@ -261,21 +260,14 @@ impl SignedExtendConfig {
     pub fn signed_extended_value<E: ExtensionField>(&self, val: Expression<E>) -> UInt<E> {
         assert_eq!(UInt::<E>::LIMB_BITS, 16);
 
-        let mut ret = UInt::new_as_empty();
-        match self.n_bits {
-            8 => {
-                ret.limbs = UintLimb::Expression(vec![
-                    self.msb.expr() * 0xff00 + val,
-                    self.msb.expr() * 0xffff,
-                ]);
-            }
-            16 => {
-                ret.limbs = UintLimb::Expression(vec![val, self.msb.expr() * 0xffff]);
-            }
+        let limb0 = match self.n_bits {
+            8 => self.msb.expr() * 0xff00 + val,
+            16 => val,
             _ => unreachable!("unsupported N_BITS = {}", self.n_bits),
-        }
+        };
 
-        ret
+        // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
+        UInt::from_exprs_unchecked(vec![limb0, self.msb.expr() * 0xffff]).unwrap()
     }
 
     pub fn assign_instance<E: ExtensionField>(
