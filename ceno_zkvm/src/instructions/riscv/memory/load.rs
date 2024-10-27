@@ -148,8 +148,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                     None,
                     // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
                     UInt::from_exprs_unchecked(vec![
-                        Expression::ZERO,
                         target_limb.as_ref().map(|limb| limb.expr()).unwrap(),
+                        Expression::ZERO,
                     ])
                     .unwrap(),
                 )
@@ -166,11 +166,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                     None,
                     // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
                     UInt::from_exprs_unchecked(vec![
-                        Expression::ZERO,
                         target_limb_bytes
                             .as_ref()
                             .map(|bytes| bytes[0].expr())
                             .unwrap(),
+                        Expression::ZERO,
                     ])
                     .unwrap(),
                 )

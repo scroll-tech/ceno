@@ -56,7 +56,7 @@ fn signed_extend(val: u32, n_bits: u32) -> u32 {
 }
 
 fn load(mem_value: Word, insn: InsnKind, shift: u32) -> Word {
-    let val = mem_value >> shift;
+    let val = mem_value >> (8 * shift);
     match insn {
         InsnKind::LB => signed_extend(val & 0xff_u32, 8),
         InsnKind::LBU => val & 0xff_u32,
