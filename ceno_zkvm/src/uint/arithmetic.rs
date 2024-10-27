@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{Itertools, izip};
+use itertools::{Itertools, enumerate, izip};
 
 use super::{UIntLimbs, UintLimb};
 use crate::{
@@ -364,16 +364,12 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
 
         // check byte diff that before the first non-zero i_0 equals zero
-        si.iter()
-            .zip(self.limbs.iter())
-            .zip(rhs.limbs.iter())
-            .enumerate()
-            .try_for_each(|(i, ((flag, a), b))| {
-                circuit_builder.require_zero(
-                    || format!("byte diff {i} zero check"),
-                    a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
-                )
-            })?;
+        enumerate(izip!(&si, &self.limbs, &rhs.limbs)).try_for_each(|(i, (flag, a, b))| {
+            circuit_builder.require_zero(
+                || format!("byte diff {i} zero check"),
+                a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
+            )
+        })?;
 
         // define accumulated byte sum
         // when a!= b, sa should equal the first non-zero byte a[i_0]

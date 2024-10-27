@@ -34,6 +34,30 @@ pub enum UintLimb<E: ExtensionField> {
     Expression(Vec<Expression<E>>),
 }
 
+impl<E: ExtensionField> IntoIterator for UintLimb<E> {
+    type Item = WitIn;
+    type IntoIter = std::vec::IntoIter<WitIn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            UintLimb::WitIn(wits) => wits.into_iter(),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl<'a, E: ExtensionField> IntoIterator for &'a UintLimb<E> {
+    type Item = &'a WitIn;
+    type IntoIter = std::slice::Iter<'a, WitIn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            UintLimb::WitIn(wits) => wits.iter(),
+            _ => unimplemented!(),
+        }
+    }
+}
+
 impl<E: ExtensionField> UintLimb<E> {
     pub fn iter(&self) -> impl Iterator<Item = &WitIn> {
         match self {
