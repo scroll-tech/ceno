@@ -243,22 +243,22 @@ impl SignedExtendConfig {
         // assert 2*val - msb*2^N_BITS is within range [0, 2^N_BITS)
         // - if val < 2^(N_BITS-1), then 2*val < 2^N_BITS, msb can only be zero.
         // - otherwise, 2*val >= 2^N_BITS, then msb can only be one.
-        match n_bits {
-            8 => cb.assert_ux::<_, _, 8>(
-                || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
-                2 * val - msb.expr() * (1 << n_bits),
-            )?,
-            16 => cb.assert_ux::<_, _, 16>(
-                || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
-                2 * val - msb.expr() * (1 << n_bits),
-            )?,
+        let assert_ux = match n_bits {
+            8 => CircuitBuilder::<E>::assert_ux::<_, _, 8>,
+            16 => CircuitBuilder::<E>::assert_ux::<_, _, 16>,
             _ => unreachable!("unsupported n_bits = {}", n_bits),
-        }
+        };
+        assert_ux(
+            cb,
+            || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
+            2 * val - msb.expr() * (1 << n_bits),
+        )?;
 
         Ok(SignedExtendConfig { msb, n_bits })
     }
 
-    pub fn sext_value<E: ExtensionField>(&self, val: Expression<E>) -> UInt<E> {
+    /// Get the signed extended value
+    pub fn signed_extended_value<E: ExtensionField>(&self, val: Expression<E>) -> UInt<E> {
         assert_eq!(UInt::<E>::LIMB_BITS, 16);
 
         let mut ret = UInt::new_as_empty();
@@ -286,11 +286,13 @@ impl SignedExtendConfig {
     ) -> Result<(), ZKVMError> {
         let msb = val >> (self.n_bits - 1);
 
-        match self.n_bits {
-            8 => lk_multiplicity.assert_ux::<8>(2 * val - (msb << self.n_bits)),
-            16 => lk_multiplicity.assert_ux::<16>(2 * val - (msb << self.n_bits)),
+        let assert_ux = match self.n_bits {
+            8 => LkMultiplicity::assert_ux::<8>,
+            16 => LkMultiplicity::assert_ux::<16>,
             _ => unreachable!("unsupported n_bits = {}", self.n_bits),
-        }
+        };
+
+        assert_ux(lk_multiplicity, 2 * val - (msb << self.n_bits));
         set_val!(instance, self.msb, E::BaseField::from(msb));
 
         Ok(())

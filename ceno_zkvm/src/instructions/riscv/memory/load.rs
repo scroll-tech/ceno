@@ -135,12 +135,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             }
             _ => None,
         };
-        let (sext_config, rd_written) = match I::INST_KIND {
+        let (signed_extend_config, rd_written) = match I::INST_KIND {
             InsnKind::LW => (None, memory_read.clone()),
             InsnKind::LH => {
                 let val = target_limb.unwrap();
                 let sext_config = SignedExtendConfig::construct_limb(circuit_builder, val.expr())?;
-                let rd_written = sext_config.sext_value(val.expr());
+                let rd_written = sext_config.signed_extended_value(val.expr());
 
                 (Some(sext_config), rd_written)
             }
@@ -154,7 +154,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             InsnKind::LB => {
                 let val = target_limb_bytes.clone().unwrap()[0];
                 let sext_config = SignedExtendConfig::construct_byte(circuit_builder, val.expr())?;
-                let rd_written = sext_config.sext_value(val.expr());
+                let rd_written = sext_config.signed_extended_value(val.expr());
 
                 (Some(sext_config), rd_written)
             }
@@ -188,7 +188,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             memory_read,
             target_limb,
             target_limb_bytes,
-            signed_extend_config: sext_config,
+            signed_extend_config,
         })
     }
 
