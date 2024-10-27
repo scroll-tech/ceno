@@ -67,14 +67,12 @@ impl NameSpace {
 #[derive(Clone, Debug)]
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
-    // This only records a single expression; and we are handling doing a vector of expressions manually elsewhere.  Blargh.
     pub values: Expression<E>,
     pub table_len: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
-    // Why, oh why?  Why not just a vector of expressions?
     pub values: Expression<E>,
     pub table_len: usize,
 }
@@ -241,11 +239,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         )
     }
 
-    // TODO(Matthias): what does this one do?
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        // Looks like this one only works for ROM?
         rom_type: ROMType,
         items: Vec<Expression<E>>,
     ) {

@@ -114,7 +114,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.write_record(name_fn, rlc_record)
     }
 
-    // Is this Vec supposed to be a tuple of expressions, ie a record/struct?
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         self.cs.rlc_chip_record(records)
     }

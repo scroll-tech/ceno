@@ -52,7 +52,6 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             .concat(),
         );
 
-        // Bah, why, oh why do that folding into random-linear-combination here, and then have to explicitly carry the length around?
         let final_table = cb.rlc_chip_record(
             [
                 // a v t
