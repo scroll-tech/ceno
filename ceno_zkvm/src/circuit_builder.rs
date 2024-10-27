@@ -131,10 +131,6 @@ pub struct ConstraintSystem<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ConstraintSystem<E> {
-    pub fn num_witin(&self) -> usize {
-        self.witin_namespace_map.len()
-    }
-
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(root_name_fn: N) -> Self {
         Self {
             witin_namespace_map: vec![],
@@ -194,6 +190,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 fixed_commit,
             },
         }
+    }
+
+    pub fn num_witin(&self) -> usize {
+        self.witin_namespace_map.len()
     }
 
     pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(
