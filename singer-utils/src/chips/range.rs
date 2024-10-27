@@ -33,21 +33,23 @@ pub(crate) fn construct_range_table_and_witness<E: ExtensionField>(
     bit_with: usize,
     challenges: &ChipChallenges,
     real_challenges: &[E],
-) -> Result<(PredType, usize), UtilError> {
+) -> (PredType, usize) {
     let range_circuit = construct_circuit(challenges);
 
-    let table_node_id = builder.add_node_with_witness(
-        "range table circuit",
-        &range_circuit,
-        vec![],
-        real_challenges.to_vec(),
-        vec![],
-        1 << RANGE_CHIP_BIT_WIDTH,
-    )?;
-    Ok((
+    let table_node_id = builder
+        .add_node_with_witness(
+            "range table circuit",
+            &range_circuit,
+            vec![],
+            real_challenges.to_vec(),
+            vec![],
+            1 << RANGE_CHIP_BIT_WIDTH,
+        )
+        .unwrap();
+    (
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
         bit_with - 1,
-    ))
+    )
 }
 
 /// Add range table circuit to the circuit graph. Return node id and lookup
@@ -56,12 +58,14 @@ pub(crate) fn construct_range_table<E: ExtensionField>(
     builder: &mut CircuitGraphBuilder<E>,
     bit_with: usize,
     challenges: &ChipChallenges,
-) -> Result<(PredType, usize), UtilError> {
+) -> (PredType, usize) {
     let range_circuit = construct_circuit(challenges);
 
-    let table_node_id = builder.add_node("range table circuit", &range_circuit, vec![])?;
-    Ok((
+    let table_node_id = builder
+        .add_node("range table circuit", &range_circuit, vec![])
+        .unwrap();
+    (
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
         bit_with - 1,
-    ))
+    )
 }

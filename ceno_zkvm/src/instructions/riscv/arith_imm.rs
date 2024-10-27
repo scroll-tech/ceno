@@ -4,8 +4,7 @@ use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
 use crate::{
-    Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    witness::LkMultiplicity,
+    Value, circuit_builder::CircuitBuilder, instructions::Instruction, witness::LkMultiplicity,
 };
 
 use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};

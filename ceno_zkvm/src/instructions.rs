@@ -9,7 +9,6 @@ use rayon::{
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     scheme::constants::MIN_PAR_SIZE,
     witness::{LkMultiplicity, RowMajorMatrix},
 };

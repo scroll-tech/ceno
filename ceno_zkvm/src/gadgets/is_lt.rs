@@ -9,7 +9,6 @@ use crate::{
     Value,
     chip_handler::utils::power_sequence,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     set_val,

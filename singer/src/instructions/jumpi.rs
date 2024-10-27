@@ -53,15 +53,15 @@ register_witness!(
 impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMPI;
     const NAME: &'static str = "JUMPI";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> InstCircuit<E> {
         let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
-        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
-        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
+        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()]).unwrap();
+        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()]).unwrap();
         let memory_ts = &phase0[Self::phase0_memory_ts()];
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
@@ -82,20 +82,22 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
             &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
-        )?;
+        );
 
         // Pop the destination pc from stack.
         let dest_values = &phase0[Self::phase0_dest_values()];
         let dest_stack_addr = stack_top_expr.sub(E::BaseField::ONE);
 
-        let old_stack_ts_dest = (&phase0[Self::phase0_old_stack_ts_dest()]).try_into()?;
+        let old_stack_ts_dest = (&phase0[Self::phase0_old_stack_ts_dest()])
+            .try_into()
+            .unwrap();
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_stack_ts_dest,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_dest_lt()],
-        )?;
+        );
         StackChip::pop(
             &mut chip_handler,
             &mut circuit_builder,
@@ -106,14 +108,16 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
 
         // Pop the condition from stack.
         let cond_values = &phase0[Self::phase0_cond_values()];
-        let old_stack_ts_cond = (&phase0[Self::phase0_old_stack_ts_cond()]).try_into()?;
+        let old_stack_ts_cond = (&phase0[Self::phase0_old_stack_ts_cond()])
+            .try_into()
+            .unwrap();
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_stack_ts_cond,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_cond_lt()],
-        )?;
+        );
 
         StackChip::pop(
             &mut chip_handler,
@@ -132,7 +136,7 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
                 &mut circuit_builder,
                 *val,
                 *wit,
-            )?);
+            ));
         }
         // cond_non_zero = [summation of cond_values_non_zero[i] != 0]
         let non_zero_or = circuit_builder.create_cell();
@@ -145,11 +149,11 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
             &mut circuit_builder,
             non_zero_or,
             cond_non_zero_or_inv,
-        )?;
+        );
 
         // If cond_non_zero, next_pc = dest, otherwise, pc = pc + 1
         let pc_add_1 = &phase0[Self::phase0_pc_add()];
-        let pc_plus_1 = RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, pc_add_1)?;
+        let pc_plus_1 = RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, pc_add_1);
         let pc_plus_1 = pc_plus_1.values();
         let next_pc = circuit_builder.create_cells(PCUInt::N_OPERAND_CELLS);
         for i in 0..PCUInt::N_OPERAND_CELLS {
@@ -198,13 +202,13 @@ impl<E: ExtensionField> Instruction<E> for JumpiInstruction {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
-        Ok(InstCircuit {
+        InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
                 phases_wire_id: vec![phase0_wire_id],
                 ..Default::default()
             },
-        })
+        }
     }
 }

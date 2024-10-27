@@ -54,22 +54,24 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
         to_chip_ids: &[Option<(WitnessId, usize)>],
         real_challenges: &[E],
         real_n_instances: usize,
-    ) -> Result<(), UtilError> {
+    ) {
         let mut build = |real_n_instances: usize,
                          num: usize,
                          input_wit_id: WitnessId,
                          leaf: &LeafCircuit<E>,
                          inner: &Arc<Circuit<E>>|
-         -> Result<NodeOutputType, UtilError> {
+         -> NodeOutputType {
             let selector = ChipCircuitGadgets::construct_prefix_selector(real_n_instances, num);
-            let selector_node_id = graph_builder.add_node_with_witness(
-                "selector circuit",
-                &selector.circuit,
-                vec![],
-                real_challenges.to_vec(),
-                vec![],
-                real_n_instances.next_power_of_two(),
-            )?;
+            let selector_node_id = graph_builder
+                .add_node_with_witness(
+                    "selector circuit",
+                    &selector.circuit,
+                    vec![],
+                    real_challenges.to_vec(),
+                    vec![],
+                    real_n_instances.next_power_of_two(),
+                )
+                .unwrap();
             let mut preds = vec![PredType::Source; 2];
             preds[leaf.input_id as usize] =
                 PredType::PredWire(NodeOutputType::WireOut(node_id, input_wit_id));
@@ -99,7 +101,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
                     id,
                     &self.chip_circuit_gadgets.product_leaf,
                     &self.chip_circuit_gadgets.product_inner,
-                )?;
+                );
                 self.output_wires_id[output_type as usize].push(out);
             }
         }
@@ -115,12 +117,10 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
                     id,
                     &self.chip_circuit_gadgets.inv_sum,
                     &self.chip_circuit_gadgets.frac_sum_inner,
-                )?;
+                );
                 self.output_wires_id[output_type as usize].push(out);
             }
         }
-
-        Ok(())
     }
 
     /// Construct the product of frac sum circuits for to chips of each circuit.
@@ -132,16 +132,17 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
         node_id: usize,
         to_chip_ids: &[Option<(WitnessId, usize)>],
         real_n_instances: usize,
-    ) -> Result<(), UtilError> {
+    ) {
         let mut build = |n_instances: usize,
                          num: usize,
                          input_wit_id: WitnessId,
                          leaf: &LeafCircuit<E>,
                          inner: &Arc<Circuit<E>>|
-         -> Result<NodeOutputType, UtilError> {
+         -> NodeOutputType {
             let selector = ChipCircuitGadgets::construct_prefix_selector(n_instances, num);
-            let selector_node_id =
-                graph_builder.add_node("selector circuit", &selector.circuit, vec![])?;
+            let selector_node_id = graph_builder
+                .add_node("selector circuit", &selector.circuit, vec![])
+                .unwrap();
             let mut preds = vec![PredType::Source; 2];
             preds[leaf.input_id as usize] =
                 PredType::PredWire(NodeOutputType::WireOut(node_id, input_wit_id));
@@ -167,7 +168,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
                     id,
                     &self.chip_circuit_gadgets.product_leaf,
                     &self.chip_circuit_gadgets.product_inner,
-                )?;
+                );
                 self.output_wires_id[output_type as usize].push(out);
             }
         }
@@ -181,12 +182,10 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
                     id,
                     &self.chip_circuit_gadgets.inv_sum,
                     &self.chip_circuit_gadgets.frac_sum_inner,
-                )?;
+                );
                 self.output_wires_id[output_type as usize].push(out);
             }
         }
-
-        Ok(())
     }
 
     /// Construct circuits and witnesses to generate the lookup table for each
@@ -200,7 +199,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
         mut table_count_witness: Vec<DenseMultilinearExtension<E>>,
         challenges: &ChipChallenges,
         real_challenges: &[E],
-    ) -> Result<Vec<NodeOutputType>, UtilError> {
+    ) -> Vec<NodeOutputType> {
         let mut tables_out = vec![NodeOutputType::OutputLayer(0); LookupChipType::iter().count()];
 
         let leaf = &self.chip_circuit_gadgets.frac_sum_leaf;
@@ -219,7 +218,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             bytecode,
             challenges,
             real_challenges,
-        )?;
+        );
         let (preds, sources) = pred_source(
             LookupChipType::BytecodeChip as usize,
             input_pred,
@@ -233,14 +232,14 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             sources,
             real_challenges,
             instance_num_vars,
-        )?;
+        );
 
         let (input_pred, selector_pred, instance_num_vars) = construct_calldata_table_and_witness(
             graph_builder,
             program_input,
             challenges,
             real_challenges,
-        )?;
+        );
         let (preds, sources) = pred_source(
             LookupChipType::CalldataChip as usize,
             input_pred,
@@ -254,7 +253,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             sources,
             real_challenges,
             instance_num_vars,
-        )?;
+        );
 
         let leaf = &self.chip_circuit_gadgets.frac_sum_leaf_no_selector;
         let mut preds_no_selector = |table_type, table_pred| {
@@ -269,7 +268,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             RANGE_CHIP_BIT_WIDTH,
             challenges,
             real_challenges,
-        )?;
+        );
         let (preds, sources) = preds_no_selector(LookupChipType::RangeChip as usize, input_pred);
         tables_out[LookupChipType::RangeChip as usize] = build_tree_graph_and_witness(
             graph_builder,
@@ -279,8 +278,8 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             sources,
             real_challenges,
             instance_num_vars,
-        )?;
-        Ok(tables_out)
+        );
+        tables_out
     }
 
     /// Construct circuits to generate the lookup table for each table, including
@@ -292,7 +291,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
         byte_code_len: usize,
         program_input_len: usize,
         challenges: &ChipChallenges,
-    ) -> Result<Vec<NodeOutputType>, UtilError> {
+    ) -> Vec<NodeOutputType> {
         let mut tables_out = vec![NodeOutputType::OutputLayer(0); LookupChipType::iter().count()];
 
         let leaf = &self.chip_circuit_gadgets.frac_sum_leaf;
@@ -305,7 +304,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
         };
 
         let (input_pred, selector_pred, instance_num_vars) =
-            construct_bytecode_table(graph_builder, byte_code_len, challenges)?;
+            construct_bytecode_table(graph_builder, byte_code_len, challenges);
         let preds = compute_preds(input_pred, selector_pred);
         tables_out[LookupChipType::BytecodeChip as usize] = build_tree_graph(
             graph_builder,
@@ -313,10 +312,10 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             &leaf.circuit,
             inner,
             instance_num_vars,
-        )?;
+        );
 
         let (input_pred, selector_pred, instance_num_vars) =
-            construct_calldata_table(graph_builder, program_input_len, challenges)?;
+            construct_calldata_table(graph_builder, program_input_len, challenges);
         let preds = compute_preds(input_pred, selector_pred);
         tables_out[LookupChipType::CalldataChip as usize] = build_tree_graph(
             graph_builder,
@@ -324,7 +323,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             &leaf.circuit,
             inner,
             instance_num_vars,
-        )?;
+        );
 
         let leaf = &self.chip_circuit_gadgets.frac_sum_leaf_no_selector;
         let compute_preds_no_selector = |table_pred| {
@@ -333,7 +332,7 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             preds
         };
         let (input_pred, instance_num_vars) =
-            construct_range_table(graph_builder, RANGE_CHIP_BIT_WIDTH, challenges)?;
+            construct_range_table(graph_builder, RANGE_CHIP_BIT_WIDTH, challenges);
         let preds = compute_preds_no_selector(input_pred);
         tables_out[LookupChipType::RangeChip as usize] = build_tree_graph(
             graph_builder,
@@ -341,8 +340,8 @@ impl<E: ExtensionField> SingerChipBuilder<E> {
             &leaf.circuit,
             inner,
             instance_num_vars,
-        )?;
-        Ok(tables_out)
+        );
+        tables_out
     }
 }
 
@@ -373,9 +372,9 @@ fn build_tree_graph_and_witness<E: ExtensionField>(
     first_source: Vec<DenseMultilinearExtension<E>>,
     real_challenges: &[E],
     instance_num_vars: usize,
-) -> Result<NodeOutputType, UtilError> {
-    let (last_pred, _) =
-        (0..=instance_num_vars).try_fold((first_pred, first_source), |(pred, source), i| {
+) -> NodeOutputType {
+    let (last_pred, _) = (0..=instance_num_vars)
+        .try_fold((first_pred, first_source), |(pred, source), i| {
             let circuit = if i == 0 { leaf } else { inner };
             graph_builder
                 .add_node_with_witness(
@@ -392,9 +391,10 @@ fn build_tree_graph_and_witness<E: ExtensionField>(
                         vec![DenseMultilinearExtension::default()],
                     )
                 })
-        })?;
+        })
+        .unwrap();
     match last_pred[0] {
-        PredType::PredWire(out) => Ok(out),
+        PredType::PredWire(out) => out,
         _ => unreachable!(),
     }
 }
@@ -407,15 +407,17 @@ fn build_tree_graph<E: ExtensionField>(
     leaf: &Arc<Circuit<E>>,
     inner: &Arc<Circuit<E>>,
     instance_num_vars: usize,
-) -> Result<NodeOutputType, UtilError> {
-    let last_pred = (0..=instance_num_vars).try_fold(first_pred, |pred, i| {
-        let circuit = if i == 0 { leaf } else { inner };
-        graph_builder
-            .add_node("tree inner node", circuit, pred)
-            .map(|id| vec![PredType::PredWire(NodeOutputType::OutputLayer(id))])
-    })?;
+) -> NodeOutputType {
+    let last_pred = (0..=instance_num_vars)
+        .try_fold(first_pred, |pred, i| {
+            let circuit = if i == 0 { leaf } else { inner };
+            graph_builder
+                .add_node("tree inner node", circuit, pred)
+                .map(|id| vec![PredType::PredWire(NodeOutputType::OutputLayer(id))])
+        })
+        .unwrap();
     match last_pred[0] {
-        PredType::PredWire(out) => Ok(out),
+        PredType::PredWire(out) => out,
         _ => unreachable!(),
     }
 }

@@ -5,7 +5,6 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     witness::LkMultiplicity,
 };

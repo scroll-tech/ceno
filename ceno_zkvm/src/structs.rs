@@ -155,7 +155,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = TC::construct_circuit(&mut circuit_builder).unwrap();
+        let config = TC::construct_circuit(&mut circuit_builder);
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
 
         config

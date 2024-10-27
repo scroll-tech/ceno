@@ -5,7 +5,6 @@ use goldilocks::SmallField;
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     set_val,
 };

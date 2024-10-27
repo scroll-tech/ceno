@@ -7,7 +7,6 @@ use mpcs::PolynomialCommitmentScheme;
 use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
-    error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,

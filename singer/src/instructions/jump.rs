@@ -46,15 +46,15 @@ register_witness!(
 impl<E: ExtensionField> Instruction<E> for JumpInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMP;
     const NAME: &'static str = "JUMP";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> InstCircuit<E> {
         let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
-        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
-        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
+        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()]).unwrap();
+        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()]).unwrap();
         let memory_ts = &phase0[Self::phase0_memory_ts()];
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
@@ -75,17 +75,17 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
             &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::ONE),
-        )?;
+        );
 
         let next_pc = &phase0[Self::phase0_next_pc()];
-        let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into()?;
+        let old_stack_ts = (&phase0[Self::phase0_old_stack_ts()]).try_into().unwrap();
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_stack_ts,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt()],
-        )?;
+        );
         StackChip::pop(
             &mut chip_handler,
             &mut circuit_builder,
@@ -124,14 +124,14 @@ impl<E: ExtensionField> Instruction<E> for JumpInstruction {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
-        Ok(InstCircuit {
+        InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
                 phases_wire_id: vec![phase0_wire_id],
                 ..Default::default()
             },
-        })
+        }
     }
 }
 
@@ -178,7 +178,7 @@ mod test {
         }
 
         // initialize general test inputs associated with push1
-        let inst_circuit = JumpInstruction::construct_circuit(challenges).unwrap();
+        let inst_circuit = JumpInstruction::construct_circuit(challenges);
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);

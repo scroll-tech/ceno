@@ -26,7 +26,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub fn from_range_values<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         range_values: &[CellId],
-    ) -> Result<Self, UtilError> {
+    ) -> Self {
         Self::from_different_sized_cell_values(
             circuit_builder,
             range_values,
@@ -39,7 +39,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub fn from_bytes_big_endian<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
-    ) -> Result<Self, UtilError> {
+    ) -> Self {
         Self::from_bytes(circuit_builder, bytes, false)
     }
 
@@ -47,7 +47,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
     pub fn from_bytes_little_endian<E: ExtensionField>(
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
-    ) -> Result<Self, UtilError> {
+    ) -> Self {
         Self::from_bytes(circuit_builder, bytes, true)
     }
 
@@ -56,7 +56,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         circuit_builder: &mut CircuitBuilder<E>,
         bytes: &[CellId],
         is_little_endian: bool,
-    ) -> Result<Self, UtilError> {
+    ) -> Self {
         Self::from_different_sized_cell_values(
             circuit_builder,
             bytes,
@@ -71,17 +71,17 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         cell_values: &[CellId],
         cell_width: usize,
         is_little_endian: bool,
-    ) -> Result<Self, UtilError> {
+    ) -> Self {
         let mut values = convert_decomp(
             circuit_builder,
             cell_values,
             cell_width,
             Self::MAX_CELL_BIT_WIDTH,
             is_little_endian,
-        )?;
+        );
         debug_assert!(values.len() <= Self::N_OPERAND_CELLS);
         pad_cells(circuit_builder, &mut values, Self::N_OPERAND_CELLS);
-        values.try_into()
+        values.try_into().unwrap()
     }
 
     /// Generate ((0)_{2^C}, (1)_{2^C}, ..., (size - 1)_{2^C})

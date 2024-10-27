@@ -35,7 +35,7 @@ impl RangeTableConfig {
 
         cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr());
 
-        Ok(Self { fixed, mlt })
+        Self { fixed, mlt }
     }
 
     pub fn generate_fixed_traces<F: SmallField>(
@@ -61,7 +61,7 @@ impl RangeTableConfig {
         num_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+    ) -> RowMajorMatrix<F> {
         let mut witness = RowMajorMatrix::<F>::new(length, num_witin);
 
         let mut mlts = vec![0; length];
@@ -77,6 +77,6 @@ impl RangeTableConfig {
                 set_val!(row, self.mlt, F::from(mlt as u64));
             });
 
-        Ok(witness)
+        witness
     }
 }

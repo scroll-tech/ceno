@@ -63,8 +63,7 @@ fn bench_add(c: &mut Criterion) {
         }
     };
     let chip_challenges = ChipChallenges::default();
-    let circuit_builder =
-        SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+    let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges);
 
     for instance_num_vars in 10..14 {
         // expand more input size once runtime is acceptable

@@ -40,15 +40,15 @@ register_witness!(
 impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
     const OPCODE: OpcodeType = OpcodeType::JUMPDEST;
     const NAME: &'static str = "JUMPDEST";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> InstCircuit<E> {
         let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
-        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
-        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
+        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()]).unwrap();
+        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()]).unwrap();
         let memory_ts = &phase0[Self::phase0_memory_ts()];
         let stack_top = phase0[Self::phase0_stack_top().start];
         let clk = phase0[Self::phase0_clk().start];
@@ -64,7 +64,7 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
         );
 
         let next_pc =
-            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()]);
         GlobalStateChip::state_out(
             &mut chip_handler,
             &mut circuit_builder,
@@ -88,14 +88,14 @@ impl<E: ExtensionField> Instruction<E> for JumpdestInstruction {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
-        Ok(InstCircuit {
+        InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
                 phases_wire_id: vec![phase0_wire_id],
                 ..Default::default()
             },
-        })
+        }
     }
 }
 
@@ -138,7 +138,7 @@ mod test {
         }
 
         // initialize general test inputs associated with push1
-        let inst_circuit = JumpdestInstruction::construct_circuit(challenges).unwrap();
+        let inst_circuit = JumpdestInstruction::construct_circuit(challenges);
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);

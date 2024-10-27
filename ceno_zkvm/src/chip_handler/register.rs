@@ -2,7 +2,6 @@ use ff_ext::ExtensionField;
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr},
     gadgets::AssertLTConfig,
     instructions::riscv::constants::UINT_LIMBS,

@@ -17,7 +17,6 @@ use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     structs::{ChallengeId, WitnessId},
 };
 

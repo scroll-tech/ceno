@@ -596,8 +596,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
+        let config = ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb);
         let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
             &config,
             cs.num_fixed,

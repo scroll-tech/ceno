@@ -15,7 +15,7 @@ pub fn verify<E: ExtensionField>(
     aux_info: &SingerAuxInfo,
     challenges: &[E],
     transcript: &mut Transcript<E>,
-) {
+) -> Result<(), ZKVMError> {
     // TODO: Add PCS.
     let point = (0..2 * <E as ExtensionField>::DEGREE)
         .map(|_| {

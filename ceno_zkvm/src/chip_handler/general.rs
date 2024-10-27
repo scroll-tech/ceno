@@ -2,7 +2,6 @@ use ff_ext::ExtensionField;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     instructions::riscv::constants::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,

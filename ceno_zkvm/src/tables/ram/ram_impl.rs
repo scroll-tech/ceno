@@ -7,7 +7,6 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     scheme::constants::MIN_PAR_SIZE,
@@ -40,8 +39,8 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
 
         let final_v = (0..RAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
-            .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
-        let final_cycle = cb.create_witin(|| "final_cycle")?;
+            .collect::<Vec<_>>();
+        let final_cycle = cb.create_witin(|| "final_cycle");
 
         let init_table = cb.rlc_chip_record(
             [
@@ -65,16 +64,16 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             .concat(),
         );
 
-        cb.w_table_record(|| "init_table", RAM::len(), init_table)?;
-        cb.r_table_record(|| "final_table", RAM::len(), final_table)?;
+        cb.w_table_record(|| "init_table", RAM::len(), init_table);
+        cb.r_table_record(|| "final_table", RAM::len(), final_table);
 
-        Ok(Self {
+        Self {
             init_v,
             addr,
             final_v,
             final_cycle,
             phantom: PhantomData,
-        })
+        }
     }
 
     pub fn gen_init_state<F: SmallField>(
@@ -112,7 +111,7 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
         &self,
         num_witness: usize,
         final_v: &[MemFinalRecord],
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+    ) -> RowMajorMatrix<F> {
         assert_eq!(final_v.len(), RAM::len());
         let mut final_table = RowMajorMatrix::<F>::new(RAM::len(), num_witness);
 
@@ -134,6 +133,6 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
                 set_val!(row, self.final_cycle, rec.cycle);
             });
 
-        Ok(final_table)
+        final_table
     }
 }

@@ -25,9 +25,7 @@ pub trait TableCircuit<E: ExtensionField> {
 
     fn name() -> String;
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::TableConfig, ZKVMError>;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::TableConfig;
 
     fn generate_fixed_traces(
         config: &Self::TableConfig,

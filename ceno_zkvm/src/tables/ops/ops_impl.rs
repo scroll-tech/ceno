@@ -85,7 +85,6 @@ impl OpTableConfig {
             .for_each(|(row, mlt)| {
                 set_val!(row, self.mlt, F::from(mlt as u64));
             });
-
-        Ok(witness)
+        witness
     }
 }

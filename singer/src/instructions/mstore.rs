@@ -26,12 +26,12 @@ pub struct MstoreInstruction;
 impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
     type InstType = Self;
 
-    fn construct_circuits(challenges: ChipChallenges) -> Result<Vec<InstCircuit<E>>, ZKVMError> {
+    fn construct_circuits(challenges: ChipChallenges) -> Vec<InstCircuit<E>> {
         let circuits = vec![
-            MstoreInstruction::construct_circuit(challenges)?,
-            MstoreAccessory::construct_circuit(challenges)?,
+            MstoreInstruction::construct_circuit(challenges),
+            MstoreAccessory::construct_circuit(challenges),
         ];
-        Ok(circuits)
+        circuits
     }
 
     fn construct_graph_and_witness(
@@ -42,25 +42,27 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
         real_challenges: &[E],
         real_n_instances: usize,
         _: &SingerParams,
-    ) -> Result<Option<NodeOutputType>, ZKVMError> {
+    ) -> Option<NodeOutputType> {
         // Add the instruction circuit to the graph.
         let inst_circuit = &inst_circuits[0];
         let n_witness_in = inst_circuit.circuit.n_witness_in;
-        let inst_node_id = graph_builder.add_node_with_witness(
-            stringify!(ReturnInstruction),
-            &inst_circuit.circuit,
-            vec![PredType::Source; n_witness_in],
-            real_challenges.to_vec(),
-            mem::take(&mut sources[0]),
-            real_n_instances,
-        )?;
+        let inst_node_id = graph_builder
+            .add_node_with_witness(
+                stringify!(ReturnInstruction),
+                &inst_circuit.circuit,
+                vec![PredType::Source; n_witness_in],
+                real_challenges.to_vec(),
+                mem::take(&mut sources[0]),
+                real_n_instances,
+            )
+            .unwrap();
         chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             inst_node_id,
             &inst_circuit.layout.chip_check_wire_id,
             real_challenges,
             real_n_instances,
-        )?;
+        );
 
         let mstore_acc_circuit = &inst_circuits[1];
         let n_witness_in = mstore_acc_circuit.circuit.n_witness_in;
@@ -72,22 +74,24 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
         preds[mstore_acc_circuit.layout.pred_ooo_wire_id.unwrap() as usize] = PredType::PredWire(
             NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_ooo_wires_id[0]),
         );
-        let mstore_acc_node_id = graph_builder.add_node_with_witness(
-            stringify!(MstoreAccessory),
-            &mstore_acc_circuit.circuit,
-            preds,
-            real_challenges.to_vec(),
-            mem::take(&mut sources[1]),
-            real_n_instances * EVM_STACK_BYTE_WIDTH,
-        )?;
+        let mstore_acc_node_id = graph_builder
+            .add_node_with_witness(
+                stringify!(MstoreAccessory),
+                &mstore_acc_circuit.circuit,
+                preds,
+                real_challenges.to_vec(),
+                mem::take(&mut sources[1]),
+                real_n_instances * EVM_STACK_BYTE_WIDTH,
+            )
+            .unwrap();
         chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
             mstore_acc_node_id,
             &mstore_acc_circuit.layout.chip_check_wire_id,
             real_challenges,
             real_n_instances * EVM_STACK_BYTE_WIDTH,
-        )?;
-        Ok(None)
+        );
+        None
     }
 
     fn construct_graph(
@@ -96,21 +100,23 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
         inst_circuits: &[InstCircuit<E>],
         real_n_instances: usize,
         _: &SingerParams,
-    ) -> Result<Option<NodeOutputType>, ZKVMError> {
+    ) -> Option<NodeOutputType> {
         // Add the instruction circuit to the graph.
         let inst_circuit = &inst_circuits[0];
         let n_witness_in = inst_circuit.circuit.n_witness_in;
-        let inst_node_id = graph_builder.add_node(
-            stringify!(ReturnInstruction),
-            &inst_circuit.circuit,
-            vec![PredType::Source; n_witness_in],
-        )?;
+        let inst_node_id = graph_builder
+            .add_node(
+                stringify!(ReturnInstruction),
+                &inst_circuit.circuit,
+                vec![PredType::Source; n_witness_in],
+            )
+            .unwrap();
         chip_builder.construct_chip_check_graph(
             graph_builder,
             inst_node_id,
             &inst_circuit.layout.chip_check_wire_id,
             real_n_instances,
-        )?;
+        );
 
         let mstore_acc_circuit = &inst_circuits[1];
         let n_witness_in = mstore_acc_circuit.circuit.n_witness_in;
@@ -122,18 +128,20 @@ impl<E: ExtensionField> InstructionGraph<E> for MstoreInstruction {
         preds[mstore_acc_circuit.layout.pred_ooo_wire_id.unwrap() as usize] = PredType::PredWire(
             NodeOutputType::WireOut(inst_node_id, inst_circuit.layout.succ_ooo_wires_id[0]),
         );
-        let mstore_acc_node_id = graph_builder.add_node(
-            stringify!(MstoreAccessory),
-            &mstore_acc_circuit.circuit,
-            preds,
-        )?;
+        let mstore_acc_node_id = graph_builder
+            .add_node(
+                stringify!(MstoreAccessory),
+                &mstore_acc_circuit.circuit,
+                preds,
+            )
+            .unwrap();
         chip_builder.construct_chip_check_graph(
             graph_builder,
             mstore_acc_node_id,
             &mstore_acc_circuit.layout.chip_check_wire_id,
             real_n_instances * EVM_STACK_BYTE_WIDTH,
-        )?;
-        Ok(None)
+        );
+        None
     }
 }
 
@@ -161,16 +169,16 @@ register_witness!(
 impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
     const OPCODE: OpcodeType = OpcodeType::MSTORE;
     const NAME: &'static str = "MSTORE";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> InstCircuit<E> {
         let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
-        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
-        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
-        let memory_ts = TSUInt::try_from(&phase0[Self::phase0_memory_ts()])?;
+        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()]).unwrap();
+        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()]).unwrap();
+        let memory_ts = TSUInt::try_from(&phase0[Self::phase0_memory_ts()]).unwrap();
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
         let clk = phase0[Self::phase0_clk().start];
@@ -186,14 +194,14 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
         );
 
         let next_pc =
-            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()]);
         let next_memory_ts = RangeChip::add_ts_with_const(
             &mut chip_handler,
             &mut circuit_builder,
             &memory_ts,
             1,
             &phase0[Self::phase0_memory_ts_add()],
-        )?;
+        );
         GlobalStateChip::state_out(
             &mut chip_handler,
             &mut circuit_builder,
@@ -208,18 +216,19 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
             &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
-        )?;
+        );
 
         // Pop offset from stack
-        let offset = StackUInt::try_from(&phase0[Self::phase0_offset()])?;
-        let old_stack_ts_offset = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_offset()])?;
+        let offset = StackUInt::try_from(&phase0[Self::phase0_offset()]).unwrap();
+        let old_stack_ts_offset =
+            TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_offset()]).unwrap();
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_stack_ts_offset,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_offset()],
-        )?;
+        );
         StackChip::pop(
             &mut chip_handler,
             &mut circuit_builder,
@@ -230,17 +239,18 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         // Pop mem_bytes from stack
         let mem_bytes = &phase0[Self::phase0_mem_bytes()];
-        RangeChip::range_check_bytes(&mut chip_handler, &mut circuit_builder, mem_bytes)?;
+        RangeChip::range_check_bytes(&mut chip_handler, &mut circuit_builder, mem_bytes);
 
-        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, mem_bytes)?;
-        let old_stack_ts_value = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()])?;
+        let mem_value = StackUInt::from_bytes_big_endian(&mut circuit_builder, mem_bytes);
+        let old_stack_ts_value =
+            TSUInt::try_from(&phase0[Self::phase0_old_stack_ts_value()]).unwrap();
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_stack_ts_value,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt_value()],
-        )?;
+        );
         StackChip::pop(
             &mut chip_handler,
             &mut circuit_builder,
@@ -280,7 +290,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
-        Ok(InstCircuit {
+        InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
@@ -289,7 +299,7 @@ impl<E: ExtensionField> Instruction<E> for MstoreInstruction {
                 succ_ooo_wires_id: vec![to_acc_ooo_id],
                 ..Default::default()
             },
-        })
+        }
     }
 }
 
@@ -314,9 +324,7 @@ register_witness!(
 );
 
 impl MstoreAccessory {
-    fn construct_circuit<E: ExtensionField>(
-        challenges: ChipChallenges,
-    ) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit<E: ExtensionField>(challenges: ChipChallenges) -> InstCircuit<E> {
         let mut circuit_builder = CircuitBuilder::default();
 
         // From predesessor circuit.
@@ -330,10 +338,10 @@ impl MstoreAccessory {
 
         // Compute offset, offset + 1, ..., offset + EVM_STACK_BYTE_WIDTH - 1.
         // Load previous memory bytes.
-        let memory_ts = TSUInt::try_from(&pred_dup[Self::pred_dup_memory_ts()])?;
-        let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()])?;
+        let memory_ts = TSUInt::try_from(&pred_dup[Self::pred_dup_memory_ts()]).unwrap();
+        let old_memory_ts = TSUInt::try_from(&phase0[Self::phase0_old_memory_ts()]).unwrap();
         let old_memory_ts_lt = &phase0[Self::phase0_old_memory_ts_lt()];
-        let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()])?;
+        let offset = StackUInt::try_from(&pred_dup[Self::pred_dup_offset()]).unwrap();
         let offset_add_delta = &phase0[Self::phase0_offset_add_delta()];
         let delta = circuit_builder.create_counter_in(0)[0];
         let offset_plus_delta = StackUInt::add_cell(
@@ -342,14 +350,14 @@ impl MstoreAccessory {
             &offset,
             delta,
             offset_add_delta,
-        )?;
+        );
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_memory_ts,
             &memory_ts,
             old_memory_ts_lt,
-        )?;
+        );
 
         let mem_byte = pred_ooo[Self::pred_ooo_mem_bytes().start];
         let prev_mem_byte = phase0[Self::phase0_prev_mem_bytes().start];
@@ -368,7 +376,7 @@ impl MstoreAccessory {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
-        Ok(InstCircuit {
+        InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
@@ -377,7 +385,7 @@ impl MstoreAccessory {
                 pred_ooo_wire_id: Some(pred_ooo_wire_id),
                 ..Default::default()
             },
-        })
+        }
     }
 }
 
@@ -430,7 +438,7 @@ mod test {
         }
 
         // initialize general test inputs associated with opcode
-        let inst_circuit = MstoreInstruction::construct_circuit(challenges).unwrap();
+        let inst_circuit = MstoreInstruction::construct_circuit(challenges);
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);

@@ -189,9 +189,7 @@ fn main() {
 
         let mut zkvm_witness = ZKVMWitnesses::default();
         // assign opcode circuits
-        config
-            .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
-            .unwrap();
+        config.assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records);
         zkvm_witness.finalize_lk_multiplicities();
 
         // Find the final register values and cycles.
@@ -220,18 +218,14 @@ fn main() {
             .collect_vec();
 
         // assign table circuits
-        config
-            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final)
-            .unwrap();
+        config.assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final);
 
         // assign program circuit
-        zkvm_witness
-            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
-                &zkvm_cs,
-                &prog_config,
-                &PROGRAM_CODE.len(),
-            )
-            .unwrap();
+        zkvm_witness.assign_table_circuit::<ExampleProgramTableCircuit<E>>(
+            &zkvm_cs,
+            &prog_config,
+            &PROGRAM_CODE.len(),
+        );
 
         let timer = Instant::now();
 
