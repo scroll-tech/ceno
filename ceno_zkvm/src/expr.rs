@@ -1,4 +1,4 @@
-mod compat;
+pub mod compat;
 
 use crate::{
     expression::{Fixed, Instance},
@@ -8,7 +8,6 @@ use bumpalo::Bump;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use std::ops::Add;
-pub mod compat;
 
 // This test serves as a little demo of the prototype so far:
 #[test]
