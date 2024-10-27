@@ -8,7 +8,7 @@ use crate::{
         Instruction,
         riscv::{
             RIVInstruction, constants::UInt, im_insn::IMInstructionConfig, insn_base::MemAddr,
-            memory::gadget::SignedExtConfig,
+            memory::gadget::SignedExtendConfig,
         },
     },
     set_val,
@@ -31,7 +31,7 @@ pub struct LoadConfig<E: ExtensionField> {
     memory_read: UInt<E>,
     target_limb: Option<WitIn>,
     target_limb_bytes: Option<Vec<WitIn>>,
-    sext_config: Option<SignedExtConfig>,
+    signed_extend_config: Option<SignedExtendConfig>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
@@ -139,7 +139,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             InsnKind::LW => (None, memory_read.clone()),
             InsnKind::LH => {
                 let val = target_limb.unwrap();
-                let sext_config = SignedExtConfig::construct_limb(circuit_builder, val.expr())?;
+                let sext_config = SignedExtendConfig::construct_limb(circuit_builder, val.expr())?;
                 let rd_written = sext_config.sext_value(val.expr());
 
                 (Some(sext_config), rd_written)
@@ -153,7 +153,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             }
             InsnKind::LB => {
                 let val = target_limb_bytes.clone().unwrap()[0];
-                let sext_config = SignedExtConfig::construct_byte(circuit_builder, val.expr())?;
+                let sext_config = SignedExtendConfig::construct_byte(circuit_builder, val.expr())?;
                 let rd_written = sext_config.sext_value(val.expr());
 
                 (Some(sext_config), rd_written)
@@ -188,7 +188,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             memory_read,
             target_limb,
             target_limb_bytes,
-            sext_config,
+            signed_extend_config: sext_config,
         })
     }
 
@@ -248,8 +248,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             InsnKind::LH | InsnKind::LHU => target_limb as u64,
             _ => 0,
         };
-        if config.sext_config.is_some() {
-            let sext_config = config.sext_config.as_ref().unwrap();
+        if config.signed_extend_config.is_some() {
+            let sext_config = config.signed_extend_config.as_ref().unwrap();
             sext_config.assign_instance::<E>(instance, lk_multiplicity, val)?;
         }
 

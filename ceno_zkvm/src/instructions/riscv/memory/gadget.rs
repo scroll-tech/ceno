@@ -208,13 +208,13 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
     }
 }
 
-pub struct SignedExtConfig {
+pub struct SignedExtendConfig {
     // most significant bit
     msb: WitIn,
     n_bits: usize,
 }
 
-impl SignedExtConfig {
+impl SignedExtendConfig {
     pub fn construct_limb<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         val: Expression<E>,
@@ -255,7 +255,7 @@ impl SignedExtConfig {
             _ => unreachable!("unsupported n_bits = {}", n_bits),
         }
 
-        Ok(SignedExtConfig { msb, n_bits })
+        Ok(SignedExtendConfig { msb, n_bits })
     }
 
     pub fn sext_value<E: ExtensionField>(&self, val: Expression<E>) -> UInt<E> {
