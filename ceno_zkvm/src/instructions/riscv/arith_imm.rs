@@ -119,19 +119,18 @@ mod test {
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(3));
-        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_i_instruction(
-                3,
-                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
-                insn_code,
-                1000,
-                Change::new(0, 1003),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            AddiInstruction::<GoldilocksExt2>::assign_instances(&config, cb.cs.num_witin(), vec![
+                StepRecord::new_i_instruction(
+                    3,
+                    Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                    insn_code,
+                    1000,
+                    Change::new(0, 1003),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &cb,
@@ -163,19 +162,18 @@ mod test {
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(-3));
-        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_i_instruction(
-                3,
-                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
-                insn_code,
-                1000,
-                Change::new(0, 997),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            AddiInstruction::<GoldilocksExt2>::assign_instances(&config, cb.cs.num_witin(), vec![
+                StepRecord::new_i_instruction(
+                    3,
+                    Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                    insn_code,
+                    1000,
+                    Change::new(0, 997),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         MockProver::assert_satisfied(
             &cb,

@@ -188,7 +188,7 @@ mod test {
         let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
         let (raw_witin, lkm) = LogicInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
-            cb.cs.num_witin as usize,
+            cb.cs.num_witin(),
             vec![StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),

@@ -600,7 +600,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
         let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
             &config,
-            cs.num_fixed,
+            cs.num_fixed(),
             programs,
         );
         for table_expr in &cs.lk_table_expressions {
@@ -896,7 +896,7 @@ mod tests {
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
+                builder.cs.num_witin(),
                 vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
                     a: 7,
                     b: 11,
@@ -928,7 +928,7 @@ mod tests {
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
+                builder.cs.num_witin(),
                 vec![
                     AssertLtCircuitInput {
                         a: u32::MAX as u64 - 5,
@@ -1020,7 +1020,7 @@ mod tests {
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
+                builder.cs.num_witin(),
                 vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
                     a: 7,
                     b: 11,
@@ -1053,7 +1053,7 @@ mod tests {
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
+                builder.cs.num_witin(),
                 vec![
                     LtCircuitInput {
                         a: u32::MAX as u64 - 5,

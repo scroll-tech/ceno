@@ -133,19 +133,18 @@ mod test {
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::SLTU, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            SltuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    rs1,
-                    rs2,
-                    Change::new(0, rd),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let (raw_witin, lkm) = SltuInstruction::assign_instances(&config, cb.cs.num_witin(), vec![
+            StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                rs1,
+                rs2,
+                Change::new(0, rd),
+                0,
+            ),
+        ])
+        .unwrap();
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());

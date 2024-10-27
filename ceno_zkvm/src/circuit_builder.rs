@@ -82,12 +82,8 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
-    pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
-
-    pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
-
     pub instance_name_map: HashMap<Instance, String>,
 
     pub r_expressions: Vec<Expression<E>>,
@@ -134,9 +130,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
 impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(root_name_fn: N) -> Self {
         Self {
-            num_witin: 0,
             witin_namespace_map: vec![],
-            num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_name_map: HashMap::new(),
@@ -194,30 +188,31 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
+    pub fn num_witin(&self) -> usize {
+        self.witin_namespace_map.len()
+    }
+
     pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         n: N,
     ) -> Result<WitIn, ZKVMError> {
-        let wit_in = WitIn {
-            id: {
-                let id = self.num_witin;
-                self.num_witin += 1;
-                id
-            },
-        };
+        let id = WitnessId::try_from(self.num_witin()).unwrap();
 
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);
 
-        Ok(wit_in)
+        Ok(WitIn { id })
+    }
+
+    pub fn num_fixed(&self) -> usize {
+        self.fixed_namespace_map.len()
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         n: N,
     ) -> Result<Fixed, ZKVMError> {
-        let f = Fixed(self.num_fixed);
-        self.num_fixed += 1;
+        let f = Fixed(self.num_fixed());
 
         let path = self.ns.compute_path(n().into());
         self.fixed_namespace_map.push(path);
