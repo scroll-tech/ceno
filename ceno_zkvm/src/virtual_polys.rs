@@ -195,7 +195,7 @@ mod tests {
         let x = cb.create_witin(|| "x").unwrap();
         let y = cb.create_witin(|| "y").unwrap();
 
-        let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin_fnord as usize)
+        let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin())
             .map(|_| vec![Goldilocks::from(1)].into_mle().into())
             .collect();
 

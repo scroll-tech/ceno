@@ -220,8 +220,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
-        let (witness, logup_multiplicity) =
-            OC::assign_instances(config, cs.num_witin_fnord as usize, records)?;
+        let (witness, logup_multiplicity) = OC::assign_instances(config, cs.num_witin(), records)?;
         assert!(self.witnesses.insert(OC::name(), witness).is_none());
         assert!(
             self.lk_mlts
@@ -269,7 +268,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = cs.get_cs(&TC::name()).unwrap();
         let witness = TC::assign_instances(
             config,
-            cs.num_witin_fnord as usize,
+            cs.num_witin(),
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;

@@ -193,7 +193,7 @@ mod test {
             let insn_code = encode_rv32(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, lkm) =
-                DivUInstruction::assign_instances(&config, cb.cs.num_witin_fnord as usize, vec![
+                DivUInstruction::assign_instances(&config, cb.cs.num_witin(), vec![
                     StepRecord::new_r_instruction(
                         3,
                         MOCK_PC_START,

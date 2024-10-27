@@ -119,7 +119,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 tracing::debug!(
                     "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
                     circuit_name,
-                    cs.num_witin_fnord,
+                    cs.num_witin(),
                     cs.r_expressions.len(),
                     cs.w_expressions.len(),
                     cs.lk_expressions.len(),
@@ -196,7 +196,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         // sanity check
-        assert_eq!(witnesses.len(), cs.num_witin_fnord as usize);
+        assert_eq!(witnesses.len(), cs.num_witin());
         assert!(
             witnesses
                 .iter()
@@ -638,7 +638,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect::<Vec<ArcMultilinearExtension<E>>>();
 
         // sanity check
-        assert_eq!(witnesses.len(), cs.num_witin_fnord as usize);
+        assert_eq!(witnesses.len(), cs.num_witin());
         assert_eq!(fixed.len(), cs.num_fixed);
         // check all witness size are power of 2
         assert!(

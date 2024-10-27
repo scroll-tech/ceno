@@ -80,7 +80,7 @@ fn bench_add(c: &mut Criterion) {
         .get(&AddInstruction::<E>::name())
         .unwrap()
         .clone();
-    let num_witin = circuit_pk.get_cs().num_witin_fnord;
+    let num_witin = circuit_pk.get_cs().num_witin();
 
     let prover = ZKVMProver::new(pk);
 
