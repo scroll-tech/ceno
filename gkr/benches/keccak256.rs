@@ -7,7 +7,7 @@ use criterion::*;
 
 use gkr::gadgets::keccak256::{keccak256_circuit, prove_keccak256, verify_keccak256};
 use goldilocks::GoldilocksExt2;
-use multilinear_extensions::util::aligned_max_usable_threads;
+use multilinear_extensions::util::max_usable_threads;
 
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
@@ -35,7 +35,7 @@ fn bench_keccak256(c: &mut Criterion) {
         keccak256_circuit::<GoldilocksExt2>().layers.len()
     );
 
-    let max_thread_id = aligned_max_usable_threads();
+    let max_thread_id = max_usable_threads();
 
     let circuit = keccak256_circuit::<GoldilocksExt2>();
 

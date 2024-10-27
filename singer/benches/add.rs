@@ -30,7 +30,7 @@ criterion_main!(op_add);
 
 const NUM_SAMPLES: usize = 10;
 
-use multilinear_extensions::util::aligned_max_usable_threads;
+use multilinear_extensions::util::max_usable_threads;
 use singer::{
     CircuitWiresIn, SingerGraphBuilder, SingerParams,
     instructions::{Instruction, InstructionGraph, SingerCircuitBuilder, add::AddInstruction},
@@ -40,7 +40,7 @@ use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
 
 fn bench_add(c: &mut Criterion) {
-    let max_thread_id = aligned_max_usable_threads();
+    let max_thread_id = max_usable_threads();
     let chip_challenges = ChipChallenges::default();
     let circuit_builder =
         SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");

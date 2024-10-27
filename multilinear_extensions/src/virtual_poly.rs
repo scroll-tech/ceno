@@ -2,7 +2,7 @@ use std::{cmp::max, collections::HashMap, marker::PhantomData, mem::MaybeUninit,
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
-    util::{aligned_max_usable_threads, bit_decompose, create_uninit_vec},
+    util::{bit_decompose, create_uninit_vec, max_usable_threads},
 };
 use ark_std::{end_timer, iterable::Iterable, rand::Rng, start_timer};
 use ff::{Field, PrimeField};
@@ -452,7 +452,7 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  ....
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
-    let nthreads = aligned_max_usable_threads();
+    let nthreads = max_usable_threads();
     let nbits = nthreads.trailing_zeros() as usize;
     assert_eq!(1 << nbits, nthreads);
 

@@ -13,7 +13,7 @@ use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     op_mle,
-    util::aligned_max_usable_threads,
+    util::max_usable_threads,
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2 as VirtualPolynomial},
 };
 use transcript::Transcript;
@@ -44,7 +44,7 @@ fn prepare_input<'a, E: ExtensionField>(
     nv: usize,
 ) -> (E, VirtualPolynomial<'a, E>, Vec<VirtualPolynomial<'a, E>>) {
     let mut rng = test_rng();
-    let max_thread_id = aligned_max_usable_threads();
+    let max_thread_id = max_usable_threads();
     let size_log2 = ceil_log2(max_thread_id);
     let fs: [ArcMultilinearExtension<'a, E>; NUM_DEGREE] = array::from_fn(|_| {
         let mle: ArcMultilinearExtension<'a, E> =
@@ -147,7 +147,7 @@ fn sumcheck_fn(c: &mut Criterion) {
 fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    let threads = aligned_max_usable_threads();
+    let threads = max_usable_threads();
     for nv in NV.into_iter() {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("devirgo_nv_{}", nv));
