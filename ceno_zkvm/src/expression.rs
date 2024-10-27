@@ -614,7 +614,7 @@ impl WitIn {
         debug: bool,
     ) -> Result<Self, ZKVMError>
     where
-        NR: Into<String> + Clone,
+        NR: Into<String>,
         N: FnOnce() -> NR,
     {
         circuit_builder.namespace(

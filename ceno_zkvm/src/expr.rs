@@ -1,3 +1,5 @@
+mod compat;
+
 use crate::{
     expression::{Fixed, Instance},
     structs::{ChallengeId, WitnessId},
