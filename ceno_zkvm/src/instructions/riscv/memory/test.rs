@@ -47,32 +47,22 @@ fn sw(_prev: Word, rs2: Word) -> Word {
     rs2
 }
 
-fn sext(mut val: u32, n_bits: u32) -> u32 {
+fn signed_extend(val: u32, n_bits: u32) -> u32 {
     match n_bits {
-        8 => {
-            if val & 0x80 != 0 {
-                val |= 0xffffff00;
-            }
-        }
-        16 => {
-            if val & 0x8000 != 0 {
-                val |= 0xffff0000;
-            }
-        }
+        8 => (val as i8) as u32,
+        16 => (val as i16) as u32,
         _ => unreachable!("unsupported n_bits = {}", n_bits),
     }
-
-    val
 }
 
 fn load(mem_value: Word, insn: InsnKind, shift: u32) -> Word {
     let val = mem_value >> shift;
     match insn {
-        InsnKind::LB => sext(val & 0xff_u32, 8),
+        InsnKind::LB => signed_extend(val & 0xff_u32, 8),
         InsnKind::LBU => val & 0xff_u32,
         InsnKind::LH => {
             assert_eq!(shift & 0x01, 0);
-            sext(val & 0xffff_u32, 16)
+            signed_extend(val & 0xffff_u32, 16)
         }
         InsnKind::LHU => {
             assert_eq!(shift & 0x01, 0);
