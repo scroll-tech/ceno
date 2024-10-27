@@ -233,11 +233,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             .assign_instance(instance, lk_multiplicity, unaligned_addr.into())?;
         if let Some(&limb) = config.target_limb.as_ref() {
             lk_multiplicity.assert_ux::<16>(target_limb as u64);
-            set_val!(
-                instance,
-                limb,
-                E::BaseField::from(target_limb as u64)
-            );
+            set_val!(instance, limb, E::BaseField::from(target_limb as u64));
         }
         if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
             if addr_low_bits[0] == 1 {
