@@ -98,7 +98,7 @@ fn bench_add(c: &mut Criterion) {
                         // generate mock witness
                         let mut rng = test_rng();
                         let num_instances = 1 << instance_num_vars;
-                        (0..num_witin as usize)
+                        (0..num_witin)
                             .map(|_| {
                                 (0..num_instances)
                                     .map(|_| Goldilocks::random(&mut rng))
