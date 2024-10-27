@@ -109,7 +109,7 @@ fn bench_add(c: &mut Criterion) {
                             1 << instance_num_vars,
                             &SingerParams::default(),
                         )
-                        .expect("gkr graph construction failed");
+                        ;
 
                         let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
 
