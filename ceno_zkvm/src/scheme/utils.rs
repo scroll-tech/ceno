@@ -673,9 +673,9 @@ mod tests {
         type B = goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a").unwrap();
-        let b = cb.create_witin(|| "b").unwrap();
-        let c = cb.create_witin(|| "c").unwrap();
+        let a = cb.create_witin(|| "a");
+        let b = cb.create_witin(|| "b");
+        let c = cb.create_witin(|| "c");
 
         let expr: Expression<E> = a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3 + 2);
 
@@ -699,9 +699,9 @@ mod tests {
         type B = goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a").unwrap();
-        let b = cb.create_witin(|| "b").unwrap();
-        let c = cb.create_witin(|| "c").unwrap();
+        let a = cb.create_witin(|| "a");
+        let b = cb.create_witin(|| "b");
+        let c = cb.create_witin(|| "c");
 
         let expr: Expression<E> = a.expr()
             + b.expr()

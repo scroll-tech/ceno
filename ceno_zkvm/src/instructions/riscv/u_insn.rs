@@ -31,10 +31,10 @@ impl<E: ExtensionField> UInstructionConfig<E> {
         rd_written: RegisterExpr<E>,
     ) -> Self {
         // State in and out
-        let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
+        let vm_state = StateInOut::construct_circuit(circuit_builder, false);
 
         // Registers
-        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
+        let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts);
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
@@ -45,9 +45,9 @@ impl<E: ExtensionField> UInstructionConfig<E> {
             0.into(),
             0.into(),
             imm.clone(),
-        ))?;
+        ));
 
-        Ok(UInstructionConfig { vm_state, rd })
+        UInstructionConfig { vm_state, rd }
     }
 
     pub fn assign_instance(
@@ -56,12 +56,10 @@ impl<E: ExtensionField> UInstructionConfig<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+        self.vm_state.assign_instance(instance, step);
+        self.rd.assign_instance(instance, lk_multiplicity, step);
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);
-
-        Ok(())
     }
 }

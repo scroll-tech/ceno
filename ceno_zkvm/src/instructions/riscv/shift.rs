@@ -52,35 +52,35 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
     fn construct_circuit(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5")?;
+    ) -> Self::InstructionConfig {
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder);
+        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5");
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
-        let mut pow2_rs2_low5 = UInt::new_unchecked(|| "pow2_rs2_low5", circuit_builder)?;
+        let mut pow2_rs2_low5 = UInt::new_unchecked(|| "pow2_rs2_low5", circuit_builder);
         // rs2 = rs2_high | rs2_low5
-        let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
+        let rs2_high = UInt::new(|| "rs2_high", circuit_builder);
 
         let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
             InsnKind::SLL => {
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder);
                 let rd_written = rs1_read.mul(
                     || "rd_written = rs1_read * pow2_rs2_low5",
                     circuit_builder,
                     &mut pow2_rs2_low5,
                     true,
-                )?;
+                );
                 (rs1_read, rd_written, None, None)
             }
             InsnKind::SRL => {
-                let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let remainder = UInt::new(|| "remainder", circuit_builder)?;
+                let mut rd_written = UInt::new(|| "rd_written", circuit_builder);
+                let remainder = UInt::new(|| "remainder", circuit_builder);
                 let div_config = DivConfig::construct_circuit(
                     circuit_builder,
                     || "srl_div",
                     &mut pow2_rs2_low5,
                     &mut rd_written,
                     &remainder,
-                )?;
+                );
                 (
                     div_config.dividend.clone(),
                     rd_written,
@@ -97,17 +97,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             rd_written.register_expr(),
-        )?;
+        );
 
-        circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.value())?;
-        circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr())?;
+        circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.value());
+        circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr());
         circuit_builder.require_equal(
             || "rs2 == rs2_high * 2^5 + rs2_low5",
             rs2_read.value(),
             rs2_high.value() * (1 << 5) + rs2_low5.expr(),
-        )?;
+        );
 
-        Ok(ShiftConfig {
+        ShiftConfig {
             r_insn,
             rs1_read,
             rs2_read,
@@ -117,7 +117,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             pow2_rs2_low5,
             div_config,
             remainder,
-        })
+        }
     }
 
     fn assign_instance(
@@ -125,7 +125,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         instance: &mut [std::mem::MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
-    ) -> Result<(), crate::error::ZKVMError> {
+    ) {
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         let rs2_low5 = rs2_read.as_u64() & 0b11111;
         let pow2_rs2_low5 = Value::new_unchecked((1 << rs2_low5) as u32);
@@ -141,7 +141,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                 config.rs1_read.assign_value(instance, rs1_read);
                 config
                     .rd_written
-                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
+                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written);
             }
             InsnKind::SRL => {
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
@@ -160,7 +160,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     &pow2_rs2_low5,
                     &rd_written,
                     &remainder,
-                )?;
+                );
 
                 config.rd_written.assign_value(instance, rd_written);
                 config
@@ -174,7 +174,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
         config
             .r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
         config.rs2_read.assign_value(instance, rs2_read);
 
         set_val!(instance, config.rs2_low5, rs2_low5);
@@ -184,8 +184,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         config.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
 
         lk_multiplicity.lookup_pow2(rs2_low5);
-
-        Ok(())
     }
 }
 
@@ -254,30 +252,20 @@ mod tests {
             _ => unreachable!(),
         };
 
-        let config = cb
-            .namespace(
-                || format!("{prefix}_({name})"),
-                |cb| {
-                    let config =
-                        ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace(
+            || format!("{prefix}_({name})"),
+            |cb| ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb),
+        );
 
-        config
-            .rd_written
-            .require_equal(
-                || format!("{prefix}_({name})_assert_rd_written"),
-                &mut cb,
-                &UInt::from_const_unchecked(
-                    Value::new_unchecked(expected_rd_written)
-                        .as_u16_limbs()
-                        .to_vec(),
-                ),
-            )
-            .unwrap();
+        config.rd_written.require_equal(
+            || format!("{prefix}_({name})_assert_rd_written"),
+            &mut cb,
+            &UInt::from_const_unchecked(
+                Value::new_unchecked(expected_rd_written)
+                    .as_u16_limbs()
+                    .to_vec(),
+            ),
+        );
 
         let (raw_witin, lkm) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
@@ -291,8 +279,7 @@ mod tests {
                 Change::new(0, rd_written),
                 0,
             )],
-        )
-        .unwrap();
+        );
 
         MockProver::assert_satisfied(
             &cb,

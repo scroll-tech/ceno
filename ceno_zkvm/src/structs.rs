@@ -146,7 +146,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = OC::construct_circuit(&mut circuit_builder).unwrap();
+        let config = OC::construct_circuit(&mut circuit_builder);
         assert!(self.circuit_css.insert(OC::name(), cs).is_none());
 
         config
@@ -164,10 +164,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
         let mut cs = ConstraintSystem::new(|| "riscv_state");
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        self.initial_global_state_expr =
-            SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
-        self.finalize_global_state_expr =
-            SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
+        self.initial_global_state_expr = SC::initial_global_state(&mut circuit_builder);
+        self.finalize_global_state_expr = SC::finalize_global_state(&mut circuit_builder);
     }
 
     pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
@@ -221,15 +219,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
-            OC::assign_instances(config, cs.num_witin as usize, records)?;
+            OC::assign_instances(config, cs.num_witin as usize, records);
         assert!(self.witnesses.insert(OC::name(), witness).is_none());
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
                 .is_none()
         );
-
-        Ok(())
     }
 
     // merge the multiplicities in each opcode circuit into one
@@ -272,10 +268,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             cs.num_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
-        )?;
+        );
         assert!(self.witnesses.insert(TC::name(), witness).is_none());
-
-        Ok(())
     }
 }
 

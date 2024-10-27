@@ -40,7 +40,7 @@ pub trait TableCircuit<E: ExtensionField> {
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         input: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
+    ) -> RowMajorMatrix<E::BaseField>;
 
     fn padding_zero(table: &mut RowMajorMatrix<E::BaseField>, num_witin: usize) {
         // Fill the padding with zeros, if any.
@@ -62,6 +62,5 @@ pub trait TableCircuit<E: ExtensionField> {
                         .for_each(|instance| instance.copy_from_slice(padding_instance.as_slice()));
                 });
         }
-        Ok(())
     }
 }

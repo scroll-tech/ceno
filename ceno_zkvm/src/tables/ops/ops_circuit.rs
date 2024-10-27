@@ -39,7 +39,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         format!("OPS_{:?}", OP::ROM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> OpTableConfig {
         cb.namespace(
             || Self::name(),
             |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len()),
@@ -61,10 +61,10 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> RowMajorMatrix<E::BaseField> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
-        let mut table = config.assign_instances(num_witin, multiplicity, OP::len())?;
-        Self::padding_zero(&mut table, num_witin)?;
-        Ok(table)
+        let mut table = config.assign_instances(num_witin, multiplicity, OP::len());
+        Self::padding_zero(&mut table, num_witin);
+        table
     }
 }
