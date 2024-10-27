@@ -103,7 +103,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
 
         // get target limb from memory word for load instructions except LW
         let target_limb = if I::INST_KIND != InsnKind::LW {
-            let target_limb = circuit_builder.create_u16(|| "target_limb")?;
+            let target_limb = circuit_builder.create_witin(|| "target_limb")?;
             circuit_builder.condition_require_equal(
                 || "target_limb = memory_value[low_bits[1]]",
                 addr_low_bits[1].clone(),
@@ -232,7 +232,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             .memory_addr
             .assign_instance(instance, lk_multiplicity, unaligned_addr.into())?;
         if let Some(&limb) = config.target_limb.as_ref() {
-            lk_multiplicity.assert_ux::<16>(target_limb as u64);
             set_val!(instance, limb, E::BaseField::from(target_limb as u64));
         }
         if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
