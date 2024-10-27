@@ -83,9 +83,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
     pub witin_namespace_map: Vec<String>,
-
     pub fixed_namespace_map: Vec<String>,
-
     pub instance_name_map: HashMap<Instance, String>,
 
     pub r_expressions: Vec<Expression<E>>,
