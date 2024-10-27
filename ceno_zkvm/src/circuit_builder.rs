@@ -85,7 +85,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
 
-    pub num_fixed: usize,
+    pub num_fixed_fnord: usize,
     pub fixed_namespace_map: Vec<String>,
 
     pub instance_name_map: HashMap<Instance, String>,
@@ -136,7 +136,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Self {
             num_witin: 0,
             witin_namespace_map: vec![],
-            num_fixed: 0,
+            num_fixed_fnord: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_name_map: HashMap::new(),
@@ -216,8 +216,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         n: N,
     ) -> Result<Fixed, ZKVMError> {
-        let f = Fixed(self.num_fixed);
-        self.num_fixed += 1;
+        let f = Fixed(self.num_fixed_fnord);
+        self.num_fixed_fnord += 1;
 
         let path = self.ns.compute_path(n().into());
         self.fixed_namespace_map.push(path);
