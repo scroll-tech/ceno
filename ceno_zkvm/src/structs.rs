@@ -196,7 +196,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
             self.circuit_fixed_traces
                 .insert(
                     TC::name(),
-                    Some(TC::generate_fixed_traces(&config, cs.num_fixed, input)),
+                    Some(TC::generate_fixed_traces(&config, cs.num_fixed(), input)),
                 )
                 .is_none()
         );

@@ -600,7 +600,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
         let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
             &config,
-            cs.num_fixed,
+            cs.num_fixed(),
             programs,
         );
         for table_expr in &cs.lk_table_expressions {
