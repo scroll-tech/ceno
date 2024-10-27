@@ -196,14 +196,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         n: N,
     ) -> Result<WitIn, ZKVMError> {
-        let wit_in = WitIn {
-            id: WitnessId::try_from(self.num_witin()).unwrap(),
-        };
+        let id = WitnessId::try_from(self.num_witin()).unwrap();
 
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);
 
-        Ok(wit_in)
+        Ok(WitIn { id })
     }
 
     pub fn num_fixed(&self) -> usize {
