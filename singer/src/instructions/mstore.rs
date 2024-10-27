@@ -511,7 +511,7 @@ mod test {
     fn bench_mstore_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+            SingerCircuitBuilder::<E>::new(chip_challenges);
         let mut singer_builder = SingerGraphBuilder::<E>::default();
 
         let mut rng = test_rng();
