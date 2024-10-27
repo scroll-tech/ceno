@@ -155,7 +155,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 )
             }
             InsnKind::LB => {
-                let val = target_limb_bytes.clone().unwrap()[0];
+                let val = target_limb_bytes.as_ref().map(|bytes| bytes[0]).unwrap();
                 let sext_config = SignedExtendConfig::construct_byte(circuit_builder, val.expr())?;
                 let rd_written = sext_config.signed_extended_value(val.expr());
 
@@ -231,20 +231,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         config
             .memory_addr
             .assign_instance(instance, lk_multiplicity, unaligned_addr.into())?;
-        if config.target_limb.is_some() {
+        if let Some(&limb) = config.target_limb.as_ref() {
             lk_multiplicity.assert_ux::<16>(target_limb as u64);
             set_val!(
                 instance,
-                config.target_limb.unwrap(),
+                limb,
                 E::BaseField::from(target_limb as u64)
             );
         }
-        if config.target_limb_bytes.is_some() {
+        if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
             if addr_low_bits[0] == 1 {
                 target_limb_bytes.reverse();
             }
             for (&col, byte) in izip!(
-                config.target_limb_bytes.clone().unwrap().iter(),
+                limb_bytes.iter(),
                 target_limb_bytes.into_iter().map(|byte| byte as u64)
             ) {
                 lk_multiplicity.assert_ux::<8>(byte);
@@ -256,9 +256,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             InsnKind::LH | InsnKind::LHU => target_limb as u64,
             _ => 0,
         };
-        if config.signed_extend_config.is_some() {
-            let sext_config = config.signed_extend_config.as_ref().unwrap();
-            sext_config.assign_instance::<E>(instance, lk_multiplicity, val)?;
+        if let Some(signed_ext_config) = config.signed_extend_config.as_ref() {
+            signed_ext_config.assign_instance::<E>(instance, lk_multiplicity, val)?;
         }
 
         Ok(())
