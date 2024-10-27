@@ -170,7 +170,7 @@ mod test {
 
         let config = cb.namespace(
             || format!("{prefix}_({name})"),
-            |cb| LogicInstruction::<GoldilocksExt2, I>::construct_circuit(cb),
+            LogicInstruction::<GoldilocksExt2, I>::construct_circuit,
         );
 
         let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);

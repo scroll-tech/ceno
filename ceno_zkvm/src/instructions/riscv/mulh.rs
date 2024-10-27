@@ -136,7 +136,7 @@ mod test {
     fn verify(rs1: u32, rs2: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb.namespace(|| "mulhu", |cb| MulhuInstruction::construct_circuit(cb));
+        let config = cb.namespace(|| "mulhu", MulhuInstruction::construct_circuit);
 
         let a = Value::<'_, u32>::new_unchecked(rs1);
         let b = Value::<'_, u32>::new_unchecked(rs2);

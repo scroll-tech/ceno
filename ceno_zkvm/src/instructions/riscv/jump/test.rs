@@ -26,7 +26,7 @@ fn test_opcode_jal() {
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb.namespace(
         || "jal",
-        |cb| JalInstruction::<GoldilocksExt2>::construct_circuit(cb),
+        JalInstruction::<GoldilocksExt2>::construct_circuit,
     );
 
     let pc_offset: i32 = -8i32;
@@ -64,7 +64,7 @@ fn test_opcode_jalr() {
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb.namespace(
         || "jalr",
-        |cb| JalrInstruction::<GoldilocksExt2>::construct_circuit(cb),
+        JalrInstruction::<GoldilocksExt2>::construct_circuit,
     );
 
     let imm = -15i32;
@@ -109,7 +109,7 @@ fn test_opcode_lui() {
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb.namespace(
         || "lui",
-        |cb| LuiInstruction::<GoldilocksExt2>::construct_circuit(cb),
+        LuiInstruction::<GoldilocksExt2>::construct_circuit,
     );
 
     let imm_value = imm_u(0x90005);
@@ -146,7 +146,7 @@ fn test_opcode_auipc() {
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb.namespace(
         || "auipc",
-        |cb| AuipcInstruction::<GoldilocksExt2>::construct_circuit(cb),
+        AuipcInstruction::<GoldilocksExt2>::construct_circuit,
     );
 
     let imm_value = imm_u(0x90005);

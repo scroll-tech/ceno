@@ -32,7 +32,7 @@ fn test_opcode_beq() {
 fn impl_opcode_beq(equal: bool) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb.namespace(|| "beq", |cb| BeqInstruction::construct_circuit(cb));
+    let config = cb.namespace(|| "beq", BeqInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, imm(8));
     let pc_offset = if equal { 8 } else { PC_STEP_SIZE };
@@ -71,7 +71,7 @@ fn test_opcode_bne() {
 fn impl_opcode_bne(equal: bool) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb.namespace(|| "bne", |cb| BneInstruction::construct_circuit(cb));
+    let config = cb.namespace(|| "bne", BneInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::BNE, 2, 3, 0, imm(8));
     let pc_offset = if equal { PC_STEP_SIZE } else { 8 };

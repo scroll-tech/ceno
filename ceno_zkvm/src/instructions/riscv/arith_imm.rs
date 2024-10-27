@@ -104,7 +104,7 @@ mod test {
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb.namespace(
             || "addi",
-            |cb| AddiInstruction::<GoldilocksExt2>::construct_circuit(cb),
+            AddiInstruction::<GoldilocksExt2>::construct_circuit,
         );
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(3));
@@ -141,7 +141,7 @@ mod test {
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb.namespace(
             || "addi",
-            |cb| AddiInstruction::<GoldilocksExt2>::construct_circuit(cb),
+            AddiInstruction::<GoldilocksExt2>::construct_circuit,
         );
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(-3));

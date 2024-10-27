@@ -174,7 +174,7 @@ mod test {
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb.namespace(
                 || format!("divu_({name})"),
-                |cb| DivUInstruction::construct_circuit(cb),
+                DivUInstruction::construct_circuit,
             );
 
             let outcome = if divisor == 0 {

@@ -254,7 +254,7 @@ mod tests {
 
         let config = cb.namespace(
             || format!("{prefix}_({name})"),
-            |cb| ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb),
+            ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit,
         );
 
         config.rd_written.require_equal(

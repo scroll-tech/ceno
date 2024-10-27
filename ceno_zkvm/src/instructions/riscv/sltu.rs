@@ -119,7 +119,7 @@ mod test {
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb.namespace(
             || format!("SLTU/{name}"),
-            |cb| SltuInstruction::construct_circuit(cb),
+            SltuInstruction::construct_circuit,
         );
 
         let insn_code = encode_rv32(InsnKind::SLTU, 2, 3, 4, 0);

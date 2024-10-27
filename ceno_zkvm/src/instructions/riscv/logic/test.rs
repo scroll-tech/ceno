@@ -19,7 +19,7 @@ const B: Word = 0xef552020;
 fn test_opcode_and() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb.namespace(|| "and", |cb| AndInstruction::construct_circuit(cb));
+    let config = cb.namespace(|| "and", AndInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
     let (raw_witin, lkm) =
@@ -59,7 +59,7 @@ fn test_opcode_and() {
 fn test_opcode_or() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb.namespace(|| "or", |cb| OrInstruction::construct_circuit(cb));
+    let config = cb.namespace(|| "or", OrInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::OR, 2, 3, 4, 0);
     let (raw_witin, lkm) =
@@ -99,7 +99,7 @@ fn test_opcode_or() {
 fn test_opcode_xor() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb.namespace(|| "xor", |cb| XorInstruction::construct_circuit(cb));
+    let config = cb.namespace(|| "xor", XorInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::XOR, 2, 3, 4, 0);
     let (raw_witin, lkm) =

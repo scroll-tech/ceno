@@ -102,10 +102,7 @@ mod test {
     fn verify(name: &'static str, rs1: i32, rs2: i32, rd: Word) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb.namespace(
-            || format!("SLT/{name}"),
-            |cb| SltInstruction::construct_circuit(cb),
-        );
+        let config = cb.namespace(|| format!("SLT/{name}"), SltInstruction::construct_circuit);
 
         let insn_code = encode_rv32(InsnKind::SLT, 2, 3, 4, 0);
         let (raw_witin, lkm) =

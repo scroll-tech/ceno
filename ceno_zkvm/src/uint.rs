@@ -337,7 +337,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     pub fn from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Self {
-        let n = Self {
+        Self {
             limbs: UintLimb::Expression(
                 expr_limbs
                     .into_iter()
@@ -347,8 +347,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             ),
             carries: None,
             carries_auxiliary_lt_config: None,
-        };
-        n
+        }
     }
 
     /// If current limbs are Expression, this function will create witIn and replace the limbs

@@ -869,7 +869,7 @@ mod tests {
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
-                .zip_eq(instances.into_iter())
+                .zip_eq(instances)
                 .for_each(|(instance, input)| {
                     self.assign_instance::<E>(instance, input, lk_multiplicity)
                 });
@@ -987,7 +987,7 @@ mod tests {
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
-                .zip_eq(instances.into_iter())
+                .zip_eq(instances)
                 .for_each(|(instance, input)| {
                     self.assign_instance::<E>(instance, input, lk_multiplicity)
                 });
