@@ -3,7 +3,6 @@ use crate::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLTConfig,
     set_val,

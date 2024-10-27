@@ -17,7 +17,7 @@ use singer_utils::{
 };
 use std::{cell::RefCell, collections::BTreeMap, mem, rc::Rc, sync::Arc};
 
-use crate::{CircuitWiresIn, SingerParams, error::ZKVMError, utils::add_assign_each_cell};
+use crate::{CircuitWiresIn, SingerParams, utils::add_assign_each_cell};
 
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 

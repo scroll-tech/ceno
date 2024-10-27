@@ -6,7 +6,6 @@ use super::{UIntLimbs, UintLimb};
 use crate::{
     circuit_builder::CircuitBuilder,
     create_witin_from_expr,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLTConfig,
     instructions::riscv::config::{IsEqualConfig, MsbConfig, UIntLtConfig, UIntLtuConfig},

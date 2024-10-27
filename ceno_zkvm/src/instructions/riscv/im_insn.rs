@@ -1,7 +1,6 @@
 use crate::{
     chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr},
     instructions::riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
     tables::InsnRecord,

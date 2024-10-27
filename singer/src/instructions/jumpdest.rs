@@ -14,8 +14,6 @@ use singer_utils::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::error::ZKVMError;
-
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 pub struct JumpdestInstruction;

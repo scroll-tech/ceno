@@ -6,7 +6,6 @@ use multilinear_extensions::mle::IntoMLEs;
 use super::*;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    error::ZKVMError,
     instructions::Instruction,
     scheme::mock_prover::{MOCK_PC_START, MockProver},
 };

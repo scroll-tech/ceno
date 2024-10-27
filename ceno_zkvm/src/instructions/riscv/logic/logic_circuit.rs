@@ -6,7 +6,6 @@ use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::{
         Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},

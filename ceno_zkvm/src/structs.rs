@@ -1,6 +1,5 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    error::ZKVMError,
     expression::Expression,
     instructions::Instruction,
     state::StateCircuit,

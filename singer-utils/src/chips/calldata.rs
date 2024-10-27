@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
-    error::UtilError,
-    structs::{ChipChallenges, StackUInt, UInt64},
-};
+use crate::structs::{ChipChallenges, StackUInt, UInt64};
 
 use super::ChipCircuitGadgets;
 use crate::chip_handler::{ChipHandler, calldata::CalldataChip};

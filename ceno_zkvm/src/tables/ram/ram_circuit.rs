@@ -4,7 +4,7 @@ use ceno_emul::{Addr, Cycle, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::RAMType, tables::TableCircuit,
+    circuit_builder::CircuitBuilder, structs::RAMType, tables::TableCircuit,
     witness::RowMajorMatrix,
 };
 

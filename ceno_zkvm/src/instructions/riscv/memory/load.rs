@@ -1,7 +1,6 @@
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, im_insn::IMInstructionConfig},

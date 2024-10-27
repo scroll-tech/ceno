@@ -6,7 +6,6 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::{
         Instruction,
         riscv::{constants::UInt, u_insn::UInstructionConfig},

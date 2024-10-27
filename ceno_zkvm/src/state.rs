@@ -2,7 +2,6 @@ use ff_ext::ExtensionField;
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr},
     structs::RAMType,
 };

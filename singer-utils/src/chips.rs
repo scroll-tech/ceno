@@ -11,7 +11,6 @@ use sumcheck::util::ceil_log2;
 
 use crate::{
     constants::RANGE_CHIP_BIT_WIDTH,
-    error::UtilError,
     structs::{ChipChallenges, InstOutChipType},
 };
 

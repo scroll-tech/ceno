@@ -10,7 +10,6 @@ use sumcheck::util::ceil_log2;
 
 use crate::{
     chip_handler::{ChipHandler, bytecode::BytecodeChip},
-    error::UtilError,
     structs::{ChipChallenges, PCUInt},
 };
 

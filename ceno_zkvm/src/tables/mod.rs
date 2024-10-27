@@ -1,6 +1,5 @@
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, scheme::constants::MIN_PAR_SIZE,
-    witness::RowMajorMatrix,
+    circuit_builder::CircuitBuilder, scheme::constants::MIN_PAR_SIZE, witness::RowMajorMatrix,
 };
 use ff::Field;
 use ff_ext::ExtensionField;

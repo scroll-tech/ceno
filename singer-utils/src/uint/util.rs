@@ -1,4 +1,3 @@
-use crate::error::UtilError;
 use ff::PrimeField;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;

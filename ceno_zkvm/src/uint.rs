@@ -6,7 +6,7 @@ pub mod util;
 use crate::{
     chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
-    error::{UtilError, ZKVMError},
+    error::UtilError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLTConfig,
     utils::add_one_to_big_num,

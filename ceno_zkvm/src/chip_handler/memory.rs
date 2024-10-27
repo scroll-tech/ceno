@@ -1,7 +1,6 @@
 use crate::{
     chip_handler::{AddressExpr, MemoryChipOperations, MemoryExpr},
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::Expression,
     gadgets::AssertLTConfig,
     instructions::riscv::constants::UINT_LIMBS,

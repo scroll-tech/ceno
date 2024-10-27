@@ -5,7 +5,7 @@ use super::ops_impl::OpTableConfig;
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ROMType, tables::TableCircuit,
+    circuit_builder::CircuitBuilder, structs::ROMType, tables::TableCircuit,
     witness::RowMajorMatrix,
 };
 use ff_ext::ExtensionField;

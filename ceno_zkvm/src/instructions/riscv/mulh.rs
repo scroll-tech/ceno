@@ -9,7 +9,7 @@ use super::{
     r_insn::RInstructionConfig,
 };
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
+    circuit_builder::CircuitBuilder, instructions::Instruction, uint::Value,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;

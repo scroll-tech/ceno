@@ -1,7 +1,6 @@
 use crate::{
     chip_handler::RegisterChipOperations,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{ToExpr, WitIn},
     gadgets::AssertLTConfig,
     instructions::{

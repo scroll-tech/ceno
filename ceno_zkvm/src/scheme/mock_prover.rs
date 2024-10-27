@@ -689,7 +689,6 @@ mod tests {
     use super::*;
     use crate::{
         ROMType::U5,
-        error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLTConfig, IsLtConfig},
         set_val,

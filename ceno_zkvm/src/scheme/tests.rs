@@ -16,7 +16,6 @@ use transcript::Transcript;
 use crate::{
     circuit_builder::CircuitBuilder,
     declare_program,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::{
         Instruction,

@@ -4,7 +4,6 @@ use ff_ext::ExtensionField;
 use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr},
     instructions::riscv::insn_base::{StateInOut, WriteRD},
     tables::InsnRecord,

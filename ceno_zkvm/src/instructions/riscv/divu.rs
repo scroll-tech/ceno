@@ -8,7 +8,6 @@ use super::{
 };
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::Expression,
     gadgets::{IsLtConfig, IsZeroConfig},
     instructions::Instruction,

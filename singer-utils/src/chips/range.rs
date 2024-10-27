@@ -8,7 +8,6 @@ use simple_frontend::structs::CircuitBuilder;
 use crate::{
     chip_handler::{ChipHandler, range::RangeChip},
     constants::RANGE_CHIP_BIT_WIDTH,
-    error::UtilError,
     structs::ChipChallenges,
 };
 

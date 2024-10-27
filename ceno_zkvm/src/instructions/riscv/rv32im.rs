@@ -1,5 +1,4 @@
 use crate::{
-    error::ZKVMError,
     instructions::Instruction,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{

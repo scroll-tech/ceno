@@ -7,7 +7,6 @@ use std::{collections::HashMap, mem::MaybeUninit};
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,

@@ -1,7 +1,6 @@
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
         Instruction,

@@ -2,7 +2,6 @@ use super::RIVInstruction;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     gadgets::DivConfig,
     instructions::{
         Instruction,

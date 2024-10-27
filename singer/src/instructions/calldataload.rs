@@ -15,8 +15,6 @@ use singer_utils::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::error::ZKVMError;
-
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 impl<E: ExtensionField> InstructionGraph<E> for CalldataloadInstruction {

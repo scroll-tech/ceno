@@ -1,6 +1,5 @@
 use crate::{
     chip_handler::{ChipHandler, range::RangeChip},
-    error::UtilError,
     uint::{constants::AddSubConstants, uint::UInt},
 };
 use ff::Field;
