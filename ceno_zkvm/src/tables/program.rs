@@ -7,7 +7,7 @@ use crate::{
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
-    tables::TableCircuit,
+    tables::{TableCircuit, views::columns_view_impl},
     witness::RowMajorMatrix,
 };
 use ceno_emul::{CENO_PLATFORM, DecodedInstruction, PC_STEP_SIZE, WORD_SIZE};
@@ -30,49 +30,27 @@ macro_rules! declare_program {
     };
 }
 
-#[derive(Clone, Debug)]
-pub struct InsnRecord<T>([T; 7]);
+columns_view_impl!(InsnRecord);
+#[repr(C)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub struct InsnRecord<T> {
+    pc: T,
+    opcode: T,
+    rd: T,
+    funct3: T,
+    rs1: T,
+    rs2: T,
+    /// The complete immediate value, for instruction types I/S/B/U/J.
+    /// Otherwise, the field funct7 of R-Type instructions.
+    imm_or_funct7: T,
+}
 
 impl<T> InsnRecord<T> {
-    pub fn new(pc: T, opcode: T, rd: T, funct3: T, rs1: T, rs2: T, imm_or_funct7: T) -> Self {
-        InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_or_funct7])
-    }
-
-    pub fn as_slice(&self) -> &[T] {
-        &self.0
-    }
-
-    pub fn pc(&self) -> &T {
-        &self.0[0]
-    }
-
-    pub fn opcode(&self) -> &T {
-        &self.0[1]
-    }
-
-    pub fn rd_or_zero(&self) -> &T {
-        &self.0[2]
-    }
-
-    pub fn funct3_or_zero(&self) -> &T {
-        &self.0[3]
-    }
-
-    pub fn rs1_or_zero(&self) -> &T {
-        &self.0[4]
-    }
-
-    pub fn rs2_or_zero(&self) -> &T {
-        &self.0[5]
-    }
-
     /// Iterate through the fields, except immediate because it is complicated.
     fn without_imm(&self) -> &[T] {
         &self.0[0..6]
     }
 
-    /// The complete immediate value, for instruction types I/S/B/U/J.
-    /// Otherwise, the field funct7 of R-Type instructions.
     pub fn imm_or_funct7(&self) -> &T {
         &self.0[6]
     }
@@ -125,21 +103,21 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
-        let record = InsnRecord([
-            cb.create_fixed(|| "pc")?,
-            cb.create_fixed(|| "opcode")?,
-            cb.create_fixed(|| "rd")?,
-            cb.create_fixed(|| "funct3")?,
-            cb.create_fixed(|| "rs1")?,
-            cb.create_fixed(|| "rs2")?,
-            cb.create_fixed(|| "imm_or_funct7")?,
-        ]);
+        let record = InsnRecord {
+            pc: cb.create_fixed(|| "pc")?,
+            opcode: cb.create_fixed(|| "opcode")?,
+            rd: cb.create_fixed(|| "rd")?,
+            funct3: cb.create_fixed(|| "funct3")?,
+            rs1: cb.create_fixed(|| "rs1")?,
+            rs2: cb.create_fixed(|| "rs2")?,
+            imm_or_funct7: cb.create_fixed(|| "imm_or_funct7")?,
+        };
 
         let mlt = cb.create_witin(|| "mlt")?;
 
         let record_exprs = {
             let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
-            fields.extend(record.as_slice().iter().map(|f| Expression::Fixed(*f)));
+            fields.extend(record.iter().map(|f| Expression::Fixed(*f)));
             cb.rlc_chip_record(fields)
         };
 

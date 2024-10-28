@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -112,7 +114,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     /// Fetch an instruction at a given PC from the Program table.
     pub fn lk_fetch(&mut self, record: &InsnRecord<Expression<E>>) -> Result<(), ZKVMError> {
-        self.lk_record(|| "fetch", ROMType::Instruction, record.as_slice().to_vec())
+        self.lk_record(|| "fetch", ROMType::Instruction, record.borrow().to_vec())
     }
 
     pub fn read_record<NR, N>(

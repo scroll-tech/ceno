@@ -7,6 +7,7 @@ use ff_ext::ExtensionField;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::{collections::HashMap, mem::MaybeUninit};
 mod range;
+pub mod views;
 pub use range::*;
 
 mod ops;
