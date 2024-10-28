@@ -14,7 +14,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     ) -> Result<ZKVMProvingKey<E, PCS>, ZKVMError> {
         let mut vm_pk = ZKVMProvingKey::new(pp, vp);
 
-        for (c_name, cs) in self.circuit_css.into_iter() {
+        for (c_name, cs) in self.circuit_css {
             let fixed_traces = vm_fixed_traces
                 .circuit_fixed_traces
                 .remove(&c_name)

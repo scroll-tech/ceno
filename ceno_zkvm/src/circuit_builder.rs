@@ -1,7 +1,7 @@
-use itertools::Itertools;
-use std::{collections::HashMap, marker::PhantomData};
+use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
+use itertools::{chain, Itertools};
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
@@ -45,19 +45,7 @@ impl NameSpace {
             panic!("'/' is not allowed in names");
         }
 
-        let mut name = String::new();
-
-        let mut needs_separation = false;
-        for ns in ns.iter().chain(Some(&this).into_iter()) {
-            if needs_separation {
-                name += "/";
-            }
-
-            name += ns;
-            needs_separation = true;
-        }
-
-        name
+        chain!(ns, once(&this)).join("/")
     }
 
     pub fn get_namespaces(&self) -> &[String] {
@@ -175,14 +163,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
     ) -> ProvingKey<E, PCS> {
         // transpose from row-major to column-major
-        let fixed_traces = fixed_traces.map(|t| t.into_mles().into_iter().collect_vec());
+        let fixed_traces = fixed_traces.map(RowMajorMatrix::into_mles);
 
         let fixed_commit_wd = fixed_traces
             .as_ref()
             .map(|traces| PCS::batch_commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd
-            .as_ref()
-            .map(|commit_wd| PCS::get_pure_commitment(commit_wd));
+        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
 
         ProvingKey {
             fixed_traces,
