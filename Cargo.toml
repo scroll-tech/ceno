@@ -15,6 +15,7 @@ members = [
   "transcript",
   "ceno_zkvm",
   "poseidon",
+  "ceno_utils",
 ]
 resolver = "2"
 

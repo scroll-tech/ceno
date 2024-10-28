@@ -254,12 +254,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ceno_utils"
+version = "0.1.0"
+
+[[package]]
 name = "ceno_zkvm"
 version = "0.1.0"
 dependencies = [
  "ark-std",
  "base64",
  "ceno_emul",
+ "ceno_utils",
  "cfg-if",
  "clap",
  "const_env",
@@ -1691,6 +1696,7 @@ name = "singer"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "ceno_utils",
  "cfg-if",
  "const_env",
  "criterion",

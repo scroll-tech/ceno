@@ -11,6 +11,7 @@ goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 
+ceno_utils = { path = "../ceno_utils" }
 ff_ext = { path = "../ff_ext" }
 gkr = { path = "../gkr", features = ["parallel"] }
 gkr-graph = { version = "0", path = "../gkr-graph" }

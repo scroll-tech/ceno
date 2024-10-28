@@ -13,6 +13,7 @@ rayon.workspace = true
 serde.workspace = true
 
 ceno_emul = { path = "../ceno_emul" }
+ceno_utils = { path = "../ceno_utils" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }

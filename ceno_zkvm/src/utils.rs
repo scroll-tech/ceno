@@ -98,19 +98,6 @@ pub fn get_challenge_pows<E: ExtensionField>(
         .collect_vec()
 }
 
-// split single u64 value into W slices, each slice got C bits.
-// all the rest slices will be filled with 0 if W x C > 64
-pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
-    assert!(C <= 64);
-    let mut x = x;
-    let mut ret = [0; W];
-    for ret in ret.iter_mut() {
-        *ret = x & ((1 << C) - 1);
-        x >>= C;
-    }
-    ret
-}
-
 /// we expect each thread at least take 4 num of sumcheck variables
 /// return optimal num threads to run sumcheck
 pub fn proper_num_threads(num_vars: usize, expected_max_threads: usize) -> usize {

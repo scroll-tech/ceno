@@ -6,7 +6,7 @@ pub mod error;
 pub mod instructions;
 pub mod scheme;
 pub mod tables;
-pub use utils::u64vec;
+pub use ceno_utils::u64vec;
 mod chip_handler;
 pub mod circuit_builder;
 pub mod expression;
