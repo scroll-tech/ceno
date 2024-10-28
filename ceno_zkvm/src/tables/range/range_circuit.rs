@@ -5,7 +5,7 @@ use super::range_impl::RangeTableConfig;
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ROMType, tables::TableCircuit,
+    circuit_builder::CircuitBuilder, structs::ROMType, tables::TableCircuit,
     witness::RowMajorMatrix,
 };
 use ff_ext::ExtensionField;
@@ -32,7 +32,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         format!("RANGE_{:?}", RANGE::ROM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> RangeTableConfig {
         cb.namespace(
             || Self::name(),
             |cb| RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE, RANGE::len()),
@@ -45,7 +45,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
         let mut table = config.generate_fixed_traces(num_fixed, RANGE::content());
-        Self::padding_zero(&mut table, num_fixed).expect("padding error");
+        Self::padding_zero(&mut table, num_fixed);
         table
     }
 
@@ -54,10 +54,10 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> RowMajorMatrix<E::BaseField> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
-        let mut table = config.assign_instances(num_witin, multiplicity, RANGE::len())?;
-        Self::padding_zero(&mut table, num_witin).expect("padding error");
-        Ok(table)
+        let mut table = config.assign_instances(num_witin, multiplicity, RANGE::len());
+        Self::padding_zero(&mut table, num_witin);
+        table
     }
 }

@@ -15,8 +15,6 @@ use singer_utils::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::error::ZKVMError;
-
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 impl<E: ExtensionField> InstructionGraph<E> for CalldataloadInstruction {
@@ -48,7 +46,7 @@ register_witness!(
 impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
     const OPCODE: OpcodeType = OpcodeType::CALLDATALOAD;
     const NAME: &'static str = "CALLDATALOAD";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> InstCircuit<E> {
         let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
@@ -56,8 +54,8 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
-        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
-        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
+        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()]).unwrap();
+        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()]).unwrap();
         let memory_ts = &phase0[Self::phase0_memory_ts()];
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
@@ -74,14 +72,14 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
         );
 
         let next_pc =
-            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()]);
         let next_stack_ts = RangeChip::add_ts_with_const(
             &mut chip_handler,
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
-        )?;
+        );
 
         GlobalStateChip::state_out(
             &mut chip_handler,
@@ -98,10 +96,10 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
             &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(1)),
-        )?;
+        );
 
         // Stack pop offset from the stack.
-        let old_stack_ts = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts()])?;
+        let old_stack_ts = TSUInt::try_from(&phase0[Self::phase0_old_stack_ts()]).unwrap();
         let offset = &phase0[Self::phase0_offset()];
         StackChip::pop(
             &mut chip_handler,
@@ -116,7 +114,7 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
             &old_stack_ts,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt()],
-        )?;
+        );
 
         // CallDataLoad check (offset, data)
         let data = &phase0[Self::phase0_data()];
@@ -144,14 +142,14 @@ impl<E: ExtensionField> Instruction<E> for CalldataloadInstruction {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
-        Ok(InstCircuit {
+        InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
                 phases_wire_id: vec![phase0_wire_id],
                 ..Default::default()
             },
-        })
+        }
     }
 }
 
@@ -199,7 +197,7 @@ mod test {
         }
 
         // initialize general test inputs associated with push1
-        let inst_circuit = CalldataloadInstruction::construct_circuit(challenges).unwrap();
+        let inst_circuit = CalldataloadInstruction::construct_circuit(challenges);
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);
@@ -267,8 +265,7 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_calldataload_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges);
         let mut singer_builder = SingerGraphBuilder::<E>::default();
 
         let mut rng = test_rng();
@@ -297,8 +294,7 @@ mod test {
             &real_challenges,
             1 << instance_num_vars,
             &SingerParams::default(),
-        )
-        .expect("gkr graph construction failed");
+        );
 
         let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
 

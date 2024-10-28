@@ -42,8 +42,7 @@ use transcript::Transcript;
 fn bench_add(c: &mut Criterion) {
     let max_thread_id = max_usable_threads();
     let chip_challenges = ChipChallenges::default();
-    let circuit_builder =
-        SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+    let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges);
 
     for instance_num_vars in 10..14 {
         // expand more input size once runtime is acceptable
@@ -89,7 +88,7 @@ fn bench_add(c: &mut Criterion) {
                             1 << instance_num_vars,
                             &SingerParams::default(),
                         )
-                        .expect("gkr graph construction failed");
+                        ;
 
                         let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
 

@@ -1,5 +1,4 @@
 use crate::{
-    error::ZKVMError,
     instructions::Instruction,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
@@ -99,7 +98,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
         steps: Vec<StepRecord>,
-    ) -> Result<(), ZKVMError> {
+    ) {
         use InsnKind::*;
 
         let mut add_records = Vec::new();
@@ -130,13 +129,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         );
         assert_eq!(halt_records.len(), 1);
 
-        witness.assign_opcode_circuit::<AddInstruction<E>>(cs, &self.add_config, add_records)?;
-        witness.assign_opcode_circuit::<BltuInstruction>(cs, &self.bltu_config, bltu_records)?;
-        witness.assign_opcode_circuit::<JalInstruction<E>>(cs, &self.jal_config, jal_records)?;
-        witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
-        witness.assign_opcode_circuit::<LuiInstruction<E>>(cs, &self.lui_config, lui_records)?;
-        witness.assign_opcode_circuit::<LwInstruction<E>>(cs, &self.lw_config, lw_records)?;
-        Ok(())
+        witness.assign_opcode_circuit::<AddInstruction<E>>(cs, &self.add_config, add_records);
+        witness.assign_opcode_circuit::<BltuInstruction>(cs, &self.bltu_config, bltu_records);
+        witness.assign_opcode_circuit::<JalInstruction<E>>(cs, &self.jal_config, jal_records);
+        witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records);
+        witness.assign_opcode_circuit::<LuiInstruction<E>>(cs, &self.lui_config, lui_records);
+        witness.assign_opcode_circuit::<LwInstruction<E>>(cs, &self.lw_config, lw_records);
     }
 
     pub fn assign_table_circuit(
@@ -145,19 +143,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness: &mut ZKVMWitnesses<E>,
         reg_final: &[MemFinalRecord],
         mem_final: &[MemFinalRecord],
-    ) -> Result<(), ZKVMError> {
-        witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
-        witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_config, &())?;
-        witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
+    ) {
+        witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
+        witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_config, &());
+        witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
 
         // assign register finalization.
-        witness
-            .assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)
-            .unwrap();
+        witness.assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final);
         // assign memory finalization.
-        witness
-            .assign_table_circuit::<MemTableCircuit<E>>(cs, &self.mem_config, mem_final)
-            .unwrap();
-        Ok(())
+        witness.assign_table_circuit::<MemTableCircuit<E>>(cs, &self.mem_config, mem_final);
     }
 }

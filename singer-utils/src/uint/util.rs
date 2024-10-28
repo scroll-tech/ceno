@@ -1,4 +1,3 @@
-use crate::error::UtilError;
 use ff::PrimeField;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -20,17 +19,18 @@ pub fn convert_decomp<E: ExtensionField>(
     small_cell_bit_width: usize,
     big_cell_bit_width: usize,
     is_little_endian: bool,
-) -> Result<Vec<CellId>, UtilError> {
+) -> Vec<CellId> {
     assert!(E::BaseField::NUM_BITS >= big_cell_bit_width as u32);
 
     if small_cell_bit_width > big_cell_bit_width {
-        return Err(UtilError::UIntError(
-            "cannot pack bigger width cells into smaller width cells".to_string(),
-        ));
+        panic!(
+            "cannot pack bigger width cells into smaller width cells: {} > {}",
+            small_cell_bit_width, big_cell_bit_width
+        );
     }
 
     if small_cell_bit_width == big_cell_bit_width {
-        return Ok(small_cells.to_vec());
+        return small_cells.to_vec();
     }
 
     // ensure the small cell values are in little endian form
@@ -59,7 +59,7 @@ pub fn convert_decomp<E: ExtensionField>(
         new_cell_ids.push(big_cell);
     }
 
-    Ok(new_cell_ids)
+    new_cell_ids
 }
 
 /// Pads a `Vec<CellId>` with new cells to reach some given size n

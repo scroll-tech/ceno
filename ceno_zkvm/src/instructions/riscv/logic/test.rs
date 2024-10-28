@@ -19,16 +19,7 @@ const B: Word = 0xef552020;
 fn test_opcode_and() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "and",
-            |cb| {
-                let config = AndInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(|| "and", AndInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
     let (raw_witin, lkm) =
@@ -42,15 +33,13 @@ fn test_opcode_and() {
                 Change::new(0, A & B),
                 0,
             ),
-        ])
-        .unwrap();
+        ]);
 
     let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A & B));
 
     config
         .rd_written
-        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-        .unwrap();
+        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written);
 
     MockProver::assert_satisfied(
         &cb,
@@ -70,16 +59,7 @@ fn test_opcode_and() {
 fn test_opcode_or() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "or",
-            |cb| {
-                let config = OrInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(|| "or", OrInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::OR, 2, 3, 4, 0);
     let (raw_witin, lkm) =
@@ -93,15 +73,13 @@ fn test_opcode_or() {
                 Change::new(0, A | B),
                 0,
             ),
-        ])
-        .unwrap();
+        ]);
 
     let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A | B));
 
     config
         .rd_written
-        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-        .unwrap();
+        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written);
 
     MockProver::assert_satisfied(
         &cb,
@@ -121,16 +99,7 @@ fn test_opcode_or() {
 fn test_opcode_xor() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "xor",
-            |cb| {
-                let config = XorInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(|| "xor", XorInstruction::construct_circuit);
 
     let insn_code = encode_rv32(InsnKind::XOR, 2, 3, 4, 0);
     let (raw_witin, lkm) =
@@ -144,15 +113,13 @@ fn test_opcode_xor() {
                 Change::new(0, A ^ B),
                 0,
             ),
-        ])
-        .unwrap();
+        ]);
 
     let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A ^ B));
 
     config
         .rd_written
-        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-        .unwrap();
+        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written);
 
     MockProver::assert_satisfied(
         &cb,

@@ -5,8 +5,8 @@ use ff_ext::ExtensionField;
 
 use super::{constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::SignedLtConfig,
-    instructions::Instruction, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, gadgets::SignedLtConfig, instructions::Instruction,
+    uint::Value, witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 
@@ -33,13 +33,13 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
         format!("{:?}", InsnKind::SLT)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
         // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb);
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", cb);
 
-        let lt = SignedLtConfig::construct_circuit(cb, || "rs1 < rs2", &rs1_read, &rs2_read)?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let lt = SignedLtConfig::construct_circuit(cb, || "rs1 < rs2", &rs1_read, &rs2_read);
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
@@ -47,15 +47,15 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             rd_written.register_expr(),
-        )?;
+        );
 
-        Ok(SltConfig {
+        SltConfig {
             r_insn,
             rs1_read,
             rs2_read,
             rd_written,
             signed_lt: lt,
-        })
+        }
     }
 
     fn assign_instance(
@@ -63,8 +63,8 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config.r_insn.assign_instance(instance, lkm, step)?;
+    ) {
+        config.r_insn.assign_instance(instance, lkm, step);
 
         let rs1 = step.rs1().unwrap().value;
         let rs2 = step.rs2().unwrap().value;
@@ -79,9 +79,7 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
             .assign_limbs(instance, rs2_read.as_u16_limbs());
         config
             .signed_lt
-            .assign_instance::<E>(instance, lkm, rs1 as SWord, rs2 as SWord)?;
-
-        Ok(())
+            .assign_instance::<E>(instance, lkm, rs1 as SWord, rs2 as SWord);
     }
 }
 
@@ -104,16 +102,7 @@ mod test {
     fn verify(name: &'static str, rs1: i32, rs2: i32, rd: Word) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || format!("SLT/{name}"),
-                |cb| {
-                    let config = SltInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace(|| format!("SLT/{name}"), SltInstruction::construct_circuit);
 
         let insn_code = encode_rv32(InsnKind::SLT, 2, 3, 4, 0);
         let (raw_witin, lkm) =
@@ -127,15 +116,13 @@ mod test {
                     Change::new(0, rd),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,

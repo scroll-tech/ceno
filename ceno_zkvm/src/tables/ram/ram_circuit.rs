@@ -4,7 +4,7 @@ use ceno_emul::{Addr, Cycle, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::RAMType, tables::TableCircuit,
+    circuit_builder::CircuitBuilder, structs::RAMType, tables::TableCircuit,
     witness::RowMajorMatrix,
 };
 
@@ -53,7 +53,7 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
         format!("RAM_{:?}", RAM::RAM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Self::TableConfig {
         cb.namespace(
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb),
@@ -66,7 +66,7 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
         init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         let mut table = config.gen_init_state(num_fixed, init_v);
-        Self::padding_zero(&mut table, num_fixed).expect("padding error");
+        Self::padding_zero(&mut table, num_fixed);
         table
     }
 
@@ -75,9 +75,9 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
         num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        let mut table = config.assign_instances(num_witin, final_v)?;
-        Self::padding_zero(&mut table, num_witin)?;
-        Ok(table)
+    ) -> RowMajorMatrix<E::BaseField> {
+        let mut table = config.assign_instances(num_witin, final_v);
+        Self::padding_zero(&mut table, num_witin);
+        table
     }
 }

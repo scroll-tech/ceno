@@ -8,7 +8,6 @@ use super::{
 };
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::Expression,
     gadgets::{IsLtConfig, IsZeroConfig},
     instructions::Instruction,
@@ -46,17 +45,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
         // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
-        let mut divisor = UInt::new_unchecked(|| "divisor", cb)?;
-        let mut outcome = UInt::new(|| "outcome", cb)?;
-        let r = UInt::new(|| "remainder", cb)?;
+        let mut divisor = UInt::new_unchecked(|| "divisor", cb);
+        let mut outcome = UInt::new(|| "outcome", cb);
+        let r = UInt::new(|| "remainder", cb);
         let (dividend, inter_mul_value) =
-            divisor.mul_add(|| "divisor * outcome + r", cb, &mut outcome, &r, true)?;
+            divisor.mul_add(|| "divisor * outcome + r", cb, &mut outcome, &r, true);
 
         // div by zero check
-        let is_zero =
-            IsZeroConfig::construct_circuit(cb, || "divisor_zero_check", divisor.value())?;
+        let is_zero = IsZeroConfig::construct_circuit(cb, || "divisor_zero_check", divisor.value());
         let outcome_value = outcome.value();
         cb.condition_require_equal(
             || "outcome_is_zero",
@@ -64,7 +62,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             outcome_value.clone(),
             ((1u64 << UInt::<E>::TOTAL_BITS) - 1).into(),
             outcome_value,
-        )?;
+        );
 
         // remainder should be less than divisor if divisor != 0.
         let lt = IsLtConfig::construct_circuit(
@@ -73,7 +71,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             r.value(),
             divisor.value(),
             UINT_LIMBS,
-        )?;
+        );
 
         // When divisor is zero, remainder is -1 implies "remainder > divisor" aka. lt.expr() == 0
         // otherwise lt.expr() == 1
@@ -81,7 +79,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "remainder < divisor when non-zero divisor",
             is_zero.expr() + lt.expr(),
             Expression::ONE,
-        )?;
+        );
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
@@ -89,9 +87,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             dividend.register_expr(),
             divisor.register_expr(),
             outcome.register_expr(),
-        )?;
+        );
 
-        Ok(ArithConfig {
+        ArithConfig {
             r_insn,
             dividend,
             divisor,
@@ -100,7 +98,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             inter_mul_value,
             is_zero,
             remainder_lt: lt,
-        })
+        }
     }
 
     fn assign_instance(
@@ -108,7 +106,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let rs1 = step.rs1().unwrap().value;
         let rs2 = step.rs2().unwrap().value;
         let rd = step.rd().unwrap().value.after;
@@ -120,7 +118,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let r = Value::new(if rs2 == 0 { 0 } else { rs1 % rs2 }, lkm);
 
         // assignment
-        config.r_insn.assign_instance(instance, lkm, step)?;
+        config.r_insn.assign_instance(instance, lkm, step);
         config
             .divisor
             .assign_limbs(instance, divisor.as_u16_limbs());
@@ -131,18 +129,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let (dividend, inter_mul_value) = divisor.mul_add(&outcome, &r, lkm, true);
         config
             .inter_mul_value
-            .assign_mul_outcome(instance, lkm, &inter_mul_value)?;
+            .assign_mul_outcome(instance, lkm, &inter_mul_value);
 
         config.dividend.assign_add_outcome(instance, &dividend);
         config.remainder.assign_limbs(instance, r.as_u16_limbs());
         config
             .is_zero
-            .assign_instance(instance, divisor.as_u64().into())?;
+            .assign_instance(instance, divisor.as_u64().into());
         config
             .remainder_lt
-            .assign_instance(instance, lkm, r.as_u64(), divisor.as_u64())?;
-
-        Ok(())
+            .assign_instance(instance, lkm, r.as_u64(), divisor.as_u64());
     }
 }
 
@@ -176,13 +172,10 @@ mod test {
         ) {
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
             let mut cb = CircuitBuilder::new(&mut cs);
-            let config = cb
-                .namespace(
-                    || format!("divu_({name})"),
-                    |cb| Ok(DivUInstruction::construct_circuit(cb)),
-                )
-                .unwrap()
-                .unwrap();
+            let config = cb.namespace(
+                || format!("divu_({name})"),
+                DivUInstruction::construct_circuit,
+            );
 
             let outcome = if divisor == 0 {
                 u32::MAX
@@ -203,8 +196,7 @@ mod test {
                         Change::new(0, outcome),
                         0,
                     ),
-                ])
-                .unwrap();
+                ]);
 
             let expected_rd_written = UInt::from_const_unchecked(
                 Value::new_unchecked(exp_outcome).as_u16_limbs().to_vec(),
@@ -212,8 +204,7 @@ mod test {
 
             config
                 .outcome
-                .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
-                .unwrap();
+                .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written);
 
             let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
             MockProver::assert_with_expected_errors(

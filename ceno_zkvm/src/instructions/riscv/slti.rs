@@ -9,7 +9,6 @@ use super::{
 };
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::IsLtConfig,
     instructions::Instruction,
@@ -42,10 +41,10 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         format!("{:?}", InsnKind::SLTI)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm = cb.create_witin(|| "imm")?;
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb);
+        let imm = cb.create_witin(|| "imm");
 
         let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         let is_rs1_neg = IsLtConfig::construct_circuit(
@@ -54,7 +53,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
             max_signed_limb_expr.clone(),
             rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
             1,
-        )?;
+        );
 
         let lt = IsLtConfig::construct_circuit(
             cb,
@@ -62,8 +61,8 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
             rs1_read.to_field_expr(is_rs1_neg.expr()),
             imm.expr(),
             UINT_LIMBS,
-        )?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        );
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
@@ -72,16 +71,16 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
-        )?;
+        );
 
-        Ok(InstructionConfig {
+        InstructionConfig {
             i_insn,
             rs1_read,
             imm,
             rd_written,
             is_rs1_neg,
             lt,
-        })
+        }
     }
 
     fn assign_instance(
@@ -89,8 +88,8 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config.i_insn.assign_instance(instance, lkm, step)?;
+    ) {
+        config.i_insn.assign_instance(instance, lkm, step);
 
         let rs1 = step.rs1().unwrap().value;
         let max_signed_limb = (1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1;
@@ -103,7 +102,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
             lkm,
             max_signed_limb,
             *rs1_value.limbs.last().unwrap() as u64,
-        )?;
+        );
 
         let imm = step.insn().imm_or_funct7();
         let imm_field = InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn());
@@ -111,9 +110,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
 
         config
             .lt
-            .assign_instance_signed(instance, lkm, rs1 as SWord, imm as SWord)?;
-
-        Ok(())
+            .assign_instance_signed(instance, lkm, rs1 as SWord, imm as SWord);
     }
 }
 
@@ -136,16 +133,10 @@ mod test {
     fn verify(name: &'static str, rs1: i32, imm: i32, rd: Word) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || format!("SLTI/{name}"),
-                |cb| {
-                    let config = SltiInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace(
+            || format!("SLTI/{name}"),
+            SltiInstruction::construct_circuit,
+        );
 
         let insn_code = encode_rv32(InsnKind::SLTI, 2, 0, 4, imm_i(imm));
         let (raw_witin, lkm) =
@@ -158,15 +149,13 @@ mod test {
                     Change::new(0, rd),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,

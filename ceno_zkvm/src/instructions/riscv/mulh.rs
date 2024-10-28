@@ -9,7 +9,7 @@ use super::{
     r_insn::RInstructionConfig,
 };
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
+    circuit_builder::CircuitBuilder, instructions::Instruction, uint::Value,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -39,17 +39,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
         let (rs1_read, rs2_read, rd_written, rd_written_reg_expr) = match I::INST_KIND {
             InsnKind::MULHU => {
                 // rs1_read * rs2_read = rd_written
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder);
+                let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder);
                 let rd_written: UIntMul<E> =
-                    rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true)?;
-                let (_, rd_written_hi) = rd_written.as_lo_hi()?;
+                    rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true);
+                let (_, rd_written_hi) = rd_written.as_lo_hi();
                 (
                     rs1_read,
                     rs2_read,
@@ -67,14 +65,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             rd_written_reg_expr,
-        )?;
+        );
 
-        Ok(ArithConfig {
+        ArithConfig {
             r_insn,
             rs1_read,
             rs2_read,
             rd_written,
-        })
+        }
     }
 
     fn assign_instance(
@@ -82,10 +80,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         config
             .r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
 
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         config
@@ -105,13 +103,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
 
                 config
                     .rd_written
-                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
+                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written);
             }
 
             _ => unreachable!("Unsupported instruction kind"),
         };
-
-        Ok(())
     }
 }
 
@@ -140,10 +136,7 @@ mod test {
     fn verify(rs1: u32, rs2: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(|| "mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace(|| "mulhu", MulhuInstruction::construct_circuit);
 
         let a = Value::<'_, u32>::new_unchecked(rs1);
         let b = Value::<'_, u32>::new_unchecked(rs2);
@@ -162,8 +155,7 @@ mod test {
                     Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         // verify value write to register, which is only hi
         let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());
@@ -172,8 +164,7 @@ mod test {
             || "assert_rd_written",
             rd_written_expr,
             expected_rd_written.value(),
-        )
-        .unwrap();
+        );
 
         MockProver::assert_satisfied(
             &cb,

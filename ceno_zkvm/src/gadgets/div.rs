@@ -5,7 +5,6 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     witness::LkMultiplicity,
 };
@@ -30,10 +29,10 @@ impl<E: ExtensionField> DivConfig<E> {
         divisor: &mut UInt<E>,
         quotient: &mut UInt<E>,
         remainder: &UInt<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         circuit_builder.namespace(name_fn, |cb| {
             let (dividend, intermediate_mul) =
-                divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true)?;
+                divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true);
 
             let r_lt = AssertLTConfig::construct_circuit(
                 cb,
@@ -41,13 +40,13 @@ impl<E: ExtensionField> DivConfig<E> {
                 remainder.value(),
                 divisor.value(),
                 UINT_LIMBS,
-            )?;
+            );
 
-            Ok(Self {
+            Self {
                 dividend,
                 intermediate_mul,
                 r_lt,
-            })
+            }
         })
     }
 
@@ -58,13 +57,12 @@ impl<E: ExtensionField> DivConfig<E> {
         divisor: &Value<'a, u32>,
         quotient: &Value<'a, u32>,
         remainder: &Value<'a, u32>,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let (dividend, intermediate) = divisor.mul_add(quotient, remainder, lkm, true);
         self.r_lt
-            .assign_instance(instance, lkm, remainder.as_u64(), divisor.as_u64())?;
+            .assign_instance(instance, lkm, remainder.as_u64(), divisor.as_u64());
         self.intermediate_mul
-            .assign_mul_outcome(instance, lkm, &intermediate)?;
+            .assign_mul_outcome(instance, lkm, &intermediate);
         self.dividend.assign_add_outcome(instance, &dividend);
-        Ok(())
     }
 }

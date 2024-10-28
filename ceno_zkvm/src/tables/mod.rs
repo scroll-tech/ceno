@@ -1,6 +1,5 @@
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, scheme::constants::MIN_PAR_SIZE,
-    witness::RowMajorMatrix,
+    circuit_builder::CircuitBuilder, scheme::constants::MIN_PAR_SIZE, witness::RowMajorMatrix,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -25,9 +24,7 @@ pub trait TableCircuit<E: ExtensionField> {
 
     fn name() -> String;
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::TableConfig, ZKVMError>;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::TableConfig;
 
     fn generate_fixed_traces(
         config: &Self::TableConfig,
@@ -40,12 +37,9 @@ pub trait TableCircuit<E: ExtensionField> {
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         input: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
+    ) -> RowMajorMatrix<E::BaseField>;
 
-    fn padding_zero(
-        table: &mut RowMajorMatrix<E::BaseField>,
-        num_witin: usize,
-    ) -> Result<(), ZKVMError> {
+    fn padding_zero(table: &mut RowMajorMatrix<E::BaseField>, num_witin: usize) {
         // Fill the padding with zeros, if any.
         let num_padding_instances = table.num_padding_instances();
         if num_padding_instances > 0 {
@@ -65,6 +59,5 @@ pub trait TableCircuit<E: ExtensionField> {
                         .for_each(|instance| instance.copy_from_slice(padding_instance.as_slice()));
                 });
         }
-        Ok(())
     }
 }

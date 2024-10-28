@@ -6,7 +6,6 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
@@ -40,12 +39,10 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         format!("{:?}", InsnKind::JALR)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<JalrConfig<E>, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> JalrConfig<E> {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder); // unsigned 32-bit value
+        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
+        let rd_written = UInt::new(|| "rd_written", circuit_builder);
 
         let i_insn = IInstructionConfig::construct_circuit(
             circuit_builder,
@@ -54,7 +51,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             rs1_read.register_expr(),
             rd_written.register_expr(),
             true,
-        )?;
+        );
 
         // Next pc is obtained by rounding rs1+imm down to an even value.
         // To implement this, check three conditions:
@@ -62,41 +59,41 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         //  2. overflow in {-1, 0, 1}
         //  3. next_pc = next_pc_addr aligned to even value (round down)
 
-        let next_pc_addr = MemAddr::<E>::construct_unaligned(circuit_builder)?;
-        let overflow = circuit_builder.create_witin(|| "overflow")?;
+        let next_pc_addr = MemAddr::<E>::construct_unaligned(circuit_builder);
+        let overflow = circuit_builder.create_witin(|| "overflow");
 
         circuit_builder.require_equal(
             || "rs1+imm = next_pc_unrounded + overflow*2^32",
             rs1_read.value() + imm.expr(),
             next_pc_addr.expr_unaligned() + overflow.expr() * (1u64 << 32),
-        )?;
+        );
 
         circuit_builder.require_zero(
             || "overflow_0_or_pm1",
             overflow.expr() * (overflow.expr() - 1) * (overflow.expr() + 1),
-        )?;
+        );
 
         circuit_builder.require_equal(
             || "next_pc_addr = next_pc",
             next_pc_addr.expr_align2(),
             i_insn.vm_state.next_pc.unwrap().expr(),
-        )?;
+        );
 
         // write pc+4 to rd
         circuit_builder.require_equal(
             || "rd_written = pc+4",
             rd_written.value(),
             i_insn.vm_state.pc.expr() + PC_STEP_SIZE,
-        )?;
+        );
 
-        Ok(JalrConfig {
+        JalrConfig {
             i_insn,
             rs1_read,
             imm,
             next_pc_addr,
             overflow,
             rd_written,
-        })
+        }
     }
 
     fn assign_instance(
@@ -104,7 +101,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let insn = step.insn();
 
         let rs1 = step.rs1().unwrap().value;
@@ -125,7 +122,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         config
             .next_pc_addr
-            .assign_instance(instance, lk_multiplicity, sum)?;
+            .assign_instance(instance, lk_multiplicity, sum);
         let overflow: E::BaseField = match (overflowing, imm < 0) {
             (false, _) => E::BaseField::ZERO,
             (true, false) => E::BaseField::ONE,
@@ -135,8 +132,6 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
-        Ok(())
+            .assign_instance(instance, lk_multiplicity, step);
     }
 }

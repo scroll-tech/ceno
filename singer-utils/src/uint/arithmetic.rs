@@ -1,6 +1,5 @@
 use crate::{
     chip_handler::{ChipHandler, range::RangeChip},
-    error::UtilError,
     uint::uint::UInt,
 };
 use ff::Field;
@@ -35,10 +34,11 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         addend_1: &UInt<M, C>,
         carry: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let result: UInt<M, C> = circuit_builder
             .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+            .try_into()
+            .unwrap();
 
         for i in 0..Self::N_OPERAND_CELLS {
             let (a, b, result) = (addend_0.values[i], addend_1.values[i], result.values[i]);
@@ -49,7 +49,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             Self::handle_carry(result, circuit_builder, i, carry);
         }
 
-        Ok(result)
+        result
     }
 
     /// Little-endian addition.
@@ -59,15 +59,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         addend_1: &UInt<M, C>,
         witness: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
-        let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        let computed_result = Self::add_unsafe(circuit_builder, addend_0, addend_1, carry);
         RangeChip::range_check_uint(
             chip_handler,
             circuit_builder,
             &computed_result,
-            Some(range_values),
+            range_values,
         )
     }
 
@@ -78,10 +78,11 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         constant: E::BaseField,
         carry: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let result: UInt<M, C> = circuit_builder
             .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+            .try_into()
+            .unwrap();
 
         // add constant to the first limb
         circuit_builder.add_const(result.values[0], constant);
@@ -94,7 +95,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             Self::handle_carry(result, circuit_builder, i, carry);
         }
 
-        Ok(result)
+        result
     }
 
     /// Add a constant value to a `UInt<M, C>` instance
@@ -104,15 +105,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         constant: E::BaseField,
         witness: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
-        let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
+        let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry);
         RangeChip::range_check_uint(
             chip_handler,
             circuit_builder,
             &computed_result,
-            Some(range_values),
+            range_values,
         )
     }
 
@@ -124,15 +125,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         constant: E::BaseField,
         witness: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
-        let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry)?;
+        let computed_result = Self::add_const_unsafe(circuit_builder, addend_0, constant, carry);
         RangeChip::range_check_uint(
             chip_handler,
             circuit_builder,
             &computed_result,
-            Some(range_values),
+            range_values,
         )
     }
 
@@ -143,10 +144,11 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         carry: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let result: UInt<M, C> = circuit_builder
             .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+            .try_into()
+            .unwrap();
 
         // add small_value to the first limb
         circuit_builder.add(result.values[0], addend_1, E::BaseField::ONE);
@@ -159,7 +161,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             Self::handle_carry(result, circuit_builder, i, carry);
         }
 
-        Ok(result)
+        result
     }
 
     /// Adds a single cell value to a `UInt<M, C>` instance
@@ -169,15 +171,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let carry = Self::extract_carry_add(witness);
         let range_values = Self::extract_range_values(witness);
-        let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry);
         RangeChip::range_check_uint(
             chip_handler,
             circuit_builder,
             &computed_result,
-            Some(range_values),
+            range_values,
         )
     }
 
@@ -189,15 +191,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         addend_0: &UInt<M, C>,
         addend_1: CellId,
         witness: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let carry = Self::extract_carry_no_overflow_add(witness);
         let range_values = Self::extract_range_values_no_overflow(witness);
-        let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry)?;
+        let computed_result = Self::add_cell_unsafe(circuit_builder, addend_0, addend_1, carry);
         RangeChip::range_check_uint(
             chip_handler,
             circuit_builder,
             &computed_result,
-            Some(range_values),
+            range_values,
         )
     }
 
@@ -208,10 +210,11 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         minuend: &UInt<M, C>,
         subtrahend: &UInt<M, C>,
         borrow: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let result: UInt<M, C> = circuit_builder
             .create_cells(Self::N_OPERAND_CELLS)
-            .try_into()?;
+            .try_into()
+            .unwrap();
 
         for i in 0..Self::N_OPERAND_CELLS {
             let (minuend, subtrahend, result) =
@@ -223,7 +226,7 @@ impl<const M: usize, const C: usize> UInt<M, C> {
             Self::handle_borrow(result, circuit_builder, i, borrow);
         }
 
-        Ok(result)
+        result
     }
 
     /// Little endian subtraction
@@ -233,15 +236,15 @@ impl<const M: usize, const C: usize> UInt<M, C> {
         minuend: &UInt<M, C>,
         subtrahend: &UInt<M, C>,
         witness: &[CellId],
-    ) -> Result<UInt<M, C>, UtilError> {
+    ) -> UInt<M, C> {
         let borrow = Self::extract_borrow_sub(witness);
         let range_values = Self::extract_range_values(witness);
-        let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow)?;
+        let computed_result = Self::sub_unsafe(circuit_builder, minuend, subtrahend, borrow);
         RangeChip::range_check_uint(
             chip_handler,
             circuit_builder,
             &computed_result,
-            Some(range_values),
+            range_values,
         )
     }
 

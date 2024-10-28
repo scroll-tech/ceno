@@ -16,7 +16,6 @@ use transcript::Transcript;
 use crate::{
     circuit_builder::CircuitBuilder,
     declare_program,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::{
         Instruction,
@@ -49,26 +48,24 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
         "TEST".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        let reg_id = cb.create_witin(|| "reg_id")?;
-        (0..RW).try_for_each(|_| {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
+        let reg_id = cb.create_witin(|| "reg_id");
+        (0..RW).for_each(|_| {
             let record = cb.rlc_chip_record(vec![
                 Expression::<E>::Constant(E::BaseField::ONE),
                 reg_id.expr(),
             ]);
-            cb.read_record(|| "read", record.clone())?;
-            cb.write_record(|| "write", record)?;
-            Result::<(), ZKVMError>::Ok(())
-        })?;
-        (0..L).try_for_each(|_| {
-            cb.assert_ux::<_, _, 16>(|| "regid_in_range", reg_id.expr())?;
-            Result::<(), ZKVMError>::Ok(())
-        })?;
+            cb.read_record(|| "read", record.clone());
+            cb.write_record(|| "write", record);
+        });
+        (0..L).for_each(|_| {
+            cb.assert_ux::<_, _, 16>(|| "regid_in_range", reg_id.expr());
+        });
         assert_eq!(cb.cs.lk_expressions.len(), L);
         assert_eq!(cb.cs.r_expressions.len(), RW);
         assert_eq!(cb.cs.w_expressions.len(), RW);
 
-        Ok(TestConfig { reg_id })
+        TestConfig { reg_id }
     }
 
     fn assign_instance(
@@ -76,10 +73,8 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
         instance: &mut [MaybeUninit<E::BaseField>],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, config.reg_id, E::BaseField::ONE);
-
-        Ok(())
     }
 }
 
@@ -112,13 +107,11 @@ fn test_rw_lk_expression_combination() {
         // generate mock witness
         let num_instances = 1 << 8;
         let mut zkvm_witness = ZKVMWitnesses::default();
-        zkvm_witness
-            .assign_opcode_circuit::<TestCircuit<E, RW, L>>(
-                &zkvm_cs,
-                &config,
-                vec![StepRecord::default(); num_instances],
-            )
-            .unwrap();
+        zkvm_witness.assign_opcode_circuit::<TestCircuit<E, RW, L>>(
+            &zkvm_cs,
+            &config,
+            vec![StepRecord::default(); num_instances],
+        );
 
         // get proof
         let prover = ZKVMProver::new(pk);
@@ -268,23 +261,15 @@ fn test_single_add_instance_e2e() {
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
-    zkvm_witness
-        .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
-        .unwrap();
-    zkvm_witness
-        .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
-        .unwrap();
+    zkvm_witness.assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records);
+    zkvm_witness.assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records);
     zkvm_witness.finalize_lk_multiplicities();
-    zkvm_witness
-        .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
-        .unwrap();
-    zkvm_witness
-        .assign_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
-            &zkvm_cs,
-            &prog_config,
-            &PROGRAM_CODE.len(),
-        )
-        .unwrap();
+    zkvm_witness.assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &());
+    zkvm_witness.assign_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
+        &zkvm_cs,
+        &prog_config,
+        &PROGRAM_CODE.len(),
+    );
 
     let pi = PublicValues::new(0, 0, 0, 0, 0);
     let transcript = Transcript::new(b"riscv");

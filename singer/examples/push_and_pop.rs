@@ -10,8 +10,7 @@ use transcript::Transcript;
 
 fn main() {
     let chip_challenges = ChipChallenges::default();
-    let circuit_builder = SingerCircuitBuilder::<GoldilocksExt2>::new(chip_challenges)
-        .expect("circuit builder failed");
+    let circuit_builder = SingerCircuitBuilder::<GoldilocksExt2>::new(chip_challenges);
     let singer_builder = SingerGraphBuilder::<GoldilocksExt2>::default();
 
     let bytecode = [0x60_u8, 0x01, 0x50];

@@ -8,7 +8,7 @@ use simple_frontend::structs::WitnessId;
 use singer_utils::{chips::SingerChipBuilder, constants::OpcodeType, structs::ChipChallenges};
 use strum_macros::EnumIter;
 
-use crate::{CircuitWiresIn, SingerParams, error::ZKVMError};
+use crate::{CircuitWiresIn, SingerParams};
 
 use self::{
     add::AddInstruction, calldataload::CalldataloadInstruction, dup::DupInstruction,
@@ -49,18 +49,16 @@ pub struct SingerCircuitBuilder<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> SingerCircuitBuilder<E> {
-    pub fn new(challenges: ChipChallenges) -> Result<Self, ZKVMError> {
+    pub fn new(challenges: ChipChallenges) -> Self {
         let mut insts_circuits = Vec::with_capacity(256);
         for opcode in 0..=255 {
-            insts_circuits.push(construct_instruction_circuits(opcode, challenges)?);
+            insts_circuits.push(construct_instruction_circuits(opcode, challenges));
         }
-        let insts_circuits: [Vec<InstCircuit<E>>; 256] = insts_circuits
-            .try_into()
-            .map_err(|_| ZKVMError::CircuitError)?;
-        Ok(Self {
+        let insts_circuits: [Vec<InstCircuit<E>>; 256] = insts_circuits.try_into().unwrap();
+        Self {
             insts_circuits,
             challenges,
-        })
+        }
     }
 }
 
@@ -68,7 +66,7 @@ impl<E: ExtensionField> SingerCircuitBuilder<E> {
 pub(crate) fn construct_instruction_circuits<E: ExtensionField>(
     opcode: u8,
     challenges: ChipChallenges,
-) -> Result<Vec<InstCircuit<E>>, ZKVMError> {
+) -> Vec<InstCircuit<E>> {
     match opcode {
         0x01 => AddInstruction::construct_circuits(challenges),
         0x11 => GtInstruction::construct_circuits(challenges),
@@ -84,7 +82,7 @@ pub(crate) fn construct_instruction_circuits<E: ExtensionField>(
         0x91 => SwapInstruction::<2>::construct_circuits(challenges),
         0x93 => SwapInstruction::<4>::construct_circuits(challenges),
         0xF3 => ReturnInstruction::construct_circuits(challenges),
-        _ => Ok(vec![]), // TODO: Add more instructions.
+        _ => vec![], // TODO: Add more instructions.
     }
 }
 
@@ -98,7 +96,7 @@ pub(crate) fn construct_inst_graph_and_witness<E: ExtensionField>(
     real_challenges: &[E],
     real_n_instances: usize,
     params: &SingerParams,
-) -> Result<Option<NodeOutputType>, ZKVMError> {
+) -> Option<NodeOutputType> {
     let construct_circuit_graph = match opcode {
         0x01 => AddInstruction::construct_graph_and_witness,
         0x11 => GtInstruction::construct_graph_and_witness,
@@ -114,7 +112,7 @@ pub(crate) fn construct_inst_graph_and_witness<E: ExtensionField>(
         0x91 => SwapInstruction::<2>::construct_graph_and_witness,
         0x93 => SwapInstruction::<4>::construct_graph_and_witness,
         0xF3 => ReturnInstruction::construct_graph_and_witness,
-        _ => return Ok(None), // TODO: Add more instructions.
+        _ => return None, // TODO: Add more instructions.
     };
 
     construct_circuit_graph(
@@ -135,7 +133,7 @@ pub(crate) fn construct_inst_graph<E: ExtensionField>(
     inst_circuits: &[InstCircuit<E>],
     real_n_instances: usize,
     params: &SingerParams,
-) -> Result<Option<NodeOutputType>, ZKVMError> {
+) -> Option<NodeOutputType> {
     let construct_graph = match opcode {
         0x01 => AddInstruction::construct_graph,
         0x11 => GtInstruction::construct_graph,
@@ -199,7 +197,7 @@ pub struct InstCircuitLayout {
 pub trait Instruction<E: ExtensionField> {
     const OPCODE: OpcodeType;
     const NAME: &'static str;
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError>;
+    fn construct_circuit(challenges: ChipChallenges) -> InstCircuit<E>;
 }
 
 /// Construct the part of the circuit graph for an instruction.
@@ -208,9 +206,8 @@ pub trait InstructionGraph<E: ExtensionField> {
 
     /// Construct instruction circuits and its extensions. Mostly there is no
     /// extensions.
-    fn construct_circuits(challenges: ChipChallenges) -> Result<Vec<InstCircuit<E>>, ZKVMError> {
-        let circuits = vec![Self::InstType::construct_circuit(challenges)?];
-        Ok(circuits)
+    fn construct_circuits(challenges: ChipChallenges) -> Vec<InstCircuit<E>> {
+        vec![Self::InstType::construct_circuit(challenges)]
     }
 
     /// Add instruction circuits, its accessories and corresponding witnesses to
@@ -224,18 +221,20 @@ pub trait InstructionGraph<E: ExtensionField> {
         real_challenges: &[E],
         real_n_instances: usize,
         _: &SingerParams,
-    ) -> Result<Option<NodeOutputType>, ZKVMError> {
+    ) -> Option<NodeOutputType> {
         assert_eq!(sources.len(), 1, "unknown source length");
         let inst_circuit = &inst_circuits[0];
         let inst_wires_in = mem::take(&mut sources[0]);
-        let node_id = graph_builder.add_node_with_witness(
-            Self::InstType::NAME,
-            &inst_circuits[0].circuit,
-            vec![PredType::Source; inst_wires_in.len()],
-            real_challenges.to_vec(),
-            inst_wires_in,
-            real_n_instances.next_power_of_two(),
-        )?;
+        let node_id = graph_builder
+            .add_node_with_witness(
+                Self::InstType::NAME,
+                &inst_circuits[0].circuit,
+                vec![PredType::Source; inst_wires_in.len()],
+                real_challenges.to_vec(),
+                inst_wires_in,
+                real_n_instances.next_power_of_two(),
+            )
+            .unwrap();
 
         chip_builder.construct_chip_check_graph_and_witness(
             graph_builder,
@@ -243,8 +242,8 @@ pub trait InstructionGraph<E: ExtensionField> {
             &inst_circuit.layout.chip_check_wire_id,
             real_challenges,
             real_n_instances,
-        )?;
-        Ok(None)
+        );
+        None
     }
 
     /// Add instruction circuits, its accessories and corresponding witnesses to
@@ -256,20 +255,22 @@ pub trait InstructionGraph<E: ExtensionField> {
         inst_circuits: &[InstCircuit<E>],
         real_n_instances: usize,
         _: &SingerParams,
-    ) -> Result<Option<NodeOutputType>, ZKVMError> {
+    ) -> Option<NodeOutputType> {
         let inst_circuit = &inst_circuits[0];
-        let node_id = graph_builder.add_node(
-            stringify!(Self::InstType),
-            &inst_circuits[0].circuit,
-            vec![PredType::Source; inst_circuit.circuit.n_witness_in],
-        )?;
+        let node_id = graph_builder
+            .add_node(
+                stringify!(Self::InstType),
+                &inst_circuits[0].circuit,
+                vec![PredType::Source; inst_circuit.circuit.n_witness_in],
+            )
+            .unwrap();
 
         chip_builder.construct_chip_check_graph(
             graph_builder,
             node_id,
             &inst_circuit.layout.chip_check_wire_id,
             real_n_instances,
-        )?;
-        Ok(None)
+        );
+        None
     }
 }

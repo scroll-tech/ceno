@@ -18,16 +18,10 @@ use super::{AuipcInstruction, JalInstruction, JalrInstruction, LuiInstruction};
 fn test_opcode_jal() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "jal",
-            |cb| {
-                let config = JalInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(
+        || "jal",
+        JalInstruction::<GoldilocksExt2>::construct_circuit,
+    );
 
     let pc_offset: i32 = -8i32;
     let new_pc: ByteAddr = ByteAddr(MOCK_PC_START.0.wrapping_add_signed(pc_offset));
@@ -42,8 +36,7 @@ fn test_opcode_jal() {
             Change::new(0, (MOCK_PC_START + PC_STEP_SIZE).into()),
             0,
         )],
-    )
-    .unwrap();
+    );
 
     MockProver::assert_satisfied(
         &cb,
@@ -63,16 +56,10 @@ fn test_opcode_jal() {
 fn test_opcode_jalr() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "jalr",
-            |cb| {
-                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(
+        || "jalr",
+        JalrInstruction::<GoldilocksExt2>::construct_circuit,
+    );
 
     let imm = -15i32;
     let rs1_read: Word = 10u32;
@@ -90,8 +77,7 @@ fn test_opcode_jalr() {
             Change::new(0, (MOCK_PC_START + PC_STEP_SIZE).into()),
             0,
         )],
-    )
-    .unwrap();
+    );
 
     MockProver::assert_satisfied(
         &cb,
@@ -111,16 +97,10 @@ fn test_opcode_jalr() {
 fn test_opcode_lui() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "lui",
-            |cb| {
-                let config = LuiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(
+        || "lui",
+        LuiInstruction::<GoldilocksExt2>::construct_circuit,
+    );
 
     let imm_value = imm_u(0x90005);
     let insn_code = encode_rv32(InsnKind::LUI, 0, 0, 4, imm_value);
@@ -134,8 +114,7 @@ fn test_opcode_lui() {
             Change::new(0, imm_value),
             0,
         )],
-    )
-    .unwrap();
+    );
 
     MockProver::assert_satisfied(
         &cb,
@@ -155,16 +134,10 @@ fn test_opcode_lui() {
 fn test_opcode_auipc() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let config = cb
-        .namespace(
-            || "auipc",
-            |cb| {
-                let config = AuipcInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
-        .unwrap();
+    let config = cb.namespace(
+        || "auipc",
+        AuipcInstruction::<GoldilocksExt2>::construct_circuit,
+    );
 
     let imm_value = imm_u(0x90005);
     let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm_value);
@@ -178,8 +151,7 @@ fn test_opcode_auipc() {
             Change::new(0, MOCK_PC_START.0.wrapping_add(imm_value)),
             0,
         )],
-    )
-    .unwrap();
+    );
 
     MockProver::assert_satisfied(
         &cb,

@@ -7,7 +7,6 @@ use super::constants::PC_STEP_SIZE;
 use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
     set_val,
@@ -48,16 +47,16 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         branch_taken_bit: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         // State in and out
-        let vm_state = StateInOut::construct_circuit(circuit_builder, true)?;
+        let vm_state = StateInOut::construct_circuit(circuit_builder, true);
 
         // Registers
-        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
-        let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts)?;
+        let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts);
+        let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts);
 
         // Immediate
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
@@ -68,7 +67,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
             rs1.id.expr(),
             rs2.id.expr(),
             imm.expr(),
-        ))?;
+        ));
 
         // Branch program counter
         let pc_offset =
@@ -78,14 +77,14 @@ impl<E: ExtensionField> BInstructionConfig<E> {
             || "pc_branch",
             next_pc.expr(),
             vm_state.pc.expr() + pc_offset,
-        )?;
+        );
 
-        Ok(BInstructionConfig {
+        BInstructionConfig {
             vm_state,
             rs1,
             rs2,
             imm,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -93,10 +92,10 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rs2.assign_instance(instance, lk_multiplicity, step)?;
+    ) {
+        self.vm_state.assign_instance(instance, step);
+        self.rs1.assign_instance(instance, lk_multiplicity, step);
+        self.rs2.assign_instance(instance, lk_multiplicity, step);
 
         // Immediate
         set_val!(
@@ -107,7 +106,5 @@ impl<E: ExtensionField> BInstructionConfig<E> {
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);
-
-        Ok(())
     }
 }

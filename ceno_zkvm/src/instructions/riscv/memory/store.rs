@@ -1,7 +1,6 @@
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
@@ -71,20 +70,18 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
-        let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder); // unsigned 32-bit value
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder);
+        let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder);
+        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
 
         let memory_addr = match I::INST_KIND {
             InsnKind::SW => MemAddr::construct_align4(circuit_builder),
             InsnKind::SH => MemAddr::construct_align2(circuit_builder),
             InsnKind::SB => MemAddr::construct_unaligned(circuit_builder),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        }?;
+        };
 
         if cfg!(feature = "forbid_overflow") {
             const MAX_RAM_ADDR: u32 = u32::MAX - 0x7FF; // max positive imm is 0x7FF
@@ -98,7 +95,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             || "memory_addr = rs1_read + imm",
             memory_addr.expr_unaligned(),
             rs1_read.value() + imm.expr(),
-        )?;
+        );
 
         let (new_memory_value, word_change) = match I::INST_KIND {
             InsnKind::SW => (rs2_read.memory_expr(), None),
@@ -108,7 +105,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
                     &memory_addr,
                     &prev_memory_value,
                     &rs2_read,
-                )?;
+                );
                 (prev_memory_value.value() + change.value(), Some(change))
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
@@ -123,9 +120,9 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             memory_addr.expr_align4(),
             prev_memory_value.memory_expr(),
             new_memory_value,
-        )?;
+        );
 
-        Ok(StoreConfig {
+        StoreConfig {
             s_insn,
             rs1_read,
             rs2_read,
@@ -133,7 +130,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             prev_memory_value,
             memory_addr,
             word_change,
-        })
+        }
     }
 
     fn assign_instance(
@@ -141,7 +138,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let memory_op = step.memory_op().unwrap();
@@ -156,7 +153,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         );
         config
             .s_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
         set_val!(instance, config.imm, imm);
@@ -166,11 +163,9 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
 
         config
             .memory_addr
-            .assign_instance(instance, lk_multiplicity, addr.into())?;
+            .assign_instance(instance, lk_multiplicity, addr.into());
         if let Some(change) = config.word_change.as_ref() {
-            change.assign_instance::<E>(instance, lk_multiplicity, step, addr.shift())?;
+            change.assign_instance::<E>(instance, lk_multiplicity, step, addr.shift());
         }
-
-        Ok(())
     }
 }
