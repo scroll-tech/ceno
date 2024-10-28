@@ -23,12 +23,10 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
     rd_written: UInt<E>,
     outflow: WitIn,
+    assert_lt_config: AssertLTConfig,
 
     // SRAI
     msb_config: Option<MsbConfig>,
-
-    // SRAI and SRLI
-    assert_lt_config: Option<AssertLTConfig>,
 }
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -68,6 +66,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 let inflow = Expression::ZERO;
                 let outflow = circuit_builder.create_witin(|| "outflow")?;
 
+                let assert_lt_config = AssertLTConfig::construct_circuit(
+                    circuit_builder,
+                    || "outflow < imm",
+                    outflow.expr(),
+                    imm.expr(),
+                    2,
+                )?;
+
                 circuit_builder.require_equal(
                     || "shift check",
                     rs1_read.value() * imm.expr() + inflow,
@@ -89,8 +95,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     rs1_read,
                     rd_written,
                     outflow,
+                    assert_lt_config,
                     msb_config: None,
-                    assert_lt_config: None,
                 })
             }
             InsnKind::SRAI | InsnKind::SRLI => {
@@ -136,8 +142,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     rs1_read,
                     rd_written,
                     outflow,
+                    assert_lt_config,
                     msb_config,
-                    assert_lt_config: Some(assert_lt_config),
                 })
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
@@ -166,10 +172,24 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             InsnKind::SLLI => {
                 let outflow = (rs1_read.as_u64() * imm as u64) >> 32;
                 set_val!(instance, config.outflow, outflow);
+
+                config.assert_lt_config.assign_instance(
+                    instance,
+                    lk_multiplicity,
+                    outflow,
+                    imm as u64,
+                )?;
             }
             InsnKind::SRAI | InsnKind::SRLI => {
                 let outflow = rs1_read.as_u32() & (imm - 1);
                 set_val!(instance, config.outflow, outflow as u64);
+
+                config.assert_lt_config.assign_instance(
+                    instance,
+                    lk_multiplicity,
+                    outflow as u64,
+                    imm as u64,
+                )?;
 
                 if I::INST_KIND == InsnKind::SRAI {
                     MsbInput {
@@ -181,13 +201,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                         lk_multiplicity,
                     );
                 }
-
-                config.assert_lt_config.as_ref().unwrap().assign_instance(
-                    instance,
-                    lk_multiplicity,
-                    outflow as u64,
-                    imm as u64,
-                )?;
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }
