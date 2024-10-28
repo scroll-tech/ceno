@@ -198,7 +198,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let wit_in = WitIn {
             id: {
                 let id = self.num_witin;
-                self.num_witin += 1;
+                self.num_witin = self.num_witin.strict_add(1);
                 id
             },
         };
