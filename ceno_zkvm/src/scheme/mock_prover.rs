@@ -20,7 +20,7 @@ use goldilocks::SmallField;
 use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -28,7 +28,6 @@ use std::{
     ops::Neg,
     sync::OnceLock,
 };
-use std::collections::BTreeMap;
 use strum::IntoEnumIterator;
 
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -403,7 +402,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 (
                     CENO_PLATFORM.pc_base() + (insn_idx * PC_WORD_SIZE) as u32,
                     insn,
-                    )
+                )
             })
             .collect::<BTreeMap<u32, u32>>();
         let program = Program::new(
@@ -608,11 +607,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
-    fn load_program_table(
-        t_vec: &mut Vec<Vec<u64>>,
-        program: &Program,
-        challenge: [E; 2],
-    ) {
+    fn load_program_table(t_vec: &mut Vec<Vec<u64>>, program: &Program, challenge: [E; 2]) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
