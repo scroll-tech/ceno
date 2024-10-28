@@ -241,7 +241,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 mul_hi
             } else {
                 // lo limb
-                UIntLimbs::from_exprs_unchecked(mul.expr())?
+                UIntLimbs::from_exprs_unchecked(mul.expr())
             };
             let add = cb.namespace(
                 || "add",

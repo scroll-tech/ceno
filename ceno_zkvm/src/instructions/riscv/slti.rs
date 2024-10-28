@@ -63,7 +63,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
             imm.expr(),
             UINT_LIMBS,
         )?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,

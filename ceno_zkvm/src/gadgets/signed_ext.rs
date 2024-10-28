@@ -68,9 +68,7 @@ impl SignedExtendConfig {
             16 => val,
             _ => unreachable!("unsupported N_BITS = {}", self.n_bits),
         };
-
-        // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
-        UInt::from_exprs_unchecked(vec![limb0, self.msb.expr() * 0xffff]).unwrap()
+        UInt::from_exprs_unchecked(vec![limb0, self.msb.expr() * 0xffff])
     }
 
     pub fn assign_instance<E: ExtensionField>(

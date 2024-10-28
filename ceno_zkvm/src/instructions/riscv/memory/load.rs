@@ -155,8 +155,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                     UInt::from_exprs_unchecked(vec![
                         target_limb.as_ref().map(|limb| limb.expr()).unwrap(),
                         Expression::ZERO,
-                    ])
-                    .unwrap(),
+                    ]),
                 )
             }
             InsnKind::LB => {
@@ -167,14 +166,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
 
                 (Some(signed_extend_config), rd_written)
             }
-            InsnKind::LBU => {
-                (
-                    None,
-                    // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
-                    UInt::from_exprs_unchecked(vec![target_byte_expr.unwrap(), Expression::ZERO])
-                        .unwrap(),
-                )
-            }
+            InsnKind::LBU => (
+                None,
+                UInt::from_exprs_unchecked(vec![target_byte_expr.unwrap(), Expression::ZERO]),
+            ),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
