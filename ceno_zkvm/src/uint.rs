@@ -527,6 +527,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             UIntLimbs::from_exprs_unchecked(self_hi)?,
         ))
     }
+
+    pub fn to_field_expr(&self, is_neg: Expression<E>) -> Expression<E> {
+        // Convert two's complement representation into field arithmetic.
+        // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
+        self.value() - is_neg * (1_u64 << 32)
+    }
 }
 
 /// Construct `UIntLimbs` from `Vec<CellId>`
