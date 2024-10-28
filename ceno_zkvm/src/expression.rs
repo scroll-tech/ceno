@@ -315,35 +315,23 @@ impl<E: ExtensionField> Add for Expression<E> {
     }
 }
 
-impl<E: ExtensionField, Rhs> AddAssign<Rhs> for Expression<E>
-where
-    Expression<E>: Add<Rhs, Output = Expression<E>>,
-{
-    fn add_assign(&mut self, rhs: Rhs) {
-        // TODO: consider in-place?
-        *self = self.clone() + rhs;
-    }
+macro_rules! binop_assign_instances {
+    ($op_assign: ident, $fun_assign: ident, $op: ident, $fun: ident) => {
+        impl<E: ExtensionField, Rhs> $op_assign<Rhs> for Expression<E>
+        where
+            Expression<E>: $op<Rhs, Output = Expression<E>>,
+        {
+            fn $fun_assign(&mut self, rhs: Rhs) {
+                // TODO: consider in-place?
+                *self = self.clone().$fun(rhs);
+            }
+        }
+    };
 }
 
-impl<E: ExtensionField, Rhs> SubAssign<Rhs> for Expression<E>
-where
-    Expression<E>: Sub<Rhs, Output = Expression<E>>,
-{
-    fn sub_assign(&mut self, rhs: Rhs) {
-        // TODO: consider in-place?
-        *self = self.clone() - rhs;
-    }
-}
-
-impl<E: ExtensionField, Rhs> MulAssign<Rhs> for Expression<E>
-where
-    Expression<E>: Mul<Rhs, Output = Expression<E>>,
-{
-    fn mul_assign(&mut self, rhs: Rhs) {
-        // TODO: consider in-place?
-        *self = self.clone() * rhs;
-    }
-}
+binop_assign_instances!(AddAssign, add_assign, Add, add);
+binop_assign_instances!(SubAssign, sub_assign, Sub, sub);
+binop_assign_instances!(MulAssign, mul_assign, Mul, mul);
 
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
