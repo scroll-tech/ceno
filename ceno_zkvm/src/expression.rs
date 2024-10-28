@@ -1070,18 +1070,16 @@ mod tests {
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
-        let expr: Expression<E> = Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into())
-            * x.expr()
-            * y.expr()
-            - 6 * z.expr();
+        let expr: Expression<E> =
+            Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into()) * x.expr() * y.expr()
+                - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
-        let expr: Expression<E> = Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into())
-            * x.expr()
-            * y.expr()
-            - 6 * z.expr();
+        let expr: Expression<E> =
+            Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into()) * x.expr() * y.expr()
+                - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation

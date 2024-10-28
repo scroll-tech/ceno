@@ -365,14 +365,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         let is_eq = self.create_witin(|| "is_eq")?;
         let diff_inverse = self.create_witin(|| "diff_inverse")?;
 
+        self.require_zero(|| "is equal", is_eq.expr() * &lhs - is_eq.expr() * &rhs)?;
         self.require_zero(
             || "is equal",
-            is_eq.expr() * &lhs - is_eq.expr() * &rhs,
-        )?;
-        self.require_zero(
-            || "is equal",
-            1 - is_eq.expr() - diff_inverse.expr() * lhs
-                + diff_inverse.expr() * rhs,
+            1 - is_eq.expr() - diff_inverse.expr() * lhs + diff_inverse.expr() * rhs,
         )?;
 
         Ok((is_eq, diff_inverse))

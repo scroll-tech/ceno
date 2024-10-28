@@ -30,10 +30,7 @@ impl IsZeroConfig {
             let inverse = cb.create_witin(|| "inv")?;
 
             // x==0 => is_zero=1
-            cb.require_one(
-                || "is_zero_1",
-                is_zero.expr() + x.clone() * inverse.expr(),
-            )?;
+            cb.require_one(|| "is_zero_1", is_zero.expr() + x.clone() * inverse.expr())?;
 
             // x!=0 => is_zero=0
             cb.require_zero(|| "is_zero_0", is_zero.expr() * x.clone())?;

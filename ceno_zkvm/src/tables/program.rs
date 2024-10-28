@@ -143,12 +143,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             cb.rlc_chip_record(fields)
         };
 
-        cb.lk_table_record(
-            || "prog table",
-            PROGRAM_SIZE,
-            record_exprs,
-            mlt.expr(),
-        )?;
+        cb.lk_table_record(|| "prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
 
         Ok(ProgramTableConfig { record, mlt })
     }

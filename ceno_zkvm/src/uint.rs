@@ -92,10 +92,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         .map(|i| {
                             let w = cb.create_witin(|| format!("limb_{i}"))?;
                             if is_check {
-                                cb.assert_ux::<_, _, C>(
-                                    || format!("limb_{i}_in_{C}"),
-                                    w.expr(),
-                                )?;
+                                cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
                             }
                             // skip range check
                             Ok(w)

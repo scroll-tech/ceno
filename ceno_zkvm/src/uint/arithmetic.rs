@@ -54,8 +54,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         limb_expr = limb_expr.clone() + carry.unwrap().expr();
                     }
                     if next_carry.is_some() {
-                        limb_expr =
-                            limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                        limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
                     }
 
                     circuit_builder
@@ -121,8 +120,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         // with high limb, overall cell will be double
         let c_limbs: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_limbs, i| {
             let limb = circuit_builder.create_witin(|| format!("limb_{i}"))?;
-            circuit_builder
-                .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
+            circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
             c_limbs.push(limb);
             Result::<Vec<WitIn>, ZKVMError>::Ok(c_limbs)
         })?;
@@ -199,8 +197,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 result_c[i] = result_c[i].clone() + carry.unwrap().expr();
             }
             if next_carry.is_some() {
-                result_c[i] =
-                    result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                result_c[i] = result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
             }
             circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
             Ok::<(), ZKVMError>(())
@@ -281,9 +278,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         let sum_expr = is_equal_per_limb
             .iter()
-            .fold(Expression::ZERO, |acc, flag| {
-                acc.clone() + flag.expr()
-            });
+            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
 
         let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
         let (is_equal, diff_inv) =
@@ -375,8 +370,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .try_for_each(|(i, ((flag, a), b))| {
                 circuit_builder.require_zero(
                     || format!("byte diff {i} zero check"),
-                    a.expr() - b.expr() - flag.expr() * a.expr()
-                        + flag.expr() * b.expr(),
+                    a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
                 )
             })?;
 
@@ -411,11 +405,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
 
         let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
-        circuit_builder.lookup_ltu_byte(
-            lhs_ne_byte.expr(),
-            rhs_ne_byte.expr(),
-            is_ltu.expr(),
-        )?;
+        circuit_builder.lookup_ltu_byte(lhs_ne_byte.expr(), rhs_ne_byte.expr(), is_ltu.expr())?;
         Ok(UIntLtuConfig {
             byte_diff_inv,
             indexes,
