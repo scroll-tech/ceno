@@ -4,11 +4,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
+    gadgets::SignedExtendConfig,
     instructions::{
         Instruction,
         riscv::{
             RIVInstruction, constants::UInt, im_insn::IMInstructionConfig, insn_base::MemAddr,
-            memory::gadget::SignedExtendConfig,
         },
     },
     set_val,
