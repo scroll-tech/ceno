@@ -42,15 +42,15 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
 
         // Fetch instruction
-        circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
-            insn_kind.codes().opcode.into(),
-            rd.id.expr(),
-            insn_kind.codes().func3.into(),
-            rs1.id.expr(),
-            rs2.id.expr(),
-            insn_kind.codes().func7.into(),
-        ))?;
+        circuit_builder.lk_fetch(&InsnRecord {
+            pc: vm_state.pc.expr(),
+            opcode: insn_kind.codes().opcode.into(),
+            rd: rd.id.expr(),
+            funct3: insn_kind.codes().func3.into(),
+            rs1: rs1.id.expr(),
+            rs2: rs2.id.expr(),
+            imm_or_funct7: insn_kind.codes().func7.into(),
+        })?;
 
         Ok(RInstructionConfig {
             vm_state,

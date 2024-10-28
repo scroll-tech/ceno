@@ -98,6 +98,12 @@ macro_rules! columns_view_impl {
                 $crate::tables::views::ColumnViewImplHider::<Self>::array_ref(self)
             }
 
+            // For backwards compatibility
+            #[must_use]
+            pub const fn as_slice(&self) -> &[T; std::mem::size_of::<$s<u8>>()] {
+                self.array_ref()
+            }
+
             pub fn iter(&self) -> std::slice::Iter<T> {
                 self.array_ref().into_iter()
             }

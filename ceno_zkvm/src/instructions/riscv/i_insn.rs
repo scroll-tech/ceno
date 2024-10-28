@@ -43,15 +43,15 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         // TODO make imm representation consistent between instruction types
 
         // Fetch the instruction.
-        circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
-            insn_kind.codes().opcode.into(),
-            rd.id.expr(),
-            insn_kind.codes().func3.into(),
-            rs1.id.expr(),
-            0.into(),
-            imm.clone(),
-        ))?;
+        circuit_builder.lk_fetch(&InsnRecord {
+            pc: vm_state.pc.expr(),
+            opcode: insn_kind.codes().opcode.into(),
+            rd: rd.id.expr(),
+            funct3: insn_kind.codes().func3.into(),
+            rs1: rs1.id.expr(),
+            rs2: 0.into(),
+            imm_or_funct7: imm.clone(),
+        })?;
 
         Ok(IInstructionConfig { vm_state, rs1, rd })
     }

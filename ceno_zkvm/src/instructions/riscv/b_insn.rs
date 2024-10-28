@@ -60,15 +60,15 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         let imm = circuit_builder.create_witin(|| "imm")?;
 
         // Fetch instruction
-        circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
-            insn_kind.codes().opcode.into(),
-            0.into(),
-            insn_kind.codes().func3.into(),
-            rs1.id.expr(),
-            rs2.id.expr(),
-            imm.expr(),
-        ))?;
+        circuit_builder.lk_fetch(&InsnRecord {
+            pc: vm_state.pc.expr(),
+            opcode: insn_kind.codes().opcode.into(),
+            rd: 0.into(),
+            funct3: insn_kind.codes().func3.into(),
+            rs1: rs1.id.expr(),
+            rs2: rs2.id.expr(),
+            imm_or_funct7: imm.expr(),
+        })?;
 
         // Branch program counter
         let pc_offset =

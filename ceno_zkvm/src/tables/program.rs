@@ -34,39 +34,35 @@ columns_view_impl!(InsnRecord);
 #[repr(C)]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct InsnRecord<T> {
-    pc: T,
-    opcode: T,
-    rd: T,
-    funct3: T,
-    rs1: T,
-    rs2: T,
+    pub pc: T,
+    pub opcode: T,
+    pub rd: T,
+    pub funct3: T,
+    pub rs1: T,
+    pub rs2: T,
     /// The complete immediate value, for instruction types I/S/B/U/J.
     /// Otherwise, the field funct7 of R-Type instructions.
-    imm_or_funct7: T,
+    pub imm_or_funct7: T,
 }
 
 impl<T> InsnRecord<T> {
     /// Iterate through the fields, except immediate because it is complicated.
     fn without_imm(&self) -> &[T] {
-        &self.0[0..6]
-    }
-
-    pub fn imm_or_funct7(&self) -> &T {
-        &self.0[6]
+        &self[0..6]
     }
 }
 
 impl InsnRecord<u32> {
     fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
-        InsnRecord::new(
+        InsnRecord {
             pc,
-            insn.opcode(),
-            insn.rd_or_zero(),
-            insn.funct3_or_zero(),
-            insn.rs1_or_zero(),
-            insn.rs2_or_zero(),
-            insn.imm_or_funct7(),
-        )
+            opcode: insn.opcode(),
+            rd: insn.rd_or_zero(),
+            funct3: insn.funct3_or_zero(),
+            rs1: insn.rs1_or_zero(),
+            rs2: insn.rs2_or_zero(),
+            imm_or_funct7: insn.imm_or_funct7(),
+        }
     }
 
     /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
@@ -158,7 +154,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 
                 set_fixed_val!(
                     row,
-                    config.record.imm_or_funct7(),
+                    config.record.imm_or_funct7,
                     InsnRecord::imm_or_funct7_field(&insn)
                 );
             });

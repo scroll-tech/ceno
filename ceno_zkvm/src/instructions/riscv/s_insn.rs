@@ -42,15 +42,15 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts)?;
 
         // Fetch instruction
-        circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
-            (insn_kind.codes().opcode as usize).into(),
-            0.into(),
-            (insn_kind.codes().func3 as usize).into(),
-            rs1.id.expr(),
-            rs2.id.expr(),
-            imm.clone(),
-        ))?;
+        circuit_builder.lk_fetch(&InsnRecord {
+            pc: vm_state.pc.expr(),
+            opcode: (insn_kind.codes().opcode as usize).into(),
+            rd: 0.into(),
+            funct3: (insn_kind.codes().func3 as usize).into(),
+            rs1: rs1.id.expr(),
+            rs2: rs2.id.expr(),
+            imm_or_funct7: imm.clone(),
+        })?;
 
         // Memory
         let mem_write = WriteMEM::construct_circuit(

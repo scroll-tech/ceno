@@ -39,15 +39,15 @@ impl<E: ExtensionField> JInstructionConfig<E> {
         let rd = WriteRD::construct_circuit(circuit_builder, rd_written, vm_state.ts)?;
 
         // Fetch instruction
-        circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
-            (insn_kind.codes().opcode as usize).into(),
-            rd.id.expr(),
-            0.into(),
-            0.into(),
-            0.into(),
-            vm_state.next_pc.unwrap().expr() - vm_state.pc.expr(),
-        ))?;
+        circuit_builder.lk_fetch(&InsnRecord {
+            pc: vm_state.pc.expr(),
+            opcode: (insn_kind.codes().opcode as usize).into(),
+            rd: rd.id.expr(),
+            funct3: 0.into(),
+            rs1: 0.into(),
+            rs2: 0.into(),
+            imm_or_funct7: vm_state.next_pc.unwrap().expr() - vm_state.pc.expr(),
+        })?;
 
         Ok(JInstructionConfig { vm_state, rd })
     }

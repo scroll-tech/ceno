@@ -37,15 +37,15 @@ impl EcallInstructionConfig {
             ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize),
         )?;
 
-        cb.lk_fetch(&InsnRecord::new(
-            pc.expr(),
-            (EANY.codes().opcode as usize).into(),
-            0.into(),
-            (EANY.codes().func3 as usize).into(),
-            0.into(),
-            0.into(),
-            0.into(), // imm = 0
-        ))?;
+        cb.lk_fetch(&InsnRecord {
+            pc: pc.expr(),
+            opcode: (EANY.codes().opcode as usize).into(),
+            rd: 0.into(),
+            funct3: (EANY.codes().func3 as usize).into(),
+            rs1: 0.into(),
+            rs2: 0.into(),
+            imm_or_funct7: 0.into(),
+        })?;
 
         let prev_x5_ts = cb.create_witin(|| "prev_x5_ts")?;
 
