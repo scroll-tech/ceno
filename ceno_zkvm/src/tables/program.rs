@@ -135,7 +135,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             cb.create_fixed(|| "imm_or_funct7")?,
         ]);
 
-        let mlt = cb.create_witin(|| "mlt")?;
+        let mlt = cb.create_witin(|| "mlt");
 
         let record_exprs = {
             let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];

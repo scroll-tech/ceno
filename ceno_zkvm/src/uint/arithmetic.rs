@@ -119,7 +119,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         };
         // with high limb, overall cell will be double
         let c_limbs: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_limbs, i| {
-            let limb = circuit_builder.create_witin(|| format!("limb_{i}"))?;
+            let limb = circuit_builder.create_witin(|| format!("limb_{i}"));
             circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
             c_limbs.push(limb);
             Result::<Vec<WitIn>, ZKVMError>::Ok(c_limbs)
@@ -127,7 +127,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let c_carries: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_carries, i| {
             // skip last carry if with_overflow == false
             if i != num_limbs - 1 || with_overflow {
-                let carry = circuit_builder.create_witin(|| format!("carry_{i}"))?;
+                let carry = circuit_builder.create_witin(|| format!("carry_{i}"));
                 c_carries.push(carry);
             }
             Result::<Vec<WitIn>, ZKVMError>::Ok(c_carries)
@@ -302,7 +302,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
     where
         E: ExtensionField<BaseField = F>,
     {
-        let high_limb_no_msb = circuit_builder.create_witin(|| "high_limb_mask")?;
+        let high_limb_no_msb = circuit_builder.create_witin(|| "high_limb_mask");
         let high_limb = self.limbs[Self::NUM_LIMBS - 1].expr();
 
         circuit_builder.lookup_and_byte(
@@ -329,7 +329,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         let n_bytes = Self::NUM_LIMBS;
         let indexes: Vec<WitIn> = (0..n_bytes)
             .map(|_| circuit_builder.create_witin(|| "index"))
-            .collect::<Result<_, ZKVMError>>()?;
+            .collect();
 
         // indicate the first non-zero byte index i_0 of a[i] - b[i]
         // from high to low
@@ -342,7 +342,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         // circuit_builder.assert_bit(|| "bit assert", index_sum)?;
 
         // equal zero if a==b, otherwise equal (a[i_0]-b[i_0])^{-1}
-        let byte_diff_inv = circuit_builder.create_witin(|| "byte_diff_inverse")?;
+        let byte_diff_inv = circuit_builder.create_witin(|| "byte_diff_inverse");
 
         // define accumulated index sum from high to low
         let si_expr: Vec<Expression<E>> = indexes
@@ -403,7 +403,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
                 - index_ne.expr(),
         )?;
 
-        let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
+        let is_ltu = circuit_builder.create_witin(|| "is_ltu");
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
         circuit_builder.lookup_ltu_byte(lhs_ne_byte.expr(), rhs_ne_byte.expr(), is_ltu.expr())?;
         Ok(UIntLtuConfig {
@@ -421,7 +421,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLtConfig, ZKVMError> {
-        let is_lt = circuit_builder.create_witin(|| "is_lt")?;
+        let is_lt = circuit_builder.create_witin(|| "is_lt");
         // circuit_builder.assert_bit(|| "assert_bit", is_lt.expr())?;
 
         let lhs_msb = self.msb_decompose(circuit_builder)?;

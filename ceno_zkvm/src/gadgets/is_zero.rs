@@ -26,8 +26,8 @@ impl IsZeroConfig {
         x: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         cb.namespace(name_fn, |cb| {
-            let is_zero = cb.create_witin(|| "is_zero")?;
-            let inverse = cb.create_witin(|| "inv")?;
+            let is_zero = cb.create_witin(|| "is_zero");
+            let inverse = cb.create_witin(|| "inv");
 
             // x==0 => is_zero=1
             cb.require_one(|| "is_zero_1", is_zero.expr() + x.clone() * inverse.expr())?;
