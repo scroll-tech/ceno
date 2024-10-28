@@ -19,8 +19,6 @@ use crate::{
 use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32};
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLEs;
 use std::hash::Hash;
 
 fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
@@ -121,18 +119,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     ])
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: u32) {
@@ -176,18 +163,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
     ])
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 fn impl_opcode_sb(imm: u32) {

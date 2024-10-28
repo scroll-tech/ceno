@@ -8,7 +8,7 @@ use crate::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
         TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, RowMajorMatrix},
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
@@ -18,7 +18,7 @@ use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::{Itertools, izip};
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
 use std::{
     collections::HashSet,
     fs::File,
@@ -672,6 +672,21 @@ Hints:
         }
     }
 
+    pub fn assert_satisfied_raw(
+        cb: &CircuitBuilder<E>,
+        raw_witin: RowMajorMatrix<E::BaseField>,
+        programs: &[u32],
+        challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
+    ) {
+        let wits_in = raw_witin
+            .de_interleaving()
+            .into_mles()
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec();
+        Self::assert_satisfied(cb, &wits_in, programs, challenge, lkm);
+    }
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
@@ -698,7 +713,7 @@ mod tests {
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use multilinear_extensions::mle::{IntoMLE, IntoMLEs};
+    use multilinear_extensions::mle::IntoMLE;
 
     #[derive(Debug)]
     #[allow(dead_code)]
@@ -905,14 +920,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,
@@ -943,14 +953,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,
@@ -1029,14 +1034,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,
@@ -1068,14 +1068,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,
