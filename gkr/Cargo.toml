@@ -9,7 +9,6 @@ ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
 
-const_env.workspace = true
 crossbeam-channel.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
