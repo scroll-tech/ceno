@@ -43,12 +43,12 @@ impl<E: ExtensionField> RInstructionConfig<E> {
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
+            vm_state.pc.expr_fnord(),
             insn_kind.codes().opcode.into(),
-            rd.id.expr(),
+            rd.id.expr_fnord(),
             insn_kind.codes().func3.into(),
-            rs1.id.expr(),
-            rs2.id.expr(),
+            rs1.id.expr_fnord(),
+            rs2.id.expr_fnord(),
             insn_kind.codes().func7.into(),
         ))?;
 

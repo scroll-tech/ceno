@@ -31,14 +31,14 @@ impl EcallInstructionConfig {
         let pc = cb.create_witin(|| "pc")?;
         let ts = cb.create_witin(|| "cur_ts")?;
 
-        cb.state_in(pc.expr(), ts.expr())?;
+        cb.state_in(pc.expr_fnord(), ts.expr_fnord())?;
         cb.state_out(
-            next_pc.map_or(pc.expr() + PC_STEP_SIZE, |next_pc| next_pc),
-            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize),
+            next_pc.map_or(pc.expr_fnord() + PC_STEP_SIZE, |next_pc| next_pc),
+            ts.expr_fnord() + (Tracer::SUBCYCLES_PER_INSN as usize),
         )?;
 
         cb.lk_fetch(&InsnRecord::new(
-            pc.expr(),
+            pc.expr_fnord(),
             (EANY.codes().opcode as usize).into(),
             0.into(),
             (EANY.codes().func3 as usize).into(),
@@ -53,8 +53,8 @@ impl EcallInstructionConfig {
         let (_, lt_x5_cfg) = cb.register_write(
             || "write x5",
             E::BaseField::from(CENO_PLATFORM.reg_ecall() as u64),
-            prev_x5_ts.expr(),
-            ts.expr() + Tracer::SUBCYCLE_RS1,
+            prev_x5_ts.expr_fnord(),
+            ts.expr_fnord() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),
             syscall_ret_value.map_or(syscall_id, |v| v),
         )?;

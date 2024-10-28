@@ -623,7 +623,7 @@ impl WitIn {
                 let name = name().into();
                 let wit = cb.create_witin(|| name.clone())?;
                 if !debug {
-                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
+                    cb.require_zero(|| name.clone(), wit.expr_fnord() - input)?;
                 }
                 Ok(wit)
             },
@@ -657,50 +657,64 @@ macro_rules! create_witin_from_expr {
 
 pub trait ToExpr<E: ExtensionField> {
     type Output;
-    fn expr(&self) -> Self::Output;
+    fn expr_fnord(&self) -> Self::Output;
 }
 
 impl<E: ExtensionField> ToExpr<E> for WitIn {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr_fnord(&self) -> Expression<E> {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &WitIn {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr_fnord(&self) -> Expression<E> {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Fixed {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr_fnord(&self) -> Expression<E> {
         Expression::Fixed(*self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &Fixed {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr_fnord(&self) -> Expression<E> {
         Expression::Fixed(**self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr_fnord(&self) -> Expression<E> {
         Expression::Instance(*self)
     }
 }
 
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr_fnord(&self) -> Expression<E> {
         Expression::Constant(*self)
     }
 }
+
+macro_rules! impl_from_via_ToExpr {
+    ($($t:ty),*) => {
+        $(
+            impl<E: ExtensionField> From<$t> for Expression<E> {
+                fn from(value: $t) -> Self {
+                    value.expr_fnord()
+                }
+            }
+        )*
+    };
+}
+impl_from_via_ToExpr!(WitIn, Fixed, Instance);
+impl_from_via_ToExpr!(&WitIn, &Fixed, &Instance);
 
 // Implement From trait for unsigned types of at most 64 bits
 macro_rules! impl_from_unsigned {
@@ -894,8 +908,8 @@ mod tests {
 
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> =
-            Into::<Expression<E>>::into(3usize) * x.expr() + Into::<Expression<E>>::into(2usize);
+        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr_fnord()
+            + Into::<Expression<E>>::into(2usize);
         // c^3 + 1
         let c = Expression::Challenge(0, 3, 1.into(), 1.into());
         // res
@@ -903,7 +917,7 @@ mod tests {
         assert_eq!(
             c * expr,
             Expression::ScaledSum(
-                Box::new(x.expr()),
+                Box::new(x.expr_fnord()),
                 Box::new(Expression::Challenge(0, 3, 3.into(), 3.into())),
                 Box::new(Expression::Challenge(0, 3, 2.into(), 2.into()))
             )
@@ -911,11 +925,11 @@ mod tests {
 
         // constant * witin
         // 3 * x
-        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr();
+        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr_fnord();
         assert_eq!(
             expr,
             Expression::ScaledSum(
-                Box::new(x.expr()),
+                Box::new(x.expr_fnord()),
                 Box::new(Expression::Constant(3.into())),
                 Box::new(Expression::Constant(0.into()))
             )
@@ -961,32 +975,33 @@ mod tests {
         let z = cb.create_witin(|| "z").unwrap();
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> =
-            Into::<Expression<E>>::into(3usize) * x.expr() + Into::<Expression<E>>::into(2usize);
+        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr_fnord()
+            + Into::<Expression<E>>::into(2usize);
         assert!(expr.is_monomial_form());
 
         // 2 product term
-        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr() * y.expr()
-            + Into::<Expression<E>>::into(2usize) * x.expr();
+        let expr: Expression<E> =
+            Into::<Expression<E>>::into(3usize) * x.expr_fnord() * y.expr_fnord()
+                + Into::<Expression<E>>::into(2usize) * x.expr_fnord();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
-                - Into::<Expression<E>>::into(6usize) * z.expr();
+            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr_fnord() * y.expr_fnord()
+                - Into::<Expression<E>>::into(6usize) * z.expr_fnord();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
-                - Into::<Expression<E>>::into(6usize) * z.expr();
+            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr_fnord() * y.expr_fnord()
+                - Into::<Expression<E>>::into(6usize) * z.expr_fnord();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2 * x + 3) * 3 + 6 * 8
-        let expr: Expression<E> = (Into::<Expression<E>>::into(2usize) * x.expr()
+        let expr: Expression<E> = (Into::<Expression<E>>::into(2usize) * x.expr_fnord()
             + Into::<Expression<E>>::into(3usize))
             * Into::<Expression<E>>::into(3usize)
             + Into::<Expression<E>>::into(6usize) * Into::<Expression<E>>::into(8usize);
@@ -1002,8 +1017,8 @@ mod tests {
         let y = cb.create_witin(|| "y").unwrap();
         // scaledsum * challenge
         // (x + 1) * (y + 1)
-        let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())
-            * (Into::<Expression<E>>::into(2usize) + y.expr());
+        let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr_fnord())
+            * (Into::<Expression<E>>::into(2usize) + y.expr_fnord());
         assert!(!expr.is_monomial_form());
     }
 

@@ -17,7 +17,7 @@ pub struct IsZeroConfig {
 
 impl IsZeroConfig {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
-        self.is_zero.expr()
+        self.is_zero.expr_fnord()
     }
 
     pub fn construct_circuit<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(
@@ -30,10 +30,13 @@ impl IsZeroConfig {
             let inverse = cb.create_witin(|| "inv")?;
 
             // x==0 => is_zero=1
-            cb.require_one(|| "is_zero_1", is_zero.expr() + x.clone() * inverse.expr())?;
+            cb.require_one(
+                || "is_zero_1",
+                is_zero.expr_fnord() + x.clone() * inverse.expr_fnord(),
+            )?;
 
             // x!=0 => is_zero=0
-            cb.require_zero(|| "is_zero_0", is_zero.expr() * x.clone())?;
+            cb.require_zero(|| "is_zero_0", is_zero.expr_fnord() * x.clone())?;
 
             Ok(IsZeroConfig { is_zero, inverse })
         })

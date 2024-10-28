@@ -29,7 +29,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![register_id.expr_fnord()],
                     value.to_vec(),
                     vec![prev_ts.clone()],
                 ]
@@ -41,7 +41,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![register_id.expr_fnord()],
                     value.to_vec(),
                     vec![ts.clone()],
                 ]
@@ -74,7 +74,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
-        assert!(register_id.expr().degree() <= 1);
+        assert!(register_id.expr_fnord().degree() <= 1);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
@@ -82,7 +82,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![register_id.expr_fnord()],
                     prev_values.to_vec(),
                     vec![prev_ts.clone()],
                 ]
@@ -94,7 +94,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
                     vec![Expression::<E>::Constant(E::BaseField::from(
                         RAMType::Register as u64,
                     ))],
-                    vec![register_id.expr()],
+                    vec![register_id.expr_fnord()],
                     value.to_vec(),
                     vec![ts.clone()],
                 ]

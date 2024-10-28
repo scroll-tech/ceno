@@ -50,7 +50,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let i_insn = IInstructionConfig::construct_circuit(
             circuit_builder,
             InsnKind::JALR,
-            &imm.expr(),
+            &imm.expr_fnord(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             true,
@@ -67,26 +67,26 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         circuit_builder.require_equal(
             || "rs1+imm = next_pc_unrounded + overflow*2^32",
-            rs1_read.value() + imm.expr(),
-            next_pc_addr.expr_unaligned() + overflow.expr() * (1u64 << 32),
+            rs1_read.value() + imm.expr_fnord(),
+            next_pc_addr.expr_unaligned() + overflow.expr_fnord() * (1u64 << 32),
         )?;
 
         circuit_builder.require_zero(
             || "overflow_0_or_pm1",
-            overflow.expr() * (overflow.expr() - 1) * (overflow.expr() + 1),
+            overflow.expr_fnord() * (overflow.expr_fnord() - 1) * (overflow.expr_fnord() + 1),
         )?;
 
         circuit_builder.require_equal(
             || "next_pc_addr = next_pc",
             next_pc_addr.expr_align2(),
-            i_insn.vm_state.next_pc.unwrap().expr(),
+            i_insn.vm_state.next_pc.unwrap().expr_fnord(),
         )?;
 
         // write pc+4 to rd
         circuit_builder.require_equal(
             || "rd_written = pc+4",
             rd_written.value(),
-            i_insn.vm_state.pc.expr() + PC_STEP_SIZE,
+            i_insn.vm_state.pc.expr_fnord() + PC_STEP_SIZE,
         )?;
 
         Ok(JalrConfig {

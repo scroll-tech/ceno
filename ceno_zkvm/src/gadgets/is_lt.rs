@@ -68,7 +68,7 @@ pub struct IsLtConfig {
 
 impl IsLtConfig {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
-        self.is_lt.expr()
+        self.is_lt.expr_fnord()
     }
 
     pub fn construct_circuit<
@@ -87,14 +87,14 @@ impl IsLtConfig {
             |cb| {
                 let name = name_fn();
                 let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
-                cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
+                cb.assert_bit(|| "is_lt_bit", is_lt.expr_fnord())?;
 
                 let config = InnerLtConfig::construct_circuit(
                     cb,
                     name,
                     lhs,
                     rhs,
-                    is_lt.expr(),
+                    is_lt.expr_fnord(),
                     max_num_u16_limbs,
                 )?;
                 Ok(Self { is_lt, config })
@@ -142,7 +142,7 @@ impl InnerLtConfig {
                 || format!("var {var_name}"),
                 |cb| {
                     let witin = cb.create_witin(|| var_name.to_string())?;
-                    cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
+                    cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr_fnord())?;
                     Ok(witin)
                 },
             )
@@ -155,7 +155,7 @@ impl InnerLtConfig {
         let pows = power_sequence((1 << u16::BITS).into());
 
         let diff_expr = izip!(&diff, pows)
-            .map(|(record, beta)| beta * record.expr())
+            .map(|(record, beta)| beta * record.expr_fnord())
             .sum::<Expression<E>>();
 
         let range = Self::range(max_num_u16_limbs);
@@ -264,7 +264,7 @@ pub struct SignedLtConfig {
 
 impl SignedLtConfig {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
-        self.is_lt.expr()
+        self.is_lt.expr_fnord()
     }
 
     pub fn construct_circuit<
@@ -282,9 +282,9 @@ impl SignedLtConfig {
             |cb| {
                 let name = name_fn();
                 let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"))?;
-                cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
+                cb.assert_bit(|| "is_lt_bit", is_lt.expr_fnord())?;
                 let config =
-                    InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
+                    InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr_fnord())?;
 
                 Ok(SignedLtConfig { is_lt, config })
             },
@@ -326,14 +326,14 @@ impl InnerSignedLtConfig {
             cb,
             || "lhs_msb",
             max_signed_limb_expr.clone(),
-            lhs.limbs.iter().last().unwrap().expr(), // msb limb
+            lhs.limbs.iter().last().unwrap().expr_fnord(), // msb limb
             1,
         )?;
         let is_rhs_neg = IsLtConfig::construct_circuit(
             cb,
             || "rhs_msb",
             max_signed_limb_expr,
-            rhs.limbs.iter().last().unwrap().expr(), // msb limb
+            rhs.limbs.iter().last().unwrap().expr_fnord(), // msb limb
             1,
         )?;
 

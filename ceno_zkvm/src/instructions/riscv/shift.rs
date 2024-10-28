@@ -99,12 +99,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rd_written.register_expr(),
         )?;
 
-        circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.value())?;
-        circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr())?;
+        circuit_builder.lookup_pow2(rs2_low5.expr_fnord(), pow2_rs2_low5.value())?;
+        circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr_fnord())?;
         circuit_builder.require_equal(
             || "rs2 == rs2_high * 2^5 + rs2_low5",
             rs2_read.value(),
-            rs2_high.value() * (1 << 5) + rs2_low5.expr(),
+            rs2_high.value() * (1 << 5) + rs2_low5.expr_fnord(),
         )?;
 
         Ok(ShiftConfig {

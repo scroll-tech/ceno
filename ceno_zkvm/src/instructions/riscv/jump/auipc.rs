@@ -42,12 +42,12 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         let u_insn = UInstructionConfig::construct_circuit(
             circuit_builder,
             InsnKind::AUIPC,
-            &imm.expr(),
+            &imm.expr_fnord(),
             rd_written.register_expr(),
         )?;
 
         let overflow_bit = circuit_builder.create_witin(|| "overflow_bit")?;
-        circuit_builder.assert_bit(|| "is_bit", overflow_bit.expr())?;
+        circuit_builder.assert_bit(|| "is_bit", overflow_bit.expr_fnord())?;
 
         // assert: imm + pc = rd_written + overflow_bit * 2^32
         // valid formulation of mod 2^32 arithmetic because:
@@ -55,8 +55,8 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         // - rd_written is constrained to 4 bytes by UInt checked limbs
         circuit_builder.require_equal(
             || "imm+pc = rd_written+2^32*overflow",
-            imm.expr() + u_insn.vm_state.pc.expr(),
-            rd_written.value() + overflow_bit.expr() * (1u64 << 32),
+            imm.expr_fnord() + u_insn.vm_state.pc.expr_fnord(),
+            rd_written.value() + overflow_bit.expr_fnord() * (1u64 << 32),
         )?;
 
         Ok(AuipcConfig {

@@ -40,13 +40,13 @@ impl<E: ExtensionField> JInstructionConfig<E> {
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
+            vm_state.pc.expr_fnord(),
             (insn_kind.codes().opcode as usize).into(),
-            rd.id.expr(),
+            rd.id.expr_fnord(),
             0.into(),
             0.into(),
             0.into(),
-            vm_state.next_pc.unwrap().expr() - vm_state.pc.expr(),
+            vm_state.next_pc.unwrap().expr_fnord() - vm_state.pc.expr_fnord(),
         ))?;
 
         Ok(JInstructionConfig { vm_state, rd })

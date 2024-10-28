@@ -61,23 +61,24 @@ impl<E: ExtensionField> BInstructionConfig<E> {
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr(),
+            vm_state.pc.expr_fnord(),
             insn_kind.codes().opcode.into(),
             0.into(),
             insn_kind.codes().func3.into(),
-            rs1.id.expr(),
-            rs2.id.expr(),
-            imm.expr(),
+            rs1.id.expr_fnord(),
+            rs2.id.expr_fnord(),
+            imm.expr_fnord(),
         ))?;
 
         // Branch program counter
-        let pc_offset =
-            branch_taken_bit.clone() * imm.expr() - branch_taken_bit * PC_STEP_SIZE + PC_STEP_SIZE;
+        let pc_offset = branch_taken_bit.clone() * imm.expr_fnord()
+            - branch_taken_bit * PC_STEP_SIZE
+            + PC_STEP_SIZE;
         let next_pc = vm_state.next_pc.unwrap();
         circuit_builder.require_equal(
             || "pc_branch",
-            next_pc.expr(),
-            vm_state.pc.expr() + pc_offset,
+            next_pc.expr_fnord(),
+            vm_state.pc.expr_fnord() + pc_offset,
         )?;
 
         Ok(BInstructionConfig {

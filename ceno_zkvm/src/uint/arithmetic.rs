@@ -35,13 +35,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             return Err(ZKVMError::CircuitError);
         };
         carries.iter().enumerate().try_for_each(|(i, carry)| {
-            circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
+            circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr_fnord())
         })?;
 
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
         c.limbs = UintLimb::Expression(
-            (self.expr())
+            (self.expr_fnord())
                 .iter()
                 .zip((*addend).iter())
                 .enumerate()
@@ -52,10 +52,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
                     let mut limb_expr = a.clone() + b.clone();
                     if carry.is_some() {
-                        limb_expr = limb_expr.clone() + carry.unwrap().expr();
+                        limb_expr = limb_expr.clone() + carry.unwrap().expr_fnord();
                     }
                     if next_carry.is_some() {
-                        limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                        limb_expr =
+                            limb_expr.clone() - next_carry.unwrap().expr_fnord() * Self::POW_OF_C;
                     }
 
                     circuit_builder
@@ -101,7 +102,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
         circuit_builder.namespace(name_fn, |cb| {
-            self.internal_add(cb, &addend.expr(), with_overflow)
+            self.internal_add(cb, &addend.expr_fnord(), with_overflow)
         })
     }
 
@@ -121,7 +122,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         // with high limb, overall cell will be double
         let c_limbs: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_limbs, i| {
             let limb = circuit_builder.create_witin(|| format!("limb_{i}"))?;
-            circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
+            circuit_builder
+                .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr_fnord())?;
             c_limbs.push(limb);
             Result::<Vec<WitIn>, ZKVMError>::Ok(c_limbs)
         })?;
@@ -141,7 +143,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 AssertLTConfig::construct_circuit(
                     circuit_builder,
                     || format!("carry_{i}_in_less_than"),
-                    carry.expr(),
+                    carry.expr_fnord(),
                     (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
                     Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
                 )
@@ -156,18 +158,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 circuit_builder.namespace(
                     || name.to_owned(),
                     |cb| {
-                        let existing_expr = u.expr();
+                        let existing_expr = u.expr_fnord();
                         // this will overwrite existing expressions
                         u.replace_limbs_with_witin(|| "replace_limbs_with_witin".to_string(), cb)?;
                         // check if the new witness equals the existing expression
-                        izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
+                        izip!(u.expr_fnord(), existing_expr).try_for_each(|(lhs, rhs)| {
                             cb.require_equal(|| "new_witin_equal_expr".to_string(), lhs, rhs)
                         })?;
                         Ok(())
                     },
                 )?;
             }
-            Ok(u.expr())
+            Ok(u.expr_fnord())
         };
 
         let a_expr = swap_witin("lhs", self)?;
@@ -193,12 +195,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         c_limbs.iter().enumerate().try_for_each(|(i, c_limb)| {
             let carry = if i > 0 { c_carries.get(i - 1) } else { None };
             let next_carry = c_carries.get(i);
-            result_c[i] = result_c[i].clone() - c_limb.expr();
+            result_c[i] = result_c[i].clone() - c_limb.expr_fnord();
             if carry.is_some() {
-                result_c[i] = result_c[i].clone() + carry.unwrap().expr();
+                result_c[i] = result_c[i].clone() + carry.unwrap().expr_fnord();
             }
             if next_carry.is_some() {
-                result_c[i] = result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                result_c[i] =
+                    result_c[i].clone() - next_carry.unwrap().expr_fnord() * Self::POW_OF_C;
             }
             circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
             Ok::<(), ZKVMError>(())
@@ -242,11 +245,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 mul_hi
             } else {
                 // lo limb
-                UIntLimbs::from_exprs_unchecked(mul.expr())?
+                UIntLimbs::from_exprs_unchecked(mul.expr_fnord())?
             };
             let add = cb.namespace(
                 || "add",
-                |cb| mul_lo_or_hi.internal_add(cb, &addend.expr(), with_overflow),
+                |cb| mul_lo_or_hi.internal_add(cb, &addend.expr_fnord(), with_overflow),
             )?;
             Ok((add, mul))
         })
@@ -272,18 +275,20 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .limbs
             .iter()
             .zip_eq(rhs.limbs.iter())
-            .map(|(a, b)| circuit_builder.is_equal(a.expr(), b.expr()))
+            .map(|(a, b)| circuit_builder.is_equal(a.expr_fnord(), b.expr_fnord()))
             .collect::<Result<Vec<(WitIn, WitIn)>, ZKVMError>>()?
             .into_iter()
             .unzip();
 
         let sum_expr = is_equal_per_limb
             .iter()
-            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
+            .fold(Expression::ZERO, |acc, flag| {
+                acc.clone() + flag.expr_fnord()
+            });
 
         let sum_flag = create_witin_from_expr!(|| "sum_flag", circuit_builder, false, sum_expr)?;
         let (is_equal, diff_inv) =
-            circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
+            circuit_builder.is_equal(sum_flag.expr_fnord(), Expression::from(n_limbs))?;
         Ok(IsEqualConfig {
             is_equal_per_limb,
             diff_inv_per_limb,
@@ -304,16 +309,16 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         E: ExtensionField<BaseField = F>,
     {
         let high_limb_no_msb = circuit_builder.create_witin(|| "high_limb_mask")?;
-        let high_limb = self.limbs[Self::NUM_LIMBS - 1].expr();
+        let high_limb = self.limbs[Self::NUM_LIMBS - 1].expr_fnord();
 
         circuit_builder.lookup_and_byte(
             high_limb.clone(),
             Expression::from(0b0111_1111),
-            high_limb_no_msb.expr(),
+            high_limb_no_msb.expr_fnord(),
         )?;
 
         let inv_128 = F::from(128).invert().unwrap();
-        let msb = (high_limb - high_limb_no_msb.expr()) * Expression::Constant(inv_128);
+        let msb = (high_limb - high_limb_no_msb.expr_fnord()) * Expression::Constant(inv_128);
         let msb = create_witin_from_expr!(|| "msb", circuit_builder, false, msb)?;
         Ok(MsbConfig {
             msb,
@@ -350,7 +355,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .iter()
             .rev()
             .scan(Expression::from(0), |state, idx| {
-                *state = state.clone() + idx.expr();
+                *state = state.clone() + idx.expr_fnord();
                 Some(state.clone())
             })
             .collect();
@@ -371,7 +376,8 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .try_for_each(|(i, ((flag, a), b))| {
                 circuit_builder.require_zero(
                     || format!("byte diff {i} zero check"),
-                    a.expr() - b.expr() - flag.expr() * a.expr() + flag.expr() * b.expr(),
+                    a.expr_fnord() - b.expr_fnord() - flag.expr_fnord() * a.expr_fnord()
+                        + flag.expr_fnord() * b.expr_fnord(),
                 )
             })?;
 
@@ -382,14 +388,14 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
             .iter()
             .zip_eq(indexes.iter())
             .fold(Expression::from(0), |acc, (ai, idx)| {
-                acc.clone() + ai.expr() * idx.expr()
+                acc.clone() + ai.expr_fnord() * idx.expr_fnord()
             });
         let sb = rhs
             .limbs
             .iter()
             .zip_eq(indexes.iter())
             .fold(Expression::from(0), |acc, (bi, idx)| {
-                acc.clone() + bi.expr() * idx.expr()
+                acc.clone() + bi.expr_fnord() * idx.expr_fnord()
             });
 
         // check the first byte difference has a inverse
@@ -401,14 +407,18 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         let index_ne = si.first().unwrap();
         circuit_builder.require_zero(
             || "byte inverse check",
-            lhs_ne_byte.expr() * byte_diff_inv.expr()
-                - rhs_ne_byte.expr() * byte_diff_inv.expr()
-                - index_ne.expr(),
+            lhs_ne_byte.expr_fnord() * byte_diff_inv.expr_fnord()
+                - rhs_ne_byte.expr_fnord() * byte_diff_inv.expr_fnord()
+                - index_ne.expr_fnord(),
         )?;
 
         let is_ltu = circuit_builder.create_witin(|| "is_ltu")?;
         // now we know the first non-equal byte pairs is  (lhs_ne_byte, rhs_ne_byte)
-        circuit_builder.lookup_ltu_byte(lhs_ne_byte.expr(), rhs_ne_byte.expr(), is_ltu.expr())?;
+        circuit_builder.lookup_ltu_byte(
+            lhs_ne_byte.expr_fnord(),
+            rhs_ne_byte.expr_fnord(),
+            is_ltu.expr_fnord(),
+        )?;
         Ok(UIntLtuConfig {
             byte_diff_inv,
             indexes,
@@ -442,12 +452,12 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         // (2) compute $lt(a,b)=a_s\cdot (1-b_s)+eq(a_s,b_s)\cdot ltu(a_{<s},b_{<s})$
         // Refer Jolt 5.3: Set Less Than (https://people.cs.georgetown.edu/jthaler/Jolt-paper.pdf)
         let (msb_is_equal, msb_diff_inv) =
-            circuit_builder.is_equal(lhs_msb.msb.expr(), rhs_msb.msb.expr())?;
+            circuit_builder.is_equal(lhs_msb.msb.expr_fnord(), rhs_msb.msb.expr_fnord())?;
         circuit_builder.require_zero(
             || "is lt zero check",
-            lhs_msb.msb.expr() - lhs_msb.msb.expr() * rhs_msb.msb.expr()
-                + msb_is_equal.expr() * is_ltu.is_ltu.expr()
-                - is_lt.expr(),
+            lhs_msb.msb.expr_fnord() - lhs_msb.msb.expr_fnord() * rhs_msb.msb.expr_fnord()
+                + msb_is_equal.expr_fnord() * is_ltu.is_ltu.expr_fnord()
+                - is_lt.expr_fnord(),
         )?;
         Ok(UIntLtConfig {
             lhs_msb,
@@ -656,13 +666,13 @@ mod tests {
 
             // verify
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
-            uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
+            uint_c.expr_fnord().iter().zip(result).for_each(|(c, ret)| {
                 assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
             });
 
             // overflow
             if overflow {
-                let carries = uint_c.carries.unwrap().last().unwrap().expr();
+                let carries = uint_c.carries.unwrap().last().unwrap().expr_fnord();
                 assert_eq!(eval_by_expr(&wit, &challenges, &carries), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
@@ -831,13 +841,13 @@ mod tests {
 
             // verify
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
-            uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
+            uint_c.expr_fnord().iter().zip(result).for_each(|(c, ret)| {
                 assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
             });
 
             // overflow
             if overflow {
-                let overflow = uint_c.carries.unwrap().last().unwrap().expr();
+                let overflow = uint_c.carries.unwrap().last().unwrap().expr_fnord();
                 assert_eq!(eval_by_expr(&wit, &challenges, &overflow), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
