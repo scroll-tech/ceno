@@ -51,7 +51,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         let is_rs1_neg = IsLtConfig::construct_circuit(
             cb,
             || "lhs_msb",
-            max_signed_limb_expr.clone(),
+            max_signed_limb_expr,
             rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
             1,
         )?;
