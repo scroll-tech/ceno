@@ -16,7 +16,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Self { cs }
     }
 
-    pub fn create_witin<NR, N>(&mut self, name_fn: N) -> Result<WitIn, ZKVMError>
+    pub fn create_witin<NR, N>(&mut self, name_fn: N) -> WitIn
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
@@ -148,7 +148,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR + Clone,
     {
-        let byte = self.cs.create_witin(name_fn.clone())?;
+        let byte = self.cs.create_witin(name_fn.clone());
         self.assert_ux::<_, _, 8>(name_fn, byte.expr())?;
 
         Ok(byte)
@@ -159,7 +159,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR + Clone,
     {
-        let limb = self.cs.create_witin(name_fn.clone())?;
+        let limb = self.cs.create_witin(name_fn.clone());
         self.assert_ux::<_, _, 16>(name_fn, limb.expr())?;
 
         Ok(limb)
@@ -393,8 +393,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         lhs: Expression<E>,
         rhs: Expression<E>,
     ) -> Result<(WitIn, WitIn), ZKVMError> {
-        let is_eq = self.create_witin(|| "is_eq")?;
-        let diff_inverse = self.create_witin(|| "diff_inverse")?;
+        let is_eq = self.create_witin(|| "is_eq");
+        let diff_inverse = self.create_witin(|| "diff_inverse");
 
         self.require_zero(
             || "is equal",

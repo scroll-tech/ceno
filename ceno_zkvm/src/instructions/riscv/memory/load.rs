@@ -82,7 +82,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
+        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
         let memory_read = UInt::new(|| "memory_read", circuit_builder)?;
 
         let memory_addr = match I::INST_KIND {
@@ -104,7 +104,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         // get target limb from memory word for load instructions except LW
         let target_limb = match I::INST_KIND {
             InsnKind::LB | InsnKind::LBU | InsnKind::LH | InsnKind::LHU => {
-                let target_limb = circuit_builder.create_witin(|| "target_limb")?;
+                let target_limb = circuit_builder.create_witin(|| "target_limb");
                 circuit_builder.condition_require_equal(
                     || "target_limb = memory_value[low_bits[1]]",
                     addr_low_bits[1].clone(),

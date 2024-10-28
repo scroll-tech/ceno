@@ -57,11 +57,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         // Note: `imm` wtns is set to 2**imm (upto 32 bit) just for efficient verification.
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
-        let outflow = circuit_builder.create_witin(|| "outflow")?;
+        let outflow = circuit_builder.create_witin(|| "outflow");
         let assert_lt_config = AssertLTConfig::construct_circuit(
             circuit_builder,
             || "outflow < imm",

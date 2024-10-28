@@ -712,16 +712,16 @@ mod tests {
         pub fn construct_circuit(
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
-            let c = cb.create_witin(|| "c")?;
+            let a = cb.create_witin(|| "a");
+            let b = cb.create_witin(|| "b");
+            let c = cb.create_witin(|| "c");
 
             // degree 1
             cb.require_equal(|| "a + 1 == b", b.expr(), a.expr() + 1)?;
             cb.require_zero(|| "c - 2 == 0", c.expr() - 2)?;
 
             // degree > 1
-            let d = cb.create_witin(|| "d")?;
+            let d = cb.create_witin(|| "d");
             cb.require_zero(
                 || "d*d - 6*d + 9 == 0",
                 d.expr() * d.expr() - d.expr() * 6 + 9,
@@ -766,7 +766,7 @@ mod tests {
         pub fn construct_circuit(
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
+            let a = cb.create_witin(|| "a");
             cb.assert_ux::<_, _, 5>(|| "assert u5", a.expr())?;
             Ok(Self { a })
         }
@@ -847,8 +847,8 @@ mod tests {
 
     impl AssertLtCircuit {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
+            let a = cb.create_witin(|| "a");
+            let b = cb.create_witin(|| "b");
             let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
@@ -971,8 +971,8 @@ mod tests {
 
     impl LtCircuit {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
+            let a = cb.create_witin(|| "a");
+            let b = cb.create_witin(|| "b");
             let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
