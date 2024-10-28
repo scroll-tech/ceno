@@ -1,13 +1,13 @@
-use super::{RIVInstruction, config::MsbConfig};
+use super::RIVInstruction;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::{AssertLTConfig, IsLtConfig},
     instructions::{
         Instruction,
-        riscv::{config::MsbInput, constants::UInt, i_insn::IInstructionConfig},
+        riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
     set_val,
     witness::LkMultiplicity,
@@ -26,7 +26,7 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     assert_lt_config: AssertLTConfig,
 
     // SRAI
-    msb_config: Option<MsbConfig>,
+    is_lt_config: Option<IsLtConfig>,
 }
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -96,18 +96,26 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     rd_written,
                     outflow,
                     assert_lt_config,
-                    msb_config: None,
+                    is_lt_config: None,
                 })
             }
             InsnKind::SRAI | InsnKind::SRLI => {
                 let outflow = circuit_builder.create_witin(|| "outflow")?;
 
-                let (inflow, msb_config) = match I::INST_KIND {
+                let (inflow, is_lt_config) = match I::INST_KIND {
                     InsnKind::SRAI => {
-                        let msb_config = rs1_read.msb_decompose(circuit_builder)?;
-                        let msb_expr: Expression<E> = msb_config.msb.expr();
+                        let max_signed_limb_expr: Expression<_> =
+                            ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
+                        let is_rs1_neg = IsLtConfig::construct_circuit(
+                            circuit_builder,
+                            || "lhs_msb",
+                            max_signed_limb_expr.clone(),
+                            rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
+                            1,
+                        )?;
+                        let msb_expr: Expression<E> = is_rs1_neg.is_lt.expr();
                         let ones = imm.expr() - Expression::ONE;
-                        (msb_expr * ones, Some(msb_config))
+                        (msb_expr * ones, Some(is_rs1_neg))
                     }
                     InsnKind::SRLI => (Expression::ZERO, None),
                     _ => unreachable!(),
@@ -143,7 +151,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     rd_written,
                     outflow,
                     assert_lt_config,
-                    msb_config,
+                    is_lt_config,
                 })
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
@@ -192,14 +200,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 )?;
 
                 if I::INST_KIND == InsnKind::SRAI {
-                    MsbInput {
-                        limbs: &rs1_read.limbs,
-                    }
-                    .assign(
+                    config.is_lt_config.as_ref().unwrap().assign_instance(
                         instance,
-                        config.msb_config.as_ref().unwrap(),
                         lk_multiplicity,
-                    );
+                        (1 << 15) - 1,
+                        rs1_read.as_u64() >> 16,
+                    )?;
                 }
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
