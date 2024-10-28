@@ -51,7 +51,7 @@ pub struct VirtualPolynomial<E: ExtensionField> {
     /// to.
     pub flattened_ml_extensions: Vec<ArcDenseMultilinearExtension<E>>,
     /// Pointers to the above poly extensions
-    raw_pointers_lookup_table: HashMap<usize, usize>,
+    raw_pointers_lookup_table: HashMap<*const DenseMultilinearExtension<E>, usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,7 +89,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
 
     /// Creates an new virtual polynomial from a MLE and its coefficient.
     pub fn new_from_mle(mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) -> Self {
-        let mle_ptr: usize = Arc::as_ptr(&mle) as usize;
+        let mle_ptr = Arc::as_ptr(&mle);
         let mut hm = HashMap::new();
         hm.insert(mle_ptr, 0);
 
@@ -132,7 +132,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
                 mle.num_vars, self.aux_info.num_variables
             );
 
-            let mle_ptr: usize = Arc::as_ptr(&mle) as usize;
+            let mle_ptr = Arc::as_ptr(&mle);
             if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
                 indexed_product.push(*index)
             } else {
@@ -173,7 +173,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
             mle.num_vars, self.aux_info.num_variables
         );
 
-        let mle_ptr = Arc::as_ptr(&mle) as usize;
+        let mle_ptr = Arc::as_ptr(&mle);
 
         // check if this mle already exists in the virtual polynomial
         let mle_index = match self.raw_pointers_lookup_table.get(&mle_ptr) {
@@ -314,17 +314,17 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
     pub fn to_ext_field(&self) -> VirtualPolynomial<E> {
         let timer = start_timer!(|| "convert VP to ext field");
-        let products = self.products.iter().map(|(f, v)| (*f, v.clone())).collect();
+        let products = self.products.clone();
 
         let mut flattened_ml_extensions = vec![];
         let mut hm = HashMap::new();
-        for mle in self.flattened_ml_extensions.iter() {
-            let mle_ptr = Arc::as_ptr(mle) as usize;
+        for mle in &self.flattened_ml_extensions {
+            let mle_ptr: *const DenseMultilinearExtension<E> = Arc::as_ptr(mle);
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
 
             let mle_ext_field = mle.as_ref().to_ext_field();
             let mle_ext_field = Arc::new(mle_ext_field);
-            let mle_ext_field_ptr = Arc::as_ptr(&mle_ext_field) as usize;
+            let mle_ext_field_ptr = Arc::as_ptr(&mle_ext_field);
             flattened_ml_extensions.push(mle_ext_field);
             hm.insert(mle_ext_field_ptr, *index);
         }
