@@ -2,6 +2,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
+use multilinear_extensions::util::max_usable_threads;
 use transcript::Transcript;
 
 /// convert ext field element to u64, assume it is inside the range
@@ -113,7 +114,8 @@ pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
 
 /// we expect each thread at least take 4 num of sumcheck variables
 /// return optimal num threads to run sumcheck
-pub fn proper_num_threads(num_vars: usize, expected_max_threads: usize) -> usize {
+pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
+    let expected_max_threads = max_usable_threads();
     let min_numvar_per_thread = 4;
     if num_vars <= min_numvar_per_thread {
         1

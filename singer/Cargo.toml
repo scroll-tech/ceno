@@ -28,7 +28,6 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 cfg-if.workspace = true
-const_env.workspace = true
 criterion.workspace = true
 pprof.workspace = true
 tracing.workspace = true
