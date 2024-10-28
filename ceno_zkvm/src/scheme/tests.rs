@@ -141,7 +141,6 @@ fn test_rw_lk_expression_combination() {
                 commit,
                 &[],
                 num_instances,
-                1,
                 &mut transcript,
                 &prover_challenges,
             )
@@ -290,7 +289,7 @@ fn test_single_add_instance_e2e() {
     let pi = PublicValues::new(0, 0, 0, 0, 0);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, 1, transcript)
+        .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
     let transcript = Transcript::new(b"riscv");

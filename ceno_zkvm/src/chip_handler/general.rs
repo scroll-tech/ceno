@@ -157,7 +157,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     where
         Name: Into<String>,
     {
-        self.namespace("require_equal", |cb| cb.cs.require_zero(name, a - b))
+        self.namespace("require_equal", |cb| {
+            cb.cs
+                .require_zero(name, a.to_monomial_form() - b.to_monomial_form())
+        })
     }
 
     pub fn require_one<Name>(&mut self, name: Name, expr: Expression<E>) -> Result<(), ZKVMError>
