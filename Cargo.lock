@@ -1568,9 +1568,9 @@ checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
 name = "rustix"
-version = "0.38.37"
+version = "0.38.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8acb788b847c24f28525660c4d7758620a7210875711f79e7f663cc152726811"
+checksum = "aa260229e6538e52293eeb577aabd09945a09d6d9cc0fc550ed7529056c2e32a"
 dependencies = [
  "bitflags 2.6.0",
  "errno",
@@ -2344,8 +2344,3 @@ dependencies = [
  "quote",
  "syn 2.0.85",
 ]
-
-[[patch.unused]]
-name = "goldilocks"
-version = "0.1.0"
-source = "git+https://github.com/hero78119/Goldilocks#7798793666c1205d50fc80b32b23a4430fce31e5"
