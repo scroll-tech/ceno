@@ -200,6 +200,7 @@ mod test {
     #[cfg(not(debug_assertions))]
     use transcript::Transcript;
 
+    use ceno_utils::u64vec;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use singer_utils::{
         constants::RANGE_CHIP_BIT_WIDTH,
@@ -212,7 +213,6 @@ mod test {
     use crate::{
         instructions::{AddInstruction, ChipChallenges, Instruction},
         test::{get_uint_params, test_opcode_circuit_v2},
-        utils::u64vec,
     };
 
     #[test]

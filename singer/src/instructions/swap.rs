@@ -196,6 +196,7 @@ mod test {
     };
     #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
+    use ceno_utils::u64vec;
     #[cfg(not(debug_assertions))]
     use ff::Field;
     #[cfg(not(debug_assertions))]
@@ -213,7 +214,6 @@ mod test {
     use crate::{
         instructions::{ChipChallenges, Instruction, SwapInstruction},
         test::get_uint_params,
-        utils::u64vec,
     };
 
     #[test]

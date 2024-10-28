@@ -155,8 +155,8 @@ mod test {
     use crate::{
         instructions::{ChipChallenges, Instruction, PopInstruction},
         test::get_uint_params,
-        utils::u64vec,
     };
+    use ceno_utils::u64vec;
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
 
     #[test]

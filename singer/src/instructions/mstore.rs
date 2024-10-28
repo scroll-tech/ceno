@@ -385,7 +385,6 @@ impl MstoreAccessory {
 mod test {
     #[cfg(not(debug_assertions))]
     use super::MstoreAccessory;
-    use crate::utils::u64vec;
     #[cfg(not(debug_assertions))]
     use crate::{
         CircuitWiresIn, SingerGraphBuilder, SingerParams,
@@ -394,6 +393,7 @@ mod test {
     };
     #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
+    use ceno_utils::u64vec;
     #[cfg(not(debug_assertions))]
     use ff::Field;
     #[cfg(not(debug_assertions))]

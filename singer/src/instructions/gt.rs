@@ -198,6 +198,7 @@ mod test {
     #[cfg(not(debug_assertions))]
     use transcript::Transcript;
 
+    use ceno_utils::u64vec;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use singer_utils::{constants::RANGE_CHIP_BIT_WIDTH, structs::TSUInt};
     use std::collections::BTreeMap;
@@ -207,7 +208,6 @@ mod test {
     use crate::{
         instructions::{ChipChallenges, GtInstruction, Instruction},
         test::get_uint_params,
-        utils::u64vec,
     };
 
     #[test]

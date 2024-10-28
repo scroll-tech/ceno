@@ -182,8 +182,8 @@ mod test {
     use crate::{
         instructions::{CalldataloadInstruction, ChipChallenges, Instruction},
         test::get_uint_params,
-        utils::u64vec,
     };
+    use ceno_utils::u64vec;
 
     #[test]
     fn test_calldataload_construct_circuit() {
