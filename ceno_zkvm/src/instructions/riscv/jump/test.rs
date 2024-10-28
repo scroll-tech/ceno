@@ -1,7 +1,5 @@
 use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -45,18 +43,7 @@ fn test_opcode_jal() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -93,18 +80,7 @@ fn test_opcode_jalr() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -137,18 +113,7 @@ fn test_opcode_lui() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -181,16 +146,5 @@ fn test_opcode_auipc() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }

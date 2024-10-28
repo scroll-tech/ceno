@@ -88,7 +88,6 @@ pub struct Emulator {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,

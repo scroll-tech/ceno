@@ -5,33 +5,12 @@ use itertools::Itertools;
 use multilinear_extensions::util::max_usable_threads;
 use transcript::Transcript;
 
-/// convert ext field element to u64, assume it is inside the range
-#[allow(dead_code)]
-pub fn ext_to_u64<E: ExtensionField>(x: &E) -> u64 {
-    let bases = x.as_bases();
-    bases[0].to_canonical_u64()
-}
-
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
         F::from(x as u64)
     } else {
         -F::from((-x) as u64)
     }
-}
-
-/// This is helper function to convert witness of u8 limb into u16 limb
-/// TODO: need a better way to keep consistency of LIMB_BITS
-#[allow(dead_code)]
-pub fn limb_u8_to_u16(input: &[u8]) -> Vec<u16> {
-    input
-        .chunks(2)
-        .map(|chunk| {
-            let low = chunk[0] as u16;
-            let high = if chunk.len() > 1 { chunk[1] as u16 } else { 0 };
-            high * 256 + low
-        })
-        .collect()
 }
 
 pub fn split_to_u8<T: From<u8>>(value: u32) -> Vec<T> {
@@ -70,15 +49,6 @@ pub(crate) fn add_one_to_big_num<F: Field>(limb_modulo: F, limbs: &[F]) -> Vec<F
     }
 
     result
-}
-
-#[allow(dead_code)]
-pub(crate) fn i64_to_base_field<E: ExtensionField>(x: i64) -> E::BaseField {
-    if x >= 0 {
-        E::BaseField::from(x as u64)
-    } else {
-        -E::BaseField::from((-x) as u64)
-    }
 }
 
 /// derive challenge from transcript and return all pows result
