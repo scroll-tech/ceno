@@ -82,8 +82,7 @@ impl<E: ExtensionField> Expression<E> {
         terms
             .into_iter()
             .map(|term| term.vars.into_iter().fold(term.coeff, |a, b| a * b))
-            .reduce(|a, b| a + b)
-            .unwrap_or(Expression::ZERO)
+            .sum()
     }
 }
 
