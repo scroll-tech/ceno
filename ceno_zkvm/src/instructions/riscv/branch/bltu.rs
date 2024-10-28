@@ -39,12 +39,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<InstructionConfig<E>, ZKVMError> {
-        let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
-        let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
+        let read_rs1 = UInt::new_unchecked("rs1_limbs", circuit_builder)?;
+        let read_rs2 = UInt::new_unchecked("rs2_limbs", circuit_builder)?;
 
         let is_lt = IsLtConfig::construct_circuit(
             circuit_builder,
-            || "rs1<rs2",
+            "rs1<rs2",
             read_rs1.value(),
             read_rs2.value(),
             UINT_LIMBS,

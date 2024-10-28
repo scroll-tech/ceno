@@ -27,13 +27,13 @@ impl RangeTableConfig {
         rom_type: ROMType,
         table_len: usize,
     ) -> Result<Self, ZKVMError> {
-        let fixed = cb.create_fixed(|| "fixed")?;
-        let mlt = cb.create_witin(|| "mlt")?;
+        let fixed = cb.create_fixed("fixed")?;
+        let mlt = cb.create_witin("mlt")?;
 
         let rlc_record =
             cb.rlc_chip_record(vec![(rom_type as usize).into(), Expression::Fixed(fixed)]);
 
-        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
+        cb.lk_table_record("record", table_len, rlc_record, mlt.expr())?;
 
         Ok(Self { fixed, mlt })
     }

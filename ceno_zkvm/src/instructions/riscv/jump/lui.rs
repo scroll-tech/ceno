@@ -32,7 +32,7 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<LuiConfig<E>, ZKVMError> {
-        let rd_written = UInt::new(|| "rd_limbs", circuit_builder)?;
+        let rd_written = UInt::new("rd_limbs", circuit_builder)?;
 
         // rd_written = imm, so just enforce that U-type immediate from program
         // table is equal to rd_written value

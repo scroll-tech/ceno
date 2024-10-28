@@ -45,10 +45,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
         let (rs1_read, rs2_read, rd_written, rd_written_reg_expr) = match I::INST_KIND {
             InsnKind::MULHU => {
                 // rs1_read * rs2_read = rd_written
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+                let mut rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
                 let rd_written: UIntMul<E> =
-                    rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true)?;
+                    rs1_read.mul("rd_written", circuit_builder, &mut rs2_read, true)?;
                 let (_, rd_written_hi) = rd_written.as_lo_hi()?;
                 (
                     rs1_read,
@@ -138,10 +138,10 @@ mod test {
     }
 
     fn verify(rs1: u32, rs2: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
+            .namespace("mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
 
@@ -169,7 +169,7 @@ mod test {
         let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
-            || "assert_rd_written",
+            "assert_rd_written",
             rd_written_expr,
             expected_rd_written.value(),
         )

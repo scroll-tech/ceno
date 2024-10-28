@@ -40,10 +40,9 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
-        cb.namespace(
-            || Self::name(),
-            |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len()),
-        )
+        cb.namespace(Self::name(), |cb| {
+            OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len())
+        })
     }
 
     fn generate_fixed_traces(

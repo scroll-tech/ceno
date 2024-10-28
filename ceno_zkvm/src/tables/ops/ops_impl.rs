@@ -28,11 +28,11 @@ impl OpTableConfig {
         table_len: usize,
     ) -> Result<Self, ZKVMError> {
         let abc = [
-            cb.create_fixed(|| "a")?,
-            cb.create_fixed(|| "b")?,
-            cb.create_fixed(|| "c")?,
+            cb.create_fixed("a")?,
+            cb.create_fixed("b")?,
+            cb.create_fixed("c")?,
         ];
-        let mlt = cb.create_witin(|| "mlt")?;
+        let mlt = cb.create_witin("mlt")?;
 
         let rlc_record = cb.rlc_chip_record(vec![
             (rom_type as usize).into(),
@@ -41,7 +41,7 @@ impl OpTableConfig {
             Expression::Fixed(abc[2]),
         ]);
 
-        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
+        cb.lk_table_record("record", table_len, rlc_record, mlt.expr())?;
 
         Ok(Self { abc, mlt })
     }

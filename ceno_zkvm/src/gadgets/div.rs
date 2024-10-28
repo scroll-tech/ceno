@@ -24,20 +24,20 @@ impl<E: ExtensionField> DivConfig<E> {
     /// giving divisor, quotient, and remainder
     /// deriving dividend and respective constrains
     /// NOTE once divisor is zero, then constrain will always failed
-    pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
+    pub fn construct_circuit<Name: Into<String> + Display + Clone>(
         circuit_builder: &mut CircuitBuilder<E>,
-        name_fn: N,
+        name: Name,
         divisor: &mut UInt<E>,
         quotient: &mut UInt<E>,
         remainder: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
-        circuit_builder.namespace(name_fn, |cb| {
+        circuit_builder.namespace(name, |cb| {
             let (dividend, intermediate_mul) =
-                divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true)?;
+                divisor.mul_add("divisor * outcome + r", cb, quotient, remainder, true)?;
 
             let r_lt = AssertLTConfig::construct_circuit(
                 cb,
-                || "remainder < divisor",
+                "remainder < divisor",
                 remainder.value(),
                 divisor.value(),
                 UINT_LIMBS,

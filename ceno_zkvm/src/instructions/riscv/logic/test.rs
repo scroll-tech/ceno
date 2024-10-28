@@ -17,16 +17,13 @@ const B: Word = 0xef552020;
 
 #[test]
 fn test_opcode_and() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "and",
-            |cb| {
-                let config = AndInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("and", |cb| {
+            let config = AndInstruction::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -49,7 +46,7 @@ fn test_opcode_and() {
 
     config
         .rd_written
-        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+        .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
     MockProver::assert_satisfied(
@@ -68,16 +65,13 @@ fn test_opcode_and() {
 
 #[test]
 fn test_opcode_or() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "or",
-            |cb| {
-                let config = OrInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("or", |cb| {
+            let config = OrInstruction::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -100,7 +94,7 @@ fn test_opcode_or() {
 
     config
         .rd_written
-        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+        .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
     MockProver::assert_satisfied(
@@ -119,16 +113,13 @@ fn test_opcode_or() {
 
 #[test]
 fn test_opcode_xor() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "xor",
-            |cb| {
-                let config = XorInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("xor", |cb| {
+            let config = XorInstruction::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -151,7 +142,7 @@ fn test_opcode_xor() {
 
     config
         .rd_written
-        .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+        .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
     MockProver::assert_satisfied(

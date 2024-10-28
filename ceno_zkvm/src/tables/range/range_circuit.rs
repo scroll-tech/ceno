@@ -33,10 +33,9 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
-        cb.namespace(
-            || Self::name(),
-            |cb| RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE, RANGE::len()),
-        )
+        cb.namespace(Self::name(), |cb| {
+            RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE, RANGE::len())
+        })
     }
 
     fn generate_fixed_traces(

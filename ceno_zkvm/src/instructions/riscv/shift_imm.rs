@@ -48,16 +48,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let mut imm = UInt::new(|| "imm", circuit_builder)?;
+        let mut imm = UInt::new("imm", circuit_builder)?;
 
         // Note: `imm` is set to 2**imm (upto 32 bit) just for efficient verification
         // Goal is to constrain:
         // rs1 == rd_written * imm + remainder
         let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
             InsnKind::SLLI => {
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
                 let rd_written = rs1_read.mul(
-                    || "rd_written = rs1_read * imm",
+                    "rd_written = rs1_read * imm",
                     circuit_builder,
                     &mut imm,
                     true,
@@ -66,11 +66,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 (rs1_read, rd_written, None, None)
             }
             InsnKind::SRLI => {
-                let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let remainder = UInt::new(|| "remainder", circuit_builder)?;
+                let mut rd_written = UInt::new("rd_written", circuit_builder)?;
+                let remainder = UInt::new("remainder", circuit_builder)?;
                 let div_config = DivConfig::construct_circuit(
                     circuit_builder,
-                    || "srli_div",
+                    "srli_div",
                     &mut imm,
                     &mut rd_written,
                     &remainder,
@@ -194,7 +194,7 @@ mod test {
         rs1_read: u32,
         expected_rd_written: u32,
     ) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let (prefix, insn_code, rd_written) = match I::INST_KIND {
@@ -212,20 +212,17 @@ mod test {
         };
 
         let config = cb
-            .namespace(
-                || format!("{prefix}_({name})"),
-                |cb| {
-                    let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace(format!("{prefix}_({name})"), |cb| {
+                let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
         config
             .rd_written
             .require_equal(
-                || "assert_rd_written",
+                "assert_rd_written",
                 &mut cb,
                 &UInt::from_const_unchecked(
                     Value::new_unchecked(expected_rd_written)
@@ -256,7 +253,7 @@ mod test {
         );
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(

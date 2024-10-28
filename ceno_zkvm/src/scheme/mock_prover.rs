@@ -594,7 +594,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         programs: &[u32; MOCK_PROGRAM_SIZE],
         challenge: [E; 2],
     ) {
-        let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
+        let mut cs = ConstraintSystem::<E>::new("mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
@@ -712,20 +712,17 @@ mod tests {
         pub fn construct_circuit(
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
-            let c = cb.create_witin(|| "c")?;
+            let a = cb.create_witin("a")?;
+            let b = cb.create_witin("b")?;
+            let c = cb.create_witin("c")?;
 
             // degree 1
-            cb.require_equal(|| "a + 1 == b", b.expr(), a.expr() + 1)?;
-            cb.require_zero(|| "c - 2 == 0", c.expr() - 2)?;
+            cb.require_equal("a + 1 == b", b.expr(), a.expr() + 1)?;
+            cb.require_zero("c - 2 == 0", c.expr() - 2)?;
 
             // degree > 1
-            let d = cb.create_witin(|| "d")?;
-            cb.require_zero(
-                || "d*d - 6*d + 9 == 0",
-                d.expr() * d.expr() - d.expr() * 6 + 9,
-            )?;
+            let d = cb.create_witin("d")?;
+            cb.require_zero("d*d - 6*d + 9 == 0", d.expr() * d.expr() - d.expr() * 6 + 9)?;
 
             Ok(Self { a, b, c })
         }
@@ -733,7 +730,7 @@ mod tests {
 
     #[test]
     fn test_assert_zero_1() {
-        let mut cs = ConstraintSystem::new(|| "test_assert_zero_1");
+        let mut cs = ConstraintSystem::new("test_assert_zero_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let _ = AssertZeroCircuit::construct_circuit(&mut builder).unwrap();
@@ -766,15 +763,15 @@ mod tests {
         pub fn construct_circuit(
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            cb.assert_ux::<_, _, 5>(|| "assert u5", a.expr())?;
+            let a = cb.create_witin("a")?;
+            cb.assert_ux::<_, 5>("assert u5", a.expr())?;
             Ok(Self { a })
         }
     }
 
     #[test]
     fn test_lookup_1() {
-        let mut cs = ConstraintSystem::new(|| "test_lookup_1");
+        let mut cs = ConstraintSystem::new("test_lookup_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
@@ -792,7 +789,7 @@ mod tests {
     #[test]
     // TODO: add it back after the support of missing lookup
     fn test_lookup_error() {
-        let mut cs = ConstraintSystem::new(|| "test_lookup_error");
+        let mut cs = ConstraintSystem::new("test_lookup_error");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
@@ -847,9 +844,9 @@ mod tests {
 
     impl AssertLtCircuit {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
-            let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
+            let a = cb.create_witin("a")?;
+            let b = cb.create_witin("b")?;
+            let lt_wtns = AssertLTConfig::construct_circuit(cb, "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -888,7 +885,7 @@ mod tests {
 
     #[test]
     fn test_assert_lt_1() {
-        let mut cs = ConstraintSystem::new(|| "test_assert_lt_1");
+        let mut cs = ConstraintSystem::new("test_assert_lt_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
@@ -921,7 +918,7 @@ mod tests {
 
     #[test]
     fn test_assert_lt_u32() {
-        let mut cs = ConstraintSystem::new(|| "test_assert_lt_u32");
+        let mut cs = ConstraintSystem::new("test_assert_lt_u32");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
@@ -971,9 +968,9 @@ mod tests {
 
     impl LtCircuit {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
-            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
+            let a = cb.create_witin("a")?;
+            let b = cb.create_witin("b")?;
+            let lt_wtns = IsLtConfig::construct_circuit(cb, "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -1012,7 +1009,7 @@ mod tests {
 
     #[test]
     fn test_lt_1() {
-        let mut cs = ConstraintSystem::new(|| "test_lt_1");
+        let mut cs = ConstraintSystem::new("test_lt_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
@@ -1045,7 +1042,7 @@ mod tests {
 
     #[test]
     fn test_lt_u32() {
-        let mut cs = ConstraintSystem::new(|| "test_lt_u32");
+        let mut cs = ConstraintSystem::new("test_lt_u32");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
         let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();

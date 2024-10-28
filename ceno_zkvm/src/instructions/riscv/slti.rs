@@ -44,13 +44,13 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm = cb.create_witin(|| "imm")?;
+        let rs1_read = UInt::new_unchecked("rs1_read", cb)?;
+        let imm = cb.create_witin("imm")?;
 
         let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         let is_rs1_neg = IsLtConfig::construct_circuit(
             cb,
-            || "lhs_msb",
+            "lhs_msb",
             max_signed_limb_expr.clone(),
             rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
             1,
@@ -58,7 +58,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
 
         let lt = IsLtConfig::construct_circuit(
             cb,
-            || "rs1 < imm",
+            "rs1 < imm",
             rs1_read.to_field_expr(is_rs1_neg.expr()),
             imm.expr(),
             UINT_LIMBS,
@@ -134,16 +134,13 @@ mod test {
     };
 
     fn verify(name: &'static str, rs1: i32, imm: i32, rd: Word) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || format!("SLTI/{name}"),
-                |cb| {
-                    let config = SltiInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace(format!("SLTI/{name}"), |cb| {
+                let config = SltiInstruction::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -165,7 +162,7 @@ mod test {
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied(

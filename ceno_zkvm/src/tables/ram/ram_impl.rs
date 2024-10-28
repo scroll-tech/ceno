@@ -36,14 +36,14 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
         let init_v = (0..RAM::V_LIMBS)
-            .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
+            .map(|i| cb.create_fixed(format!("init_v_limb_{i}")))
             .collect::<Result<Vec<Fixed>, ZKVMError>>()?;
-        let addr = cb.create_fixed(|| "addr")?;
+        let addr = cb.create_fixed("addr")?;
 
         let final_v = (0..RAM::V_LIMBS)
-            .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
+            .map(|i| cb.create_witin(format!("final_v_limb_{i}")))
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
-        let final_cycle = cb.create_witin(|| "final_cycle")?;
+        let final_cycle = cb.create_witin("final_cycle")?;
 
         let init_table = cb.rlc_chip_record(
             [
@@ -66,8 +66,8 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             .concat(),
         );
 
-        cb.w_table_record(|| "init_table", RAM::len(), init_table)?;
-        cb.r_table_record(|| "final_table", RAM::len(), final_table)?;
+        cb.w_table_record("init_table", RAM::len(), init_table)?;
+        cb.r_table_record("final_table", RAM::len(), final_table)?;
 
         Ok(Self {
             init_v,
