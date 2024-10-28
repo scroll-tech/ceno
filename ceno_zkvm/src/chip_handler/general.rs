@@ -168,13 +168,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "require_equal",
-            |cb| {
-                cb.cs
-                    .require_zero(name_fn, a.to_monomial_form() - b.to_monomial_form())
-            },
-        )
+        self.namespace(|| "require_equal", |cb| cb.cs.require_zero(name_fn, a - b))
     }
 
     pub fn require_one<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
