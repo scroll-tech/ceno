@@ -40,3 +40,10 @@ mod test_utils;
 pub trait RIVInstruction {
     const INST_KIND: InsnKind;
 }
+
+pub use arith::{AddInstruction, MulInstruction, SubInstruction};
+pub use jump::{AuipcInstruction, JalInstruction, JalrInstruction, LuiInstruction};
+pub use memory::{
+    LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, LwInstruction, SbInstruction,
+    ShInstruction, SwInstruction,
+};

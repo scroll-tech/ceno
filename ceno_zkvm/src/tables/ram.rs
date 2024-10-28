@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, WORD_SIZE, Word};
+use ceno_emul::{Addr, WORD_SIZE, Word};
 use ram_circuit::RamTableCircuit;
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
@@ -17,11 +17,11 @@ impl RamTable for MemTable {
 
     fn len() -> usize {
         // TODO figure out better way to define memory entry count
-        1 << 10
+        1 << 21
     }
 
     fn addr(entry_index: usize) -> Addr {
-        CENO_PLATFORM.ram_start() + (entry_index * WORD_SIZE) as Addr
+        (entry_index * WORD_SIZE) as Addr
     }
 }
 pub type MemTableCircuit<E> = RamTableCircuit<E, MemTable>;

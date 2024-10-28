@@ -1,14 +1,17 @@
 use crate::{
     error::ZKVMError,
-    instructions::Instruction,
+    instructions::{Instruction, riscv::*},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, LtuTableCircuit, MemFinalRecord, MemInitRecord, MemTableCircuit,
         RegTableCircuit, TableCircuit, U14TableCircuit, U16TableCircuit,
     },
 };
-use ceno_emul::{CENO_PLATFORM, InsnKind, StepRecord};
+use ceno_emul::{CENO_PLATFORM, InsnKind, InsnKind::*, StepRecord};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
+use num_traits::cast::ToPrimitive;
+use strum::IntoEnumIterator;
 
 use super::{
     arith::AddInstruction,
@@ -19,14 +22,33 @@ use super::{
 };
 
 pub struct Rv32imConfig<E: ExtensionField> {
-    // Opcodes.
+    // ALU Opcodes.
     pub add_config: <AddInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub bltu_config: <BltuInstruction as Instruction<E>>::InstructionConfig,
-    pub jal_config: <JalInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub lui_config: <LuiInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub lw_config: <LwInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub sub_config: <SubInstruction<E> as Instruction<E>>::InstructionConfig,
 
+    // Branching Opcodes
+    pub bltu_config: <BltuInstruction as Instruction<E>>::InstructionConfig,
+
+    // Imm
+    pub lui_config: <LuiInstruction<E> as Instruction<E>>::InstructionConfig,
+
+    // Jump Opcodes
+    pub jal_config: <JalInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub jalr_config: <JalrInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub auipc_config: <AuipcInstruction<E> as Instruction<E>>::InstructionConfig,
+
+    // Memory Opcodes
+    pub lw_config: <LwInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub lhu_config: <LhuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub lh_config: <LhInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub lbu_config: <LbuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub lb_config: <LbInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub sw_config: <SwInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub sh_config: <ShInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub sb_config: <SbInstruction<E> as Instruction<E>>::InstructionConfig,
+
+    // Ecall Opcodes
+    pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -41,13 +63,31 @@ pub struct Rv32imConfig<E: ExtensionField> {
 impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         // opcode circuits
+        // alu opcodes
         let add_config = cs.register_opcode_circuit::<AddInstruction<E>>();
-        let bltu_config = cs.register_opcode_circuit::<BltuInstruction>();
-        let jal_config = cs.register_opcode_circuit::<JalInstruction<E>>();
-        let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
-        let lui_config = cs.register_opcode_circuit::<LuiInstruction<E>>();
-        let lw_config = cs.register_opcode_circuit::<LwInstruction<E>>();
+        let sub_config = cs.register_opcode_circuit::<SubInstruction<E>>();
 
+        // branching opcodes
+        let bltu_config = cs.register_opcode_circuit::<BltuInstruction>();
+
+        // jump opcodes
+        let lui_config = cs.register_opcode_circuit::<LuiInstruction<E>>();
+        let jal_config = cs.register_opcode_circuit::<JalInstruction<E>>();
+        let jalr_config = cs.register_opcode_circuit::<JalrInstruction<E>>();
+        let auipc_config = cs.register_opcode_circuit::<AuipcInstruction<E>>();
+
+        // memory opcodes
+        let lw_config = cs.register_opcode_circuit::<LwInstruction<E>>();
+        let lhu_config = cs.register_opcode_circuit::<LhuInstruction<E>>();
+        let lh_config = cs.register_opcode_circuit::<LhInstruction<E>>();
+        let lbu_config = cs.register_opcode_circuit::<LbuInstruction<E>>();
+        let lb_config = cs.register_opcode_circuit::<LbInstruction<E>>();
+        let sw_config = cs.register_opcode_circuit::<SwInstruction<E>>();
+        let sh_config = cs.register_opcode_circuit::<ShInstruction<E>>();
+        let sb_config = cs.register_opcode_circuit::<SbInstruction<E>>();
+
+        // ecall opcodes
+        let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
@@ -59,12 +99,28 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mem_config = cs.register_table_circuit::<MemTableCircuit<E>>();
 
         Self {
+            // alu opcodes
             add_config,
+            sub_config,
+            // branching opcodes
             bltu_config,
-            jal_config,
-            halt_config,
+            // jump opcodes
             lui_config,
+            jal_config,
+            jalr_config,
+            auipc_config,
+            // memory opcodes
+            sw_config,
+            sh_config,
+            sb_config,
             lw_config,
+            lhu_config,
+            lh_config,
+            lbu_config,
+            lb_config,
+            // ecall opcodes
+            halt_config,
+            // tables
             u16_range_config,
             u14_range_config,
             and_config,
@@ -83,11 +139,25 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         mem_init: &[MemInitRecord],
     ) {
         fixed.register_opcode_circuit::<AddInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<SubInstruction<E>>(cs);
+
         fixed.register_opcode_circuit::<BltuInstruction>(cs);
+
         fixed.register_opcode_circuit::<JalInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<HaltInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<JalrInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<AuipcInstruction<E>>(cs);
         fixed.register_opcode_circuit::<LuiInstruction<E>>(cs);
+
+        fixed.register_opcode_circuit::<SwInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<ShInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<SbInstruction<E>>(cs);
         fixed.register_opcode_circuit::<LwInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<LhuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<LhInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<LbuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<LbInstruction<E>>(cs);
+
+        fixed.register_opcode_circuit::<HaltInstruction<E>>(cs);
 
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, self.u16_range_config.clone(), &());
         fixed.register_table_circuit::<U14TableCircuit<E>>(cs, self.u14_range_config.clone(), &());
@@ -104,42 +174,60 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness: &mut ZKVMWitnesses<E>,
         steps: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
-        use InsnKind::*;
-
-        let mut add_records = Vec::new();
-        let mut bltu_records = Vec::new();
-        let mut jal_records = Vec::new();
+        let mut all_records = vec![Vec::new(); InsnKind::iter().count()];
         let mut halt_records = Vec::new();
-        let mut lui_records = Vec::new();
-        let mut lw_records = Vec::new();
-        steps
-            .into_iter()
-            .for_each(|record| match record.insn().codes().kind {
-                ADD => add_records.push(record),
-                BLTU => bltu_records.push(record),
-                JAL => jal_records.push(record),
+        steps.into_iter().for_each(|record| {
+            let insn_kind = record.insn().codes().kind;
+            match insn_kind {
+                // ecall
                 EANY if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() => {
                     halt_records.push(record);
                 }
-                LUI => lui_records.push(record),
-                LW => lw_records.push(record),
-                i => unimplemented!("instruction {i:?}"),
-            });
+                _ => all_records[insn_kind.to_usize().unwrap()].push(record),
+            }
+        });
 
-        tracing::info!(
-            "tracer generated {} ADD records, {} BLTU records, {} JAL records",
-            add_records.len(),
-            bltu_records.len(),
-            jal_records.len(),
-        );
+        for (insn_kind, records) in InsnKind::iter()
+            .zip(all_records.iter())
+            .sorted_by(|a, b| Ord::cmp(&a.1.len(), &b.1.len()))
+            .rev()
+        {
+            if records.len() != 0 {
+                tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
+            }
+        }
         assert_eq!(halt_records.len(), 1);
 
-        witness.assign_opcode_circuit::<AddInstruction<E>>(cs, &self.add_config, add_records)?;
-        witness.assign_opcode_circuit::<BltuInstruction>(cs, &self.bltu_config, bltu_records)?;
-        witness.assign_opcode_circuit::<JalInstruction<E>>(cs, &self.jal_config, jal_records)?;
-        witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
-        witness.assign_opcode_circuit::<LuiInstruction<E>>(cs, &self.lui_config, lui_records)?;
-        witness.assign_opcode_circuit::<LwInstruction<E>>(cs, &self.lw_config, lw_records)?;
+        witness.assign_opcode_circuit::<AddInstruction<E>>(
+            cs,
+            &self.add_config,
+            all_records[ADD.to_usize().unwrap()].as_slice(),
+        )?;
+        witness.assign_opcode_circuit::<BltuInstruction>(
+            cs,
+            &self.bltu_config,
+            all_records[BLTU.to_usize().unwrap()].as_slice(),
+        )?;
+        witness.assign_opcode_circuit::<JalInstruction<E>>(
+            cs,
+            &self.jal_config,
+            all_records[JAL.to_usize().unwrap()].as_slice(),
+        )?;
+        witness.assign_opcode_circuit::<LuiInstruction<E>>(
+            cs,
+            &self.lui_config,
+            all_records[LUI.to_usize().unwrap()].as_slice(),
+        )?;
+        witness.assign_opcode_circuit::<LwInstruction<E>>(
+            cs,
+            &self.lw_config,
+            all_records[SW.to_usize().unwrap()].as_slice(),
+        )?;
+        witness.assign_opcode_circuit::<HaltInstruction<E>>(
+            cs,
+            &self.halt_config,
+            &halt_records,
+        )?;
         Ok(())
     }
 

@@ -215,13 +215,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: &OC::InstructionConfig,
-        records: Vec<StepRecord>,
+        records: &[StepRecord],
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 
+        if records.len() == 0 {
+            return Ok(());
+        }
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
-            OC::assign_instances(config, cs.num_witin as usize, records)?;
+            OC::assign_instances(config, cs.num_witin as usize, records.to_vec())?;
         assert!(self.witnesses.insert(OC::name(), witness).is_none());
         assert!(
             self.lk_mlts

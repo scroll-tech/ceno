@@ -5,6 +5,5 @@ pub mod store;
 #[cfg(test)]
 mod test;
 
-pub use load::LwInstruction;
-#[cfg(test)]
+pub use load::{LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, LwInstruction};
 pub use store::{SbInstruction, ShInstruction, SwInstruction};

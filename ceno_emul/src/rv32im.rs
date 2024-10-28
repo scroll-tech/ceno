@@ -16,6 +16,7 @@
 
 use anyhow::{Result, anyhow};
 use std::sync::OnceLock;
+use num_derive::ToPrimitive;
 use strum_macros::EnumIter;
 
 use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
@@ -133,7 +134,7 @@ pub enum InsnFormat {
 }
 use InsnFormat::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, EnumIter)]
+#[derive(Clone, Copy, Debug, PartialEq, EnumIter, ToPrimitive)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {
     INVALID,
