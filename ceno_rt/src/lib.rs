@@ -1,5 +1,4 @@
 #![feature(strict_overflow_ops)]
-#![no_std]
 
 use core::arch::{asm, global_asm};
 
@@ -11,16 +10,16 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
-#[cfg(not(test))]
-mod panic_handler {
-    use core::panic::PanicInfo;
+// #[cfg(not(test))]
+// mod panic_handler {
+//     use core::panic::PanicInfo;
 
-    #[panic_handler]
-    #[inline(never)]
-    fn panic_handler(_panic: &PanicInfo<'_>) -> ! {
-        super::halt(1)
-    }
-}
+//     #[panic_handler]
+//     #[inline(never)]
+//     fn panic_handler(_panic: &PanicInfo<'_>) -> ! {
+//         super::halt(1)
+//     }
+// }
 
 #[allow(asm_sub_register)]
 pub fn halt(exit_code: u32) -> ! {

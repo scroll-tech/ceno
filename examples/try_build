@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euxo pipefail
+#cargo install xargo
+# xargo build
+cargo build \
+    --verbose \
+    --profile ceno-dev --examples \
+    --target ./.cargo/riscv32im-scroll-cenovm-elf.json \
+    -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+    -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \

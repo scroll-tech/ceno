@@ -1,0 +1,4 @@
+[build]
+target = "./.cargo/riscv32im-scroll-cenovm-elf.json"
+
+[target.riscv32im-scroll-cenovm-elf]

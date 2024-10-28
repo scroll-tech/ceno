@@ -1,7 +1,8 @@
 #![no_main]
-#![no_std]
+#![feature(restricted_std)]
 
 extern crate ceno_rt;
+extern crate alloc;
 
 ceno_rt::entry!(main);
 fn main() {}

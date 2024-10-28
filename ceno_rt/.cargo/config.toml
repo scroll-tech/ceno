@@ -1,5 +1,59 @@
-[target.riscv32im-unknown-none-elf]
+# [build]
+# target = "riscv32im-scroll-cenovm-elf"
+
+[profile.release]
+lto = true
+panic = "abort"
+
+# Keeping this for legacy purposes - the commands below in `alias` are based off this configuration.
+# [unstable]
+# build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
+# build-std-features = ["compiler-builtins-mem"]
+
+[build]
+rustflags = ["-C", "passes=loweratomic", "-Zlocation-detail=none"]
+target = "./.cargo/riscv32im-scroll-cenovm-elf.json"
+
+[alias]
+ceno-build = """
+    build --profile ceno-dev \
+          --target ./.cargo/riscv32im-scroll-cenovm-elf.json \
+          -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+          -Zbuild-std-features=compiler-builtins-mem
+    """
+ceno-build-orig = """
+    build --profile ceno-dev \
+          --target riscv32im-scroll-cenovm-elf \
+          -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+          -Zbuild-std-features=compiler-builtins-mem
+    """
+ceno-check = """
+    check \
+        --target riscv32im-scroll-cenovm-elf \
+        -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+        -Zbuild-std-features=compiler-builtins-mem \
+    """
+ceno-clippy = """
+    clippy \
+        --target riscv32im-scroll-cenovm-elf \
+        -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+        -Zbuild-std-features=compiler-builtins-mem \
+    """
+ceno-run = """
+    run --profile ceno-release \
+          --target riscv32im-scroll-cenovm-elf \
+          -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+          -Zbuild-std-features=compiler-builtins-mem 
+    """
+# [target.riscv32im-unknown-none-elf]
+
+[target.riscv32im-scroll-cenovm-elf]
+# TODO: provide the run_script.
+# runner = "examples/scripts/run_script.sh"
+# rustflags = ["-C", "passes=loweratomic", "-Zlocation-detail=none"]
+# rustflags = [] 
 rustflags = [
+  "-Zlocation-detail=none",
   "-C",
   "link-arg=-Tmemory.x",
   #"-C", "link-arg=-Tlink.x", // Script from riscv_rt.
@@ -7,9 +61,19 @@ rustflags = [
   "link-arg=-Tceno_link.x",
 ]
 
-[build]
-target = "riscv32im-unknown-none-elf"
+[env]
+# path where riscv32im-scroll-cenovm-elf.json lies
+RUST_TARGET_PATH = { value = ".cargo/", relative = true, force = true }
 
-[profile.release]
-lto = true
+[profile.ceno-dev]
+inherits = "dev"
 panic = "abort"
+
+# profile for mozakvm binaries
+[profile.ceno-release]
+codegen-units = 1
+inherits = "release"
+lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = true
