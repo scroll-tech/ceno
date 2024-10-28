@@ -167,10 +167,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                     None,
                     // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
                     UInt::from_exprs_unchecked(vec![
-                        target_limb_bytes
-                            .as_ref()
-                            .map(|bytes| bytes[0].expr())
-                            .unwrap(),
+                        target_limb_bytes.as_ref().unwrap()[0].expr(),
                         Expression::ZERO,
                     ])
                     .unwrap(),
@@ -237,6 +234,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         }
         if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
             if addr_low_bits[0] == 1 {
+                // target_limb_bytes[0] = target_limb.to_le_bytes[1]
+                // target_limb_bytes[1] = target_limb.to_le_bytes[0]
                 target_limb_bytes.reverse();
             }
             for (&col, byte) in izip!(
