@@ -80,8 +80,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
                 cb.assert_ux::<_, _, 8>(
                     || "rs2_limb[0].le_bytes[1]",
-                    u8_base_inv.expr_fnord()
-                        * (rs2_limbs[0].clone() - rs2_limb_bytes[0].expr_fnord()),
+                    u8_base_inv.expr_fnord() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr_fnord()),
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
@@ -126,8 +125,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     low_bits[1].clone(),
                     expected_change.expr_fnord(),
-                    (1 << 16) * (rs2_limbs[0].clone() - prev_limbs[1].clone()),
-                    rs2_limbs[0].clone() - prev_limbs[0].clone(),
+                    (1 << 16) * (&rs2_limbs[0] - &prev_limbs[1]),
+                    &rs2_limbs[0] - &prev_limbs[0],
                 )?;
 
                 Ok(MemWordChange {

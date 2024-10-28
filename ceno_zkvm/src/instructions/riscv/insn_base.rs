@@ -381,13 +381,13 @@ impl<E: ExtensionField> MemAddr<E> {
 
     /// Represent the address aligned to 2 bytes.
     pub fn expr_align2(&self) -> AddressExpr<E> {
-        self.addr.address_expr() - self.low_bit_exprs()[0].clone()
+        self.addr.address_expr() - &self.low_bit_exprs()[0]
     }
 
     /// Represent the address aligned to 4 bytes.
     pub fn expr_align4(&self) -> AddressExpr<E> {
         let low_bits = self.low_bit_exprs();
-        self.addr.address_expr() - low_bits[1].clone() * 2 - low_bits[0].clone()
+        self.addr.address_expr() - &low_bits[1] * 2 - &low_bits[0]
     }
 
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
@@ -425,7 +425,7 @@ impl<E: ExtensionField> MemAddr<E> {
             .invert()
             .unwrap()
             .expr_fnord();
-        let mid_u14 = (limbs[0].clone() - low_sum) * shift_right;
+        let mid_u14 = (&limbs[0] - low_sum) * shift_right;
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 
         // Range check the high limb.

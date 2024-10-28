@@ -5,7 +5,7 @@ use std::{
     fmt::Display,
     iter::Sum,
     mem::MaybeUninit,
-    ops::{Add, Deref, Mul, Neg, Sub},
+    ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 use ff::Field;
@@ -315,6 +315,36 @@ impl<E: ExtensionField> Add for Expression<E> {
     }
 }
 
+impl<E: ExtensionField, Rhs> AddAssign<Rhs> for Expression<E>
+where
+    Expression<E>: Add<Rhs, Output = Expression<E>>,
+{
+    fn add_assign(&mut self, rhs: Rhs) {
+        // TODO: consider in-place?
+        *self = self.clone() + rhs;
+    }
+}
+
+impl<E: ExtensionField, Rhs> SubAssign<Rhs> for Expression<E>
+where
+    Expression<E>: Sub<Rhs, Output = Expression<E>>,
+{
+    fn sub_assign(&mut self, rhs: Rhs) {
+        // TODO: consider in-place?
+        *self = self.clone() - rhs;
+    }
+}
+
+impl<E: ExtensionField, Rhs> MulAssign<Rhs> for Expression<E>
+where
+    Expression<E>: Mul<Rhs, Output = Expression<E>>,
+{
+    fn mul_assign(&mut self, rhs: Rhs) {
+        // TODO: consider in-place?
+        *self = self.clone() * rhs;
+    }
+}
+
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
         iter.fold(Expression::ZERO, |acc, x| acc + x)
@@ -467,13 +497,38 @@ macro_rules! ref_binop_instances {
                 self.clone().$fun(rhs.clone())
             }
         }
+
+        // for mutable references
+        impl<E: ExtensionField> $op<&mut Expression<E>> for Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &mut Expression<E>) -> Expression<E> {
+                self.$fun(rhs.clone())
+            }
+        }
+
+        impl<E: ExtensionField> $op<Expression<E>> for &mut Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<&mut Expression<E>> for &mut Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &mut Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs.clone())
+            }
+        }
     };
 }
 ref_binop_instances!(Add, add);
 ref_binop_instances!(Sub, sub);
 ref_binop_instances!(Mul, mul);
 
-macro_rules! binop_instances {
+macro_rules! mixed_binop_instances {
     ($op: ident, $fun: ident, ($($t:ty),*)) => {
         $(impl<E: ExtensionField> $op<Expression<E>> for $t {
             type Output = Expression<E>;
@@ -489,21 +544,38 @@ macro_rules! binop_instances {
             fn $fun(self, rhs: $t) -> Expression<E> {
                 self.$fun(Expression::<E>::from(rhs))
             }
-        })*
+        }
+
+        impl<E: ExtensionField> $op<&Expression<E>> for $t {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
+                Expression::<E>::from(self).$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<$t> for &Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: $t) -> Expression<E> {
+                self.$fun(Expression::<E>::from(rhs))
+            }
+        }
+    )*
     };
 }
 
-binop_instances!(
+mixed_binop_instances!(
     Add,
     add,
     (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
 );
-binop_instances!(
+mixed_binop_instances!(
     Sub,
     sub,
     (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
 );
-binop_instances!(
+mixed_binop_instances!(
     Mul,
     mul,
     (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)

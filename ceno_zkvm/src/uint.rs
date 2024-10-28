@@ -170,10 +170,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .assert_ux::<_, _, C>(|| "range check", w.expr_fnord())
                     .unwrap();
                 circuit_builder
-                    .require_zero(
-                        || "create_witin_from_expr",
-                        w.expr_fnord() - expr_limbs[i].clone(),
-                    )
+                    .require_zero(|| "create_witin_from_expr", w.expr_fnord() - &expr_limbs[i])
                     .unwrap();
                 w
             })
@@ -300,7 +297,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 chunk
                     .iter()
                     .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift.clone() * limb.expr_fnord())
+                    .map(|(limb, shift)| shift * limb.expr_fnord())
                     .reduce(|a, b| a + b)
                     .unwrap()
             })
@@ -318,7 +315,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
             shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8)));
+            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() * (1 << 8)));
             shift_pows
         };
         let split_limbs = x
@@ -335,7 +332,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 let combined_limb = limbs
                     .iter()
                     .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift.clone() * limb.clone())
+                    .map(|(limb, shift)| shift * limb)
                     .reduce(|a, b| a + b)
                     .unwrap();
 
@@ -514,7 +511,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.expr_fnord()
             .into_iter()
             .rev()
-            .reduce(|sum, limb| sum * base.clone() + limb)
+            .reduce(|sum, limb| sum * &base + limb)
             .unwrap()
     }
 
@@ -602,7 +599,7 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
         let u16_limbs = u8_limbs
             .chunks(2)
             .map(|chunk| {
-                let (a, b) = (chunk[0].clone(), chunk[1].clone());
+                let (a, b) = (&chunk[0], &chunk[1]);
                 a + b * 256
             })
             .collect_vec();

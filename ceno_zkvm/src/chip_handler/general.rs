@@ -211,7 +211,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         when_true: &Expression<E>,
         when_false: &Expression<E>,
     ) -> Expression<E> {
-        cond.clone() * when_true.clone() + (1 - cond.clone()) * when_false.clone()
+        cond * when_true + (1 - cond) * when_false
     }
 
     pub(crate) fn assert_ux<NR, N, const C: usize>(
@@ -297,10 +297,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.namespace(
             || "assert_bit",
-            |cb| {
-                cb.cs
-                    .require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
-            },
+            |cb| cb.cs.require_zero(name_fn, &expr * (1 - &expr)),
         )
     }
 

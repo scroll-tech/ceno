@@ -340,7 +340,7 @@ impl InnerSignedLtConfig {
         // Convert two's complement representation into field arithmetic.
         // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
         let neg_shift = -Expression::Constant((1_u64 << 32).into());
-        let lhs_value = lhs.value() + is_lhs_neg.expr() * neg_shift.clone();
+        let lhs_value = lhs.value() + is_lhs_neg.expr() * &neg_shift;
         let rhs_value = rhs.value() + is_rhs_neg.expr() * neg_shift;
 
         let config = InnerLtConfig::construct_circuit(
