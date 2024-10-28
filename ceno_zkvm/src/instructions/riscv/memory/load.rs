@@ -118,31 +118,35 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         };
 
         // get target byte from memory word for LB and LBU
-        let target_limb_bytes = match I::INST_KIND {
+        let (target_byte_expr, target_limb_bytes) = match I::INST_KIND {
             InsnKind::LB | InsnKind::LBU => {
                 let target_byte = circuit_builder.create_u8(|| "limb.le_bytes[low_bits[0]]")?;
-                let sibling_byte = circuit_builder.create_u8(|| "limb.le_bytes[!low_bits[0]]")?;
+                let dummy_byte = circuit_builder.create_u8(|| "limb.le_bytes[1-low_bits[0]]")?;
 
                 circuit_builder.condition_require_equal(
                     || "target_byte = target_limb[low_bits[0]]",
                     addr_low_bits[0].clone(),
                     target_limb.unwrap().expr(),
-                    target_byte.expr() * (1<<8) + sibling_byte.expr(), // target_byte = limb.le_bytes[1]
-                    sibling_byte.expr() * (1<<8) + target_byte.expr(), // target_byte = limb.le_bytes[0]
+                    target_byte.expr() * (1<<8) + dummy_byte.expr(), // target_byte = limb.le_bytes[1]
+                    dummy_byte.expr() * (1<<8) + target_byte.expr(), // target_byte = limb.le_bytes[0]
                 )?;
 
-                Some(vec![target_byte, sibling_byte])
+                (
+                    Some(target_byte.expr()),
+                    Some(vec![target_byte, dummy_byte]),
+                )
             }
-            _ => None,
+            _ => (None, None),
         };
         let (signed_extend_config, rd_written) = match I::INST_KIND {
             InsnKind::LW => (None, memory_read.clone()),
             InsnKind::LH => {
                 let val = target_limb.unwrap();
-                let sext_config = SignedExtendConfig::construct_limb(circuit_builder, val.expr())?;
-                let rd_written = sext_config.signed_extended_value(val.expr());
+                let signed_extend_config =
+                    SignedExtendConfig::construct_limb(circuit_builder, val.expr())?;
+                let rd_written = signed_extend_config.signed_extended_value(val.expr());
 
-                (Some(sext_config), rd_written)
+                (Some(signed_extend_config), rd_written)
             }
             InsnKind::LHU => {
                 (
@@ -156,21 +160,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 )
             }
             InsnKind::LB => {
-                let val = target_limb_bytes.as_ref().map(|bytes| bytes[0]).unwrap();
-                let sext_config = SignedExtendConfig::construct_byte(circuit_builder, val.expr())?;
-                let rd_written = sext_config.signed_extended_value(val.expr());
+                let val = target_byte_expr.unwrap();
+                let signed_extend_config =
+                    SignedExtendConfig::construct_byte(circuit_builder, val.clone())?;
+                let rd_written = signed_extend_config.signed_extended_value(val);
 
-                (Some(sext_config), rd_written)
+                (Some(signed_extend_config), rd_written)
             }
             InsnKind::LBU => {
                 (
                     None,
                     // it's safe to unwrap as `UInt::from_exprs_unchecked` never return error
-                    UInt::from_exprs_unchecked(vec![
-                        target_limb_bytes.as_ref().unwrap()[0].expr(),
-                        Expression::ZERO,
-                    ])
-                    .unwrap(),
+                    UInt::from_exprs_unchecked(vec![target_byte_expr.unwrap(), Expression::ZERO])
+                        .unwrap(),
                 )
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
