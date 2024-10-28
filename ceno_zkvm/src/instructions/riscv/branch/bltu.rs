@@ -5,7 +5,6 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::Expression,
     gadgets::IsLtConfig,
     instructions::{
@@ -36,11 +35,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
 
     type InstructionConfig = InstructionConfig<E>;
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<InstructionConfig<E>, ZKVMError> {
-        let read_rs1 = UInt::new_unchecked("rs1_limbs", circuit_builder)?;
-        let read_rs2 = UInt::new_unchecked("rs2_limbs", circuit_builder)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> InstructionConfig<E> {
+        let read_rs1 = UInt::new_unchecked("rs1_limbs", circuit_builder);
+        let read_rs2 = UInt::new_unchecked("rs2_limbs", circuit_builder);
 
         let is_lt = IsLtConfig::construct_circuit(
             circuit_builder,
@@ -48,7 +45,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
             read_rs1.value(),
             read_rs2.value(),
             UINT_LIMBS,
-        )?;
+        );
 
         let branch_taken_bit = match I::INST_KIND {
             InsnKind::BLTU => is_lt.expr(),
@@ -63,14 +60,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
             read_rs1.register_expr(),
             read_rs2.register_expr(),
             branch_taken_bit,
-        )?;
+        );
 
-        Ok(InstructionConfig {
+        InstructionConfig {
             b_insn,
             read_rs1,
             read_rs2,
             is_lt,
-        })
+        }
     }
 
     fn assign_instance(
@@ -78,7 +75,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
         instance: &mut [std::mem::MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         config.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
@@ -88,12 +85,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
             lk_multiplicity,
             step.rs1().unwrap().value as u64,
             step.rs2().unwrap().value as u64,
-        )?;
+        );
 
         config
             .b_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
-        Ok(())
+            .assign_instance(instance, lk_multiplicity, step);
     }
 }

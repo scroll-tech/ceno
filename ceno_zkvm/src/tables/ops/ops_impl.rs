@@ -7,7 +7,6 @@ use std::{collections::HashMap, mem::MaybeUninit};
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
@@ -26,13 +25,13 @@ impl OpTableConfig {
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
         table_len: usize,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         let abc = [
-            cb.create_fixed("a")?,
-            cb.create_fixed("b")?,
-            cb.create_fixed("c")?,
+            cb.create_fixed("a"),
+            cb.create_fixed("b"),
+            cb.create_fixed("c"),
         ];
-        let mlt = cb.create_witin("mlt")?;
+        let mlt = cb.create_witin("mlt");
 
         let rlc_record = cb.rlc_chip_record(vec![
             (rom_type as usize).into(),
@@ -41,9 +40,9 @@ impl OpTableConfig {
             Expression::Fixed(abc[2]),
         ]);
 
-        cb.lk_table_record("record", table_len, rlc_record, mlt.expr())?;
+        cb.lk_table_record("record", table_len, rlc_record, mlt.expr());
 
-        Ok(Self { abc, mlt })
+        Self { abc, mlt }
     }
 
     pub fn generate_fixed_traces<F: SmallField>(
@@ -71,7 +70,7 @@ impl OpTableConfig {
         num_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+    ) -> RowMajorMatrix<F> {
         let mut witness = RowMajorMatrix::<F>::new(length, num_witin);
 
         let mut mlts = vec![0; length];
@@ -86,7 +85,6 @@ impl OpTableConfig {
             .for_each(|(row, mlt)| {
                 set_val!(row, self.mlt, F::from(mlt as u64));
             });
-
-        Ok(witness)
+        witness
     }
 }

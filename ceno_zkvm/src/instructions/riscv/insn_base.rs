@@ -10,7 +10,6 @@ use crate::{
         RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLTConfig,
     set_val,
@@ -33,28 +32,25 @@ impl<E: ExtensionField> StateInOut<E> {
     /// If circuit is branching, leave witness for next_pc free and return in
     /// configuration so that calling circuit can constrain its value.
     /// Otherwise, internally increment by PC_STEP_SIZE
-    pub fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-        branching: bool,
-    ) -> Result<Self, ZKVMError> {
-        let pc = circuit_builder.create_witin("pc")?;
+    pub fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>, branching: bool) -> Self {
+        let pc = circuit_builder.create_witin("pc");
         let (next_pc_opt, next_pc_expr) = if branching {
-            let next_pc = circuit_builder.create_witin("next_pc")?;
+            let next_pc = circuit_builder.create_witin("next_pc");
             (Some(next_pc), next_pc.expr())
         } else {
             (None, pc.expr() + PC_STEP_SIZE)
         };
-        let ts = circuit_builder.create_witin("ts")?;
+        let ts = circuit_builder.create_witin("ts");
         let next_ts = ts.expr() + Tracer::SUBCYCLES_PER_INSN;
-        circuit_builder.state_in(pc.expr(), ts.expr())?;
-        circuit_builder.state_out(next_pc_expr, next_ts)?;
+        circuit_builder.state_in(pc.expr(), ts.expr());
+        circuit_builder.state_out(next_pc_expr, next_ts);
 
-        Ok(StateInOut {
+        StateInOut {
             pc,
             next_pc: next_pc_opt,
             ts,
             _field_type: PhantomData,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -62,14 +58,12 @@ impl<E: ExtensionField> StateInOut<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         // lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.pc, step.pc().before.0 as u64);
         if let Some(n_pc) = self.next_pc {
             set_val!(instance, n_pc, step.pc().after.0 as u64);
         }
         set_val!(instance, self.ts, step.cycle());
-
-        Ok(())
     }
 }
 
@@ -86,23 +80,23 @@ impl<E: ExtensionField> ReadRS1<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         rs1_read: RegisterExpr<E>,
         cur_ts: WitIn,
-    ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin("rs1_id")?;
-        let prev_ts = circuit_builder.create_witin("prev_rs1_ts")?;
+    ) -> Self {
+        let id = circuit_builder.create_witin("rs1_id");
+        let prev_ts = circuit_builder.create_witin("prev_rs1_ts");
         let (_, lt_cfg) = circuit_builder.register_read(
             "read_rs1",
             id,
             prev_ts.expr(),
             cur_ts.expr() + Tracer::SUBCYCLE_RS1,
             rs1_read,
-        )?;
+        );
 
-        Ok(ReadRS1 {
+        ReadRS1 {
             id,
             prev_ts,
             lt_cfg,
             _field_type: PhantomData,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -110,7 +104,7 @@ impl<E: ExtensionField> ReadRS1<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.id, step.insn().rs1() as u64);
 
         // Register state
@@ -122,9 +116,7 @@ impl<E: ExtensionField> ReadRS1<E> {
             lk_multiplicity,
             step.rs1().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS1,
-        )?;
-
-        Ok(())
+        );
     }
 }
 
@@ -141,23 +133,23 @@ impl<E: ExtensionField> ReadRS2<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         rs2_read: RegisterExpr<E>,
         cur_ts: WitIn,
-    ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin("rs2_id")?;
-        let prev_ts = circuit_builder.create_witin("prev_rs2_ts")?;
+    ) -> Self {
+        let id = circuit_builder.create_witin("rs2_id");
+        let prev_ts = circuit_builder.create_witin("prev_rs2_ts");
         let (_, lt_cfg) = circuit_builder.register_read(
             "read_rs2",
             id,
             prev_ts.expr(),
             cur_ts.expr() + Tracer::SUBCYCLE_RS2,
             rs2_read,
-        )?;
+        );
 
-        Ok(ReadRS2 {
+        ReadRS2 {
             id,
             prev_ts,
             lt_cfg,
             _field_type: PhantomData,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -165,7 +157,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.id, step.insn().rs2() as u64);
 
         // Register state
@@ -177,9 +169,7 @@ impl<E: ExtensionField> ReadRS2<E> {
             lk_multiplicity,
             step.rs2().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS2,
-        )?;
-
-        Ok(())
+        );
     }
 }
 
@@ -196,10 +186,10 @@ impl<E: ExtensionField> WriteRD<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         rd_written: RegisterExpr<E>,
         cur_ts: WitIn,
-    ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin("rd_id")?;
-        let prev_ts = circuit_builder.create_witin("prev_rd_ts")?;
-        let prev_value = UInt::new_unchecked("prev_rd_value", circuit_builder)?;
+    ) -> Self {
+        let id = circuit_builder.create_witin("rd_id");
+        let prev_ts = circuit_builder.create_witin("prev_rd_ts");
+        let prev_value = UInt::new_unchecked("prev_rd_value", circuit_builder);
         let (_, lt_cfg) = circuit_builder.register_write(
             "write_rd",
             id,
@@ -207,14 +197,14 @@ impl<E: ExtensionField> WriteRD<E> {
             cur_ts.expr() + Tracer::SUBCYCLE_RD,
             prev_value.register_expr(),
             rd_written,
-        )?;
+        );
 
-        Ok(WriteRD {
+        WriteRD {
             id,
             prev_ts,
             prev_value,
             lt_cfg,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -222,7 +212,7 @@ impl<E: ExtensionField> WriteRD<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.id, step.insn().rd() as u64);
         set_val!(instance, self.prev_ts, step.rd().unwrap().previous_cycle);
 
@@ -238,9 +228,7 @@ impl<E: ExtensionField> WriteRD<E> {
             lk_multiplicity,
             step.rd().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RD,
-        )?;
-
-        Ok(())
+        );
     }
 }
 
@@ -257,21 +245,21 @@ impl<E: ExtensionField> ReadMEM<E> {
         mem_addr: AddressExpr<E>,
         mem_read: Expression<E>,
         cur_ts: WitIn,
-    ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin("prev_ts")?;
+    ) -> Self {
+        let prev_ts = circuit_builder.create_witin("prev_ts");
         let (_, lt_cfg) = circuit_builder.memory_read(
             "read_memory",
             &mem_addr,
             prev_ts.expr(),
             cur_ts.expr() + Tracer::SUBCYCLE_MEM,
             mem_read,
-        )?;
+        );
 
-        Ok(ReadMEM {
+        ReadMEM {
             prev_ts,
             lt_cfg,
             _field_type: PhantomData,
-        })
+        }
     }
 
     pub fn assign_instance(
@@ -279,7 +267,7 @@ impl<E: ExtensionField> ReadMEM<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         // Memory state
         set_val!(
             instance,
@@ -293,9 +281,7 @@ impl<E: ExtensionField> ReadMEM<E> {
             lk_multiplicity,
             step.memory_op().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_MEM,
-        )?;
-
-        Ok(())
+        );
     }
 }
 
@@ -312,8 +298,8 @@ impl WriteMEM {
         prev_value: MemoryExpr<E>,
         new_value: MemoryExpr<E>,
         cur_ts: WitIn,
-    ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin("prev_ts")?;
+    ) -> Self {
+        let prev_ts = circuit_builder.create_witin("prev_ts");
 
         let (_, lt_cfg) = circuit_builder.memory_write(
             "write_memory",
@@ -322,9 +308,9 @@ impl WriteMEM {
             cur_ts.expr() + Tracer::SUBCYCLE_MEM,
             prev_value,
             new_value,
-        )?;
+        );
 
-        Ok(WriteMEM { prev_ts, lt_cfg })
+        WriteMEM { prev_ts, lt_cfg }
     }
 
     pub fn assign_instance<E: ExtensionField>(
@@ -332,7 +318,7 @@ impl WriteMEM {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(
             instance,
             self.prev_ts,
@@ -344,9 +330,7 @@ impl WriteMEM {
             lk_multiplicity,
             step.memory_op().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_MEM,
-        )?;
-
-        Ok(())
+        );
     }
 }
 
@@ -360,17 +344,17 @@ impl<E: ExtensionField> MemAddr<E> {
     const N_LOW_BITS: usize = 2;
 
     /// An address which is range-checked, and not aligned. Bits 0 and 1 are variables.
-    pub fn construct_unaligned(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
+    pub fn construct_unaligned(cb: &mut CircuitBuilder<E>) -> Self {
         Self::construct(cb, 0)
     }
 
     /// An address which is range-checked, and aligned to 2 bytes. Bit 0 is constant 0. Bit 1 is variable.
-    pub fn construct_align2(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
+    pub fn construct_align2(cb: &mut CircuitBuilder<E>) -> Self {
         Self::construct(cb, 1)
     }
 
     /// An address which is range-checked, and aligned to 4 bytes. Bits 0 and 1 are constant 0.
-    pub fn construct_align4(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
+    pub fn construct_align4(cb: &mut CircuitBuilder<E>) -> Self {
         Self::construct(cb, 2)
     }
 
@@ -397,22 +381,22 @@ impl<E: ExtensionField> MemAddr<E> {
             .collect()
     }
 
-    fn construct(cb: &mut CircuitBuilder<E>, n_zeros: usize) -> Result<Self, ZKVMError> {
+    fn construct(cb: &mut CircuitBuilder<E>, n_zeros: usize) -> Self {
         assert!(n_zeros <= Self::N_LOW_BITS);
 
         // The address as two u16 limbs.
         // Soundness: This does not use the UInt range-check but specialized checks instead.
-        let addr = UInt::new_unchecked("memory_addr", cb)?;
+        let addr = UInt::new_unchecked("memory_addr", cb);
         let limbs = addr.expr();
 
         // Witness and constrain the non-zero low bits.
         let low_bits = (n_zeros..Self::N_LOW_BITS)
             .map(|i| {
-                let bit = cb.create_witin(format!("addr_bit_{}", i))?;
-                cb.assert_bit(format!("addr_bit_{}", i), bit.expr())?;
-                Ok(bit)
+                let bit = cb.create_witin(format!("addr_bit_{}", i));
+                cb.assert_bit(format!("addr_bit_{}", i), bit.expr());
+                bit
             })
-            .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
+            .collect::<Vec<_>>();
 
         // Express the value of the low bits.
         let low_sum: Expression<E> = (n_zeros..Self::N_LOW_BITS)
@@ -426,14 +410,14 @@ impl<E: ExtensionField> MemAddr<E> {
             .unwrap()
             .expr();
         let mid_u14 = (limbs[0].clone() - low_sum) * shift_right;
-        cb.assert_ux::<_, 14>("mid_u14", mid_u14)?;
+        cb.assert_ux::<_, 14>("mid_u14", mid_u14);
 
         // Range check the high limb.
         for high_u16 in limbs.iter().skip(1) {
-            cb.assert_ux::<_, 16>("high_u16", high_u16.clone())?;
+            cb.assert_ux::<_, 16>("high_u16", high_u16.clone());
         }
 
-        Ok(MemAddr { addr, low_bits })
+        MemAddr { addr, low_bits }
     }
 
     pub fn assign_instance(
@@ -441,7 +425,7 @@ impl<E: ExtensionField> MemAddr<E> {
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lkm: &mut LkMultiplicity,
         addr: Word,
-    ) -> Result<(), ZKVMError> {
+    ) {
         self.addr.assign_value(instance, Value::new_unchecked(addr));
 
         // Witness the non-zero low bits.
@@ -459,8 +443,6 @@ impl<E: ExtensionField> MemAddr<E> {
             let high_u16 = (addr >> (i * 16)) & 0xffff;
             lkm.assert_ux::<16>(high_u16 as u64);
         }
-
-        Ok(())
     }
 
     fn n_zeros(&self) -> usize {
@@ -477,7 +459,6 @@ mod test {
     use crate::{
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        error::ZKVMError,
         scheme::mock_prover::MockProver,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -485,33 +466,32 @@ mod test {
     use super::MemAddr;
 
     #[test]
-    fn test_mem_addr() -> Result<(), ZKVMError> {
+    fn test_mem_addr() {
         let aligned_1 = 0xbeadbeef;
         let aligned_2 = 0xbeadbeee;
         let aligned_4 = 0xbeadbeec;
 
-        impl_test_mem_addr(1, aligned_1, true)?;
-        impl_test_mem_addr(1, aligned_2, true)?;
-        impl_test_mem_addr(1, aligned_4, true)?;
+        impl_test_mem_addr(1, aligned_1, true);
+        impl_test_mem_addr(1, aligned_2, true);
+        impl_test_mem_addr(1, aligned_4, true);
 
-        impl_test_mem_addr(2, aligned_1, false)?;
-        impl_test_mem_addr(2, aligned_2, true)?;
-        impl_test_mem_addr(2, aligned_4, true)?;
+        impl_test_mem_addr(2, aligned_1, false);
+        impl_test_mem_addr(2, aligned_2, true);
+        impl_test_mem_addr(2, aligned_4, true);
 
-        impl_test_mem_addr(4, aligned_1, false)?;
-        impl_test_mem_addr(4, aligned_2, false)?;
-        impl_test_mem_addr(4, aligned_4, true)?;
-        Ok(())
+        impl_test_mem_addr(4, aligned_1, false);
+        impl_test_mem_addr(4, aligned_2, false);
+        impl_test_mem_addr(4, aligned_4, true);
     }
 
-    fn impl_test_mem_addr(align: u32, addr: u32, is_ok: bool) -> Result<(), ZKVMError> {
+    fn impl_test_mem_addr(align: u32, addr: u32, is_ok: bool) {
         let mut cs = ConstraintSystem::<E>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let mem_addr = match align {
-            1 => MemAddr::construct_unaligned(&mut cb)?,
-            2 => MemAddr::construct_align2(&mut cb)?,
-            4 => MemAddr::construct_align4(&mut cb)?,
+            1 => MemAddr::construct_unaligned(&mut cb),
+            2 => MemAddr::construct_align2(&mut cb),
+            4 => MemAddr::construct_align4(&mut cb),
             _ => unreachable!(),
         };
 
@@ -519,7 +499,7 @@ mod test {
         let num_rows = 2;
         let mut raw_witin = RowMajorMatrix::<F>::new(num_rows, cb.cs.num_witin as usize);
         for instance in raw_witin.iter_mut() {
-            mem_addr.assign_instance(instance, &mut lkm, addr)?;
+            mem_addr.assign_instance(instance, &mut lkm, addr);
         }
 
         // Check the range lookups.
@@ -536,9 +516,9 @@ mod test {
         assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
 
         if is_ok {
-            cb.require_equal("", mem_addr.expr_unaligned(), addr.into())?;
-            cb.require_equal("", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
-            cb.require_equal("", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
+            cb.require_equal("", mem_addr.expr_unaligned(), addr.into());
+            cb.require_equal("", mem_addr.expr_align2(), (addr >> 1 << 1).into());
+            cb.require_equal("", mem_addr.expr_align4(), (addr >> 2 << 2).into());
         }
         MockProver::assert_with_expected_errors(
             &cb,
@@ -553,6 +533,5 @@ mod test {
             None,
             None,
         );
-        Ok(())
     }
 }

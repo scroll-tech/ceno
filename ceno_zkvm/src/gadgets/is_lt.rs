@@ -9,7 +9,6 @@ use crate::{
     Value,
     chip_handler::utils::power_sequence,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     set_val,
@@ -26,7 +25,7 @@ impl AssertLTConfig {
         lhs: Expression<E>,
         rhs: Expression<E>,
         max_num_u16_limbs: usize,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         cb.namespace("assert_lt", |cb| {
             let config = InnerLtConfig::construct_circuit(
                 cb,
@@ -35,8 +34,8 @@ impl AssertLTConfig {
                 rhs,
                 Expression::ONE,
                 max_num_u16_limbs,
-            )?;
-            Ok(Self(config))
+            );
+            Self(config)
         })
     }
 
@@ -46,9 +45,8 @@ impl AssertLTConfig {
         lkm: &mut LkMultiplicity,
         lhs: u64,
         rhs: u64,
-    ) -> Result<(), ZKVMError> {
-        self.0.assign_instance(instance, lkm, lhs, rhs)?;
-        Ok(())
+    ) {
+        self.0.assign_instance(instance, lkm, lhs, rhs);
     }
 }
 
@@ -69,10 +67,10 @@ impl IsLtConfig {
         lhs: Expression<E>,
         rhs: Expression<E>,
         max_num_u16_limbs: usize,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         cb.namespace("is_lt", |cb| {
-            let is_lt = cb.create_witin(format!("{name} is_lt witin"))?;
-            cb.assert_bit("is_lt_bit", is_lt.expr())?;
+            let is_lt = cb.create_witin(format!("{name} is_lt witin"));
+            cb.assert_bit("is_lt_bit", is_lt.expr());
 
             let config = InnerLtConfig::construct_circuit(
                 cb,
@@ -81,8 +79,8 @@ impl IsLtConfig {
                 rhs,
                 is_lt.expr(),
                 max_num_u16_limbs,
-            )?;
-            Ok(Self { is_lt, config })
+            );
+            Self { is_lt, config }
         })
     }
 
@@ -92,10 +90,9 @@ impl IsLtConfig {
         lkm: &mut LkMultiplicity,
         lhs: u64,
         rhs: u64,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.is_lt, (lhs < rhs) as u64);
-        self.config.assign_instance(instance, lkm, lhs, rhs)?;
-        Ok(())
+        self.config.assign_instance(instance, lkm, lhs, rhs);
     }
 
     pub fn assign_instance_signed<F: SmallField>(
@@ -104,11 +101,9 @@ impl IsLtConfig {
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.is_lt, (lhs < rhs) as u64);
-        self.config
-            .assign_instance_signed(instance, lkm, lhs, rhs)?;
-        Ok(())
+        self.config.assign_instance_signed(instance, lkm, lhs, rhs);
     }
 }
 
@@ -130,20 +125,20 @@ impl InnerLtConfig {
         rhs: Expression<E>,
         is_lt_expr: Expression<E>,
         max_num_u16_limbs: usize,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         assert!(max_num_u16_limbs >= 1);
 
-        let mut witin_u16 = |var_name: String| -> Result<WitIn, ZKVMError> {
+        let mut witin_u16 = |var_name: String| -> WitIn {
             cb.namespace(format!("var {var_name}"), |cb| {
-                let witin = cb.create_witin(var_name)?;
-                cb.assert_ux::<_, 16>(name.clone(), witin.expr())?;
-                Ok(witin)
+                let witin = cb.create_witin(var_name.to_string());
+                cb.assert_ux::<_, 16>(name.clone(), witin.expr());
+                witin
             })
         };
 
         let diff = (0..max_num_u16_limbs)
             .map(|i| witin_u16(format!("diff_{i}")))
-            .collect::<Result<Vec<WitIn>, _>>()?;
+            .collect::<Vec<WitIn>>();
 
         let pows = power_sequence((1 << u16::BITS).into());
 
@@ -153,12 +148,12 @@ impl InnerLtConfig {
 
         let range = Self::range(max_num_u16_limbs);
 
-        cb.require_equal(name, lhs - rhs, diff_expr - is_lt_expr * range)?;
+        cb.require_equal(name, lhs - rhs, diff_expr - is_lt_expr * range);
 
-        Ok(Self {
+        Self {
             diff,
             max_num_u16_limbs,
-        })
+        }
     }
 
     pub fn assign_instance<F: SmallField>(
@@ -167,7 +162,7 @@ impl InnerLtConfig {
         lkm: &mut LkMultiplicity,
         lhs: u64,
         rhs: u64,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let diff = cal_lt_diff(lhs < rhs, self.max_num_u16_limbs, lhs, rhs);
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
@@ -175,7 +170,6 @@ impl InnerLtConfig {
             lkm.assert_ux::<16>(val);
             set_val!(instance, wit, val);
         });
-        Ok(())
     }
 
     // TODO: refactor with the above function
@@ -185,7 +179,7 @@ impl InnerLtConfig {
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let diff = if lhs < rhs {
             Self::range(self.diff.len()) - lhs.abs_diff(rhs) as u64
         } else {
@@ -197,7 +191,6 @@ impl InnerLtConfig {
             lkm.assert_ux::<16>(val);
             set_val!(instance, wit, val);
         });
-        Ok(())
     }
 }
 
@@ -221,11 +214,11 @@ impl AssertSignedLtConfig {
         name: Name,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         cb.namespace("assert_signed_lt", |cb| {
             let config =
-                InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, Expression::ONE)?;
-            Ok(Self { config })
+                InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, Expression::ONE);
+            Self { config }
         })
     }
 
@@ -235,9 +228,8 @@ impl AssertSignedLtConfig {
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
-    ) -> Result<(), ZKVMError> {
-        self.config.assign_instance::<E>(instance, lkm, lhs, rhs)?;
-        Ok(())
+    ) {
+        self.config.assign_instance::<E>(instance, lkm, lhs, rhs);
     }
 }
 
@@ -257,13 +249,13 @@ impl SignedLtConfig {
         name: Name,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         cb.namespace("is_signed_lt", |cb| {
-            let is_lt = cb.create_witin(format!("{name} is_signed_lt witin"))?;
-            cb.assert_bit("is_lt_bit", is_lt.expr())?;
-            let config = InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
+            let is_lt = cb.create_witin(format!("{name} is_signed_lt witin"));
+            cb.assert_bit("is_lt_bit", is_lt.expr());
+            let config = InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr());
 
-            Ok(SignedLtConfig { is_lt, config })
+            SignedLtConfig { is_lt, config }
         })
     }
 
@@ -273,11 +265,10 @@ impl SignedLtConfig {
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.is_lt, (lhs < rhs) as u64);
         self.config
-            .assign_instance::<E>(instance, lkm, lhs as SWord, rhs as SWord)?;
-        Ok(())
+            .assign_instance::<E>(instance, lkm, lhs as SWord, rhs as SWord);
     }
 }
 
@@ -295,7 +286,7 @@ impl InnerSignedLtConfig {
         lhs: &UInt<E>,
         rhs: &UInt<E>,
         is_lt_expr: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Self {
         let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         // Extract the sign bit.
         let is_lhs_neg = IsLtConfig::construct_circuit(
@@ -304,14 +295,14 @@ impl InnerSignedLtConfig {
             max_signed_limb_expr.clone(),
             lhs.limbs.iter().last().unwrap().expr(), // msb limb
             1,
-        )?;
+        );
         let is_rhs_neg = IsLtConfig::construct_circuit(
             cb,
             "rhs_msb",
             max_signed_limb_expr,
             rhs.limbs.iter().last().unwrap().expr(), // msb limb
             1,
-        )?;
+        );
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
@@ -323,13 +314,13 @@ impl InnerSignedLtConfig {
             rhs_value,
             is_lt_expr,
             UINT_LIMBS,
-        )?;
+        );
 
-        Ok(Self {
+        Self {
             is_lhs_neg,
             is_rhs_neg,
             config,
-        })
+        }
     }
 
     pub fn assign_instance<E: ExtensionField>(
@@ -338,7 +329,7 @@ impl InnerSignedLtConfig {
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let max_signed_limb = (1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1;
         let lhs_value = Value::new_unchecked(lhs as Word);
         let rhs_value = Value::new_unchecked(rhs as Word);
@@ -347,16 +338,14 @@ impl InnerSignedLtConfig {
             lkm,
             max_signed_limb,
             *lhs_value.limbs.last().unwrap() as u64,
-        )?;
+        );
         self.is_rhs_neg.assign_instance(
             instance,
             lkm,
             max_signed_limb,
             *rhs_value.limbs.last().unwrap() as u64,
-        )?;
+        );
 
-        self.config
-            .assign_instance_signed(instance, lkm, lhs, rhs)?;
-        Ok(())
+        self.config.assign_instance_signed(instance, lkm, lhs, rhs);
     }
 }

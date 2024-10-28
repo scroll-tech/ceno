@@ -2,7 +2,6 @@ use super::RIVInstruction;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     gadgets::DivConfig,
     instructions::{
         Instruction,
@@ -45,36 +44,34 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let mut imm = UInt::new("imm", circuit_builder)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
+        let mut imm = UInt::new("imm", circuit_builder);
 
         // Note: `imm` is set to 2**imm (upto 32 bit) just for efficient verification
         // Goal is to constrain:
         // rs1 == rd_written * imm + remainder
         let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
             InsnKind::SLLI => {
-                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder);
                 let rd_written = rs1_read.mul(
                     "rd_written = rs1_read * imm",
                     circuit_builder,
                     &mut imm,
                     true,
-                )?;
+                );
 
                 (rs1_read, rd_written, None, None)
             }
             InsnKind::SRLI => {
-                let mut rd_written = UInt::new("rd_written", circuit_builder)?;
-                let remainder = UInt::new("remainder", circuit_builder)?;
+                let mut rd_written = UInt::new("rd_written", circuit_builder);
+                let remainder = UInt::new("remainder", circuit_builder);
                 let div_config = DivConfig::construct_circuit(
                     circuit_builder,
                     "srli_div",
                     &mut imm,
                     &mut rd_written,
                     &remainder,
-                )?;
+                );
                 (
                     div_config.dividend.clone(),
                     rd_written,
@@ -92,16 +89,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
-        )?;
+        );
 
-        Ok(ShiftImmConfig {
+        ShiftImmConfig {
             i_insn,
             imm,
             rd_written,
             rs1_read,
             remainder,
             div_config,
-        })
+        }
     }
 
     fn assign_instance(
@@ -109,7 +106,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
         match I::INST_KIND {
             InsnKind::SLLI => {
@@ -118,7 +115,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 config.rs1_read.assign_value(instance, rs1_read);
                 config
                     .rd_written
-                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
+                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written);
             }
             InsnKind::SRLI => {
                 let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
@@ -130,7 +127,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     &imm,
                     &rd_written,
                     &remainder,
-                )?;
+                );
                 config
                     .remainder
                     .as_ref()
@@ -145,9 +142,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
-        Ok(())
+            .assign_instance(instance, lk_multiplicity, step);
     }
 }
 
@@ -211,26 +206,20 @@ mod test {
             _ => unreachable!(),
         };
 
-        let config = cb
-            .namespace(format!("{prefix}_({name})"), |cb| {
-                let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                Ok(config)
-            })
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace(
+            format!("{prefix}_({name})"),
+            ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit,
+        );
 
-        config
-            .rd_written
-            .require_equal(
-                "assert_rd_written",
-                &mut cb,
-                &UInt::from_const_unchecked(
-                    Value::new_unchecked(expected_rd_written)
-                        .as_u16_limbs()
-                        .to_vec(),
-                ),
-            )
-            .unwrap();
+        config.rd_written.require_equal(
+            "assert_rd_written",
+            &mut cb,
+            &UInt::from_const_unchecked(
+                Value::new_unchecked(expected_rd_written)
+                    .as_u16_limbs()
+                    .to_vec(),
+            ),
+        );
 
         let (raw_witin, lkm) = ShiftImmInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
@@ -243,8 +232,7 @@ mod test {
                 Change::new(0, rd_written),
                 0,
             )],
-        )
-        .unwrap();
+        );
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(expected_rd_written)
@@ -253,8 +241,7 @@ mod test {
         );
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,

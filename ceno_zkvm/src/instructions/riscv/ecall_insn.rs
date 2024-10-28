@@ -3,7 +3,6 @@ use crate::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLTConfig,
     set_val,
@@ -27,15 +26,15 @@ impl EcallInstructionConfig {
         syscall_id: RegisterExpr<E>,
         syscall_ret_value: Option<RegisterExpr<E>>,
         next_pc: Option<Expression<E>>,
-    ) -> Result<Self, ZKVMError> {
-        let pc = cb.create_witin("pc")?;
-        let ts = cb.create_witin("cur_ts")?;
+    ) -> Self {
+        let pc = cb.create_witin("pc");
+        let ts = cb.create_witin("cur_ts");
 
-        cb.state_in(pc.expr(), ts.expr())?;
+        cb.state_in(pc.expr(), ts.expr());
         cb.state_out(
             next_pc.map_or(pc.expr() + PC_STEP_SIZE, |next_pc| next_pc),
             ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize),
-        )?;
+        );
 
         cb.lk_fetch(&InsnRecord::new(
             pc.expr(),
@@ -45,9 +44,9 @@ impl EcallInstructionConfig {
             0.into(),
             0.into(),
             0.into(), // imm = 0
-        ))?;
+        ));
 
-        let prev_x5_ts = cb.create_witin("prev_x5_ts")?;
+        let prev_x5_ts = cb.create_witin("prev_x5_ts");
 
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(
@@ -57,14 +56,14 @@ impl EcallInstructionConfig {
             ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),
             syscall_ret_value.map_or(syscall_id, |v| v),
-        )?;
+        );
 
-        Ok(Self {
+        Self {
             pc,
             ts,
             prev_x5_ts,
             lt_x5_cfg,
-        })
+        }
     }
 
     pub fn assign_instance<E: ExtensionField>(
@@ -72,7 +71,7 @@ impl EcallInstructionConfig {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         set_val!(instance, self.pc, step.pc().before.0 as u64);
         set_val!(instance, self.ts, step.cycle());
         lk_multiplicity.fetch(step.pc().before.0);
@@ -89,8 +88,6 @@ impl EcallInstructionConfig {
             lk_multiplicity,
             step.rs1().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS1,
-        )?;
-
-        Ok(())
+        );
     }
 }

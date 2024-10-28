@@ -10,7 +10,6 @@ use sumcheck::util::ceil_log2;
 
 use crate::{
     chip_handler::{ChipHandler, bytecode::BytecodeChip},
-    error::UtilError,
     structs::{ChipChallenges, PCUInt},
 };
 
@@ -42,18 +41,20 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
     bytecode: &[u8],
     challenges: &ChipChallenges,
     real_challenges: &[E],
-) -> Result<(PredType, PredType, usize), UtilError> {
+) -> (PredType, PredType, usize) {
     let bytecode_circuit = construct_circuit(challenges);
     let selector = ChipCircuitGadgets::construct_prefix_selector(bytecode.len(), 1);
 
-    let selector_node_id = builder.add_node_with_witness(
-        "bytecode selector circuit",
-        &selector.circuit,
-        vec![],
-        real_challenges.to_vec(),
-        vec![],
-        bytecode.len().next_power_of_two(),
-    )?;
+    let selector_node_id = builder
+        .add_node_with_witness(
+            "bytecode selector circuit",
+            &selector.circuit,
+            vec![],
+            real_challenges.to_vec(),
+            vec![],
+            bytecode.len().next_power_of_two(),
+        )
+        .unwrap();
 
     let wits_in = vec![
         PCUInt::counter_vector::<E::BaseField>(bytecode.len().next_power_of_two())
@@ -70,20 +71,22 @@ pub(crate) fn construct_bytecode_table_and_witness<E: ExtensionField>(
         },
     ];
 
-    let table_node_id = builder.add_node_with_witness(
-        "bytecode table circuit",
-        &bytecode_circuit,
-        vec![PredType::Source; 2],
-        real_challenges.to_vec(),
-        wits_in,
-        bytecode.len().next_power_of_two(),
-    )?;
+    let table_node_id = builder
+        .add_node_with_witness(
+            "bytecode table circuit",
+            &bytecode_circuit,
+            vec![PredType::Source; 2],
+            real_challenges.to_vec(),
+            wits_in,
+            bytecode.len().next_power_of_two(),
+        )
+        .unwrap();
 
-    Ok((
+    (
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
         PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id)),
         ceil_log2(bytecode.len()) - 1,
-    ))
+    )
 }
 
 /// Add bytecode table circuit to the circuit graph. Return node id and lookup
@@ -92,22 +95,25 @@ pub(crate) fn construct_bytecode_table<E: ExtensionField>(
     builder: &mut CircuitGraphBuilder<E>,
     bytecode_len: usize,
     challenges: &ChipChallenges,
-) -> Result<(PredType, PredType, usize), UtilError> {
+) -> (PredType, PredType, usize) {
     let bytecode_circuit = construct_circuit(challenges);
     let selector = ChipCircuitGadgets::construct_prefix_selector(bytecode_len, 1);
 
-    let selector_node_id =
-        builder.add_node("bytecode selector circuit", &selector.circuit, vec![])?;
+    let selector_node_id = builder
+        .add_node("bytecode selector circuit", &selector.circuit, vec![])
+        .unwrap();
 
-    let table_node_id = builder.add_node(
-        "bytecode table circuit",
-        &bytecode_circuit,
-        vec![PredType::Source; 2],
-    )?;
+    let table_node_id = builder
+        .add_node(
+            "bytecode table circuit",
+            &bytecode_circuit,
+            vec![PredType::Source; 2],
+        )
+        .unwrap();
 
-    Ok((
+    (
         PredType::PredWire(NodeOutputType::OutputLayer(table_node_id)),
         PredType::PredWire(NodeOutputType::OutputLayer(selector_node_id)),
         ceil_log2(bytecode_len) - 1,
-    ))
+    )
 }

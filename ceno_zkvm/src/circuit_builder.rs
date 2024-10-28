@@ -7,7 +7,6 @@ use mpcs::PolynomialCommitmentScheme;
 use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
-    error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
@@ -194,7 +193,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn create_witin<Name: Into<String>>(&mut self, name: Name) -> Result<WitIn, ZKVMError> {
+    pub fn create_witin<Name: Into<String>>(&mut self, name: Name) -> WitIn {
         let wit_in = WitIn {
             id: {
                 let id = self.num_witin;
@@ -206,30 +205,26 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let path = self.ns.compute_path(name.into());
         self.witin_namespace_map.push(path);
 
-        Ok(wit_in)
+        wit_in
     }
 
-    pub fn create_fixed<Name: Into<String>>(&mut self, n: Name) -> Result<Fixed, ZKVMError> {
+    pub fn create_fixed<Name: Into<String>>(&mut self, n: Name) -> Fixed {
         let f = Fixed(self.num_fixed);
         self.num_fixed += 1;
 
         let path = self.ns.compute_path(n.into());
         self.fixed_namespace_map.push(path);
 
-        Ok(f)
+        f
     }
 
-    pub fn query_instance<Name: Into<String>>(
-        &mut self,
-        n: Name,
-        idx: usize,
-    ) -> Result<Instance, ZKVMError> {
+    pub fn query_instance<Name: Into<String>>(&mut self, n: Name, idx: usize) -> Instance {
         let i = Instance(idx);
 
         let name = n.into();
         self.instance_name_map.insert(i, name);
 
-        Ok(i)
+        i
     }
 
     pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
@@ -245,15 +240,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         name: Name,
         rom_type: ROMType,
         items: Vec<Expression<E>>,
-    ) -> Result<(), ZKVMError> {
+    ) {
+        #[cfg(test)]
+        self.lk_expressions_items_map
+            .push((rom_type, items.clone()));
         let rlc_record = self.rlc_chip_record(
             std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
-                .chain(
-                    #[cfg(test)]
-                    items.clone(),
-                    #[cfg(not(test))]
-                    items,
-                )
+                .chain(items)
                 .collect(),
         );
         assert_eq!(
@@ -265,9 +258,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name.into());
         self.lk_expressions_namespace_map.push(path);
-        #[cfg(test)]
-        self.lk_expressions_items_map.push((rom_type, items));
-        Ok(())
     }
 
     pub fn lk_table_record<Name>(
@@ -276,8 +266,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         table_len: usize,
         rlc_record: Expression<E>,
         multiplicity: Expression<E>,
-    ) -> Result<(), ZKVMError>
-    where
+    ) where
         Name: Into<String>,
     {
         assert_eq!(
@@ -293,16 +282,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name.into());
         self.lk_table_expressions_namespace_map.push(path);
-
-        Ok(())
     }
 
-    pub fn r_table_record<Name>(
-        &mut self,
-        name: Name,
-        table_len: usize,
-        rlc_record: Expression<E>,
-    ) -> Result<(), ZKVMError>
+    pub fn r_table_record<Name>(&mut self, name: Name, table_len: usize, rlc_record: Expression<E>)
     where
         Name: Into<String>,
     {
@@ -318,16 +300,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name.into());
         self.r_table_expressions_namespace_map.push(path);
-
-        Ok(())
     }
 
-    pub fn w_table_record<Name>(
-        &mut self,
-        name: Name,
-        table_len: usize,
-        rlc_record: Expression<E>,
-    ) -> Result<(), ZKVMError>
+    pub fn w_table_record<Name>(&mut self, name: Name, table_len: usize, rlc_record: Expression<E>)
     where
         Name: Into<String>,
     {
@@ -343,15 +318,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name.into());
         self.w_table_expressions_namespace_map.push(path);
-
-        Ok(())
     }
 
-    pub fn read_record<Name: Into<String>>(
-        &mut self,
-        name: Name,
-        rlc_record: Expression<E>,
-    ) -> Result<(), ZKVMError> {
+    pub fn read_record<Name: Into<String>>(&mut self, name: Name, rlc_record: Expression<E>) {
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -361,14 +330,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name.into());
         self.r_expressions_namespace_map.push(path);
-        Ok(())
     }
 
-    pub fn write_record<Name: Into<String>>(
-        &mut self,
-        name: Name,
-        rlc_record: Expression<E>,
-    ) -> Result<(), ZKVMError> {
+    pub fn write_record<Name: Into<String>>(&mut self, name: Name, rlc_record: Expression<E>) {
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -378,14 +342,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name.into());
         self.w_expressions_namespace_map.push(path);
-        Ok(())
     }
 
     pub fn require_zero<Name: Into<String>>(
         &mut self,
         name: Name,
         assert_zero_expr: Expression<E>,
-    ) -> Result<(), ZKVMError> {
+    ) {
         assert!(
             assert_zero_expr.degree() > 0,
             "constant expression assert to zero ?"
@@ -408,14 +371,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             self.assert_zero_sumcheck_expressions_namespace_map
                 .push(path);
         }
-        Ok(())
     }
 
     pub fn namespace<Name: Into<String>, T>(
         &mut self,
         name: Name,
-        cb: impl FnOnce(&mut ConstraintSystem<E>) -> Result<T, ZKVMError>,
-    ) -> Result<T, ZKVMError> {
+        cb: impl FnOnce(&mut ConstraintSystem<E>) -> T,
+    ) -> T {
         self.ns.push_namespace(name.into());
         let t = cb(self);
         self.ns.pop_namespace();

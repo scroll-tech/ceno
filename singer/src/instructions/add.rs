@@ -15,8 +15,6 @@ use singer_utils::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-use crate::error::ZKVMError;
-
 use super::{ChipChallenges, InstCircuit, InstCircuitLayout, Instruction, InstructionGraph};
 
 pub struct AddInstruction;
@@ -51,15 +49,15 @@ register_witness!(
 impl<E: ExtensionField> Instruction<E> for AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
     const NAME: &'static str = "ADD";
-    fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
+    fn construct_circuit(challenges: ChipChallenges) -> InstCircuit<E> {
         let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
         let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
-        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
-        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()])?;
+        let pc = PCUInt::try_from(&phase0[Self::phase0_pc()]).unwrap();
+        let stack_ts = TSUInt::try_from(&phase0[Self::phase0_stack_ts()]).unwrap();
         let memory_ts = &phase0[Self::phase0_memory_ts()];
         let stack_top = phase0[Self::phase0_stack_top().start];
         let stack_top_expr = MixedCell::Cell(stack_top);
@@ -76,14 +74,14 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         );
 
         let next_pc =
-            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()])?;
+            RangeChip::add_pc_const(&mut circuit_builder, &pc, 1, &phase0[Self::phase0_pc_add()]);
         let next_stack_ts = RangeChip::add_ts_with_const(
             &mut chip_handler,
             &mut circuit_builder,
             &stack_ts,
             1,
             &phase0[Self::phase0_stack_ts_add()],
-        )?;
+        );
 
         GlobalStateChip::state_out(
             &mut chip_handler,
@@ -96,8 +94,8 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
         );
 
         // Execution result = addend0 + addend1, with carry.
-        let addend_0 = (&phase0[Self::phase0_addend_0()]).try_into()?;
-        let addend_1 = (&phase0[Self::phase0_addend_1()]).try_into()?;
+        let addend_0 = (&phase0[Self::phase0_addend_0()]).try_into().unwrap();
+        let addend_1 = (&phase0[Self::phase0_addend_1()]).try_into().unwrap();
         #[cfg(feature = "dbg-add-opcode")]
         println!(
             "addInstCircuit::phase0_instruction_add: {:?}",
@@ -109,24 +107,24 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &addend_0,
             &addend_1,
             &phase0[Self::phase0_instruction_add()],
-        )?;
+        );
 
         // Check the range of stack_top - 2 is within [0, 1 << STACK_TOP_BIT_WIDTH).
         RangeChip::range_check_stack_top(
             &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
-        )?;
+        );
 
         // Pop two values from stack
-        let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into()?;
+        let old_stack_ts0 = (&phase0[Self::phase0_old_stack_ts0()]).try_into().unwrap();
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_stack_ts0,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt0()],
-        )?;
+        );
         StackChip::pop(
             &mut chip_handler,
             &mut circuit_builder,
@@ -135,14 +133,14 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             addend_0.values(),
         );
 
-        let old_stack_ts1 = (&phase0[Self::phase0_old_stack_ts1()]).try_into()?;
+        let old_stack_ts1 = (&phase0[Self::phase0_old_stack_ts1()]).try_into().unwrap();
         TSUInt::assert_lt(
             &mut circuit_builder,
             &mut chip_handler,
             &old_stack_ts1,
             &stack_ts,
             &phase0[Self::phase0_old_stack_ts_lt1()],
-        )?;
+        );
         StackChip::pop(
             &mut chip_handler,
             &mut circuit_builder,
@@ -173,14 +171,14 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 
         let outputs_wire_id = [ram_load_id, ram_store_id, rom_id];
 
-        Ok(InstCircuit {
+        InstCircuit {
             circuit: Arc::new(Circuit::new(&circuit_builder)),
             layout: InstCircuitLayout {
                 chip_check_wire_id: outputs_wire_id,
                 phases_wire_id: vec![phase0_wire_id],
                 ..Default::default()
             },
-        })
+        }
     }
 }
 
@@ -229,7 +227,7 @@ mod test {
         }
 
         // initialize general test inputs associated with push1
-        let inst_circuit = AddInstruction::construct_circuit(challenges).unwrap();
+        let inst_circuit = AddInstruction::construct_circuit(challenges);
 
         #[cfg(feature = "test-dbg")]
         println!("{:?}", inst_circuit);
@@ -319,8 +317,7 @@ mod test {
     #[cfg(not(debug_assertions))]
     fn bench_add_instruction_helper<E: ExtensionField>(instance_num_vars: usize) {
         let chip_challenges = ChipChallenges::default();
-        let circuit_builder =
-            SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
+        let circuit_builder = SingerCircuitBuilder::<E>::new(chip_challenges);
         let mut singer_builder = SingerGraphBuilder::<E>::default();
 
         let mut rng = test_rng();
@@ -348,8 +345,7 @@ mod test {
             &real_challenges,
             1 << instance_num_vars,
             &SingerParams::default(),
-        )
-        .expect("gkr graph construction failed");
+        );
 
         let (graph, wit) = singer_builder.graph_builder.finalize_graph_and_witness();
 

@@ -72,7 +72,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
                 real_challenges,
                 real_n_instances,
                 params,
-            )?;
+            );
             if pub_out_id.is_some() {
                 self.public_output_size = pub_out_id;
             }
@@ -87,7 +87,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
             singer_wires_in.table_count,
             &circuit_builder.challenges,
             real_challenges,
-        )?;
+        );
 
         let SingerGraphBuilder {
             graph_builder,
@@ -130,7 +130,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
                 inst_circuits,
                 *real_n_instances,
                 &aux_info.singer_params,
-            )?;
+            );
             if pub_out_id.is_some() {
                 self.public_output_size = pub_out_id;
             }
@@ -143,7 +143,7 @@ impl<'a, E: ExtensionField> SingerGraphBuilder<'a, E> {
             aux_info.bytecode_len,
             aux_info.program_input_len,
             &circuit_builder.challenges,
-        )?;
+        );
 
         let SingerGraphBuilder {
             graph_builder,

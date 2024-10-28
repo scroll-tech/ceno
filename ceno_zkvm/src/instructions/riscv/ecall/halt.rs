@@ -1,7 +1,6 @@
 use crate::{
     chip_handler::RegisterChipOperations,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{ToExpr, WitIn},
     gadgets::AssertLTConfig,
     instructions::{
@@ -33,10 +32,10 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         "ECALL_HALT".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        let prev_x10_ts = cb.create_witin("prev_x10_ts")?;
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
+        let prev_x10_ts = cb.create_witin("prev_x10_ts");
         let exit_code = {
-            let exit_code = cb.query_exit_code()?;
+            let exit_code = cb.query_exit_code();
             [exit_code[0].expr(), exit_code[1].expr()]
         };
 
@@ -45,7 +44,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             [ECALL_HALT_OPCODE[0].into(), ECALL_HALT_OPCODE[1].into()],
             None,
             Some(EXIT_PC.into()),
-        )?;
+        );
 
         // read exit_code from arg0 (X10 register)
         let (_, lt_x10_cfg) = cb.register_read(
@@ -54,13 +53,13 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             prev_x10_ts.expr(),
             ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
-        )?;
+        );
 
-        Ok(HaltConfig {
+        HaltConfig {
             ecall_cfg,
             prev_x10_ts,
             lt_x10_cfg,
-        })
+        }
     }
 
     fn assign_instance(
@@ -68,7 +67,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         assert_eq!(
             step.rs1().unwrap().value,
             (ECALL_HALT_OPCODE[0] + (ECALL_HALT_OPCODE[1] << 16)) as u32
@@ -92,12 +91,10 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             lk_multiplicity,
             step.rs2().unwrap().previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS2,
-        )?;
+        );
 
         config
             .ecall_cfg
-            .assign_instance::<E>(instance, lk_multiplicity, step)?;
-
-        Ok(())
+            .assign_instance::<E>(instance, lk_multiplicity, step);
     }
 }

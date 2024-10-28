@@ -596,8 +596,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     ) {
         let mut cs = ConstraintSystem::<E>::new("mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
+        let config = ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb);
         let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
             &config,
             cs.num_fixed,
@@ -690,7 +689,6 @@ mod tests {
     use super::*;
     use crate::{
         ROMType::U5,
-        error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLTConfig, IsLtConfig},
         set_val,
@@ -709,22 +707,20 @@ mod tests {
     }
 
     impl AssertZeroCircuit {
-        pub fn construct_circuit(
-            cb: &mut CircuitBuilder<GoldilocksExt2>,
-        ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin("a")?;
-            let b = cb.create_witin("b")?;
-            let c = cb.create_witin("c")?;
+        pub fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
+            let a = cb.create_witin("a");
+            let b = cb.create_witin("b");
+            let c = cb.create_witin("c");
 
             // degree 1
-            cb.require_equal("a + 1 == b", b.expr(), a.expr() + 1)?;
-            cb.require_zero("c - 2 == 0", c.expr() - 2)?;
+            cb.require_equal("a + 1 == b", b.expr(), a.expr() + 1);
+            cb.require_zero("c - 2 == 0", c.expr() - 2);
 
             // degree > 1
-            let d = cb.create_witin("d")?;
-            cb.require_zero("d*d - 6*d + 9 == 0", d.expr() * d.expr() - d.expr() * 6 + 9)?;
+            let d = cb.create_witin("d");
+            cb.require_zero("d*d - 6*d + 9 == 0", d.expr() * d.expr() - d.expr() * 6 + 9);
 
-            Ok(Self { a, b, c })
+            Self { a, b, c }
         }
     }
 
@@ -733,7 +729,7 @@ mod tests {
         let mut cs = ConstraintSystem::new("test_assert_zero_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let _ = AssertZeroCircuit::construct_circuit(&mut builder).unwrap();
+        AssertZeroCircuit::construct_circuit(&mut builder);
 
         let wits_in = vec![
             vec![Goldilocks::from(3), Goldilocks::from(500)]
@@ -760,12 +756,10 @@ mod tests {
     }
 
     impl RangeCheckCircuit {
-        pub fn construct_circuit(
-            cb: &mut CircuitBuilder<GoldilocksExt2>,
-        ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin("a")?;
-            cb.assert_ux::<_, 5>("assert u5", a.expr())?;
-            Ok(Self { a })
+        pub fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
+            let a = cb.create_witin("a");
+            cb.assert_ux::<_, 5>("assert u5", a.expr());
+            Self { a }
         }
     }
 
@@ -774,7 +768,7 @@ mod tests {
         let mut cs = ConstraintSystem::new("test_lookup_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
+        RangeCheckCircuit::construct_circuit(&mut builder);
 
         let wits_in = vec![
             vec![Goldilocks::from(3u64), Goldilocks::from(5u64)]
@@ -792,7 +786,7 @@ mod tests {
         let mut cs = ConstraintSystem::new("test_lookup_error");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
+        RangeCheckCircuit::construct_circuit(&mut builder);
 
         let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
 
@@ -843,11 +837,11 @@ mod tests {
     }
 
     impl AssertLtCircuit {
-        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin("a")?;
-            let b = cb.create_witin("b")?;
-            let lt_wtns = AssertLTConfig::construct_circuit(cb, "lt", a.expr(), b.expr(), 1)?;
-            Ok(Self { a, b, lt_wtns })
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
+            let a = cb.create_witin("a");
+            let b = cb.create_witin("b");
+            let lt_wtns = AssertLTConfig::construct_circuit(cb, "lt", a.expr(), b.expr(), 1);
+            Self { a, b, lt_wtns }
         }
 
         fn assign_instance<E: ExtensionField>(
@@ -855,13 +849,11 @@ mod tests {
             instance: &mut [MaybeUninit<E::BaseField>],
             input: AssertLtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
-        ) -> Result<(), ZKVMError> {
+        ) {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
             self.lt_wtns
-                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
-
-            Ok(())
+                .assign_instance(instance, lk_multiplicity, input.a, input.b);
         }
 
         fn assign_instances<E: ExtensionField>(
@@ -869,17 +861,17 @@ mod tests {
             num_witin: usize,
             instances: Vec<AssertLtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
-        ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        ) -> RowMajorMatrix<E::BaseField> {
             let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
-                .zip_eq(instances.into_iter())
-                .try_for_each(|(instance, input)| {
+                .zip_eq(instances)
+                .for_each(|(instance, input)| {
                     self.assign_instance::<E>(instance, input, lk_multiplicity)
-                })?;
+                });
 
-            Ok(raw_witin)
+            raw_witin
         }
     }
 
@@ -888,19 +880,17 @@ mod tests {
         let mut cs = ConstraintSystem::new("test_assert_lt_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = AssertLtCircuit::construct_circuit(&mut builder);
 
         let mut lk_multiplicity = LkMultiplicity::default();
-        let raw_witin = circuit
-            .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
-                vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
-                    a: 7,
-                    b: 11,
-                }],
-                &mut lk_multiplicity,
-            )
-            .unwrap();
+        let raw_witin = circuit.assign_instances::<GoldilocksExt2>(
+            builder.cs.num_witin as usize,
+            vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
+                a: 7,
+                b: 11,
+            }],
+            &mut lk_multiplicity,
+        );
 
         MockProver::assert_satisfied(
             &builder,
@@ -921,24 +911,22 @@ mod tests {
         let mut cs = ConstraintSystem::new("test_assert_lt_u32");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = AssertLtCircuit::construct_circuit(&mut builder);
         let mut lk_multiplicity = LkMultiplicity::default();
-        let raw_witin = circuit
-            .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
-                vec![
-                    AssertLtCircuitInput {
-                        a: u32::MAX as u64 - 5,
-                        b: u32::MAX as u64 - 3,
-                    },
-                    AssertLtCircuitInput {
-                        a: u32::MAX as u64 - 3,
-                        b: u32::MAX as u64 - 2,
-                    },
-                ],
-                &mut lk_multiplicity,
-            )
-            .unwrap();
+        let raw_witin = circuit.assign_instances::<GoldilocksExt2>(
+            builder.cs.num_witin as usize,
+            vec![
+                AssertLtCircuitInput {
+                    a: u32::MAX as u64 - 5,
+                    b: u32::MAX as u64 - 3,
+                },
+                AssertLtCircuitInput {
+                    a: u32::MAX as u64 - 3,
+                    b: u32::MAX as u64 - 2,
+                },
+            ],
+            &mut lk_multiplicity,
+        );
 
         MockProver::assert_satisfied(
             &builder,
@@ -967,11 +955,11 @@ mod tests {
     }
 
     impl LtCircuit {
-        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin("a")?;
-            let b = cb.create_witin("b")?;
-            let lt_wtns = IsLtConfig::construct_circuit(cb, "lt", a.expr(), b.expr(), 1)?;
-            Ok(Self { a, b, lt_wtns })
+        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Self {
+            let a = cb.create_witin("a");
+            let b = cb.create_witin("b");
+            let lt_wtns = IsLtConfig::construct_circuit(cb, "lt", a.expr(), b.expr(), 1);
+            Self { a, b, lt_wtns }
         }
 
         fn assign_instance<E: ExtensionField>(
@@ -979,13 +967,11 @@ mod tests {
             instance: &mut [MaybeUninit<E::BaseField>],
             input: LtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
-        ) -> Result<(), ZKVMError> {
+        ) {
             set_val!(instance, self.a, input.a);
             set_val!(instance, self.b, input.b);
             self.lt_wtns
-                .assign_instance(instance, lk_multiplicity, input.a, input.b)?;
-
-            Ok(())
+                .assign_instance(instance, lk_multiplicity, input.a, input.b);
         }
 
         fn assign_instances<E: ExtensionField>(
@@ -993,17 +979,17 @@ mod tests {
             num_witin: usize,
             instances: Vec<LtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
-        ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        ) -> RowMajorMatrix<E::BaseField> {
             let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
-                .zip_eq(instances.into_iter())
-                .try_for_each(|(instance, input)| {
+                .zip_eq(instances)
+                .for_each(|(instance, input)| {
                     self.assign_instance::<E>(instance, input, lk_multiplicity)
-                })?;
+                });
 
-            Ok(raw_witin)
+            raw_witin
         }
     }
 
@@ -1012,19 +998,17 @@ mod tests {
         let mut cs = ConstraintSystem::new("test_lt_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = LtCircuit::construct_circuit(&mut builder);
 
         let mut lk_multiplicity = LkMultiplicity::default();
-        let raw_witin = circuit
-            .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
-                vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
-                    a: 7,
-                    b: 11,
-                }],
-                &mut lk_multiplicity,
-            )
-            .unwrap();
+        let raw_witin = circuit.assign_instances::<GoldilocksExt2>(
+            builder.cs.num_witin as usize,
+            vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
+                a: 7,
+                b: 11,
+            }],
+            &mut lk_multiplicity,
+        );
 
         MockProver::assert_satisfied(
             &builder,
@@ -1045,25 +1029,23 @@ mod tests {
         let mut cs = ConstraintSystem::new("test_lt_u32");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = LtCircuit::construct_circuit(&mut builder);
 
         let mut lk_multiplicity = LkMultiplicity::default();
-        let raw_witin = circuit
-            .assign_instances::<GoldilocksExt2>(
-                builder.cs.num_witin as usize,
-                vec![
-                    LtCircuitInput {
-                        a: u32::MAX as u64 - 5,
-                        b: u32::MAX as u64 - 3,
-                    },
-                    LtCircuitInput {
-                        a: u32::MAX as u64 - 3,
-                        b: u32::MAX as u64 - 5,
-                    },
-                ],
-                &mut lk_multiplicity,
-            )
-            .unwrap();
+        let raw_witin = circuit.assign_instances::<GoldilocksExt2>(
+            builder.cs.num_witin as usize,
+            vec![
+                LtCircuitInput {
+                    a: u32::MAX as u64 - 5,
+                    b: u32::MAX as u64 - 3,
+                },
+                LtCircuitInput {
+                    a: u32::MAX as u64 - 3,
+                    b: u32::MAX as u64 - 5,
+                },
+            ],
+            &mut lk_multiplicity,
+        );
 
         MockProver::assert_satisfied(
             &builder,

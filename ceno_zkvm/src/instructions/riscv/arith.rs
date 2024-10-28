@@ -6,7 +6,6 @@ use ff_ext::ExtensionField;
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::Instruction,
     uint::{Value, ValueMul},
     witness::LkMultiplicity,
@@ -50,36 +49,33 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::InstructionConfig {
         let (rs1_read, rs2_read, rd_written) = match I::INST_KIND {
             InsnKind::ADD => {
                 // rd_written = rs1_read + rs2_read
-                let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
-                let rd_written = rs1_read.add("rd_written", circuit_builder, &rs2_read, true)?;
+                let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder);
+                let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder);
+                let rd_written = rs1_read.add("rd_written", circuit_builder, &rs2_read, true);
                 (rs1_read, rs2_read, rd_written)
             }
 
             InsnKind::SUB => {
                 // rd_written + rs2_read = rs1_read
                 // rd_written is the new value to be updated in register so we need to constrain its range.
-                let rd_written = UInt::new("rd_written", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
+                let rd_written = UInt::new("rd_written", circuit_builder);
+                let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder);
                 let rs1_read =
                     rs2_read
                         .clone()
-                        .add("rs1_read", circuit_builder, &rd_written.clone(), true)?;
+                        .add("rs1_read", circuit_builder, &rd_written.clone(), true);
                 (rs1_read, rs2_read, rd_written)
             }
 
             InsnKind::MUL => {
                 // rs1_read * rs2_read = rd_written
-                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
-                let mut rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
-                let rd_written =
-                    rs1_read.mul("rd_written", circuit_builder, &mut rs2_read, true)?;
+                let mut rs1_read = UInt::new_unchecked("rs1_read", circuit_builder);
+                let mut rs2_read = UInt::new_unchecked("rs2_read", circuit_builder);
+                let rd_written = rs1_read.mul("rd_written", circuit_builder, &mut rs2_read, true);
                 (rs1_read, rs2_read, rd_written)
             }
 
@@ -92,14 +88,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             rd_written.register_expr(),
-        )?;
+        );
 
-        Ok(ArithConfig {
+        ArithConfig {
             r_insn,
             rs1_read,
             rs2_read,
             rd_written,
-        })
+        }
     }
 
     fn assign_instance(
@@ -107,10 +103,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         config
             .r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
 
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         config
@@ -155,13 +151,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         limbs: rd_written.limbs.to_vec(),
                         carries: result.carries,
                         max_carry_value: result.max_carry_value,
-                    })?;
+                    });
             }
 
             _ => unreachable!("Unsupported instruction kind"),
         };
-
-        Ok(())
     }
 }
 
@@ -183,13 +177,7 @@ mod test {
     fn test_opcode_add() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace("add", |cb| {
-                let config = AddInstruction::construct_circuit(cb);
-                Ok(config)
-            })
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace("add", AddInstruction::construct_circuit);
 
         let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
@@ -203,8 +191,7 @@ mod test {
                     Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_add(0xfffffffe))
@@ -214,8 +201,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,
@@ -235,13 +221,7 @@ mod test {
     fn test_opcode_add_overflow() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace("add", |cb| {
-                let config = AddInstruction::construct_circuit(cb);
-                Ok(config)
-            })
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace("add", AddInstruction::construct_circuit);
 
         let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
         let (raw_witin, lkm) =
@@ -255,8 +235,7 @@ mod test {
                     Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked((u32::MAX - 1).wrapping_add(u32::MAX - 1))
@@ -266,8 +245,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,
@@ -287,13 +265,7 @@ mod test {
     fn test_opcode_sub() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace("sub", |cb| {
-                let config = SubInstruction::construct_circuit(cb);
-                Ok(config)
-            })
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace("sub", SubInstruction::construct_circuit);
 
         let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, lkm) =
@@ -307,8 +279,7 @@ mod test {
                     Change::new(0, 11_u32.wrapping_sub(2)),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_sub(2))
@@ -318,8 +289,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,
@@ -339,13 +309,7 @@ mod test {
     fn test_opcode_sub_underflow() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace("sub", |cb| {
-                let config = SubInstruction::construct_circuit(cb);
-                Ok(config)
-            })
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace("sub", SubInstruction::construct_circuit);
 
         let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
         let (raw_witin, _) =
@@ -359,8 +323,7 @@ mod test {
                     Change::new(0, 3_u32.wrapping_sub(11)),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(3_u32.wrapping_sub(11))
@@ -370,8 +333,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,
@@ -391,10 +353,7 @@ mod test {
     fn test_opcode_mul() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace("mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace("mul", MulInstruction::construct_circuit);
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
@@ -409,16 +368,14 @@ mod test {
                     Change::new(0, 22),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
 
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,
@@ -438,10 +395,7 @@ mod test {
     fn test_opcode_mul_overflow() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace("mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace("mul", MulInstruction::construct_circuit);
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
@@ -456,15 +410,13 @@ mod test {
                     Change::new(0, 0),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written = UInt::from_const_unchecked(vec![0u64, 0]);
 
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,
@@ -484,10 +436,7 @@ mod test {
     fn test_opcode_mul_overflow2() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace("mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
+        let config = cb.namespace("mul", MulInstruction::construct_circuit);
 
         let a = Value::<'_, u32>::new_unchecked(u32::MAX);
         let b = Value::<'_, u32>::new_unchecked(u32::MAX);
@@ -510,15 +459,13 @@ mod test {
                     ),
                     0,
                 ),
-            ])
-            .unwrap();
+            ]);
 
         let expected_rd_written = UInt::from_const_unchecked(c_limb.clone());
 
         config
             .rd_written
-            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written);
 
         MockProver::assert_satisfied(
             &cb,

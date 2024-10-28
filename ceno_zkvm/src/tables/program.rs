@@ -2,7 +2,6 @@ use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
@@ -124,18 +123,18 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         "PROGRAM".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> ProgramTableConfig {
         let record = InsnRecord([
-            cb.create_fixed("pc")?,
-            cb.create_fixed("opcode")?,
-            cb.create_fixed("rd")?,
-            cb.create_fixed("funct3")?,
-            cb.create_fixed("rs1")?,
-            cb.create_fixed("rs2")?,
-            cb.create_fixed("imm_or_funct7")?,
+            cb.create_fixed("pc"),
+            cb.create_fixed("opcode"),
+            cb.create_fixed("rd"),
+            cb.create_fixed("funct3"),
+            cb.create_fixed("rs1"),
+            cb.create_fixed("rs2"),
+            cb.create_fixed("imm_or_funct7"),
         ]);
 
-        let mlt = cb.create_witin("mlt")?;
+        let mlt = cb.create_witin("mlt");
 
         let record_exprs = {
             let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
@@ -143,9 +142,9 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             cb.rlc_chip_record(fields)
         };
 
-        cb.lk_table_record("prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
+        cb.lk_table_record("prog table", PROGRAM_SIZE, record_exprs, mlt.expr());
 
-        Ok(ProgramTableConfig { record, mlt })
+        ProgramTableConfig { record, mlt }
     }
 
     fn generate_fixed_traces(
@@ -193,7 +192,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         num_instructions: &usize,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> RowMajorMatrix<E::BaseField> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
         let mut prog_mlt = vec![0_usize; *num_instructions];
@@ -211,6 +210,6 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        Ok(witness)
+        witness
     }
 }

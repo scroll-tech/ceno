@@ -17,7 +17,6 @@ use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     structs::{ChallengeId, WitnessId},
 };
 
@@ -612,16 +611,16 @@ impl WitIn {
         circuit_builder: &mut CircuitBuilder<E>,
         input: Expression<E>,
         debug: bool,
-    ) -> Result<Self, ZKVMError>
+    ) -> Self
     where
         Name: Into<String> + Clone,
     {
         circuit_builder.namespace("from_expr", |cb| {
-            let wit = cb.create_witin(name.clone())?;
+            let wit = cb.create_witin(name.clone());
             if !debug {
-                cb.require_zero(name.clone(), wit.expr() - input)?;
+                cb.require_zero(name.clone(), wit.expr() - input);
             }
-            Ok(wit)
+            wit
         })
     }
 
@@ -871,7 +870,7 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new("test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin("x").unwrap();
+        let x = cb.create_witin("x");
 
         // scaledsum * challenge
         // 3 * x + 2
@@ -937,9 +936,9 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new("test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin("x").unwrap();
-        let y = cb.create_witin("y").unwrap();
-        let z = cb.create_witin("z").unwrap();
+        let x = cb.create_witin("x");
+        let y = cb.create_witin("y");
+        let z = cb.create_witin("z");
         // scaledsum * challenge
         // 3 * x + 2
         let expr: Expression<E> =
@@ -979,8 +978,8 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new("test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin("x").unwrap();
-        let y = cb.create_witin("y").unwrap();
+        let x = cb.create_witin("x");
+        let y = cb.create_witin("y");
         // scaledsum * challenge
         // (x + 1) * (y + 1)
         let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())

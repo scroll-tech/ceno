@@ -9,7 +9,6 @@ use rayon::{
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     scheme::constants::MIN_PAR_SIZE,
     witness::{LkMultiplicity, RowMajorMatrix},
 };
@@ -30,9 +29,7 @@ pub trait Instruction<E: ExtensionField> {
     }
 
     fn name() -> String;
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError>;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> Self::InstructionConfig;
 
     // assign single instance giving step from trace
     fn assign_instance(
@@ -40,13 +37,13 @@ pub trait Instruction<E: ExtensionField> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-    ) -> Result<(), ZKVMError>;
+    );
 
     fn assign_instances(
         config: &Self::InstructionConfig,
         num_witin: usize,
         steps: Vec<StepRecord>,
-    ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
+    ) -> (RowMajorMatrix<E::BaseField>, LkMultiplicity) {
         let nthreads =
             std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
         let num_instance_per_batch = if steps.len() > 256 {
@@ -61,17 +58,15 @@ pub trait Instruction<E: ExtensionField> {
 
         raw_witin_iter
             .zip(steps.par_chunks(num_instance_per_batch))
-            .flat_map(|(instances, steps)| {
+            .for_each(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances
                     .chunks_mut(num_witin)
                     .zip(steps)
-                    .map(|(instance, step)| {
+                    .for_each(|(instance, step)| {
                         Self::assign_instance(config, instance, &mut lk_multiplicity, step)
                     })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Result<(), ZKVMError>>()?;
+            });
 
         let num_padding_instances = raw_witin.num_padding_instances();
         if num_padding_instances > 0 {
@@ -98,6 +93,6 @@ pub trait Instruction<E: ExtensionField> {
                 });
         }
 
-        Ok((raw_witin, lk_multiplicity))
+        (raw_witin, lk_multiplicity)
     }
 }

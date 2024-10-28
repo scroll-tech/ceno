@@ -5,7 +5,6 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     expression::ToExpr,
     instructions::{
         Instruction,
@@ -40,24 +39,22 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
         format!("{:?}", InsnKind::JAL)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<JalConfig<E>, ZKVMError> {
-        let rd_written = UInt::new("rd_written", circuit_builder)?;
+    fn construct_circuit(circuit_builder: &mut CircuitBuilder<E>) -> JalConfig<E> {
+        let rd_written = UInt::new("rd_written", circuit_builder);
 
         let j_insn = JInstructionConfig::construct_circuit(
             circuit_builder,
             InsnKind::JAL,
             rd_written.register_expr(),
-        )?;
+        );
 
         circuit_builder.require_equal(
             "jal rd_written",
             rd_written.value(),
             j_insn.vm_state.pc.expr() + PC_STEP_SIZE,
-        )?;
+        );
 
-        Ok(JalConfig { j_insn, rd_written })
+        JalConfig { j_insn, rd_written }
     }
 
     fn assign_instance(
@@ -65,14 +62,12 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
+    ) {
         config
             .j_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, lk_multiplicity, step);
 
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
         config.rd_written.assign_value(instance, rd_written);
-
-        Ok(())
     }
 }
