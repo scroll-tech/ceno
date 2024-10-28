@@ -1,7 +1,7 @@
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
-use itertools::{chain, Itertools};
+use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
@@ -40,12 +40,10 @@ impl NameSpace {
     }
 
     pub(crate) fn compute_path(&self, this: String) -> String {
-        let ns = self.get_namespaces();
-        if this.chars().any(|a| a == '/') {
+        if this.chars().contains(&'/') {
             panic!("'/' is not allowed in names");
         }
-
-        chain!(ns, once(&this)).join("/")
+        chain!(self.get_namespaces(), once(&this)).join("/")
     }
 
     pub fn get_namespaces(&self) -> &[String] {
