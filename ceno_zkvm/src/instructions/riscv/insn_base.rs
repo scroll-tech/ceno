@@ -40,13 +40,13 @@ impl<E: ExtensionField> StateInOut<E> {
         let pc = circuit_builder.create_witin(|| "pc")?;
         let (next_pc_opt, next_pc_expr) = if branching {
             let next_pc = circuit_builder.create_witin(|| "next_pc")?;
-            (Some(next_pc), next_pc.expr_fnord())
+            (Some(next_pc), next_pc.expr())
         } else {
-            (None, pc.expr_fnord() + PC_STEP_SIZE)
+            (None, pc.expr() + PC_STEP_SIZE)
         };
         let ts = circuit_builder.create_witin(|| "ts")?;
-        let next_ts = ts.expr_fnord() + Tracer::SUBCYCLES_PER_INSN;
-        circuit_builder.state_in(pc.expr_fnord(), ts.expr_fnord())?;
+        let next_ts = ts.expr() + Tracer::SUBCYCLES_PER_INSN;
+        circuit_builder.state_in(pc.expr(), ts.expr())?;
         circuit_builder.state_out(next_pc_expr, next_ts)?;
 
         Ok(StateInOut {
@@ -92,8 +92,8 @@ impl<E: ExtensionField> ReadRS1<E> {
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs1",
             id,
-            prev_ts.expr_fnord(),
-            cur_ts.expr_fnord() + Tracer::SUBCYCLE_RS1,
+            prev_ts.expr(),
+            cur_ts.expr() + Tracer::SUBCYCLE_RS1,
             rs1_read,
         )?;
 
@@ -147,8 +147,8 @@ impl<E: ExtensionField> ReadRS2<E> {
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs2",
             id,
-            prev_ts.expr_fnord(),
-            cur_ts.expr_fnord() + Tracer::SUBCYCLE_RS2,
+            prev_ts.expr(),
+            cur_ts.expr() + Tracer::SUBCYCLE_RS2,
             rs2_read,
         )?;
 
@@ -203,8 +203,8 @@ impl<E: ExtensionField> WriteRD<E> {
         let (_, lt_cfg) = circuit_builder.register_write(
             || "write_rd",
             id,
-            prev_ts.expr_fnord(),
-            cur_ts.expr_fnord() + Tracer::SUBCYCLE_RD,
+            prev_ts.expr(),
+            cur_ts.expr() + Tracer::SUBCYCLE_RD,
             prev_value.register_expr(),
             rd_written,
         )?;
@@ -262,8 +262,8 @@ impl<E: ExtensionField> ReadMEM<E> {
         let (_, lt_cfg) = circuit_builder.memory_read(
             || "read_memory",
             &mem_addr,
-            prev_ts.expr_fnord(),
-            cur_ts.expr_fnord() + Tracer::SUBCYCLE_MEM,
+            prev_ts.expr(),
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
             mem_read,
         )?;
 
@@ -318,8 +318,8 @@ impl WriteMEM {
         let (_, lt_cfg) = circuit_builder.memory_write(
             || "write_memory",
             &mem_addr,
-            prev_ts.expr_fnord(),
-            cur_ts.expr_fnord() + Tracer::SUBCYCLE_MEM,
+            prev_ts.expr(),
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
             prev_value,
             new_value,
         )?;
@@ -393,7 +393,7 @@ impl<E: ExtensionField> MemAddr<E> {
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
     pub fn low_bit_exprs(&self) -> Vec<Expression<E>> {
         iter::repeat_n(Expression::ZERO, self.n_zeros())
-            .chain(self.low_bits.iter().map(ToExpr::expr_fnord))
+            .chain(self.low_bits.iter().map(ToExpr::expr))
             .collect()
     }
 
@@ -403,13 +403,13 @@ impl<E: ExtensionField> MemAddr<E> {
         // The address as two u16 limbs.
         // Soundness: This does not use the UInt range-check but specialized checks instead.
         let addr = UInt::new_unchecked(|| "memory_addr", cb)?;
-        let limbs = addr.expr_fnord();
+        let limbs = addr.expr();
 
         // Witness and constrain the non-zero low bits.
         let low_bits = (n_zeros..Self::N_LOW_BITS)
             .map(|i| {
                 let bit = cb.create_witin(|| format!("addr_bit_{}", i))?;
-                cb.assert_bit(|| format!("addr_bit_{}", i), bit.expr_fnord())?;
+                cb.assert_bit(|| format!("addr_bit_{}", i), bit.expr())?;
                 Ok(bit)
             })
             .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
@@ -417,14 +417,14 @@ impl<E: ExtensionField> MemAddr<E> {
         // Express the value of the low bits.
         let low_sum: Expression<E> = (n_zeros..Self::N_LOW_BITS)
             .zip_eq(low_bits.iter())
-            .map(|(pos, bit)| bit.expr_fnord() * (1 << pos))
+            .map(|(pos, bit)| bit.expr() * (1 << pos))
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
         let shift_right = E::BaseField::from(1 << Self::N_LOW_BITS)
             .invert()
             .unwrap()
-            .expr_fnord();
+            .expr();
         let mid_u14 = (&limbs[0] - low_sum) * shift_right;
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 

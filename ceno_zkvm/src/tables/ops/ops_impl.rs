@@ -41,7 +41,7 @@ impl OpTableConfig {
             Expression::Fixed(abc[2]),
         ]);
 
-        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr_fnord())?;
+        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
 
         Ok(Self { abc, mlt })
     }

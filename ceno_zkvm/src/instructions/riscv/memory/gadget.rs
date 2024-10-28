@@ -34,7 +34,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
             (0..num_bytes)
                 .map(|i| {
                     let byte = cb.create_witin(|| format!("{}.le_bytes[{}]", anno, i))?;
-                    cb.assert_ux::<_, _, 8>(|| "byte range check", byte.expr_fnord())?;
+                    cb.assert_ux::<_, _, 8>(|| "byte range check", byte.expr())?;
 
                     Ok(byte)
                 })
@@ -54,7 +54,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 bytes
                     .iter()
                     .enumerate()
-                    .map(|(idx, byte)| (1 << (idx * 8)) * byte.expr_fnord())
+                    .map(|(idx, byte)| (1 << (idx * 8)) * byte.expr())
                     .sum(),
             )?;
 
@@ -68,8 +68,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 assert!(prev_word.wits_in().is_some() && rs2_word.wits_in().is_some());
 
                 let low_bits = addr.low_bit_exprs();
-                let prev_limbs = prev_word.expr_fnord();
-                let rs2_limbs = rs2_word.expr_fnord();
+                let prev_limbs = prev_word.expr();
+                let rs2_limbs = rs2_word.expr();
 
                 // degree 2 expression
                 let prev_target_limb = cb.select(&low_bits[1], &prev_limbs[1], &prev_limbs[0]);
@@ -80,7 +80,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
                 cb.assert_ux::<_, _, 8>(
                     || "rs2_limb[0].le_bytes[1]",
-                    u8_base_inv.expr_fnord() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr_fnord()),
+                    u8_base_inv.expr() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
@@ -88,9 +88,9 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 cb.condition_require_equal(
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
                     low_bits[0].clone(),
-                    expected_limb_change.expr_fnord(),
-                    (1 << 8) * (rs2_limb_bytes[0].expr_fnord() - prev_limb_bytes[1].expr_fnord()),
-                    rs2_limb_bytes[0].expr_fnord() - prev_limb_bytes[0].expr_fnord(),
+                    expected_limb_change.expr(),
+                    (1 << 8) * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()),
+                    rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr(),
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
@@ -98,9 +98,9 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 cb.condition_require_equal(
                     || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
                     low_bits[1].clone(),
-                    expected_change.expr_fnord(),
-                    (1 << 16) * expected_limb_change.expr_fnord(),
-                    expected_limb_change.expr_fnord(),
+                    expected_change.expr(),
+                    (1 << 16) * expected_limb_change.expr(),
+                    expected_limb_change.expr(),
                 )?;
 
                 Ok(MemWordChange {
@@ -114,8 +114,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 assert!(prev_word.wits_in().is_some() && rs2_word.wits_in().is_some());
 
                 let low_bits = addr.low_bit_exprs();
-                let prev_limbs = prev_word.expr_fnord();
-                let rs2_limbs = rs2_word.expr_fnord();
+                let prev_limbs = prev_word.expr();
+                let rs2_limbs = rs2_word.expr();
 
                 let expected_change = cb.create_witin(|| "expected_change")?;
 
@@ -124,7 +124,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     || "expected_change = select(low_bits[1], 2^16*(limb_change))",
                     // degree 2 expression
                     low_bits[1].clone(),
-                    expected_change.expr_fnord(),
+                    expected_change.expr(),
                     (1 << 16) * (&rs2_limbs[0] - &prev_limbs[1]),
                     &rs2_limbs[0] - &prev_limbs[0],
                 )?;
@@ -142,7 +142,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
     pub(crate) fn value<E: ExtensionField>(&self) -> Expression<E> {
         assert!(N_ZEROS <= 1);
 
-        self.expected_changes[1 - N_ZEROS].expr_fnord()
+        self.expected_changes[1 - N_ZEROS].expr()
     }
 
     pub fn assign_instance<E: ExtensionField>(

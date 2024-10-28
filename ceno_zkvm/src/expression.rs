@@ -726,7 +726,7 @@ impl WitIn {
                 let name = name().into();
                 let wit = cb.create_witin(|| name.clone())?;
                 if !debug {
-                    cb.require_zero(|| name.clone(), wit.expr_fnord() - input)?;
+                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
                 }
                 Ok(wit)
             },
@@ -742,65 +742,49 @@ impl WitIn {
     }
 }
 
-#[macro_export]
-/// this is to avoid non-monomial expression
-macro_rules! create_witin_from_expr {
-    // Handle the case for a single expression
-    ($name:expr, $builder:expr, $debug:expr, $e:expr) => {
-        WitIn::from_expr($name, $builder, $e, $debug)
-    };
-    // Recursively handle multiple expressions and create a flat tuple with error handling
-    ($name:expr, $builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
-        {
-            // Return a Result tuple, handling errors
-            Ok::<_, ZKVMError>((WitIn::from_expr($name, $builder, $e, $debug)?, $(WitIn::from_expr($name, $builder, $rest)?),*))
-        }
-    };
-}
-
 pub trait ToExpr<E: ExtensionField> {
     type Output;
-    fn expr_fnord(&self) -> Self::Output;
+    fn expr(&self) -> Self::Output;
 }
 
 impl<E: ExtensionField> ToExpr<E> for WitIn {
     type Output = Expression<E>;
-    fn expr_fnord(&self) -> Expression<E> {
+    fn expr(&self) -> Expression<E> {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &WitIn {
     type Output = Expression<E>;
-    fn expr_fnord(&self) -> Expression<E> {
+    fn expr(&self) -> Expression<E> {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Fixed {
     type Output = Expression<E>;
-    fn expr_fnord(&self) -> Expression<E> {
+    fn expr(&self) -> Expression<E> {
         Expression::Fixed(*self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &Fixed {
     type Output = Expression<E>;
-    fn expr_fnord(&self) -> Expression<E> {
+    fn expr(&self) -> Expression<E> {
         Expression::Fixed(**self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
-    fn expr_fnord(&self) -> Expression<E> {
+    fn expr(&self) -> Expression<E> {
         Expression::Instance(*self)
     }
 }
 
 impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     type Output = Expression<E>;
-    fn expr_fnord(&self) -> Expression<E> {
+    fn expr(&self) -> Expression<E> {
         Expression::Constant(*self)
     }
 }
@@ -1011,7 +995,7 @@ mod tests {
 
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> = 3 * x.expr_fnord() + 2;
+        let expr: Expression<E> = 3 * x.expr() + 2;
         // c^3 + 1
         let c = Expression::Challenge(0, 3, 1.into(), 1.into());
         // res
@@ -1019,7 +1003,7 @@ mod tests {
         assert_eq!(
             c * expr,
             Expression::ScaledSum(
-                Box::new(x.expr_fnord()),
+                Box::new(x.expr()),
                 Box::new(Expression::Challenge(0, 3, 3.into(), 3.into())),
                 Box::new(Expression::Challenge(0, 3, 2.into(), 2.into()))
             )
@@ -1027,11 +1011,11 @@ mod tests {
 
         // constant * witin
         // 3 * x
-        let expr: Expression<E> = 3 * x.expr_fnord();
+        let expr: Expression<E> = 3 * x.expr();
         assert_eq!(
             expr,
             Expression::ScaledSum(
-                Box::new(x.expr_fnord()),
+                Box::new(x.expr()),
                 Box::new(Expression::Constant(3.into())),
                 Box::new(Expression::Constant(0.into()))
             )
@@ -1077,32 +1061,32 @@ mod tests {
         let z = cb.create_witin(|| "z").unwrap();
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> = 3 * x.expr_fnord() + 2;
+        let expr: Expression<E> = 3 * x.expr() + 2;
         assert!(expr.is_monomial_form());
 
         // 2 product term
-        let expr: Expression<E> = 3 * x.expr_fnord() * y.expr_fnord() + 2 * x.expr_fnord();
+        let expr: Expression<E> = 3 * x.expr() * y.expr() + 2 * x.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> = Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into())
-            * x.expr_fnord()
-            * y.expr_fnord()
-            - 6 * z.expr_fnord();
+            * x.expr()
+            * y.expr()
+            - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> = Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into())
-            * x.expr_fnord()
-            * y.expr_fnord()
-            - 6 * z.expr_fnord();
+            * x.expr()
+            * y.expr()
+            - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2 * x + 3) * 3 + 6 * 8
-        let expr: Expression<E> = (2 * x.expr_fnord() + 3) * 3 + 6 * 8;
+        let expr: Expression<E> = (2 * x.expr() + 3) * 3 + 6 * 8;
         assert!(expr.is_monomial_form());
     }
 
@@ -1115,7 +1099,7 @@ mod tests {
         let y = cb.create_witin(|| "y").unwrap();
         // scaledsum * challenge
         // (x + 1) * (y + 1)
-        let expr: Expression<E> = (1 + x.expr_fnord()) * (2 + y.expr_fnord());
+        let expr: Expression<E> = (1 + x.expr()) * (2 + y.expr());
         assert!(!expr.is_monomial_form());
     }
 

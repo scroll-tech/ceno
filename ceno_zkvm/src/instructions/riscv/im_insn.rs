@@ -44,11 +44,11 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
 
         // Fetch the instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
-            vm_state.pc.expr_fnord(),
+            vm_state.pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
-            rd.id.expr_fnord(),
+            rd.id.expr(),
             (insn_kind.codes().func3 as usize).into(),
-            rs1.id.expr_fnord(),
+            rs1.id.expr(),
             0.into(),
             imm.clone(),
         ))?;

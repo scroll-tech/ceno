@@ -138,7 +138,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         let mlt = cb.create_witin(|| "mlt")?;
 
         let record_exprs = {
-            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr_fnord()];
+            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
             fields.extend(record.as_slice().iter().map(|f| Expression::Fixed(*f)));
             cb.rlc_chip_record(fields)
         };
@@ -147,7 +147,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             || "prog table",
             PROGRAM_SIZE,
             record_exprs,
-            mlt.expr_fnord(),
+            mlt.expr(),
         )?;
 
         Ok(ProgramTableConfig { record, mlt })

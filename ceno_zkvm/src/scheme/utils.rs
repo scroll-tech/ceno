@@ -677,10 +677,10 @@ mod tests {
         let b = cb.create_witin(|| "b").unwrap();
         let c = cb.create_witin(|| "c").unwrap();
 
-        let expr: Expression<E> = a.expr_fnord()
-            + b.expr_fnord()
-            + a.expr_fnord() * b.expr_fnord()
-            + (c.expr_fnord() * 3 + 2);
+        let expr: Expression<E> = a.expr()
+            + b.expr()
+            + a.expr() * b.expr()
+            + (c.expr() * 3 + 2);
 
         let res = wit_infer_by_expr(
             &[],
@@ -706,10 +706,10 @@ mod tests {
         let b = cb.create_witin(|| "b").unwrap();
         let c = cb.create_witin(|| "c").unwrap();
 
-        let expr: Expression<E> = a.expr_fnord()
-            + b.expr_fnord()
-            + a.expr_fnord() * b.expr_fnord()
-            + (c.expr_fnord() * 3 + 2)
+        let expr: Expression<E> = a.expr()
+            + b.expr()
+            + a.expr() * b.expr()
+            + (c.expr() * 3 + 2)
             + Expression::Challenge(0, 1, E::ONE, E::ONE);
 
         let res = wit_infer_by_expr(

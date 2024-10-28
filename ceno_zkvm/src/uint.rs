@@ -94,7 +94,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                             if is_check {
                                 cb.assert_ux::<_, _, C>(
                                     || format!("limb_{i}_in_{C}"),
-                                    w.expr_fnord(),
+                                    w.expr(),
                                 )?;
                             }
                             // skip range check
@@ -167,10 +167,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .map(|i| {
                 let w = circuit_builder.create_witin(|| "wit for limb").unwrap();
                 circuit_builder
-                    .assert_ux::<_, _, C>(|| "range check", w.expr_fnord())
+                    .assert_ux::<_, _, C>(|| "range check", w.expr())
                     .unwrap();
                 circuit_builder
-                    .require_zero(|| "create_witin_from_expr", w.expr_fnord() - &expr_limbs[i])
+                    .require_zero(|| "create_witin_from_expr", w.expr() - &expr_limbs[i])
                     .unwrap();
                 w
             })
@@ -297,7 +297,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 chunk
                     .iter()
                     .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift * limb.expr_fnord())
+                    .map(|(limb, shift)| shift * limb.expr())
                     .reduce(|a, b| a + b)
                     .unwrap()
             })
@@ -325,8 +325,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 let limbs = (0..k)
                     .map(|_| {
                         let w = circuit_builder.create_witin(|| "").unwrap();
-                        circuit_builder.assert_byte(|| "", w.expr_fnord()).unwrap();
-                        w.expr_fnord()
+                        circuit_builder.assert_byte(|| "", w.expr()).unwrap();
+                        w.expr()
                     })
                     .collect_vec();
                 let combined_limb = limbs
@@ -337,7 +337,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .unwrap();
 
                 circuit_builder
-                    .require_zero(|| "zero check", large_limb.expr_fnord() - combined_limb)
+                    .require_zero(|| "zero check", large_limb.expr() - combined_limb)
                     .unwrap();
                 limbs
             })
@@ -372,7 +372,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     (0..Self::NUM_LIMBS)
                         .map(|i| {
                             let w = cb.create_witin(|| format!("limb_{i}"))?;
-                            cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr_fnord())?;
+                            cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
                             Ok(w)
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
@@ -508,7 +508,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     /// Get an Expression<E> from the limbs, unsafe if Uint value exceeds field limit
     pub fn value(&self) -> Expression<E> {
         let base = Expression::from(1 << C);
-        self.expr_fnord()
+        self.expr()
             .into_iter()
             .rev()
             .reduce(|sum, limb| sum * &base + limb)
@@ -520,12 +520,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         &self,
     ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
         assert!(M == 2 * M2);
-        let mut self_lo = self.expr_fnord();
+        let mut self_lo = self.expr();
         let self_hi = self_lo.split_off(self_lo.len() / 2);
         Ok((
             UIntLimbs::from_exprs_unchecked(self_lo)?,
             UIntLimbs::from_exprs_unchecked(self_hi)?,
         ))
+    }
+
+    pub fn to_field_expr(&self, is_neg: Expression<E>) -> Expression<E> {
+        // Convert two's complement representation into field arithmetic.
+        // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
+        self.value() - is_neg * (1_u64 << 32)
     }
 }
 
@@ -563,11 +569,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UI
 
 impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<M, C, E> {
     type Output = Vec<Expression<E>>;
-    fn expr_fnord(&self) -> Vec<Expression<E>> {
+    fn expr(&self) -> Vec<Expression<E>> {
         match &self.limbs {
             UintLimb::WitIn(limbs) => limbs
                 .iter()
-                .map(ToExpr::expr_fnord)
+                .map(ToExpr::expr)
                 .collect::<Vec<Expression<E>>>(),
             UintLimb::Expression(e) => e.clone(),
         }
@@ -577,7 +583,7 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<
 impl<E: ExtensionField> UIntLimbs<32, 16, E> {
     /// Return a value suitable for register read/write. From [u16; 2] limbs.
     pub fn register_expr(&self) -> RegisterExpr<E> {
-        let u16_limbs = self.expr_fnord();
+        let u16_limbs = self.expr();
         u16_limbs.try_into().expect("two limbs with M=32 and C=16")
     }
 
@@ -595,7 +601,7 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
 impl<E: ExtensionField> UIntLimbs<32, 8, E> {
     /// Return a value suitable for register read/write. From [u8; 4] limbs.
     pub fn register_expr(&self) -> RegisterExpr<E> {
-        let u8_limbs = self.expr_fnord();
+        let u8_limbs = self.expr();
         let u16_limbs = u8_limbs
             .chunks(2)
             .map(|chunk| {

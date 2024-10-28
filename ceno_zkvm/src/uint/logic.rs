@@ -21,9 +21,9 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         for (a_byte, b_byte, c_byte) in izip!(a.limbs.iter(), b.limbs.iter(), c.limbs.iter()) {
             cb.logic_u8(
                 rom_type,
-                a_byte.expr_fnord(),
-                b_byte.expr_fnord(),
-                c_byte.expr_fnord(),
+                a_byte.expr(),
+                b_byte.expr(),
+                c_byte.expr(),
             )?;
         }
         Ok(())

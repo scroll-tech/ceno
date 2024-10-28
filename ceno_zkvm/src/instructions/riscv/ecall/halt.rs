@@ -37,7 +37,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         let prev_x10_ts = cb.create_witin(|| "prev_x10_ts")?;
         let exit_code = {
             let exit_code = cb.query_exit_code()?;
-            [exit_code[0].expr_fnord(), exit_code[1].expr_fnord()]
+            [exit_code[0].expr(), exit_code[1].expr()]
         };
 
         let ecall_cfg = EcallInstructionConfig::construct_circuit(
@@ -51,8 +51,8 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         let (_, lt_x10_cfg) = cb.register_read(
             || "read x10",
             E::BaseField::from(ceno_emul::CENO_PLATFORM.reg_arg0() as u64),
-            prev_x10_ts.expr_fnord(),
-            ecall_cfg.ts.expr_fnord() + Tracer::SUBCYCLE_RS2,
+            prev_x10_ts.expr(),
+            ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
         )?;
 

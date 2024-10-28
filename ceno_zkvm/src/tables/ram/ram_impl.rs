@@ -49,7 +49,7 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             [
                 vec![(RAM::RAM_TYPE as usize).into()],
                 vec![Expression::Fixed(addr)],
-                init_v.iter().map(|v| v.expr_fnord()).collect_vec(),
+                init_v.iter().map(|v| v.expr()).collect_vec(),
                 vec![Expression::ZERO], // Initial cycle.
             ]
             .concat(),
@@ -60,8 +60,8 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
                 // a v t
                 vec![(RAM::RAM_TYPE as usize).into()],
                 vec![Expression::Fixed(addr)],
-                final_v.iter().map(|v| v.expr_fnord()).collect_vec(),
-                vec![final_cycle.expr_fnord()],
+                final_v.iter().map(|v| v.expr()).collect_vec(),
+                vec![final_cycle.expr()],
             ]
             .concat(),
         );

@@ -717,14 +717,14 @@ mod tests {
             let c = cb.create_witin(|| "c")?;
 
             // degree 1
-            cb.require_equal(|| "a + 1 == b", b.expr_fnord(), a.expr_fnord() + 1)?;
-            cb.require_zero(|| "c - 2 == 0", c.expr_fnord() - 2)?;
+            cb.require_equal(|| "a + 1 == b", b.expr(), a.expr() + 1)?;
+            cb.require_zero(|| "c - 2 == 0", c.expr() - 2)?;
 
             // degree > 1
             let d = cb.create_witin(|| "d")?;
             cb.require_zero(
                 || "d*d - 6*d + 9 == 0",
-                d.expr_fnord() * d.expr_fnord() - d.expr_fnord() * 6 + 9,
+                d.expr() * d.expr() - d.expr() * 6 + 9,
             )?;
 
             Ok(Self { a, b, c })
@@ -767,7 +767,7 @@ mod tests {
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a")?;
-            cb.assert_ux::<_, _, 5>(|| "assert u5", a.expr_fnord())?;
+            cb.assert_ux::<_, _, 5>(|| "assert u5", a.expr())?;
             Ok(Self { a })
         }
     }
@@ -850,7 +850,7 @@ mod tests {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
             let lt_wtns =
-                AssertLTConfig::construct_circuit(cb, || "lt", a.expr_fnord(), b.expr_fnord(), 1)?;
+                AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -975,7 +975,7 @@ mod tests {
             let a = cb.create_witin(|| "a")?;
             let b = cb.create_witin(|| "b")?;
             let lt_wtns =
-                IsLtConfig::construct_circuit(cb, || "lt", a.expr_fnord(), b.expr_fnord(), 1)?;
+                IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 

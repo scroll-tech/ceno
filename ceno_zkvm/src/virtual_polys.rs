@@ -202,8 +202,8 @@ mod tests {
         let mut virtual_polys = VirtualPolynomials::new(1, 0);
 
         // 3xy + 2y
-        let expr: Expression<E> = Expression::from(3) * x.expr_fnord() * y.expr_fnord()
-            + Expression::from(2) * y.expr_fnord();
+        let expr: Expression<E> = Expression::from(3) * x.expr() * y.expr()
+            + Expression::from(2) * y.expr();
 
         let distrinct_zerocheck_terms_set = virtual_polys.add_mle_list_by_expr(
             None,
@@ -217,7 +217,7 @@ mod tests {
 
         // 3x^3
         let expr: Expression<E> =
-            Expression::from(3) * x.expr_fnord() * x.expr_fnord() * x.expr_fnord();
+            Expression::from(3) * x.expr() * x.expr() * x.expr();
         let distrinct_zerocheck_terms_set = virtual_polys.add_mle_list_by_expr(
             None,
             wits_in.iter().collect_vec(),

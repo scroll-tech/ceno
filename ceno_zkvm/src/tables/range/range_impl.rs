@@ -33,7 +33,7 @@ impl RangeTableConfig {
         let rlc_record =
             cb.rlc_chip_record(vec![(rom_type as usize).into(), Expression::Fixed(fixed)]);
 
-        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr_fnord())?;
+        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
 
         Ok(Self { fixed, mlt })
     }
