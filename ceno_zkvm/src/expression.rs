@@ -757,7 +757,9 @@ pub mod fmt {
     ) -> String {
         match expression {
             Expression::WitIn(wit_in) => {
-                wtns.push(*wit_in);
+                if !wtns.contains(wit_in) {
+                    wtns.push(*wit_in);
+                }
                 format!("WitIn({})", wit_in)
             }
             Expression::Challenge(id, pow, scaler, offset) => {
