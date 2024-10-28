@@ -25,6 +25,7 @@ impl OpTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
+        table_len: usize,
     ) -> Result<Self, ZKVMError> {
         let abc = [
             cb.create_fixed(|| "a")?,
@@ -40,7 +41,7 @@ impl OpTableConfig {
             Expression::Fixed(abc[2]),
         ]);
 
-        cb.lk_table_record(|| "record", rlc_record, mlt.expr())?;
+        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
 
         Ok(Self { abc, mlt })
     }
@@ -51,13 +52,6 @@ impl OpTableConfig {
         content: Vec<[u64; 3]>,
     ) -> RowMajorMatrix<F> {
         let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
-
-        // Fill the padding with zeros, if any.
-        fixed.par_iter_mut().skip(content.len()).for_each(|row| {
-            for col in &self.abc {
-                set_fixed_val!(row, *col, F::ZERO);
-            }
-        });
 
         fixed
             .par_iter_mut()
@@ -84,11 +78,6 @@ impl OpTableConfig {
         for (idx, mlt) in multiplicity {
             mlts[*idx as usize] = *mlt;
         }
-
-        // Fill the padding with zeros, if any.
-        witness.par_iter_mut().skip(length).for_each(|row| {
-            set_val!(row, self.mlt, F::ZERO);
-        });
 
         witness
             .par_iter_mut()

@@ -48,16 +48,18 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 }
 
+/// The common representation of a memory address.
+pub type AddressExpr<E> = Expression<E>;
+
 /// The common representation of a memory value.
-/// Format: `[u16; UINT_LIMBS]`, least-significant-first.
-pub type MemoryExpr<E> = [Expression<E>; UINT_LIMBS];
+pub type MemoryExpr<E> = Expression<E>;
 
 pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     #[allow(dead_code)]
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: &MemoryExpr<E>,
+        memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
@@ -68,7 +70,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: &MemoryExpr<E>,
+        memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,

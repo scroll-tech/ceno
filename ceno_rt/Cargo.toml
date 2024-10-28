@@ -10,5 +10,4 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-riscv = "0.11.1"
-riscv-rt = "0.12.2"
+riscv = "0.12"

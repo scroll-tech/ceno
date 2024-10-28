@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{MemoryChipOperations, MemoryExpr},
+    chip_handler::{AddressExpr, MemoryChipOperations, MemoryExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
@@ -16,7 +16,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
     fn memory_read(
         &mut self,
         name_fn: N,
-        memory_addr: &MemoryExpr<E>,
+        memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
@@ -25,11 +25,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
-                    vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Memory as u64,
-                    ))],
-                    memory_addr.to_vec(),
-                    value.to_vec(),
+                    vec![
+                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                        memory_addr.clone(),
+                    ],
+                    vec![value.clone()],
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -37,11 +37,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
                 [
-                    vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Memory as u64,
-                    ))],
-                    memory_addr.to_vec(),
-                    value.to_vec(),
+                    vec![
+                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                        memory_addr.clone(),
+                    ],
+                    vec![value],
                     vec![ts.clone()],
                 ]
                 .concat(),
@@ -58,7 +58,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 UINT_LIMBS,
             )?;
 
-            let next_ts = ts + 1.into();
+            let next_ts = ts + 1;
 
             Ok((next_ts, lt_cfg))
         })
@@ -67,7 +67,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
     fn memory_write(
         &mut self,
         name_fn: N,
-        memory_addr: &MemoryExpr<E>,
+        memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
@@ -77,11 +77,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
-                    vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Memory as u64,
-                    ))],
-                    memory_addr.to_vec(),
-                    prev_values.to_vec(),
+                    vec![
+                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                        memory_addr.clone(),
+                    ],
+                    vec![prev_values],
                     vec![prev_ts.clone()],
                 ]
                 .concat(),
@@ -89,11 +89,11 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
                 [
-                    vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Memory as u64,
-                    ))],
-                    memory_addr.to_vec(),
-                    value.to_vec(),
+                    vec![
+                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                        memory_addr.clone(),
+                    ],
+                    vec![value],
                     vec![ts.clone()],
                 ]
                 .concat(),
@@ -109,7 +109,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 UINT_LIMBS,
             )?;
 
-            let next_ts = ts + 1.into();
+            let next_ts = ts + 1;
 
             Ok((next_ts, lt_cfg))
         })

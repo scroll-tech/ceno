@@ -4,3 +4,4 @@ target
 log.txt
 logs/
 table_cache_dev_*
+.DS_Store

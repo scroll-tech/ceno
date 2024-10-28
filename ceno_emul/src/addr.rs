@@ -79,6 +79,10 @@ impl ByteAddr {
         WordAddr(self.0 / WORD_SIZE as u32)
     }
 
+    pub const fn shift(self) -> u32 {
+        self.0 & 0x03
+    }
+
     pub const fn is_aligned(&self) -> bool {
         self.0 % WORD_SIZE as u32 == 0
     }

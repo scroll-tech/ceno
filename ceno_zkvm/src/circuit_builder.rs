@@ -69,6 +69,13 @@ impl NameSpace {
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
+    pub table_len: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTableExpression<E: ExtensionField> {
+    pub values: Expression<E>,
+    pub table_len: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +95,12 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
+
+    /// init/final ram expression
+    pub r_table_expressions: Vec<SetTableExpression<E>>,
+    pub r_table_expressions_namespace_map: Vec<String>,
+    pub w_table_expressions: Vec<SetTableExpression<E>>,
+    pub w_table_expressions_namespace_map: Vec<String>,
 
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
@@ -131,6 +144,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             r_expressions_namespace_map: vec![],
             w_expressions: vec![],
             w_expressions_namespace_map: vec![],
+            r_table_expressions: vec![],
+            r_table_expressions_namespace_map: vec![],
+            w_table_expressions: vec![],
+            w_table_expressions_namespace_map: vec![],
             lk_expressions: vec![],
             lk_expressions_namespace_map: vec![],
             lk_table_expressions: vec![],
@@ -262,6 +279,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        table_len: usize,
         rlc_record: Expression<E>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
@@ -278,9 +296,62 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
             multiplicity,
+            table_len,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.lk_table_expressions_namespace_map.push(path);
+
+        Ok(())
+    }
+
+    pub fn r_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_len: usize,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc record degree {} != 1",
+            rlc_record.degree()
+        );
+        self.r_table_expressions.push(SetTableExpression {
+            values: rlc_record,
+            table_len,
+        });
+        let path = self.ns.compute_path(name_fn().into());
+        self.r_table_expressions_namespace_map.push(path);
+
+        Ok(())
+    }
+
+    pub fn w_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_len: usize,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc record degree {} != 1",
+            rlc_record.degree()
+        );
+        self.w_table_expressions.push(SetTableExpression {
+            values: rlc_record,
+            table_len,
+        });
+        let path = self.ns.compute_path(name_fn().into());
+        self.w_table_expressions_namespace_map.push(path);
 
         Ok(())
     }

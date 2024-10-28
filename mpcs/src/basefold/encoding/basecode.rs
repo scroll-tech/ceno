@@ -10,7 +10,7 @@ use crate::{
 };
 use aes::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use ark_std::{end_timer, start_timer};
-use ff::{BatchInverter, Field, PrimeField};
+use ff::{BatchInvert, Field, PrimeField};
 use ff_ext::ExtensionField;
 use generic_array::GenericArray;
 use multilinear_extensions::mle::FieldType;
@@ -354,8 +354,7 @@ pub fn get_table_aes<E: ExtensionField, Rng: RngCore + Clone>(
         .collect();
 
     // Then invert all the elements. Now weights = { -1/2x }
-    let mut scratch_space = vec![E::BaseField::ZERO; weights.len()];
-    BatchInverter::invert_with_external_scratch(&mut weights, &mut scratch_space);
+    BatchInvert::batch_invert(&mut weights);
 
     // Zip x and -1/2x together. The result is the list { (x, -1/2x) }
     // What is this -1/2x? It is used in linear interpolation over the domain (x, -x), which

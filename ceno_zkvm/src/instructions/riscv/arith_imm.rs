@@ -44,6 +44,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             &imm.value(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
+            false,
         )?;
 
         Ok(InstructionConfig {
@@ -80,15 +81,15 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_ADDI, MOCK_PC_ADDI_SUB, MOCK_PROGRAM, MockProver},
+        instructions::{Instruction, riscv::test_utils::imm_i},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     use super::AddiInstruction;
@@ -108,13 +109,14 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_ADDI,
-                MOCK_PROGRAM[13],
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                insn_code,
                 1000,
                 Change::new(0, 1003),
                 0,
@@ -130,6 +132,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[insn_code],
             None,
             Some(lkm),
         );
@@ -150,13 +153,14 @@ mod test {
             .unwrap()
             .unwrap();
 
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(-3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_ADDI_SUB,
-                MOCK_PROGRAM[14],
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                insn_code,
                 1000,
                 Change::new(0, 997),
                 0,
@@ -172,7 +176,8 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            Some([1.into(), 10000.into()]),
+            &[insn_code],
+            None,
             Some(lkm),
         );
     }

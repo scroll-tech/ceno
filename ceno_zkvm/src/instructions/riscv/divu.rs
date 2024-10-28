@@ -62,7 +62,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "outcome_is_zero",
             is_zero.expr(),
             outcome_value.clone(),
-            ((1u64 << UInt::<E>::M) - 1).into(),
+            ((1u64 << UInt::<E>::TOTAL_BITS) - 1).into(),
             outcome_value,
         )?;
 
@@ -151,7 +151,7 @@ mod test {
 
     mod divu {
 
-        use ceno_emul::{Change, StepRecord, Word};
+        use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
@@ -164,10 +164,16 @@ mod test {
                 Instruction,
                 riscv::{constants::UInt, divu::DivUInstruction},
             },
-            scheme::mock_prover::{MOCK_PC_DIVU, MOCK_PROGRAM, MockProver},
+            scheme::mock_prover::{MOCK_PC_START, MockProver},
         };
 
-        fn verify(name: &'static str, dividend: Word, divisor: Word, exp_outcome: Word) {
+        fn verify(
+            name: &'static str,
+            dividend: Word,
+            divisor: Word,
+            exp_outcome: Word,
+            is_ok: bool,
+        ) {
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
@@ -183,13 +189,15 @@ mod test {
             } else {
                 dividend / divisor
             };
+
+            let insn_code = encode_rv32(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, lkm) =
                 DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                     StepRecord::new_r_instruction(
                         3,
-                        MOCK_PC_DIVU,
-                        MOCK_PROGRAM[9],
+                        MOCK_PC_START,
+                        insn_code,
                         dividend,
                         divisor,
                         Change::new(0, outcome),
@@ -207,7 +215,8 @@ mod test {
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
 
-            MockProver::assert_satisfied(
+            let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
+            MockProver::assert_with_expected_errors(
                 &cb,
                 &raw_witin
                     .de_interleaving()
@@ -215,20 +224,27 @@ mod test {
                     .into_iter()
                     .map(|v| v.into())
                     .collect_vec(),
+                &[insn_code],
+                expected_errors,
                 None,
                 Some(lkm),
             );
         }
         #[test]
         fn test_opcode_divu() {
-            verify("basic", 10, 2, 5);
-            verify("dividend > divisor", 10, 11, 0);
-            verify("remainder", 11, 2, 5);
-            verify("u32::MAX", u32::MAX, u32::MAX, 1);
-            verify("div u32::MAX", 3, u32::MAX, 0);
-            verify("u32::MAX div by 2", u32::MAX, 2, u32::MAX / 2);
-            verify("mul with carries", 1202729773, 171818539, 7);
-            verify("div by zero", 10, 0, u32::MAX);
+            verify("basic", 10, 2, 5, true);
+            verify("dividend > divisor", 10, 11, 0, true);
+            verify("remainder", 11, 2, 5, true);
+            verify("u32::MAX", u32::MAX, u32::MAX, 1, true);
+            verify("div u32::MAX", 3, u32::MAX, 0, true);
+            verify("u32::MAX div by 2", u32::MAX, 2, u32::MAX / 2, true);
+            verify("mul with carries", 1202729773, 171818539, 7, true);
+            verify("div by zero", 10, 0, u32::MAX, true);
+        }
+
+        #[test]
+        fn test_opcode_divu_unstatisfied() {
+            verify("assert_outcome", 10, 2, 3, false);
         }
 
         #[test]
@@ -236,7 +252,7 @@ mod test {
             let mut rng = rand::thread_rng();
             let a: u32 = rng.gen();
             let b: u32 = rng.gen_range(1..u32::MAX);
-            verify("random", a, b, a / b);
+            verify("random", a, b, a / b, true);
         }
     }
 }
