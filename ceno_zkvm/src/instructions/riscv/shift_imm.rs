@@ -61,9 +61,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
+        let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
         match I::INST_KIND {
             InsnKind::SLLI => {
-                let inflow = Expression::ZERO;
                 let outflow = circuit_builder.create_witin(|| "outflow")?;
 
                 let assert_lt_config = AssertLTConfig::construct_circuit(
@@ -76,8 +76,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
                 circuit_builder.require_equal(
                     || "shift check",
-                    rs1_read.value() * imm.expr() + inflow,
-                    outflow.expr() * Expression::Constant((1 << 32).into()) + rd_written.value(),
+                    rs1_read.value() * imm.expr(), // inflow is zero for this case
+                    outflow.expr() * two_pow_total_bits + rd_written.value(),
                 )?;
 
                 let i_insn = IInstructionConfig::<E>::construct_circuit(
@@ -132,7 +132,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 circuit_builder.require_equal(
                     || "shift check",
                     rd_written.value() * imm.expr() + outflow.expr(),
-                    inflow * Expression::Constant((1 << 32).into()) + rs1_read.value(),
+                    inflow * two_pow_total_bits + rs1_read.value(),
                 )?;
 
                 let i_insn = IInstructionConfig::<E>::construct_circuit(
