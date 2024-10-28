@@ -176,10 +176,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "require_one",
-            |cb| cb.cs.require_zero(name_fn, Expression::from(1) - expr),
-        )
+        self.namespace(|| "require_one", |cb| cb.cs.require_zero(name_fn, 1 - expr))
     }
 
     pub fn condition_require_equal<NR, N>(
