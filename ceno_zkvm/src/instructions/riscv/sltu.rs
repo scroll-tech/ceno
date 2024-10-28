@@ -57,7 +57,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rs2_read.value(),
             UINT_LIMBS,
         )?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,

@@ -39,7 +39,7 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
 
         let lt = SignedLtConfig::construct_circuit(cb, || "rs1 < rs2", &rs1_read, &rs2_read)?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,

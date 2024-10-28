@@ -302,7 +302,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .unwrap()
             })
             .collect_vec();
-        UIntLimbs::<M, C, E>::from_exprs_unchecked(combined_limbs)
+        Ok(UIntLimbs::<M, C, E>::from_exprs_unchecked(combined_limbs))
     }
 
     pub fn to_u8_limbs(
@@ -345,8 +345,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         UIntLimbs::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
     }
 
-    pub fn from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Result<Self, ZKVMError> {
-        let n = Self {
+    pub fn from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Self {
+        Self {
             limbs: UintLimb::Expression(
                 expr_limbs
                     .into_iter()
@@ -356,8 +356,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             ),
             carries: None,
             carries_auxiliary_lt_config: None,
-        };
-        Ok(n)
+        }
     }
 
     /// If current limbs are Expression, this function will create witIn and replace the limbs
@@ -523,9 +522,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let mut self_lo = self.expr();
         let self_hi = self_lo.split_off(self_lo.len() / 2);
         Ok((
-            UIntLimbs::from_exprs_unchecked(self_lo)?,
-            UIntLimbs::from_exprs_unchecked(self_hi)?,
+            UIntLimbs::from_exprs_unchecked(self_lo),
+            UIntLimbs::from_exprs_unchecked(self_hi),
         ))
+    }
+
+    pub fn to_field_expr(&self, is_neg: Expression<E>) -> Expression<E> {
+        // Convert two's complement representation into field arithmetic.
+        // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
+        self.value() - is_neg * (1_u64 << 32)
     }
 }
 
@@ -630,6 +635,7 @@ impl ValueMul {
     }
 }
 
+#[derive(Clone)]
 pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
     #[allow(dead_code)]
     val: T,

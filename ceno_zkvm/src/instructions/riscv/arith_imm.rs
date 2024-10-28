@@ -88,21 +88,12 @@ mod test {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
+        instructions::{Instruction, riscv::test_utils::imm_i},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     use super::AddiInstruction;
 
-    fn imm(imm: i32) -> u32 {
-        // imm is 12 bits in B-type
-        const IMM_MAX: i32 = 2i32.pow(12);
-        if imm.is_negative() {
-            (IMM_MAX + imm) as u32
-        } else {
-            imm as u32
-        }
-    }
     #[test]
     fn test_opcode_addi() {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -118,7 +109,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -162,7 +153,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm(-3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(-3));
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
