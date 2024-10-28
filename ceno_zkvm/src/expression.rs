@@ -442,6 +442,37 @@ impl<E: ExtensionField> Sub for Expression<E> {
     }
 }
 
+macro_rules! ref_binop_instances {
+    ($op: ident, $fun: ident) => {
+        impl<E: ExtensionField> $op<&Expression<E>> for Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
+                self.$fun(rhs.clone())
+            }
+        }
+
+        impl<E: ExtensionField> $op<Expression<E>> for &Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<&Expression<E>> for &Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs.clone())
+            }
+        }
+    };
+}
+ref_binop_instances!(Add, add);
+ref_binop_instances!(Sub, sub);
+ref_binop_instances!(Mul, mul);
+
 macro_rules! binop_instances {
     ($op: ident, $fun: ident, ($($t:ty),*)) => {
         $(impl<E: ExtensionField> $op<Expression<E>> for $t {
@@ -908,8 +939,7 @@ mod tests {
 
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr_fnord()
-            + Into::<Expression<E>>::into(2usize);
+        let expr: Expression<E> = 3 * x.expr_fnord() + 2;
         // c^3 + 1
         let c = Expression::Challenge(0, 3, 1.into(), 1.into());
         // res
@@ -925,7 +955,7 @@ mod tests {
 
         // constant * witin
         // 3 * x
-        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr_fnord();
+        let expr: Expression<E> = 3 * x.expr_fnord();
         assert_eq!(
             expr,
             Expression::ScaledSum(
@@ -975,36 +1005,32 @@ mod tests {
         let z = cb.create_witin(|| "z").unwrap();
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr_fnord()
-            + Into::<Expression<E>>::into(2usize);
+        let expr: Expression<E> = 3 * x.expr_fnord() + 2;
         assert!(expr.is_monomial_form());
 
         // 2 product term
-        let expr: Expression<E> =
-            Into::<Expression<E>>::into(3usize) * x.expr_fnord() * y.expr_fnord()
-                + Into::<Expression<E>>::into(2usize) * x.expr_fnord();
+        let expr: Expression<E> = 3 * x.expr_fnord() * y.expr_fnord() + 2 * x.expr_fnord();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
-        let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr_fnord() * y.expr_fnord()
-                - Into::<Expression<E>>::into(6usize) * z.expr_fnord();
+        let expr: Expression<E> = Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into())
+            * x.expr_fnord()
+            * y.expr_fnord()
+            - 6 * z.expr_fnord();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
-        let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr_fnord() * y.expr_fnord()
-                - Into::<Expression<E>>::into(6usize) * z.expr_fnord();
+        let expr: Expression<E> = Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into())
+            * x.expr_fnord()
+            * y.expr_fnord()
+            - 6 * z.expr_fnord();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2 * x + 3) * 3 + 6 * 8
-        let expr: Expression<E> = (Into::<Expression<E>>::into(2usize) * x.expr_fnord()
-            + Into::<Expression<E>>::into(3usize))
-            * Into::<Expression<E>>::into(3usize)
-            + Into::<Expression<E>>::into(6usize) * Into::<Expression<E>>::into(8usize);
+        let expr: Expression<E> = (2 * x.expr_fnord() + 3) * 3 + 6 * 8;
         assert!(expr.is_monomial_form());
     }
 
@@ -1017,8 +1043,7 @@ mod tests {
         let y = cb.create_witin(|| "y").unwrap();
         // scaledsum * challenge
         // (x + 1) * (y + 1)
-        let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr_fnord())
-            * (Into::<Expression<E>>::into(2usize) + y.expr_fnord());
+        let expr: Expression<E> = (1 + x.expr_fnord()) * (2 + y.expr_fnord());
         assert!(!expr.is_monomial_form());
     }
 

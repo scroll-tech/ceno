@@ -370,11 +370,11 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         self.require_zero(
             || "is equal",
-            is_eq.expr_fnord().clone() * lhs.clone() - is_eq.expr_fnord() * rhs.clone(),
+            is_eq.expr_fnord() * &lhs - is_eq.expr_fnord() * &rhs,
         )?;
         self.require_zero(
             || "is equal",
-            Expression::from(1) - is_eq.expr_fnord().clone() - diff_inverse.expr_fnord() * lhs
+            1 - is_eq.expr_fnord() - diff_inverse.expr_fnord() * lhs
                 + diff_inverse.expr_fnord() * rhs,
         )?;
 
