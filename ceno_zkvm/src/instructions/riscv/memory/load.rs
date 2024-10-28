@@ -102,18 +102,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_value = memory_read.expr();
 
         // get target limb from memory word for load instructions except LW
-        let target_limb = if I::INST_KIND != InsnKind::LW {
-            let target_limb = circuit_builder.create_witin(|| "target_limb")?;
-            circuit_builder.condition_require_equal(
-                || "target_limb = memory_value[low_bits[1]]",
-                addr_low_bits[1].clone(),
-                target_limb.expr(),
-                memory_value[1].clone(),
-                memory_value[0].clone(),
-            )?;
-            Some(target_limb)
-        } else {
-            None
+        let target_limb = match I::INST_KIND {
+            InsnKind::LB | InsnKind::LBU | InsnKind::LH | InsnKind::LHU => {
+                let target_limb = circuit_builder.create_witin(|| "target_limb")?;
+                circuit_builder.condition_require_equal(
+                    || "target_limb = memory_value[low_bits[1]]",
+                    addr_low_bits[1].clone(),
+                    target_limb.expr(),
+                    memory_value[1].clone(),
+                    memory_value[0].clone(),
+                )?;
+                Some(target_limb)
+            }
+            _ => None,
         };
 
         // get target byte from memory word for LB and LBU

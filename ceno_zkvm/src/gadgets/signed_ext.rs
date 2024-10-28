@@ -10,8 +10,9 @@ use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
 pub struct SignedExtendConfig {
-    // most significant bit
+    /// most significant bit
     msb: WitIn,
+    /// number of bits contained in the value
     n_bits: usize,
 }
 
