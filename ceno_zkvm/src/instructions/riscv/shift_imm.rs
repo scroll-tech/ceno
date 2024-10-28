@@ -145,14 +145,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         config.rd_written.assign_value(instance, rd_written);
 
         let outflow = match I::INST_KIND {
-            InsnKind::SLLI => (rs1_read.as_u64() * imm as u64) >> 32,
+            InsnKind::SLLI => (rs1_read.as_u64() * imm as u64) >> UInt::<E>::TOTAL_BITS,
             InsnKind::SRAI | InsnKind::SRLI => {
                 if I::INST_KIND == InsnKind::SRAI {
+                    let max_signed_limb_expr = (1 << (UInt::<E>::LIMB_BITS - 1)) - 1;
                     config.is_lt_config.as_ref().unwrap().assign_instance(
                         instance,
                         lk_multiplicity,
-                        (1 << 15) - 1,
-                        rs1_read.as_u64() >> 16,
+                        max_signed_limb_expr,
+                        rs1_read.as_u64() >> UInt::<E>::LIMB_BITS,
                     )?;
                 }
 
