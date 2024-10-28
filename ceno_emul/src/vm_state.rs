@@ -2,17 +2,19 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    Program,
+    PC_STEP_SIZE, Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
-use std::iter::from_fn;
+use std::{iter::from_fn, sync::Arc};
+use std::ops::Deref;
 
 /// An implementation of the machine state and of the side-effects of operations.
 pub struct VMState {
+    program: Arc<Program>,
     platform: Platform,
     pc: Word,
     /// Map a word-address (addr/4) to a word.
@@ -24,28 +26,39 @@ pub struct VMState {
 }
 
 impl VMState {
-    pub fn new(platform: Platform) -> Self {
-        let pc = platform.pc_start();
-        Self {
-            platform,
+    pub fn new(platform: Platform, program: Program) -> Self {
+        let pc = program.entry;
+        let program = Arc::new(program);
+
+        let mut vm = Self {
             pc,
+            platform,
+            program: program.clone(),
             memory: HashMap::new(),
             registers: [0; 32],
             halted: false,
             tracer: Tracer::new(),
+        };
+
+        // init memory from program.image
+        for (&addr, &value) in program.image.iter() {
+            vm.init_memory(ByteAddr(addr).waddr(), value);
         }
+
+        vm
     }
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
-        let mut state = Self::new(platform);
         let program = Program::load_elf(elf, u32::MAX).unwrap();
-        for (addr, word) in program.image.iter() {
-            let addr = ByteAddr(*addr).waddr();
-            state.init_memory(addr, *word);
+        let state = Self::new(platform, program);
+
+        if state.program.base_address != state.platform.rom_start() {
+            return Err(anyhow!(
+                "Invalid base_address {:x}",
+                state.program.base_address
+            ));
         }
-        if program.entry != state.platform.pc_start() {
-            return Err(anyhow!("Invalid entrypoint {:x}", program.entry));
-        }
+
         Ok(state)
     }
 
@@ -57,7 +70,11 @@ impl VMState {
         &self.tracer
     }
 
-    /// Set a word in memory without side-effects.
+    pub fn program(&self) -> &Program {
+        self.program.deref()
+    }
+
+    /// Set a word in memory without side effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
         self.memory.insert(addr, value);
     }
@@ -104,7 +121,10 @@ impl EmuContext for VMState {
             self.halt();
             Ok(true)
         } else {
-            self.trap(TrapCause::EcallError)
+            tracing::debug!("ecall with syscall id = {function:x}");
+            self.set_pc(ByteAddr(self.pc + PC_STEP_SIZE as u32));
+
+            Ok(true)
         }
     }
 
