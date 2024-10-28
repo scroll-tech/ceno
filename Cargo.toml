@@ -26,7 +26,6 @@ version = "0.1.0"
 [workspace.dependencies]
 ark-std = "0.4"
 cfg-if = "1.0"
-const_env = "0.1"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 ff = "0.13"

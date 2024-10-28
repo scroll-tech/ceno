@@ -638,15 +638,6 @@ impl WitIn {
     }
 }
 
-#[macro_export]
-/// this is to avoid non-monomial expression
-macro_rules! create_witin_from_expr {
-    // Handle the case for a single expression
-    ($name:expr, $builder:expr, $debug:expr, $e:expr) => {
-        WitIn::from_expr($name, $builder, $e, $debug)
-    };
-}
-
 pub trait ToExpr<E: ExtensionField> {
     type Output;
     fn expr(&self) -> Self::Output;
@@ -749,7 +740,9 @@ pub mod fmt {
     ) -> String {
         match expression {
             Expression::WitIn(wit_in) => {
-                wtns.push(*wit_in);
+                if !wtns.contains(wit_in) {
+                    wtns.push(*wit_in);
+                }
                 format!("WitIn({})", wit_in)
             }
             Expression::Challenge(id, pow, scaler, offset) => {
