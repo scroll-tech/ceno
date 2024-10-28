@@ -293,35 +293,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 }
 
-impl<const M: usize, E: ExtensionField> UIntLimbs<M, 16, E> {
-    pub fn msb_decompose(
-        &self,
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<MsbConfig, ZKVMError> {
-        let msb = circuit_builder.create_witin(|| "msb")?;
-        let high_limb_no_msb = circuit_builder.create_witin(|| "high_limb_mask")?;
-        let high_limb = self.limbs[Self::NUM_LIMBS - 1];
-
-        circuit_builder.assert_ux::<_, _, 16>(
-            || "high_limb_mask",
-            high_limb_no_msb.expr() * Expression::Constant(2.into()), // TODO 2.into() doesn't work
-        )?;
-
-        circuit_builder.assert_bit(|| "msb require_bool", msb.expr())?;
-
-        circuit_builder.require_equal(
-            || "msb check",
-            msb.expr() * Expression::Constant((1 << 15).into()) + high_limb_no_msb.expr(),
-            high_limb.expr(),
-        )?;
-
-        Ok(MsbConfig {
-            msb,
-            high_limb_no_msb,
-        })
-    }
-}
-
 impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
     /// decompose x = (x_s, x_{<s})
     /// where x_s is highest bit, x_{<s} is the rest

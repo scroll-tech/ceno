@@ -18,11 +18,11 @@ pub struct MsbConfig {
     pub high_limb_no_msb: WitIn,
 }
 
-pub struct MsbInput<'a, T> {
-    pub limbs: &'a [T],
+pub struct MsbInput<'a> {
+    pub limbs: &'a [u8],
 }
 
-impl MsbInput<'_, u8> {
+impl MsbInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
         instance: &mut [MaybeUninit<F>],
@@ -40,28 +40,6 @@ impl MsbInput<'_, u8> {
         });
         lk_multiplicity.lookup_and_byte(high_limb as u64, 0b0111_1111);
         (msb, high_limb)
-    }
-}
-
-impl MsbInput<'_, u16> {
-    pub fn assign<F: SmallField>(
-        &self,
-        instance: &mut [MaybeUninit<F>],
-        config: &MsbConfig,
-        lk_multiplicity: &mut LkMultiplicity,
-    ) -> (u16, u16) {
-        let n_limbs = self.limbs.len();
-        assert!(n_limbs > 0);
-        let high_limb = self.limbs[n_limbs - 1];
-        let msb = high_limb >> 15;
-        assert!(msb == 0 || msb == 1);
-        set_val!(instance, config.msb, { i64_to_base::<F>(msb as i64) });
-        let high_limb_no_msb = high_limb & 0b0111_1111_1111_1111;
-        set_val!(instance, config.high_limb_no_msb, {
-            i64_to_base::<F>(high_limb_no_msb as i64)
-        });
-        lk_multiplicity.assert_ux::<16>((high_limb_no_msb as u64) * 2);
-        (msb, high_limb_no_msb)
     }
 }
 
