@@ -177,7 +177,7 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-LogicInstruction::<GoldilocksExt2, I>::construct_circuit
+                LogicInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
             .unwrap();
 

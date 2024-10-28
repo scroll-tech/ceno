@@ -257,7 +257,7 @@ mod tests {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-              ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit
+                ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
             .unwrap();
 

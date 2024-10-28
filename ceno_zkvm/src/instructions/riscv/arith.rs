@@ -425,8 +425,7 @@ mod test {
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
             .namespace(|| "mul", MulInstruction::construct_circuit)
-            .unwrap()
-            ;
+            .unwrap();
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
@@ -471,8 +470,7 @@ mod test {
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
             .namespace(|| "mul", MulInstruction::construct_circuit)
-            .unwrap()
-            ;
+            .unwrap();
 
         let a = Value::<'_, u32>::new_unchecked(u32::MAX);
         let b = Value::<'_, u32>::new_unchecked(u32::MAX);
