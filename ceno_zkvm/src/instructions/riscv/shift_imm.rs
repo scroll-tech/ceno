@@ -61,47 +61,27 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
+        let outflow = circuit_builder.create_witin(|| "outflow")?;
+        let assert_lt_config = AssertLTConfig::construct_circuit(
+            circuit_builder,
+            || "outflow < imm",
+            outflow.expr(),
+            imm.expr(),
+            2,
+        )?;
+
         let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
-        match I::INST_KIND {
+
+        let is_lt_config = match I::INST_KIND {
             InsnKind::SLLI => {
-                let outflow = circuit_builder.create_witin(|| "outflow")?;
-
-                let assert_lt_config = AssertLTConfig::construct_circuit(
-                    circuit_builder,
-                    || "outflow < imm",
-                    outflow.expr(),
-                    imm.expr(),
-                    2,
-                )?;
-
                 circuit_builder.require_equal(
                     || "shift check",
                     rs1_read.value() * imm.expr(), // inflow is zero for this case
                     outflow.expr() * two_pow_total_bits + rd_written.value(),
                 )?;
-
-                let i_insn = IInstructionConfig::<E>::construct_circuit(
-                    circuit_builder,
-                    I::INST_KIND,
-                    &imm.expr(),
-                    rs1_read.register_expr(),
-                    rd_written.register_expr(),
-                    false,
-                )?;
-
-                Ok(ShiftImmConfig {
-                    i_insn,
-                    imm,
-                    rs1_read,
-                    rd_written,
-                    outflow,
-                    assert_lt_config,
-                    is_lt_config: None,
-                })
+                None
             }
             InsnKind::SRAI | InsnKind::SRLI => {
-                let outflow = circuit_builder.create_witin(|| "outflow")?;
-
                 let (inflow, is_lt_config) = match I::INST_KIND {
                     InsnKind::SRAI => {
                         let max_signed_limb_expr: Expression<_> =
@@ -120,42 +100,34 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     InsnKind::SRLI => (Expression::ZERO, None),
                     _ => unreachable!(),
                 };
-
-                let assert_lt_config = AssertLTConfig::construct_circuit(
-                    circuit_builder,
-                    || "outflow < imm",
-                    outflow.expr(),
-                    imm.expr(),
-                    2,
-                )?;
-
                 circuit_builder.require_equal(
                     || "shift check",
                     rd_written.value() * imm.expr() + outflow.expr(),
                     inflow * two_pow_total_bits + rs1_read.value(),
                 )?;
-
-                let i_insn = IInstructionConfig::<E>::construct_circuit(
-                    circuit_builder,
-                    I::INST_KIND,
-                    &imm.expr(),
-                    rs1_read.register_expr(),
-                    rd_written.register_expr(),
-                    false,
-                )?;
-
-                Ok(ShiftImmConfig {
-                    i_insn,
-                    imm,
-                    rs1_read,
-                    rd_written,
-                    outflow,
-                    assert_lt_config,
-                    is_lt_config,
-                })
+                is_lt_config
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        }
+        };
+
+        let i_insn = IInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            I::INST_KIND,
+            &imm.expr(),
+            rs1_read.register_expr(),
+            rd_written.register_expr(),
+            false,
+        )?;
+
+        Ok(ShiftImmConfig {
+            i_insn,
+            imm,
+            rs1_read,
+            rd_written,
+            outflow,
+            assert_lt_config,
+            is_lt_config,
+        })
     }
 
     fn assign_instance(
@@ -170,35 +142,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
         set_val!(instance, config.imm, imm as u64);
         config.rs1_read.assign_value(instance, rs1_read.clone());
-        config.rd_written.assign_value(instance, rd_written.clone());
+        config.rd_written.assign_value(instance, rd_written);
 
-        config
-            .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
-        match I::INST_KIND {
-            InsnKind::SLLI => {
-                let outflow = (rs1_read.as_u64() * imm as u64) >> 32;
-                set_val!(instance, config.outflow, outflow);
-
-                config.assert_lt_config.assign_instance(
-                    instance,
-                    lk_multiplicity,
-                    outflow,
-                    imm as u64,
-                )?;
-            }
+        let outflow = match I::INST_KIND {
+            InsnKind::SLLI => (rs1_read.as_u64() * imm as u64) >> 32,
             InsnKind::SRAI | InsnKind::SRLI => {
-                let outflow = rs1_read.as_u32() & (imm - 1);
-                set_val!(instance, config.outflow, outflow as u64);
-
-                config.assert_lt_config.assign_instance(
-                    instance,
-                    lk_multiplicity,
-                    outflow as u64,
-                    imm as u64,
-                )?;
-
                 if I::INST_KIND == InsnKind::SRAI {
                     config.is_lt_config.as_ref().unwrap().assign_instance(
                         instance,
@@ -207,9 +155,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                         rs1_read.as_u64() >> 16,
                     )?;
                 }
+
+                rs1_read.as_u64() & (imm as u64 - 1)
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        }
+        };
+
+        set_val!(instance, config.outflow, outflow);
+        config
+            .assert_lt_config
+            .assign_instance(instance, lk_multiplicity, outflow, imm as u64)?;
+
+        config
+            .i_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+
         Ok(())
     }
 }
