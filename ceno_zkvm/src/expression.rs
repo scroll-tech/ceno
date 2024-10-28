@@ -794,7 +794,7 @@ macro_rules! impl_from_via_ToExpr {
         $(
             impl<E: ExtensionField> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
-                    value.expr_fnord()
+                    value.expr()
                 }
             }
         )*
