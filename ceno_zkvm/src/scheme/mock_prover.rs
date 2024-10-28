@@ -674,7 +674,6 @@ Hints:
 
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
-        // wits_in: &[ArcMultilinearExtension<'a, E>],
         raw_witin: RowMajorMatrix<E::BaseField>,
         programs: &[u32],
         challenge: Option<[E; 2]>,
@@ -686,7 +685,7 @@ Hints:
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
-        Self::assert_with_expected_errors(cb, &wits_in, programs, &[], challenge, lkm);
+        Self::assert_satisfied(cb, &wits_in, programs, challenge, lkm);
     }
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
