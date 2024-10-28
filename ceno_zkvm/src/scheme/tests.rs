@@ -1,9 +1,9 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM,
+    CENO_PLATFORM,
     InsnKind::{ADD, EANY},
-    StepRecord, VMState,
+    PC_WORD_SIZE, Program, StepRecord, VMState,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -235,11 +235,23 @@ fn test_single_add_instance_e2e() {
     let vk = pk.get_vk();
 
     // single instance
-    let mut vm = VMState::new(CENO_PLATFORM);
-    let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
-    for (i, insn) in PROGRAM_CODE.iter().enumerate() {
-        vm.init_memory(pc_start + i, *insn);
-    }
+
+    let program = Program::new(
+        CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.pc_base(),
+        PROGRAM_CODE.to_vec(),
+        PROGRAM_CODE
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    (insn_idx * PC_WORD_SIZE) as u32 + CENO_PLATFORM.pc_base(),
+                    insn,
+                )
+            })
+            .collect(),
+    );
+    let mut vm = VMState::new(CENO_PLATFORM, program);
     let all_records = vm
         .iter_until_halt()
         .collect::<Result<Vec<StepRecord>, _>>()

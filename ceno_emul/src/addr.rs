@@ -17,6 +17,7 @@
 use std::{fmt, ops};
 
 pub const WORD_SIZE: usize = 4;
+pub const PC_WORD_SIZE: usize = 4;
 pub const PC_STEP_SIZE: usize = 4;
 
 // Type aliases to clarify the code without wrapper types.

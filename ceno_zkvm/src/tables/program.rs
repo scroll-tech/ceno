@@ -155,7 +155,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     ) -> RowMajorMatrix<E::BaseField> {
         // TODO: get bytecode of the program.
         let num_instructions = program.len();
-        let pc_start = CENO_PLATFORM.pc_start();
+        let pc_start = CENO_PLATFORM.pc_base();
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 
@@ -198,7 +198,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 
         let mut prog_mlt = vec![0_usize; *num_instructions];
         for (pc, mlt) in multiplicity {
-            let i = (*pc as usize - CENO_PLATFORM.pc_start() as usize) / WORD_SIZE;
+            let i = (*pc as usize - CENO_PLATFORM.pc_base() as usize) / WORD_SIZE;
             prog_mlt[i] = *mlt;
         }
 

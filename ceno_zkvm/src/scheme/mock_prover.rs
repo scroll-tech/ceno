@@ -31,7 +31,7 @@ use std::{
 use strum::IntoEnumIterator;
 
 const MOCK_PROGRAM_SIZE: usize = 32;
-pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
+pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_base());
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]

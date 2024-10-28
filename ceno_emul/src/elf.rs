@@ -31,7 +31,7 @@ use elf::{
 pub struct Program {
     /// The entrypoint of the program
     pub entry: u32,
-    /// The base address of the program
+    /// This is the lowest address of the program's executable code
     pub base_address: u32,
     /// The instructions of the program
     pub instructions: Vec<u32>,
@@ -40,6 +40,7 @@ pub struct Program {
 }
 
 impl Program {
+    /// Create program
     pub fn new(
         entry: u32,
         base_address: u32,

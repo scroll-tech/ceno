@@ -273,7 +273,6 @@ dependencies = [
  "itertools 0.13.0",
  "mpcs",
  "multilinear_extensions",
- "num-traits",
  "paste",
  "pprof",
  "rand",
