@@ -460,6 +460,7 @@ impl<E: ExtensionField> Sub for Expression<E> {
     }
 }
 
+/// Instances that Expression and &Expression
 macro_rules! ref_binop_instances {
     ($op: ident, $fun: ident) => {
         impl<E: ExtensionField> $op<&Expression<E>> for Expression<E> {
