@@ -9,8 +9,7 @@ use crate::{
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
-use std::{iter::from_fn, sync::Arc};
-use std::ops::Deref;
+use std::{iter::from_fn, ops::Deref, sync::Arc};
 
 /// An implementation of the machine state and of the side-effects of operations.
 pub struct VMState {

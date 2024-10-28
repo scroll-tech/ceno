@@ -12,7 +12,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
-use ceno_emul::{ByteAddr, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, PC_WORD_SIZE, Program};
 use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
@@ -28,6 +28,7 @@ use std::{
     ops::Neg,
     sync::OnceLock,
 };
+use std::collections::BTreeMap;
 use strum::IntoEnumIterator;
 
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -389,10 +390,28 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         // fix the program table
-        let mut programs = [0u32; MOCK_PROGRAM_SIZE];
-        for (i, &program) in input_programs.iter().enumerate() {
-            programs[i] = program;
-        }
+        let instructions = input_programs
+            .iter()
+            .cloned()
+            .chain(std::iter::repeat(0))
+            .take(MOCK_PROGRAM_SIZE)
+            .collect_vec();
+        let image = instructions
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    CENO_PLATFORM.pc_base() + (insn_idx * PC_WORD_SIZE) as u32,
+                    insn,
+                    )
+            })
+            .collect::<BTreeMap<u32, u32>>();
+        let program = Program::new(
+            CENO_PLATFORM.pc_base(),
+            CENO_PLATFORM.pc_base(),
+            instructions,
+            image,
+        );
 
         // load tables
         let (challenge, mut table) = if let Some(challenge) = challenge {
@@ -401,7 +420,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             load_once_tables(cb)
         };
         let mut prog_table = vec![];
-        Self::load_program_table(&mut prog_table, &programs, challenge);
+        Self::load_program_table(&mut prog_table, &program, challenge);
         for prog in prog_table {
             table.insert(prog);
         }
@@ -591,7 +610,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
     fn load_program_table(
         t_vec: &mut Vec<Vec<u64>>,
-        programs: &[u32; MOCK_PROGRAM_SIZE],
+        program: &Program,
         challenge: [E; 2],
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
@@ -601,7 +620,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
             &config,
             cs.num_fixed,
-            programs,
+            program,
         );
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {

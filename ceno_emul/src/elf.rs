@@ -28,6 +28,7 @@ use elf::{
 };
 
 /// A RISC Zero program
+#[derive(Clone, Debug)]
 pub struct Program {
     /// The entrypoint of the program
     pub entry: u32,

@@ -76,6 +76,21 @@ fn main() {
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 
+    let program = Program::new(
+        CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.pc_base(),
+        PROGRAM_CODE.to_vec(),
+        PROGRAM_CODE
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    (insn_idx * PC_WORD_SIZE) as u32 + CENO_PLATFORM.pc_base(),
+                    insn,
+                )
+            })
+            .collect(),
+    );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
         .with(
@@ -108,7 +123,7 @@ fn main() {
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
             &zkvm_cs,
             prog_config.clone(),
-            &PROGRAM_CODE,
+            &program,
         );
 
         let reg_init = initial_registers();
@@ -126,22 +141,7 @@ fn main() {
         let prover = ZKVMProver::new(pk);
         let verifier = ZKVMVerifier::new(vk);
 
-        let program = Program::new(
-            CENO_PLATFORM.pc_base(),
-            CENO_PLATFORM.pc_base(),
-            PROGRAM_CODE.to_vec(),
-            PROGRAM_CODE
-                .iter()
-                .enumerate()
-                .map(|(insn_idx, &insn)| {
-                    (
-                        (insn_idx * PC_WORD_SIZE) as u32 + CENO_PLATFORM.pc_base(),
-                        insn,
-                    )
-                })
-                .collect(),
-        );
-        let mut vm = VMState::new(CENO_PLATFORM, program);
+        let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
         for record in &mem_init {
             vm.init_memory(record.addr.into(), record.value);
@@ -215,7 +215,7 @@ fn main() {
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
                 &zkvm_cs,
                 &prog_config,
-                &PROGRAM_CODE.len(),
+                &program,
             )
             .unwrap();
 

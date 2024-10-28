@@ -15,9 +15,9 @@
 // limitations under the License.
 
 use anyhow::{Result, anyhow};
+use num_derive::ToPrimitive;
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
-use num_derive::ToPrimitive;
 
 use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 
