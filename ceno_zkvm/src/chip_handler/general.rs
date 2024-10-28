@@ -293,8 +293,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn namespace<NR: Into<String>, N: FnOnce() -> NR, T>(
         &mut self,
         name_fn: N,
-        cb: impl FnOnce(&mut CircuitBuilder<E>) -> Result<T, ZKVMError>,
-    ) -> Result<T, ZKVMError> {
+        cb: impl FnOnce(&mut CircuitBuilder<E>) -> T,
+    ) -> T {
         self.cs.namespace(name_fn, |cs| {
             let mut inner_circuit_builder = CircuitBuilder::new(cs);
             cb(&mut inner_circuit_builder)

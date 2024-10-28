@@ -186,14 +186,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "add",
-                |cb| {
-                    let config = AddInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
+            .namespace(|| "add", AddInstruction::construct_circuit)
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
@@ -241,14 +234,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "add",
-                |cb| {
-                    let config = AddInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
+            .namespace(|| "add", AddInstruction::construct_circuit)
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
@@ -296,14 +282,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "sub",
-                |cb| {
-                    let config = SubInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
+            .namespace(|| "sub", SubInstruction::construct_circuit)
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
@@ -351,14 +330,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "sub",
-                |cb| {
-                    let config = SubInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
+            .namespace(|| "sub", SubInstruction::construct_circuit)
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
@@ -406,8 +378,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
+            .namespace(|| "mul", MulInstruction::construct_circuit)
             .unwrap();
 
         // values assignment
@@ -453,9 +424,9 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
+            .namespace(|| "mul", MulInstruction::construct_circuit)
             .unwrap()
-            .unwrap();
+            ;
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
@@ -499,9 +470,9 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
+            .namespace(|| "mul", MulInstruction::construct_circuit)
             .unwrap()
-            .unwrap();
+            ;
 
         let a = Value::<'_, u32>::new_unchecked(u32::MAX);
         let b = Value::<'_, u32>::new_unchecked(u32::MAX);

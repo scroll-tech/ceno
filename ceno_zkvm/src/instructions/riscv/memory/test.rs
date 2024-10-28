@@ -80,14 +80,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || Inst::name(),
-            |cb| {
-                let config = Inst::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| Inst::name(), Inst::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(I::INST_KIND, 2, 3, 0, imm);
@@ -139,14 +132,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || Inst::name(),
-            |cb| {
-                let config = Inst::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| Inst::name(), Inst::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(I::INST_KIND, 2, 3, 0, imm);

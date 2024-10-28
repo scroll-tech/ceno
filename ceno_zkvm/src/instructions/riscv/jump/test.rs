@@ -21,12 +21,8 @@ fn test_opcode_jal() {
     let config = cb
         .namespace(
             || "jal",
-            |cb| {
-                let config = JalInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
+            JalInstruction::<GoldilocksExt2>::construct_circuit,
         )
-        .unwrap()
         .unwrap();
 
     let pc_offset: i32 = -8i32;
@@ -66,12 +62,8 @@ fn test_opcode_jalr() {
     let config = cb
         .namespace(
             || "jalr",
-            |cb| {
-                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
+            JalrInstruction::<GoldilocksExt2>::construct_circuit,
         )
-        .unwrap()
         .unwrap();
 
     let imm = -15i32;
@@ -114,12 +106,8 @@ fn test_opcode_lui() {
     let config = cb
         .namespace(
             || "lui",
-            |cb| {
-                let config = LuiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
+            LuiInstruction::<GoldilocksExt2>::construct_circuit,
         )
-        .unwrap()
         .unwrap();
 
     let imm_value = imm_u(0x90005);
@@ -158,12 +146,8 @@ fn test_opcode_auipc() {
     let config = cb
         .namespace(
             || "auipc",
-            |cb| {
-                let config = AuipcInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                Ok(config)
-            },
+            AuipcInstruction::<GoldilocksExt2>::construct_circuit,
         )
-        .unwrap()
         .unwrap();
 
     let imm_value = imm_u(0x90005);

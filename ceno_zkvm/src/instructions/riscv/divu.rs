@@ -179,9 +179,8 @@ mod test {
             let config = cb
                 .namespace(
                     || format!("divu_({name})"),
-                    |cb| Ok(DivUInstruction::construct_circuit(cb)),
+                    DivUInstruction::construct_circuit,
                 )
-                .unwrap()
                 .unwrap();
 
             let outcome = if divisor == 0 {

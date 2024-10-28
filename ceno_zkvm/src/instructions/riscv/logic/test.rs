@@ -20,14 +20,7 @@ fn test_opcode_and() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "and",
-            |cb| {
-                let config = AndInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "and", AndInstruction::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
@@ -71,14 +64,7 @@ fn test_opcode_or() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "or",
-            |cb| {
-                let config = OrInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "or", OrInstruction::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::OR, 2, 3, 4, 0);
@@ -122,14 +108,7 @@ fn test_opcode_xor() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "xor",
-            |cb| {
-                let config = XorInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "xor", XorInstruction::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::XOR, 2, 3, 4, 0);

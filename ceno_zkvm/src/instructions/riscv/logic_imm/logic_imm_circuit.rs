@@ -177,12 +177,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-                |cb| {
-                    let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
+LogicInstruction::<GoldilocksExt2, I>::construct_circuit
             )
-            .unwrap()
             .unwrap();
 
         let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);

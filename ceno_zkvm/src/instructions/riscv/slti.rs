@@ -139,12 +139,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("SLTI/{name}"),
-                |cb| {
-                    let config = SltiInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
+                SltiInstruction::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::SLTI, 2, 0, 4, imm_i(imm));

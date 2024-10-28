@@ -105,14 +105,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || format!("SLT/{name}"),
-                |cb| {
-                    let config = SltInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
+            .namespace(|| format!("SLT/{name}"), SltInstruction::construct_circuit)
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::SLT, 2, 3, 4, 0);

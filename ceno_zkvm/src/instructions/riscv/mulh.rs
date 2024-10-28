@@ -141,8 +141,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
-            .unwrap()
+            .namespace(|| "mulhu", MulhuInstruction::construct_circuit)
             .unwrap();
 
         let a = Value::<'_, u32>::new_unchecked(rs1);
