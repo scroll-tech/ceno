@@ -89,7 +89,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                         let is_rs1_neg = IsLtConfig::construct_circuit(
                             circuit_builder,
                             || "lhs_msb",
-                            max_signed_limb_expr.clone(),
+                            max_signed_limb_expr,
                             rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
                             1,
                         )?;
