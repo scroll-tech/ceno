@@ -50,7 +50,7 @@ fn test_opcode_and() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn test_opcode_or() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -130,5 +130,5 @@ fn test_opcode_xor() {
         .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
         .unwrap();
 
-    MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }

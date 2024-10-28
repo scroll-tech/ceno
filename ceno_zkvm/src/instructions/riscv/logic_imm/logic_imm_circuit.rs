@@ -203,6 +203,6 @@ mod test {
         cb.require_equal(|| "assert_rd_written", rd_written_expr, expected.value())
             .unwrap();
 
-        MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

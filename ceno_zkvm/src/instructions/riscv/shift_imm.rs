@@ -298,6 +298,6 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

@@ -672,7 +672,7 @@ Hints:
         }
     }
 
-    pub fn assert_satisfied(
+    pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
         // wits_in: &[ArcMultilinearExtension<'a, E>],
         raw_witin: RowMajorMatrix<E::BaseField>,
@@ -688,7 +688,7 @@ Hints:
             .collect_vec();
         Self::assert_with_expected_errors(cb, &wits_in, programs, &[], challenge, lkm);
     }
-    pub fn assert_satisfied_arc(
+    pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
@@ -769,7 +769,7 @@ mod tests {
                 .into(),
         ];
 
-        MockProver::assert_satisfied_arc(&builder, &wits_in, &[], None, None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], None, None);
     }
 
     #[derive(Debug)]
@@ -802,7 +802,7 @@ mod tests {
         ];
 
         let challenge = [1.into(), 1000.into()];
-        MockProver::assert_satisfied_arc(&builder, &wits_in, &[], Some(challenge), None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], Some(challenge), None);
     }
 
     #[test]
@@ -921,7 +921,7 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
             &[],
@@ -954,7 +954,7 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
             &[],
@@ -1035,7 +1035,7 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
             &[],
@@ -1069,7 +1069,7 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
             &[],

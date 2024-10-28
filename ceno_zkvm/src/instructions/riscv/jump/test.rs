@@ -43,7 +43,7 @@ fn test_opcode_jal() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_opcode_jalr() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn test_opcode_lui() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -146,5 +146,5 @@ fn test_opcode_auipc() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
