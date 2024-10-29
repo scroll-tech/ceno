@@ -1,7 +1,8 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Neg};
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 
 use super::{
     RIVInstruction,
@@ -9,8 +10,7 @@ use super::{
     r_insn::RInstructionConfig,
 };
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, expression::{Expression, ToExpr, WitIn}, gadgets::IsLtConfig, instructions::Instruction, set_val, uint::Value, witness::LkMultiplicity
 };
 use core::mem::MaybeUninit;
 
@@ -24,15 +24,15 @@ pub struct ArithConfig<E: ExtensionField> {
     rd_written: UIntMul<E>,
 }
 
-pub struct MulhInstruction<E, I>(PhantomData<(E, I)>);
+pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
 pub struct MulhuOp;
 impl RIVInstruction for MulhuOp {
     const INST_KIND: InsnKind = InsnKind::MULHU;
 }
-pub type MulhuInstruction<E> = MulhInstruction<E, MulhuOp>;
+pub type MulhuInstruction<E> = MulhInstructionBase<E, MulhuOp>;
 
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E, I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
     type InstructionConfig = ArithConfig<E>;
 
     fn name() -> String {
@@ -114,6 +114,126 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstruction<E,
         Ok(())
     }
 }
+
+pub struct MulhInstruction<E>(PhantomData<E>);
+
+pub struct MulhConfig<E: ExtensionField> {
+    rs1_read: UInt<E>,
+    rs2_read: UInt<E>,
+    rd_written: UInt<E>,
+    rs1_signed: Signed,
+    rs2_signed: Signed,
+    rd_signed: Signed,
+    unsigned_prod_low: UInt<E>,
+    r_insn: RInstructionConfig<E>,
+}
+
+impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
+    type InstructionConfig = MulhConfig<E>;
+
+    fn name() -> String {
+        format!("{:?}", InsnKind::MULH)
+    }
+
+    fn construct_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+    ) -> Result<MulhConfig<E>, ZKVMError> {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+
+        let rs1_signed = Signed::construct_circuit(circuit_builder, &rs1_read)?;
+        let rs2_signed = Signed::construct_circuit(circuit_builder, &rs2_read)?;
+        let rd_signed = Signed::construct_circuit(circuit_builder, &rd_written)?;
+
+        let unsigned_prod_low = UInt::new(|| "prod_low", circuit_builder)?;
+
+        circuit_builder.require_equal(
+            || "unsigned_prod_equal",
+            rs1_signed.abs_value.expr() * rs2_signed.abs_value.expr(),
+            unsigned_prod_low.value() + Expression::<E>::from(1u64 << 32) * rd_signed.abs_value.expr()
+        )?;
+
+        circuit_builder.require_equal(
+            || "check_signs",
+            rs1_signed.is_negative.expr::<E>() * (Expression::<E>::ONE - rs2_signed.is_negative.expr())
+            + (Expression::<E>::ONE - rs1_signed.is_negative.expr::<E>()) * rs2_signed.is_negative.expr(),
+            rd_signed.is_negative.expr())?;
+
+        let r_insn = RInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            InsnKind::MULH,
+            rs1_read.register_expr(),
+            rs2_read.register_expr(),
+            rd_written.register_expr(),
+        )?;
+
+        Ok(MulhConfig {
+            rs1_read,
+            rs2_read,
+            rd_written,
+            rs1_signed,
+            rs2_signed,
+            rd_signed,
+            unsigned_prod_low,
+            r_insn,
+        })
+    }
+
+    fn assign_instance(
+        config: &Self::InstructionConfig,
+        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        todo!();
+
+        // Ok(())
+    }
+}
+
+
+struct Signed {
+    pub is_negative: IsLtConfig,
+    pub abs_value: WitIn,
+}
+
+impl Signed {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        val: &UInt<E>,
+    ) -> Result<Self, ZKVMError> {
+        // is_lt is set if top limb of val is negative
+        let sign_cmp = IsLtConfig::construct_circuit(
+            cb,
+            || "signed",
+            (1u64 << 15).into(),
+            val.expr().last().unwrap().clone(),
+            1)?;
+        let abs_value = cb.create_witin(|| "abs_value witin")?;
+        cb.require_equal(|| "abs_value", abs_value.expr(),
+            (1 - 2*sign_cmp.expr())*(val.value() - (1 << 32)*sign_cmp.expr()))?;
+
+        Ok(Self { is_negative: sign_cmp, abs_value })
+    }
+
+    pub fn assign_instance<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        val: &Value<u32>,
+    ) -> Result<(), ZKVMError> {
+        self.is_negative.assign_instance(instance, lkm, 1u64 << 15, *val.limbs.last().unwrap() as u64)?;
+        let unsigned = val.as_u64();
+        set_val!(instance, self.abs_value, if unsigned >= (1u64 << 31) {
+            (unsigned as i64 - (1i64 << 32)).neg() as u64
+        } else {
+            unsigned
+        });
+        Ok(())
+    }
+}
+
 
 #[cfg(test)]
 mod test {
