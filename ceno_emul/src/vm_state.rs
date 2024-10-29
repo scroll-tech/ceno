@@ -1,13 +1,7 @@
 use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
-use crate::{
-    Program,
-    addr::{ByteAddr, RegIdx, Word, WordAddr},
-    platform::Platform,
-    rv32im::{DecodedInstruction, Emulator, TrapCause},
-    tracer::{Change, StepRecord, Tracer},
-};
+use crate::{Program, addr::{ByteAddr, RegIdx, Word, WordAddr}, platform::Platform, rv32im::{DecodedInstruction, Emulator, TrapCause}, tracer::{Change, StepRecord, Tracer}, PC_STEP_SIZE};
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
 
@@ -120,7 +114,11 @@ impl EmuContext for VMState {
             self.halt();
             Ok(true)
         } else {
-            self.trap(TrapCause::EcallError)
+            // self.trap(TrapCause::EcallError)
+            // ignore ecall other than halt for now
+            tracing::debug!("ecall with syscall_id={:x}", function);
+            self.set_pc(ByteAddr(self.pc + PC_STEP_SIZE as u32));
+            Ok(true)
         }
     }
 
