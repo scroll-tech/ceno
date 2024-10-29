@@ -224,7 +224,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         let init_v = cb.query_public_io()?;
         let addr = cb.create_fixed(|| "addr")?;
 
-        let final_cycle = cb.create_witin(|| "final_cycle")?;
+        let final_cycle = cb.create_witin(|| "final_cycle");
 
         let init_table = cb.rlc_chip_record(
             [
@@ -330,12 +330,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        let addr = cb.create_witin(|| "addr")?;
+        let addr = cb.create_witin(|| "addr");
 
         let final_v = (0..DVRAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
-            .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
-        let final_cycle = cb.create_witin(|| "final_cycle")?;
+            .collect::<Vec<WitIn>>();
+        let final_cycle = cb.create_witin(|| "final_cycle");
 
         let init_table = cb.rlc_chip_record(
             [

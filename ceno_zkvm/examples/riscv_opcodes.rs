@@ -13,7 +13,7 @@ use ceno_zkvm::{
 use clap::Parser;
 
 use ceno_emul::{
-    CENO_PLATFORM, EmuContext,
+    ByteAddr, CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
     PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
