@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    PC_STEP_SIZE, Program,
+    Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
@@ -120,10 +120,7 @@ impl EmuContext for VMState {
             self.halt();
             Ok(true)
         } else {
-            tracing::debug!("ecall with syscall id = {function:x}");
-            self.set_pc(ByteAddr(self.pc + PC_STEP_SIZE as u32));
-
-            Ok(true)
+            self.trap(TrapCause::EcallError)
         }
     }
 
