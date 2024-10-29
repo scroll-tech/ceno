@@ -4,6 +4,7 @@ use ceno_emul::{InsnKind, SWord, StepRecord, Word};
 use ff_ext::ExtensionField;
 
 use super::{
+    RIVInstruction,
     constants::{UINT_LIMBS, UInt},
     i_insn::IInstructionConfig,
 };
@@ -21,7 +22,7 @@ use crate::{
 use core::mem::MaybeUninit;
 
 #[derive(Debug)]
-pub struct InstructionConfig<E: ExtensionField> {
+pub struct SetLessThanImmConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -33,13 +34,18 @@ pub struct InstructionConfig<E: ExtensionField> {
     lt: IsLtConfig,
 }
 
-pub struct SltiInstruction<E>(PhantomData<E>);
+pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
 
-impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
-    type InstructionConfig = InstructionConfig<E>;
+pub struct SltiOp;
+impl RIVInstruction for SltiOp {
+    const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTI;
+}
+
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {
+    type InstructionConfig = SetLessThanImmConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", InsnKind::SLTI)
+        format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -74,7 +80,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
             false,
         )?;
 
-        Ok(InstructionConfig {
+        Ok(SetLessThanImmConfig {
             i_insn,
             rs1_read,
             imm,
@@ -131,33 +137,50 @@ mod test {
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
-    fn verify(name: &'static str, rs1: i32, imm: i32, rd: Word) {
+    fn verify<I: RIVInstruction>(name: &'static str, rs1: i32, imm: i32, rd: Word) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
+
+        let (prefix, insn_code, rd_written) = match I::INST_KIND {
+            InsnKind::SLTI => (
+                "SLTI",
+                encode_rv32(InsnKind::SLTI, 2, 0, 4, imm_i(imm)),
+                (rs1 < imm) as u32,
+            ),
+            _ => unreachable!(),
+        };
+
         let config = cb
             .namespace(
-                || format!("SLTI/{name}"),
+                || format!("{prefix}_({name})"),
                 |cb| {
-                    let config = SltiInstruction::construct_circuit(cb);
+                    let config =
+                        SetLessThanImmInstruction::<GoldilocksExt2, SltiOp>::construct_circuit(cb);
                     Ok(config)
                 },
             )
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::SLTI, 2, 0, 4, imm_i(imm));
         let (raw_witin, lkm) =
-            SltiInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_i_instruction(
+            SetLessThanImmInstruction::<GoldilocksExt2, SltiOp>::assign_instances(
+                &config,
+                cb.cs.num_witin as usize,
+                vec![StepRecord::new_i_instruction(
                     3,
                     Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                     insn_code,
                     rs1 as Word,
                     Change::new(0, rd),
                     0,
-                ),
-            ])
+                )],
+            )
             .unwrap();
+
+        assert_eq!(
+            rd_written, rd,
+            "calculated and expected rd_written mismatch"
+        );
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
@@ -171,29 +194,29 @@ mod test {
 
     #[test]
     fn test_slti_true() {
-        verify("lt = true, 0 < 1", 0, 1, 1);
-        verify("lt = true, 1 < 2", 1, 2, 1);
-        verify("lt = true, -1 < 0", -1, 0, 1);
-        verify("lt = true, -1 < 1", -1, 1, 1);
-        verify("lt = true, -2 < -1", -2, -1, 1);
+        verify::<SltiOp>("lt = true, 0 < 1", 0, 1, 1);
+        verify::<SltiOp>("lt = true, 1 < 2", 1, 2, 1);
+        verify::<SltiOp>("lt = true, -1 < 0", -1, 0, 1);
+        verify::<SltiOp>("lt = true, -1 < 1", -1, 1, 1);
+        verify::<SltiOp>("lt = true, -2 < -1", -2, -1, 1);
         // -2048 <= imm <= 2047
-        verify("lt = true, imm upper bondary", i32::MIN, 2047, 1);
-        verify("lt = true, imm lower bondary", i32::MIN, -2048, 1);
+        verify::<SltiOp>("lt = true, imm upper bondary", i32::MIN, 2047, 1);
+        verify::<SltiOp>("lt = true, imm lower bondary", i32::MIN, -2048, 1);
     }
 
     #[test]
     fn test_slti_false() {
-        verify("lt = false, 1 < 0", 1, 0, 0);
-        verify("lt = false, 2 < 1", 2, 1, 0);
-        verify("lt = false, 0 < -1", 0, -1, 0);
-        verify("lt = false, 1 < -1", 1, -1, 0);
-        verify("lt = false, -1 < -2", -1, -2, 0);
-        verify("lt = false, 0 == 0", 0, 0, 0);
-        verify("lt = false, 1 == 1", 1, 1, 0);
-        verify("lt = false, -1 == -1", -1, -1, 0);
+        verify::<SltiOp>("lt = false, 1 < 0", 1, 0, 0);
+        verify::<SltiOp>("lt = false, 2 < 1", 2, 1, 0);
+        verify::<SltiOp>("lt = false, 0 < -1", 0, -1, 0);
+        verify::<SltiOp>("lt = false, 1 < -1", 1, -1, 0);
+        verify::<SltiOp>("lt = false, -1 < -2", -1, -2, 0);
+        verify::<SltiOp>("lt = false, 0 == 0", 0, 0, 0);
+        verify::<SltiOp>("lt = false, 1 == 1", 1, 1, 0);
+        verify::<SltiOp>("lt = false, -1 == -1", -1, -1, 0);
         // -2048 <= imm <= 2047
-        verify("lt = false, imm upper bondary", i32::MAX, 2047, 0);
-        verify("lt = false, imm lower bondary", i32::MAX, -2048, 0);
+        verify::<SltiOp>("lt = false, imm upper bondary", i32::MAX, 2047, 0);
+        verify::<SltiOp>("lt = false, imm lower bondary", i32::MAX, -2048, 0);
     }
 
     #[test]
@@ -202,6 +225,6 @@ mod test {
         let a: i32 = rng.gen();
         let b: i32 = rng.gen::<i32>() % 2048;
         println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify("random 1", a, b, (a < b) as u32);
+        verify::<SltiOp>("random 1", a, b, (a < b) as u32);
     }
 }
