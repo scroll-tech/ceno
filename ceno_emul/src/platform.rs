@@ -5,19 +5,30 @@ use crate::addr::{Addr, RegIdx};
 /// - the layout of virtual memory,
 /// - special addresses, such as the initial PC,
 /// - codes of environment calls.
-pub struct Platform;
+#[derive(Copy, Clone)]
+pub struct Platform {
+    pub rom_start: Addr,
+    pub rom_end: Addr,
+    pub ram_start: Addr,
+    pub ram_end: Addr,
+}
 
-pub const CENO_PLATFORM: Platform = Platform;
+pub const CENO_PLATFORM: Platform = Platform {
+    rom_start: 0x2000_0000,
+    rom_end: 0x3000_0000 - 1,
+    ram_start: 0x8000_0000,
+    ram_end: 0xFFFF_FFFF,
+};
 
 impl Platform {
     // Virtual memory layout.
 
     pub const fn rom_start(&self) -> Addr {
-        0x2000_0000
+        self.rom_start
     }
 
     pub const fn rom_end(&self) -> Addr {
-        0x3000_0000 - 1
+        self.rom_end
     }
 
     pub fn is_rom(&self, addr: Addr) -> bool {
@@ -25,18 +36,17 @@ impl Platform {
     }
 
     pub const fn ram_start(&self) -> Addr {
-        let ram_start = 0x8000_0000;
         if cfg!(feature = "forbid_overflow") {
             // -1<<11 == 0x800 is the smallest negative 'immediate'
             // offset we can have in memory instructions.
             // So if we stay away from it, we are safe.
-            assert!(ram_start >= 0x800);
+            assert!(self.ram_start >= 0x800);
         }
-        ram_start
+        self.ram_start
     }
 
     pub const fn ram_end(&self) -> Addr {
-        0xFFFF_FFFF
+        self.ram_end
             - if cfg!(feature = "forbid_overflow") {
                 // (1<<11) - 1 == 0x7ff is the largest positive 'immediate'
                 // offset we can have in memory instructions.
@@ -69,7 +79,7 @@ impl Platform {
 
     // Startup.
 
-    pub const fn pc_start(&self) -> Addr {
+    pub const fn pc_base(&self) -> Addr {
         self.rom_start()
     }
 
@@ -122,7 +132,7 @@ mod tests {
     #[test]
     fn test_no_overlap() {
         let p = CENO_PLATFORM;
-        assert!(p.can_execute(p.pc_start()));
+        assert!(p.can_execute(p.pc_base()));
         // ROM and RAM do not overlap.
         assert!(!p.is_rom(p.ram_start()));
         assert!(!p.is_rom(p.ram_end()));

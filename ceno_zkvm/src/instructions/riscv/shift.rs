@@ -56,7 +56,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5")?;
+        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5");
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
         let mut pow2_rs2_low5 = UInt::new_unchecked(|| "pow2_rs2_low5", circuit_builder)?;
         // rs2 = rs2_high | rs2_low5

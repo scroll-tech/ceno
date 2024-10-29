@@ -38,7 +38,7 @@ impl SignedExtendConfig {
     ) -> Result<Self, ZKVMError> {
         assert!(n_bits == 8 || n_bits == 16);
 
-        let msb = cb.create_witin(|| "msb")?;
+        let msb = cb.create_witin(|| "msb");
         // require msb is boolean
         cb.assert_bit(|| "msb is boolean", msb.expr())?;
 

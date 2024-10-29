@@ -34,7 +34,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        let prev_x10_ts = cb.create_witin(|| "prev_x10_ts")?;
+        let prev_x10_ts = cb.create_witin(|| "prev_x10_ts");
         let exit_code = {
             let exit_code = cb.query_exit_code()?;
             [exit_code[0].expr(), exit_code[1].expr()]

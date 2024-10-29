@@ -556,6 +556,7 @@ impl Emulator {
         let decoded = DecodedInstruction::new(word);
         let insn = self.table.lookup(&decoded);
         ctx.on_insn_decoded(&decoded);
+        tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
@@ -775,6 +776,7 @@ impl Emulator {
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm_s()));
         let shift = 8 * (addr.0 & 3);
         if !ctx.check_data_store(addr) {
+            tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
             return ctx.trap(TrapCause::StoreAccessFault);
         }
         let mut data = ctx.peek_memory(addr.waddr());

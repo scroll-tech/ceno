@@ -37,14 +37,14 @@ impl<E: ExtensionField> StateInOut<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         branching: bool,
     ) -> Result<Self, ZKVMError> {
-        let pc = circuit_builder.create_witin(|| "pc")?;
+        let pc = circuit_builder.create_witin(|| "pc");
         let (next_pc_opt, next_pc_expr) = if branching {
-            let next_pc = circuit_builder.create_witin(|| "next_pc")?;
+            let next_pc = circuit_builder.create_witin(|| "next_pc");
             (Some(next_pc), next_pc.expr())
         } else {
             (None, pc.expr() + PC_STEP_SIZE)
         };
-        let ts = circuit_builder.create_witin(|| "ts")?;
+        let ts = circuit_builder.create_witin(|| "ts");
         let next_ts = ts.expr() + Tracer::SUBCYCLES_PER_INSN;
         circuit_builder.state_in(pc.expr(), ts.expr())?;
         circuit_builder.state_out(next_pc_expr, next_ts)?;
@@ -87,8 +87,8 @@ impl<E: ExtensionField> ReadRS1<E> {
         rs1_read: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rs1_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
+        let id = circuit_builder.create_witin(|| "rs1_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts");
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs1",
             id,
@@ -142,8 +142,8 @@ impl<E: ExtensionField> ReadRS2<E> {
         rs2_read: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rs2_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
+        let id = circuit_builder.create_witin(|| "rs2_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts");
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs2",
             id,
@@ -197,8 +197,8 @@ impl<E: ExtensionField> WriteRD<E> {
         rd_written: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rd_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
+        let id = circuit_builder.create_witin(|| "rd_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts");
         let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
         let (_, lt_cfg) = circuit_builder.register_write(
             || "write_rd",
@@ -258,7 +258,7 @@ impl<E: ExtensionField> ReadMEM<E> {
         mem_read: Expression<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts");
         let (_, lt_cfg) = circuit_builder.memory_read(
             || "read_memory",
             &mem_addr,
@@ -313,7 +313,7 @@ impl WriteMEM {
         new_value: MemoryExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts");
 
         let (_, lt_cfg) = circuit_builder.memory_write(
             || "write_memory",
@@ -408,7 +408,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Witness and constrain the non-zero low bits.
         let low_bits = (n_zeros..Self::N_LOW_BITS)
             .map(|i| {
-                let bit = cb.create_witin(|| format!("addr_bit_{}", i))?;
+                let bit = cb.create_witin(|| format!("addr_bit_{}", i));
                 cb.assert_bit(|| format!("addr_bit_{}", i), bit.expr())?;
                 Ok(bit)
             })
