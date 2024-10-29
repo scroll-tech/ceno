@@ -290,7 +290,6 @@ impl DecodedInstruction {
                 kind: SLLI | SRLI | SRAI,
                 ..
             } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
-            InsnCodes { kind: SLTIU, .. } => (self.func7 << 5) | self.rs2,
             InsnCodes { format: I, .. } => self.imm_i(),
             InsnCodes { format: S, .. } => self.imm_s(),
             InsnCodes { format: B, .. } => self.imm_b(),
@@ -324,23 +323,27 @@ impl DecodedInstruction {
         (i.category, i.kind)
     }
 
+    pub fn imm12_sign_ext(&self) -> u32 {
+        self.imm_is_negative() as u32 * 0xfffff000
+    }
+
     pub fn imm_b(&self) -> u32 {
-        (self.top_bit * 0xfffff000)
+        self.imm12_sign_ext()
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
     pub fn imm_i(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
+        self.imm12_sign_ext() | (self.func7 << 5) | self.rs2
     }
 
     pub fn imm_s(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
+        self.imm12_sign_ext() | (self.func7 << 5) | self.rd
     }
 
     pub fn imm_j(&self) -> u32 {
-        (self.top_bit * 0xfff00000)
+        self.imm12_sign_ext()
             | (self.rs1 << 15)
             | (self.func3 << 12)
             | ((self.rs2 & 1) << 11)
