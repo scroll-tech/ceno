@@ -38,7 +38,7 @@ impl VMState {
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         let mut state = Self::new(platform);
-        let program = Program::load_elf(elf, u32::MAX).unwrap();
+        let program = Program::load_elf(elf, u32::MAX)?;
         for (addr, word) in program.image.iter() {
             let addr = ByteAddr(*addr).waddr();
             state.init_memory(addr, *word);
