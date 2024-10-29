@@ -31,8 +31,6 @@ crossbeam-channel = "0.5"
 ff = "0.13"
 goldilocks = { git = "https://github.com/hero78119/Goldilocks" }
 itertools = "0.13"
-num-traits = "0.2"
-num-derive = "0.4"
 paste = "1"
 plonky2 = "0.2"
 poseidon = { path = "./poseidon" }

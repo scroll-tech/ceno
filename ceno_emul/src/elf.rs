@@ -59,7 +59,7 @@ impl Program {
     pub fn load_elf(input: &[u8], max_mem: u32) -> Result<Program> {
         let mut instructions: Vec<u32> = Vec::new();
         let mut image: BTreeMap<u32, u32> = BTreeMap::new();
-        let mut base_address = max_mem;
+        let mut base_address = None;
 
         let elf = ElfBytes::<LittleEndian>::minimal_parse(input)
             .map_err(|err| anyhow!("Elf parse error: {err}"))?;
@@ -92,9 +92,9 @@ impl Program {
             tracing::debug!(
                 "loadable segement {}: PF_R={}, PF_W={}, PF_X={}",
                 idx,
-                segment.p_flags & PF_R,
-                segment.p_flags & PF_W,
-                segment.p_flags & PF_X,
+                segment.p_flags & PF_R != 0,
+                segment.p_flags & PF_W != 0,
+                segment.p_flags & PF_X != 0,
             );
             let file_size: u32 = segment
                 .p_filesz
@@ -114,8 +114,12 @@ impl Program {
                 .p_vaddr
                 .try_into()
                 .map_err(|err| anyhow!("vaddr is larger than 32 bits. {err}"))?;
-            if (segment.p_flags & PF_X) != 0 && base_address > vaddr {
-                base_address = vaddr;
+            if (segment.p_flags & PF_X) != 0 {
+                if base_address.is_none() {
+                    base_address = Some(vaddr);
+                } else {
+                    return Err(anyhow!("only support one executable segment"));
+                }
             }
             if vaddr % WORD_SIZE as u32 != 0 {
                 bail!("vaddr {vaddr:08x} is unaligned");
@@ -151,6 +155,10 @@ impl Program {
             }
         }
 
+        if base_address.is_none() {
+            return Err(anyhow!("does not have executable segment"));
+        }
+        let base_address = base_address.unwrap();
         assert!(entry >= base_address);
         assert!((entry - base_address) as usize <= instructions.len() * WORD_SIZE);
 
