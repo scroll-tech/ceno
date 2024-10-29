@@ -60,6 +60,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         let imm = cb.create_witin(|| "imm")?;
 
         let (value_expr, is_rs1_neg) = match I::INST_KIND {
+            InsnKind::SLTIU => (rs1_read.value(), None),
             InsnKind::SLTI => {
                 let max_signed_limb_expr: Expression<_> =
                     ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
@@ -72,7 +73,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                 )?;
                 (rs1_read.to_field_expr(is_rs1_neg.expr()), Some(is_rs1_neg))
             }
-            InsnKind::SLTIU => (rs1_read.value(), None),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
@@ -119,6 +119,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         set_val!(instance, config.imm, imm_field);
 
         match I::INST_KIND {
+            InsnKind::SLTIU => {
+                config
+                    .lt
+                    .assign_instance(instance, lkm, rs1 as u64, imm as u64)?;
+            }
             InsnKind::SLTI => {
                 config.is_rs1_neg.as_ref().unwrap().assign_instance(
                     instance,
@@ -129,11 +134,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                 config
                     .lt
                     .assign_instance_signed(instance, lkm, rs1 as SWord, imm as SWord)?;
-            }
-            InsnKind::SLTIU => {
-                config
-                    .lt
-                    .assign_instance(instance, lkm, rs1 as u64, imm as u64)?;
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }
@@ -155,83 +155,6 @@ mod test {
         instructions::{Instruction, riscv::test_utils::imm_i},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
-
-    #[test]
-    fn test_slti_true() {
-        verify_slti("lt = true, 0 < 1", 0, 1, 1);
-        verify_slti("lt = true, 1 < 2", 1, 2, 1);
-        verify_slti("lt = true, -1 < 0", -1, 0, 1);
-        verify_slti("lt = true, -1 < 1", -1, 1, 1);
-        verify_slti("lt = true, -2 < -1", -2, -1, 1);
-        // -2048 <= imm <= 2047
-        verify_slti("lt = true, imm upper bondary", i32::MIN, 2047, 1);
-        verify_slti("lt = true, imm lower bondary", i32::MIN, -2048, 1);
-    }
-
-    #[test]
-    fn test_slti_false() {
-        verify_slti("lt = false, 1 < 0", 1, 0, 0);
-        verify_slti("lt = false, 2 < 1", 2, 1, 0);
-        verify_slti("lt = false, 0 < -1", 0, -1, 0);
-        verify_slti("lt = false, 1 < -1", 1, -1, 0);
-        verify_slti("lt = false, -1 < -2", -1, -2, 0);
-        verify_slti("lt = false, 0 == 0", 0, 0, 0);
-        verify_slti("lt = false, 1 == 1", 1, 1, 0);
-        verify_slti("lt = false, -1 == -1", -1, -1, 0);
-        // -2048 <= imm <= 2047
-        verify_slti("lt = false, imm upper bondary", i32::MAX, 2047, 0);
-        verify_slti("lt = false, imm lower bondary", i32::MAX, -2048, 0);
-    }
-
-    #[test]
-    fn test_slti_random() {
-        let mut rng = rand::thread_rng();
-        let a: i32 = rng.gen();
-        let b: i32 = rng.gen::<i32>() % 2048;
-        println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify_slti("random 1", a, b, (a < b) as u32);
-    }
-
-    fn verify_slti(name: &'static str, rs1: i32, imm: i32, rd: Word) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || format!("SLTI/{name}"),
-                |cb| {
-                    let config =
-                        SetLessThanImmInstruction::<GoldilocksExt2, SltiOp>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let insn_code = encode_rv32(InsnKind::SLTI, 2, 0, 4, imm_i(imm));
-        let (raw_witin, lkm) =
-            SetLessThanImmInstruction::<GoldilocksExt2, SltiOp>::assign_instances(
-                &config,
-                cb.cs.num_witin as usize,
-                vec![StepRecord::new_i_instruction(
-                    3,
-                    Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
-                    insn_code,
-                    rs1 as Word,
-                    Change::new(0, rd),
-                    0,
-                )],
-            )
-            .unwrap();
-
-        let expected_rd_written =
-            UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
 
     #[test]
     fn test_sltiu_true() {
@@ -287,6 +210,83 @@ mod test {
         let insn_code = encode_rv32(InsnKind::SLTIU, 2, 0, 4, imm);
         let (raw_witin, lkm) =
             SetLessThanImmInstruction::<GoldilocksExt2, SltiuOp>::assign_instances(
+                &config,
+                cb.cs.num_witin as usize,
+                vec![StepRecord::new_i_instruction(
+                    3,
+                    Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                    insn_code,
+                    rs1 as Word,
+                    Change::new(0, rd),
+                    0,
+                )],
+            )
+            .unwrap();
+
+        let expected_rd_written =
+            UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
+        config
+            .rd_written
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .unwrap();
+
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    }
+
+    #[test]
+    fn test_slti_true() {
+        verify_slti("lt = true, 0 < 1", 0, 1, 1);
+        verify_slti("lt = true, 1 < 2", 1, 2, 1);
+        verify_slti("lt = true, -1 < 0", -1, 0, 1);
+        verify_slti("lt = true, -1 < 1", -1, 1, 1);
+        verify_slti("lt = true, -2 < -1", -2, -1, 1);
+        // -2048 <= imm <= 2047
+        verify_slti("lt = true, imm upper bondary", i32::MIN, 2047, 1);
+        verify_slti("lt = true, imm lower bondary", i32::MIN, -2048, 1);
+    }
+
+    #[test]
+    fn test_slti_false() {
+        verify_slti("lt = false, 1 < 0", 1, 0, 0);
+        verify_slti("lt = false, 2 < 1", 2, 1, 0);
+        verify_slti("lt = false, 0 < -1", 0, -1, 0);
+        verify_slti("lt = false, 1 < -1", 1, -1, 0);
+        verify_slti("lt = false, -1 < -2", -1, -2, 0);
+        verify_slti("lt = false, 0 == 0", 0, 0, 0);
+        verify_slti("lt = false, 1 == 1", 1, 1, 0);
+        verify_slti("lt = false, -1 == -1", -1, -1, 0);
+        // -2048 <= imm <= 2047
+        verify_slti("lt = false, imm upper bondary", i32::MAX, 2047, 0);
+        verify_slti("lt = false, imm lower bondary", i32::MAX, -2048, 0);
+    }
+
+    #[test]
+    fn test_slti_random() {
+        let mut rng = rand::thread_rng();
+        let a: i32 = rng.gen();
+        let b: i32 = rng.gen::<i32>() % 2048;
+        println!("random: {} <? {}", a, b); // For debugging, do not delete.
+        verify_slti("random 1", a, b, (a < b) as u32);
+    }
+
+    fn verify_slti(name: &'static str, rs1: i32, imm: i32, rd: Word) {
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(
+                || format!("SLTI/{name}"),
+                |cb| {
+                    let config =
+                        SetLessThanImmInstruction::<GoldilocksExt2, SltiOp>::construct_circuit(cb);
+                    Ok(config)
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        let insn_code = encode_rv32(InsnKind::SLTI, 2, 0, 4, imm_i(imm));
+        let (raw_witin, lkm) =
+            SetLessThanImmInstruction::<GoldilocksExt2, SltiOp>::assign_instances(
                 &config,
                 cb.cs.num_witin as usize,
                 vec![StepRecord::new_i_instruction(
