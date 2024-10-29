@@ -199,9 +199,48 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        todo!();
+        config
+            .r_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
 
-        // Ok(())
+        // Read registers from step
+        let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
+        config
+            .rs1_read
+            .assign_limbs(instance, rs1_read.as_u16_limbs());
+
+        let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
+        config
+            .rs2_read
+            .assign_limbs(instance, rs2_read.as_u16_limbs());
+
+        let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
+        config
+            .rd_written
+            .assign_limbs(instance, rd_written.as_u16_limbs());
+
+        // Assign sign values
+        let (_, rs1_abs) = config.rs1_signed.assign_instance(
+            instance,
+            lk_multiplicity,
+            &rs1_read)?;
+
+        let (_, rs2_abs) = config.rs2_signed.assign_instance(
+            instance,
+            lk_multiplicity,
+            &rs2_read)?;
+
+        config.rd_signed.assign_instance(
+            instance,
+            lk_multiplicity,
+            &rd_written)?;
+
+        // Extract low limbs value of unsigned product
+        let unsigned_prod_low = Value::new((rs1_abs * rs2_abs) % (1u64 << BIT_WIDTH), lk_multiplicity);
+        config.unsigned_prod_low
+            .assign_limbs(instance, unsigned_prod_low.as_u16_limbs());
+
+        Ok(())
     }
 }
 
@@ -241,24 +280,30 @@ impl Signed {
         instance: &mut [MaybeUninit<F>],
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(bool, u64), ZKVMError> {
+        let high_limb = *val.limbs.last().unwrap() as u64;
+        let sign_cutoff = 1u64 << (LIMB_BITS - 1);
         self.is_negative.assign_instance(
             instance,
             lkm,
-            1u64 << 15,
-            *val.limbs.last().unwrap() as u64,
+            sign_cutoff,
+            high_limb,
         )?;
-        let unsigned = val.as_u64();
-        set_val!(
-            instance,
-            self.abs_value,
+        let is_negative = sign_cutoff < high_limb;
+        let abs_value = {
+            let unsigned = val.as_u64();
             if unsigned >= (1u64 << 31) {
                 (unsigned as i64 - (1i64 << BIT_WIDTH)).neg() as u64
             } else {
                 unsigned
             }
+        };
+        set_val!(
+            instance,
+            self.abs_value,
+            abs_value
         );
-        Ok(())
+        Ok((is_negative, abs_value))
     }
 }
 
