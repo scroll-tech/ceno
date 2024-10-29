@@ -4,13 +4,22 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
-use super::{
-    RIVInstruction,
-    constants::{UInt, UIntMul},
-    r_insn::RInstructionConfig,
-};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, expression::{Expression, ToExpr, WitIn}, gadgets::IsLtConfig, instructions::Instruction, set_val, uint::Value, witness::LkMultiplicity
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr, WitIn},
+    gadgets::IsLtConfig,
+    instructions::{
+        Instruction,
+        riscv::{
+            RIVInstruction,
+            constants::{BIT_WIDTH, LIMB_BITS, UInt, UIntMul},
+            r_insn::RInstructionConfig,
+        },
+    },
+    set_val,
+    uint::Value,
+    witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 
@@ -151,14 +160,18 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         circuit_builder.require_equal(
             || "unsigned_prod_equal",
             rs1_signed.abs_value.expr() * rs2_signed.abs_value.expr(),
-            unsigned_prod_low.value() + Expression::<E>::from(1u64 << 32) * rd_signed.abs_value.expr()
+            unsigned_prod_low.value()
+                + Expression::<E>::from(1u64 << 32) * rd_signed.abs_value.expr(),
         )?;
 
         circuit_builder.require_equal(
             || "check_signs",
-            rs1_signed.is_negative.expr::<E>() * (Expression::<E>::ONE - rs2_signed.is_negative.expr())
-            + (Expression::<E>::ONE - rs1_signed.is_negative.expr::<E>()) * rs2_signed.is_negative.expr(),
-            rd_signed.is_negative.expr())?;
+            rs1_signed.is_negative.expr::<E>()
+                * (Expression::<E>::ONE - rs2_signed.is_negative.expr())
+                + (Expression::<E>::ONE - rs1_signed.is_negative.expr::<E>())
+                    * rs2_signed.is_negative.expr(),
+            rd_signed.is_negative.expr(),
+        )?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -192,7 +205,6 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
     }
 }
 
-
 struct Signed {
     pub is_negative: IsLtConfig,
     pub abs_value: WitIn,
@@ -204,17 +216,24 @@ impl Signed {
         val: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
         // is_lt is set if top limb of val is negative
-        let sign_cmp = IsLtConfig::construct_circuit(
+        let is_negative = IsLtConfig::construct_circuit(
             cb,
             || "signed",
-            (1u64 << 15).into(),
+            (1u64 << (LIMB_BITS - 1)).into(),
             val.expr().last().unwrap().clone(),
-            1)?;
+            1,
+        )?;
         let abs_value = cb.create_witin(|| "abs_value witin")?;
-        cb.require_equal(|| "abs_value", abs_value.expr(),
-            (1 - 2*sign_cmp.expr())*(val.value() - (1 << 32)*sign_cmp.expr()))?;
+        cb.require_equal(
+            || "abs_value",
+            abs_value.expr(),
+            (1 - 2 * is_negative.expr()) * (val.value() - (1 << 32) * is_negative.expr()),
+        )?;
 
-        Ok(Self { is_negative: sign_cmp, abs_value })
+        Ok(Self {
+            is_negative,
+            abs_value,
+        })
     }
 
     pub fn assign_instance<F: SmallField>(
@@ -223,17 +242,25 @@ impl Signed {
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
     ) -> Result<(), ZKVMError> {
-        self.is_negative.assign_instance(instance, lkm, 1u64 << 15, *val.limbs.last().unwrap() as u64)?;
+        self.is_negative.assign_instance(
+            instance,
+            lkm,
+            1u64 << 15,
+            *val.limbs.last().unwrap() as u64,
+        )?;
         let unsigned = val.as_u64();
-        set_val!(instance, self.abs_value, if unsigned >= (1u64 << 31) {
-            (unsigned as i64 - (1i64 << 32)).neg() as u64
-        } else {
-            unsigned
-        });
+        set_val!(
+            instance,
+            self.abs_value,
+            if unsigned >= (1u64 << 31) {
+                (unsigned as i64 - (1i64 << BIT_WIDTH)).neg() as u64
+            } else {
+                unsigned
+            }
+        );
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod test {
