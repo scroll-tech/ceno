@@ -1,6 +1,4 @@
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use std::cmp::Ordering;
 
 use super::Expression;
 use Expression::*;
@@ -92,43 +90,6 @@ impl<E: ExtensionField> Expression<E> {
 struct Term<E: ExtensionField> {
     coeff: Expression<E>,
     vars: Vec<Expression<E>>,
-}
-
-// Define a lexicographic order for expressions. It compares the types first, then the arguments left-to-right.
-impl<E: ExtensionField> Ord for Expression<E> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        use Ordering::*;
-
-        match (self, other) {
-            (Fixed(a), Fixed(b)) => a.cmp(b),
-            (WitIn(a), WitIn(b)) => a.cmp(b),
-            (Instance(a), Instance(b)) => a.cmp(b),
-            (Challenge(a, b, c, d), Challenge(e, f, g, h)) => {
-                (a, b, for_cmp_ext(c), for_cmp_ext(d)).cmp(&(e, f, for_cmp_ext(g), for_cmp_ext(h)))
-            }
-            (Fixed(_), _) => Less,
-            (Instance(_), Fixed(_)) => Greater,
-            (Instance(_), _) => Less,
-            (WitIn(_), Fixed(_)) => Greater,
-            (WitIn(_), Instance(_)) => Greater,
-            (WitIn(_), _) => Less,
-            (Challenge(..), Fixed(_)) => Greater,
-            (Challenge(..), Instance(_)) => Greater,
-            (Challenge(..), WitIn(_)) => Greater,
-            // TODO(Matthias): remove this, and check whether we got all the cases.
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<E: ExtensionField> PartialOrd for Expression<E> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-fn for_cmp_ext<E: ExtensionField>(a: &E) -> Vec<u64> {
-    a.as_bases().iter().map(|f| f.to_canonical_u64()).collect()
 }
 
 #[cfg(test)]

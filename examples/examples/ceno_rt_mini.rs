@@ -3,5 +3,5 @@
 
 extern crate ceno_rt;
 
-#[no_mangle]
+ceno_rt::entry!(main);
 fn main() {}

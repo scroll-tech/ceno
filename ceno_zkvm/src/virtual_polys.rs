@@ -22,11 +22,11 @@ pub struct VirtualPolynomials<'a, E: ExtensionField> {
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
-    pub fn new(num_threads: usize, num_variables: usize) -> Self {
+    pub fn new(num_threads: usize, max_num_variables: usize) -> Self {
         VirtualPolynomials {
             num_threads,
             polys: (0..num_threads)
-                .map(|_| VirtualPolynomialV2::new(num_variables - ceil_log2(num_threads)))
+                .map(|_| VirtualPolynomialV2::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
             thread_based_mles_storage: HashMap::new(),
         }

@@ -1,58 +1,56 @@
 [package]
-name = "ceno_zkvm"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = "ceno_zkvm"
+version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
+rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true
-rand_chacha.workspace = true
 
-transcript = { path = "../transcript" }
-sumcheck = { version = "0.1.0", path = "../sumcheck" }
-multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
-ff_ext = { path = "../ff_ext" }
 ceno_emul = { path = "../ceno_emul" }
+ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
+multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+sumcheck = { version = "0", path = "../sumcheck" }
+transcript = { path = "../transcript" }
 
-itertools = "0.12.1"
-strum = "0.25.0"
-strum_macros = "0.25.3"
-paste = "1.0.15"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-tracing-flame = "0.2.0"
-tracing = "0.1.40"
+itertools.workspace = true
+paste.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+tracing.workspace = true
+tracing-flame.workspace = true
+tracing-subscriber.workspace = true
 
-rand = "0.8"
-thread_local = "1.1.8"
-generic_static = "0.2.0"
-clap = { version = "4.5.20", features = ["derive"] }
-tempfile = "3.13.0"
+clap = { version = "4.5", features = ["derive"] }
+generic_static = "0.2"
+rand.workspace = true
+tempfile = "3.13"
+thread_local = "1.1"
 
 [dev-dependencies]
-pprof = { version = "0.13", features = ["flamegraph"]}
-criterion = { version = "0.5", features = ["html_reports"] }
-cfg-if = "1.0.0"
-const_env = "0.1.2"
-serde_json = "1.0.128"
-base64 = "0.22.1"
+base64 = "0.22"
+cfg-if.workspace = true
+criterion.workspace = true
+pprof.workspace = true
+serde_json.workspace = true
 
 [build-dependencies]
 glob = "0.3"
 
 [features]
-default = ["riv32"]
+default = ["riv32", "forbid_overflow"]
+flamegraph = ["pprof/flamegraph", "pprof/criterion"]
+forbid_overflow = []
+non_pow2_rayon_thread = []
 riv32 = []
 riv64 = []
-non_pow2_rayon_thread = []
-flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 
 [[bench]]
-name = "riscv_add"
 harness = false
+name = "riscv_add"
