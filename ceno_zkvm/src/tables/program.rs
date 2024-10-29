@@ -10,7 +10,7 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{CENO_PLATFORM, DecodedInstruction, PC_STEP_SIZE, WORD_SIZE};
+use ceno_emul::{DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -117,8 +117,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     for ProgramTableCircuit<E, PROGRAM_SIZE>
 {
     type TableConfig = ProgramTableConfig;
-    type FixedInput = [u32; PROGRAM_SIZE];
-    type WitnessInput = usize;
+    type FixedInput = Program;
+    type WitnessInput = Program;
 
     fn name() -> String {
         "PROGRAM".into()
@@ -153,9 +153,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         num_fixed: usize,
         program: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
-        // TODO: get bytecode of the program.
-        let num_instructions = program.len();
-        let pc_start = CENO_PLATFORM.pc_start();
+        let num_instructions = program.instructions.len();
+        let pc_base = program.base_address;
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 
@@ -164,8 +163,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
-                let pc = pc_start + (i * PC_STEP_SIZE) as u32;
-                let insn = DecodedInstruction::new(program[i]);
+                let pc = pc_base + (i * PC_STEP_SIZE) as u32;
+                let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
 
                 // Copy all the fields except immediate.
@@ -192,13 +191,13 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
-        num_instructions: &usize,
+        program: &Program,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
-        let mut prog_mlt = vec![0_usize; *num_instructions];
+        let mut prog_mlt = vec![0_usize; program.instructions.len()];
         for (pc, mlt) in multiplicity {
-            let i = (*pc as usize - CENO_PLATFORM.pc_start() as usize) / WORD_SIZE;
+            let i = (*pc as usize - program.base_address as usize) / WORD_SIZE;
             prog_mlt[i] = *mlt;
         }
 

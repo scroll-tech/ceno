@@ -1,7 +1,5 @@
 use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLEs;
 
 use super::*;
 use crate::{
@@ -42,18 +40,7 @@ fn impl_opcode_beq(equal: bool) {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -84,18 +71,7 @@ fn impl_opcode_bne(equal: bool) {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -136,18 +112,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }
 
@@ -188,18 +153,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }
 
@@ -241,18 +195,7 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }
 
@@ -294,17 +237,6 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
         ])
         .unwrap();
 
-    MockProver::assert_satisfied(
-        &circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }

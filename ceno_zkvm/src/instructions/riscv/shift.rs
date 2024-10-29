@@ -31,14 +31,16 @@ pub struct ShiftConfig<E: ExtensionField> {
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
-#[allow(dead_code)]
+#[cfg(test)]
 struct SllOp;
+#[cfg(test)]
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 struct SrlOp;
+#[cfg(test)]
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
 }
@@ -193,8 +195,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 mod tests {
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         Value,
@@ -289,17 +289,6 @@ mod tests {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

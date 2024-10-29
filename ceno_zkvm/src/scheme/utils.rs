@@ -352,7 +352,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     challenges: &[E],
@@ -361,7 +361,7 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
     eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
