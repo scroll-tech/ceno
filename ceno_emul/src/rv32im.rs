@@ -290,6 +290,7 @@ impl DecodedInstruction {
                 kind: SLLI | SRLI | SRAI,
                 ..
             } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
+            InsnCodes { kind: SLTIU, .. } => (self.func7 << 5) | self.rs2,
             InsnCodes { format: I, .. } => self.imm_i(),
             InsnCodes { format: S, .. } => self.imm_s(),
             InsnCodes { format: B, .. } => self.imm_b(),
@@ -303,7 +304,7 @@ impl DecodedInstruction {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI,
+                kind: SLLI | SRLI | SRAI | ADDI | SLTIU,
                 ..
             } => false,
             _ => self.top_bit != 0,
