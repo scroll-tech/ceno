@@ -298,8 +298,8 @@ impl DecodedInstruction {
         }
     }
 
-    /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
-    pub fn imm_is_negative(&self) -> bool {
+    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
+    pub fn imm_field_is_negative(&self) -> bool {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
@@ -323,27 +323,30 @@ impl DecodedInstruction {
         (i.category, i.kind)
     }
 
-    pub fn imm12_sign_ext(&self) -> u32 {
-        self.imm_is_negative() as u32 * 0xfffff000
-    }
-
     pub fn imm_b(&self) -> u32 {
-        self.imm12_sign_ext()
+        (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
+    /// checks if the imm requires sign extension
+    pub fn requires_sign_ext(&self) -> bool {
+        !matches!(self.codes(), InsnCodes { kind: SLTIU, .. })
+    }
+
     pub fn imm_i(&self) -> u32 {
-        self.imm12_sign_ext() | (self.func7 << 5) | self.rs2
+        ((self.requires_sign_ext() as u32) * self.top_bit * 0xfffff000)
+            | (self.func7 << 5)
+            | self.rs2
     }
 
     pub fn imm_s(&self) -> u32 {
-        self.imm12_sign_ext() | (self.func7 << 5) | self.rd
+        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
     pub fn imm_j(&self) -> u32 {
-        self.imm12_sign_ext()
+        (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
             | (self.func3 << 12)
             | ((self.rs2 & 1) << 11)
