@@ -11,6 +11,7 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{MemFinalRecord, ProgramTableCircuit, initial_memory, initial_registers},
 };
+use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
@@ -19,7 +20,6 @@ use std::{panic, time::Instant};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
-use ff_ext::ff::Field;
 
 fn main() {
     type E = GoldilocksExt2;
@@ -153,7 +153,7 @@ fn main() {
         .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
             &zkvm_cs,
             &prog_config,
-            &vm.program(),
+            vm.program(),
         )
         .unwrap();
 

@@ -109,6 +109,10 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         let rs1 = step.rs1().unwrap().value;
         let imm: i32 = insn.imm_or_funct7() as i32;
+        if step.rd().is_none() {
+            tracing::info!("step: {:?}", step.insn().kind());
+            tracing::info!("step: {:?}", step);
+        }
         let rd = step.rd().unwrap().value.after;
 
         let (sum, overflowing) = rs1.overflowing_add_signed(imm);
