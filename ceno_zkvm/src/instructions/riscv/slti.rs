@@ -45,13 +45,13 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm = cb.create_witin(|| "imm")?;
+        let imm = cb.create_witin(|| "imm");
 
         let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         let is_rs1_neg = IsLtConfig::construct_circuit(
             cb,
             || "lhs_msb",
-            max_signed_limb_expr.clone(),
+            max_signed_limb_expr,
             rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
             1,
         )?;
@@ -63,7 +63,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
             imm.expr(),
             UINT_LIMBS,
         )?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
@@ -122,8 +122,6 @@ mod test {
     use ceno_emul::{Change, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
     use goldilocks::GoldilocksExt2;
 
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
     use rand::Rng;
 
     use super::*;
@@ -168,18 +166,7 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 
     #[test]

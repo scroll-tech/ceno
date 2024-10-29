@@ -28,7 +28,7 @@ impl RangeTableConfig {
         table_len: usize,
     ) -> Result<Self, ZKVMError> {
         let fixed = cb.create_fixed(|| "fixed")?;
-        let mlt = cb.create_witin(|| "mlt")?;
+        let mlt = cb.create_witin(|| "mlt");
 
         let rlc_record =
             cb.rlc_chip_record(vec![(rom_type as usize).into(), Expression::Fixed(fixed)]);

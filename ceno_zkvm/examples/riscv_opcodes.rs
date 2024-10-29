@@ -13,9 +13,9 @@ use ceno_zkvm::{
 use clap::Parser;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext,
+    CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
-    StepRecord, Tracer, VMState, WordAddr, encode_rv32,
+    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -78,6 +78,21 @@ fn main() {
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 
+    let program = Program::new(
+        CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.pc_base(),
+        PROGRAM_CODE.to_vec(),
+        PROGRAM_CODE
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    (insn_idx * PC_WORD_SIZE) as u32 + CENO_PLATFORM.pc_base(),
+                    insn,
+                )
+            })
+            .collect(),
+    );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
         .with(
@@ -104,7 +119,7 @@ fn main() {
     zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
         &zkvm_cs,
         prog_config.clone(),
-        &PROGRAM_CODE,
+        &program,
     );
 
     let reg_init = initial_registers();
@@ -135,13 +150,8 @@ fn main() {
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         let public_io_init = init_public_io(&[1, u32::MAX, step_loop]);
 
-        let mut vm = VMState::new(CENO_PLATFORM);
-        let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
+        let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
-        // init program
-        for (i, inst) in PROGRAM_CODE.iter().enumerate() {
-            vm.init_memory(pc_start + i, *inst);
-        }
         // init mmio
         for record in program_data_init.iter().chain(public_io_init.iter()) {
             vm.init_memory(record.addr.into(), record.value);
@@ -251,11 +261,7 @@ fn main() {
 
         // assign program circuit
         zkvm_witness
-            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
-                &zkvm_cs,
-                &prog_config,
-                &PROGRAM_CODE.len(),
-            )
+            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
 
         let timer = Instant::now();

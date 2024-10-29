@@ -8,19 +8,19 @@ use crate::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
         TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, RowMajorMatrix},
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
-use ceno_emul::{ByteAddr, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, PC_WORD_SIZE, Program};
 use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::{Itertools, izip};
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -31,7 +31,7 @@ use std::{
 use strum::IntoEnumIterator;
 
 const MOCK_PROGRAM_SIZE: usize = 32;
-pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_start());
+pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_base());
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
@@ -389,10 +389,28 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         // fix the program table
-        let mut programs = [0u32; MOCK_PROGRAM_SIZE];
-        for (i, &program) in input_programs.iter().enumerate() {
-            programs[i] = program;
-        }
+        let instructions = input_programs
+            .iter()
+            .cloned()
+            .chain(std::iter::repeat(0))
+            .take(MOCK_PROGRAM_SIZE)
+            .collect_vec();
+        let image = instructions
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    CENO_PLATFORM.pc_base() + (insn_idx * PC_WORD_SIZE) as u32,
+                    insn,
+                )
+            })
+            .collect::<BTreeMap<u32, u32>>();
+        let program = Program::new(
+            CENO_PLATFORM.pc_base(),
+            CENO_PLATFORM.pc_base(),
+            instructions,
+            image,
+        );
 
         // load tables
         let (challenge, mut table) = if let Some(challenge) = challenge {
@@ -401,7 +419,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             load_once_tables(cb)
         };
         let mut prog_table = vec![];
-        Self::load_program_table(&mut prog_table, &programs, challenge);
+        Self::load_program_table(&mut prog_table, &program, challenge);
         for prog in prog_table {
             table.insert(prog);
         }
@@ -589,11 +607,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
-    fn load_program_table(
-        t_vec: &mut Vec<Vec<u64>>,
-        programs: &[u32; MOCK_PROGRAM_SIZE],
-        challenge: [E; 2],
-    ) {
+    fn load_program_table(t_vec: &mut Vec<Vec<u64>>, program: &Program, challenge: [E; 2]) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
@@ -601,7 +615,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
             &config,
             cs.num_fixed,
-            programs,
+            program,
         );
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
@@ -672,6 +686,21 @@ Hints:
         }
     }
 
+    pub fn assert_satisfied_raw(
+        cb: &CircuitBuilder<E>,
+        raw_witin: RowMajorMatrix<E::BaseField>,
+        programs: &[u32],
+        challenge: Option<[E; 2]>,
+        lkm: Option<LkMultiplicity>,
+    ) {
+        let wits_in = raw_witin
+            .de_interleaving()
+            .into_mles()
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec();
+        Self::assert_satisfied(cb, &wits_in, programs, challenge, lkm);
+    }
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
@@ -698,13 +727,15 @@ mod tests {
     };
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use multilinear_extensions::mle::{IntoMLE, IntoMLEs};
+    use multilinear_extensions::mle::IntoMLE;
 
     #[derive(Debug)]
-    #[allow(dead_code)]
     struct AssertZeroCircuit {
+        #[allow(dead_code)]
         pub a: WitIn,
+        #[allow(dead_code)]
         pub b: WitIn,
+        #[allow(dead_code)]
         pub c: WitIn,
     }
 
@@ -712,16 +743,16 @@ mod tests {
         pub fn construct_circuit(
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
-            let c = cb.create_witin(|| "c")?;
+            let a = cb.create_witin(|| "a");
+            let b = cb.create_witin(|| "b");
+            let c = cb.create_witin(|| "c");
 
             // degree 1
             cb.require_equal(|| "a + 1 == b", b.expr(), a.expr() + 1)?;
             cb.require_zero(|| "c - 2 == 0", c.expr() - 2)?;
 
             // degree > 1
-            let d = cb.create_witin(|| "d")?;
+            let d = cb.create_witin(|| "d");
             cb.require_zero(
                 || "d*d - 6*d + 9 == 0",
                 d.expr() * d.expr() - d.expr() * 6 + 9,
@@ -766,7 +797,7 @@ mod tests {
         pub fn construct_circuit(
             cb: &mut CircuitBuilder<GoldilocksExt2>,
         ) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
+            let a = cb.create_witin(|| "a");
             cb.assert_ux::<_, _, 5>(|| "assert u5", a.expr())?;
             Ok(Self { a })
         }
@@ -832,7 +863,6 @@ mod tests {
         assert_eq!(err[0].inst_id(), 0);
     }
 
-    #[allow(dead_code)]
     #[derive(Debug)]
     struct AssertLtCircuit {
         pub a: WitIn,
@@ -847,8 +877,8 @@ mod tests {
 
     impl AssertLtCircuit {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
+            let a = cb.create_witin(|| "a");
+            let b = cb.create_witin(|| "b");
             let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
@@ -905,14 +935,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,
@@ -943,14 +968,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,
@@ -971,8 +991,8 @@ mod tests {
 
     impl LtCircuit {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
-            let a = cb.create_witin(|| "a")?;
-            let b = cb.create_witin(|| "b")?;
+            let a = cb.create_witin(|| "a");
+            let b = cb.create_witin(|| "b");
             let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
@@ -1029,14 +1049,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,
@@ -1068,14 +1083,9 @@ mod tests {
             )
             .unwrap();
 
-        MockProver::assert_satisfied(
+        MockProver::assert_satisfied_raw(
             &builder,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
+            raw_witin,
             &[],
             Some([1.into(), 1000.into()]),
             None,

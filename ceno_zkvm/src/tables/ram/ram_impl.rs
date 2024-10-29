@@ -41,12 +41,12 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             .collect::<Result<Vec<Fixed>, ZKVMError>>()?;
         let addr = cb.create_fixed(|| "addr")?;
 
-        let final_cycle = cb.create_witin(|| "final_cycle")?;
+        let final_cycle = cb.create_witin(|| "final_cycle");
         let final_v = if NVRAM::WRITABLE {
             Some(
                 (0..NVRAM::V_LIMBS)
                     .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
-                    .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                    .collect::<Vec<WitIn>>(),
             )
         } else {
             None

@@ -28,8 +28,8 @@ impl EcallInstructionConfig {
         syscall_ret_value: Option<RegisterExpr<E>>,
         next_pc: Option<Expression<E>>,
     ) -> Result<Self, ZKVMError> {
-        let pc = cb.create_witin(|| "pc")?;
-        let ts = cb.create_witin(|| "cur_ts")?;
+        let pc = cb.create_witin(|| "pc");
+        let ts = cb.create_witin(|| "cur_ts");
 
         cb.state_in(pc.expr(), ts.expr())?;
         cb.state_out(
@@ -47,7 +47,7 @@ impl EcallInstructionConfig {
             0.into(), // imm = 0
         ))?;
 
-        let prev_x5_ts = cb.create_witin(|| "prev_x5_ts")?;
+        let prev_x5_ts = cb.create_witin(|| "prev_x5_ts");
 
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(

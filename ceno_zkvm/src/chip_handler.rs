@@ -55,7 +55,6 @@ pub type AddressExpr<E> = Expression<E>;
 pub type MemoryExpr<E> = Expression<E>;
 
 pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
-    #[allow(dead_code)]
     fn memory_read(
         &mut self,
         name_fn: N,
@@ -66,7 +65,6 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
-    #[allow(dead_code)]
     fn memory_write(
         &mut self,
         name_fn: N,

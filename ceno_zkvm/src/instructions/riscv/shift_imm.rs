@@ -57,11 +57,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         // Note: `imm` wtns is set to 2**imm (upto 32 bit) just for efficient verification.
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
-        let outflow = circuit_builder.create_witin(|| "outflow")?;
+        let outflow = circuit_builder.create_witin(|| "outflow");
         let assert_lt_config = AssertLTConfig::construct_circuit(
             circuit_builder,
             || "outflow < imm",
@@ -89,7 +89,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                         let is_rs1_neg = IsLtConfig::construct_circuit(
                             circuit_builder,
                             || "lhs_msb",
-                            max_signed_limb_expr.clone(),
+                            max_signed_limb_expr,
                             rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
                             1,
                         )?;
@@ -179,8 +179,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use super::{ShiftImmInstruction, SlliOp, SraiOp, SrliOp};
     use crate::{
@@ -300,17 +298,6 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }
