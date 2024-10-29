@@ -48,7 +48,7 @@ impl VMState {
     }
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
-        let program = Program::load_elf(elf, u32::MAX).unwrap();
+        let program = Program::load_elf(elf, u32::MAX)?;
         let state = Self::new(platform, program);
 
         if state.program.base_address != state.platform.rom_start() {
