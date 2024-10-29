@@ -8,7 +8,7 @@ use ark_std::{end_timer, iterable::Iterable, rand::Rng, start_timer};
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator},
+    iter::IntoParallelIterator,
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
@@ -475,37 +475,6 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
                 build_eq_x_r_helper_sequential(&r[..(r.len() - nbits)], chunks, eq_t);
             });
         unsafe { std::mem::transmute::<Vec<MaybeUninit<E>>, Vec<E>>(ret) }
-    }
-}
-
-/// A helper function to build eq(x, r) via dynamic programing tricks.
-/// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
-#[allow(dead_code)]
-fn build_eq_x_r_helper<E: ExtensionField>(r: &[E], buf: &mut [Vec<E>; 2]) {
-    buf[0][0] = E::ONE;
-    if r.is_empty() {
-        buf[0].resize(1, E::ZERO);
-        return;
-    }
-    for (i, r) in r.iter().rev().enumerate() {
-        let [current, next] = buf;
-        let (cur_size, next_size) = (1 << i, 1 << (i + 1));
-        // suppose at the previous step we processed buf [0..size]
-        // for the current step we are populating new buf[0..2*size]
-        // for j travese 0..size
-        // buf[2*j + 1] = r * buf[j]
-        // buf[2*j] = (1 - r) * buf[j]
-        current[0..cur_size]
-            .par_iter()
-            .zip_eq(next[0..next_size].par_chunks_mut(2))
-            .with_min_len(64)
-            .for_each(|(prev_val, next_vals)| {
-                assert!(next_vals.len() == 2);
-                let tmp = *r * prev_val;
-                next_vals[1] = tmp;
-                next_vals[0] = *prev_val - tmp;
-            });
-        buf.swap(0, 1); // swap rolling buffer
     }
 }
 

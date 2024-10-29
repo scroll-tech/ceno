@@ -44,7 +44,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<JalrConfig<E>, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
+        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let i_insn = IInstructionConfig::construct_circuit(
@@ -63,7 +63,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         //  3. next_pc = next_pc_addr aligned to even value (round down)
 
         let next_pc_addr = MemAddr::<E>::construct_unaligned(circuit_builder)?;
-        let overflow = circuit_builder.create_witin(|| "overflow")?;
+        let overflow = circuit_builder.create_witin(|| "overflow");
 
         circuit_builder.require_equal(
             || "rs1+imm = next_pc_unrounded + overflow*2^32",

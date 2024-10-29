@@ -86,7 +86,7 @@ impl IsLtConfig {
             || "is_lt",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"));
                 cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
 
                 let config = InnerLtConfig::construct_circuit(
@@ -153,7 +153,7 @@ impl InnerLtConfig {
             cb.namespace(
                 || format!("var {var_name}"),
                 |cb| {
-                    let witin = cb.create_witin(|| var_name.to_string())?;
+                    let witin = cb.create_witin(|| var_name.to_string());
                     cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
                     Ok(witin)
                 },
@@ -293,7 +293,7 @@ impl SignedLtConfig {
             || "is_signed_lt",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"))?;
+                let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"));
                 cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
                 let config =
                     InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;

@@ -40,10 +40,10 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
             .collect::<Result<Vec<Fixed>, ZKVMError>>()?;
         let addr = cb.create_fixed(|| "addr")?;
 
-        let final_v = (0..RAM::V_LIMBS)
+        let final_v: Vec<_> = (0..RAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
-            .collect::<Result<Vec<WitIn>, ZKVMError>>()?;
-        let final_cycle = cb.create_witin(|| "final_cycle")?;
+            .collect();
+        let final_cycle = cb.create_witin(|| "final_cycle");
 
         let init_table = cb.rlc_chip_record(
             [

@@ -194,14 +194,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(
-        &mut self,
-        n: N,
-    ) -> Result<WitIn, ZKVMError> {
+    pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> WitIn {
         let wit_in = WitIn {
             id: {
                 let id = self.num_witin;
-                self.num_witin += 1;
+                self.num_witin = self.num_witin.strict_add(1);
                 id
             },
         };
@@ -209,7 +206,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);
 
-        Ok(wit_in)
+        wit_in
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(
