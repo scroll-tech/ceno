@@ -36,7 +36,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<AuipcConfig<E>, ZKVMError> {
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let u_insn = UInstructionConfig::construct_circuit(
@@ -46,7 +46,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             rd_written.register_expr(),
         )?;
 
-        let overflow_bit = circuit_builder.create_witin(|| "overflow_bit")?;
+        let overflow_bit = circuit_builder.create_witin(|| "overflow_bit");
         circuit_builder.assert_bit(|| "is_bit", overflow_bit.expr())?;
 
         // assert: imm + pc = rd_written + overflow_bit * 2^32

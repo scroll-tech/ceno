@@ -90,7 +90,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 limbs: UintLimb::WitIn(
                     (0..Self::NUM_LIMBS)
                         .map(|i| {
-                            let w = cb.create_witin(|| format!("limb_{i}"))?;
+                            let w = cb.create_witin(|| format!("limb_{i}"));
                             if is_check {
                                 cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
                             }
@@ -162,7 +162,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         assert_eq!(expr_limbs.len(), Self::NUM_LIMBS);
         let limbs = (0..Self::NUM_LIMBS)
             .map(|i| {
-                let w = circuit_builder.create_witin(|| "wit for limb").unwrap();
+                let w = circuit_builder.create_witin(|| "wit for limb");
                 circuit_builder
                     .assert_ux::<_, _, C>(|| "range check", w.expr())
                     .unwrap();
@@ -324,7 +324,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .flat_map(|large_limb| {
                 let limbs = (0..k)
                     .map(|_| {
-                        let w = circuit_builder.create_witin(|| "").unwrap();
+                        let w = circuit_builder.create_witin(|| "");
                         circuit_builder.assert_byte(|| "", w.expr()).unwrap();
                         w.expr()
                     })
@@ -370,7 +370,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 self.limbs = UintLimb::WitIn(
                     (0..Self::NUM_LIMBS)
                         .map(|i| {
-                            let w = cb.create_witin(|| format!("limb_{i}"))?;
+                            let w = cb.create_witin(|| format!("limb_{i}"));
                             cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
                             Ok(w)
                         })
@@ -400,7 +400,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 self.carries = Some(
                     (0..carries_len)
                         .map(|i| {
-                            let c = cb.create_witin(|| format!("carry_{i}"))?;
+                            let c = cb.create_witin(|| format!("carry_{i}"));
                             Ok(c)
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,

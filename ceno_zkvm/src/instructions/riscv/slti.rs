@@ -57,7 +57,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm = cb.create_witin(|| "imm")?;
+        let imm = cb.create_witin(|| "imm");
 
         let (value_expr, is_rs1_neg) = match I::INST_KIND {
             InsnKind::SLTIU => (rs1_read.value(), None),
