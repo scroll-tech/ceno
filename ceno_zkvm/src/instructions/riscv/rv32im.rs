@@ -221,6 +221,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness.assign_opcode_circuit::<LwInstruction<E>>(
             cs,
             &self.lw_config,
+            all_records[LW.to_usize().unwrap()].as_slice(),
+        )?;
+        witness.assign_opcode_circuit::<SwInstruction<E>>(
+            cs,
+            &self.sw_config,
             all_records[SW.to_usize().unwrap()].as_slice(),
         )?;
         witness.assign_opcode_circuit::<HaltInstruction<E>>(

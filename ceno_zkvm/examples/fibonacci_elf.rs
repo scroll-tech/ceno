@@ -161,7 +161,7 @@ fn main() {
 
     let transcript = Transcript::new(b"riscv");
     let mut zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, 8, transcript)
+        .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
     println!(

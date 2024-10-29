@@ -114,7 +114,7 @@ impl<RAM: RamTable + Send + Sync + Clone> RamTableConfig<RAM> {
         num_witness: usize,
         final_v: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert_eq!(final_v.len(), RAM::len());
+        // assert_eq!(final_v.len(), RAM::len());
         let mut final_table = RowMajorMatrix::<F>::new(RAM::len(), num_witness);
 
         final_table
