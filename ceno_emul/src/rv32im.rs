@@ -182,8 +182,8 @@ pub enum InsnKind {
     SB,
     SH,
     SW,
+    /// ECALL and EBREAK etc.
     EANY,
-    MRET,
 }
 use InsnKind::*;
 
@@ -397,7 +397,7 @@ const fn insn(
     }
 }
 
-type InstructionTable = [InsnCodes; 48];
+type InstructionTable = [InsnCodes; 47];
 type FastInstructionTable = [u8; 1 << 10];
 
 const RV32IM_ISA: InstructionTable = [
@@ -448,7 +448,6 @@ const RV32IM_ISA: InstructionTable = [
     insn(S, SH, Store, 0x23, 0x1, -1),
     insn(S, SW, Store, 0x23, 0x2, -1),
     insn(I, EANY, System, 0x73, 0x0, 0x00),
-    insn(I, MRET, System, 0x73, 0x0, 0x18),
 ];
 
 #[cfg(test)]
@@ -819,7 +818,6 @@ impl Emulator {
                 1 => ctx.trap(TrapCause::Breakpoint),
                 _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
             },
-            InsnKind::MRET => ctx.mret(),
             _ => unreachable!(),
         }
     }
