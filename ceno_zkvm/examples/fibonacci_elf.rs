@@ -150,11 +150,7 @@ fn main() {
         .unwrap();
     // assign program circuit
     zkvm_witness
-        .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
-            &zkvm_cs,
-            &prog_config,
-            vm.program(),
-        )
+        .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, vm.program())
         .unwrap();
 
     let timer = Instant::now();

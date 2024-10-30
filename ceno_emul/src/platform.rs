@@ -74,7 +74,8 @@ impl Platform {
 
     /// Virtual address of the program counter.
     pub const fn pc_vma(&self) -> Addr {
-        self.register_vma(32)
+        // first 33 indices are reserved for registers X0..X31 and X32 (dark register)
+        self.register_vma(64)
     }
 
     // Startup.

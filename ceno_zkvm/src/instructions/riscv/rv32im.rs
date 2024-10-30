@@ -28,7 +28,7 @@ use ceno_emul::{CENO_PLATFORM, InsnKind, InsnKind::*, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use num_traits::cast::ToPrimitive;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;
 
 use super::{
@@ -281,7 +281,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<MemTableCircuit<E>>(cs, self.mem_config.clone(), mem_init);
     }
 
-
     pub fn assign_opcode_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
@@ -325,7 +324,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     &self.$config,
                     all_records.remove(&$insn_kind.to_usize().unwrap()).unwrap(),
                 )?;
-            }
+            };
         }
         // alu
         assign_opcode!(ADD, AddInstruction<E>, add_config);
@@ -373,7 +372,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // ecall / halt
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
 
-        assert!(all_records.is_empty());
+        assert_eq!(
+            all_records.keys().cloned().collect::<BTreeSet<_>>(),
+            // these are opcodes that haven't been implemented
+            [
+                INVALID, SRA, SLT, SLTIU, MULH, MULHSU, DIV, REM, REMU, EANY, MRET
+            ]
+            .into_iter()
+            .map(|insn_kind| insn_kind.to_usize().unwrap())
+            .collect::<BTreeSet<_>>(),
+        );
         Ok(())
     }
 

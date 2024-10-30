@@ -1,7 +1,13 @@
 use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
-use crate::{Program, addr::{ByteAddr, RegIdx, Word, WordAddr}, platform::Platform, rv32im::{DecodedInstruction, Emulator, TrapCause}, tracer::{Change, StepRecord, Tracer}, PC_STEP_SIZE};
+use crate::{
+    PC_STEP_SIZE, Program,
+    addr::{ByteAddr, RegIdx, Word, WordAddr},
+    platform::Platform,
+    rv32im::{DecodedInstruction, Emulator, TrapCause},
+    tracer::{Change, StepRecord, Tracer},
+};
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
 
@@ -12,7 +18,7 @@ pub struct VMState {
     pc: Word,
     /// Map a word-address (addr/4) to a word.
     memory: HashMap<WordAddr, Word>,
-    registers: [Word; 32],
+    registers: [Word; 32 + 1], // +1 for "dark" register
     // Termination.
     halted: bool,
     tracer: Tracer,
@@ -28,7 +34,7 @@ impl VMState {
             platform,
             program: program.clone(),
             memory: HashMap::new(),
-            registers: [0; 32],
+            registers: [0; 32 + 1],
             halted: false,
             tracer: Tracer::new(),
         };
@@ -152,7 +158,12 @@ impl EmuContext for VMState {
     }
 
     /// Store a register and record this operation.
-    fn store_register(&mut self, idx: RegIdx, after: Word) -> Result<()> {
+    fn store_register(&mut self, mut idx: RegIdx, after: Word) -> Result<()> {
+        if idx == 0 {
+            // refer to https://github.com/scroll-tech/ceno/issues/245 for the idea of "dark" register.
+            // 32 is the index of 'dark' register
+            idx = 32;
+        }
         if idx != 0 {
             let before = self.peek_register(idx);
             self.tracer.store_register(idx, Change { before, after });
