@@ -336,7 +336,7 @@ impl DecodedInstruction {
     }
 
     pub fn imm_i(&self) -> u32 {
-        ((self.requires_sign_ext() as u32) * self.top_bit * 0xfffff000)
+        ((self.requires_sign_ext() as u32) * self.top_bit * 0xffff_f000)
             | (self.func7 << 5)
             | self.rs2
     }
