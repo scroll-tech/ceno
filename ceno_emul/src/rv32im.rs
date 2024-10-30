@@ -204,6 +204,8 @@ pub struct InsnCodes {
 }
 
 impl DecodedInstruction {
+    pub const RD_NULL: u32 = 32;
+
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -225,16 +227,11 @@ impl DecodedInstruction {
         self.opcode
     }
 
-    /// Get the rd field, regardless of the instruction format.
-    pub fn rd(&self) -> u32 {
-        self.rd
-    }
-
-    /// Get the register destination, or zero if the instruction does not write to a register.
-    pub fn rd_or_zero(&self) -> u32 {
+    /// Get the register destination, or RD_NULL if the instruction does not write to a register or writes to x0.
+    pub fn rd_or_null(&self) -> u32 {
         match self.codes().format {
-            R | I | U | J => self.rd,
-            _ => 0,
+            R | I | U | J if self.rd != 0 => self.rd,
+            _ => Self::RD_NULL,
         }
     }
 
@@ -581,10 +578,8 @@ impl Emulator {
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
-        let mut rd = decoded.rd;
         let imm_i = decoded.imm_i();
         let mut br_cond = |cond| -> u32 {
-            rd = 0;
             if cond {
                 new_pc = pc.wrapping_add(decoded.imm_b());
             }
@@ -708,7 +703,7 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(rd as usize, out)?;
+        ctx.store_register(decoded.rd_or_null() as usize, out)?;
         ctx.set_pc(new_pc);
         Ok(true)
     }
@@ -760,7 +755,7 @@ impl Emulator {
             }
             _ => unreachable!(),
         };
-        ctx.store_register(decoded.rd as usize, out)?;
+        ctx.store_register(decoded.rd_or_null() as usize, out)?;
         ctx.set_pc(ctx.get_pc() + WORD_SIZE);
         Ok(true)
     }

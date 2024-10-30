@@ -18,13 +18,17 @@ pub struct VMState {
     pc: Word,
     /// Map a word-address (addr/4) to a word.
     memory: HashMap<WordAddr, Word>,
-    registers: [Word; 32],
+    registers: [Word; VMState::REG_COUNT],
     // Termination.
     halted: bool,
     tracer: Tracer,
 }
 
 impl VMState {
+    /// The number of registers that the VM uses.
+    /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
+    pub const REG_COUNT: usize = 32 + 1;
+
     pub fn new(platform: Platform, program: Program) -> Self {
         let pc = program.entry;
         let program = Arc::new(program);
@@ -34,7 +38,7 @@ impl VMState {
             platform,
             program: program.clone(),
             memory: HashMap::new(),
-            registers: [0; 32],
+            registers: [0; VMState::REG_COUNT],
             halted: false,
             tracer: Tracer::new(),
         };
