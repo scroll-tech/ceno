@@ -9,7 +9,7 @@ const MASK_10_BITS: u32 = 0x3FF;
 const MASK_12_BITS: u32 = 0xFFF;
 
 pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> u32 {
-    match kind.codes().format {
+    match InsnFormat::const_from(kind.codes().kind) {
         InsnFormat::R => encode_r(kind, rs1, rs2, rd),
         InsnFormat::I => encode_i(kind, rs1, rd, imm),
         InsnFormat::S => encode_s(kind, rs1, rs2, imm),

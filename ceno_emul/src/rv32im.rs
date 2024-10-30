@@ -122,7 +122,7 @@ pub enum InsnCategory {
 }
 use InsnCategory::*;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum InsnFormat {
     R,
     I,
@@ -195,7 +195,6 @@ impl InsnKind {
 
 #[derive(Clone, Copy, Debug)]
 pub struct InsnCodes {
-    pub format: InsnFormat,
     pub kind: InsnKind,
     pub opcode: u32,
     pub func3: u32,
@@ -231,7 +230,7 @@ impl DecodedInstruction {
 
     /// Get the register destination, or zero if the instruction does not write to a register.
     pub fn rd_or_zero(&self) -> u32 {
-        match self.codes().format {
+        match self.codes().kind.into() {
             R | I | U | J => self.rd,
             _ => 0,
         }
@@ -244,7 +243,7 @@ impl DecodedInstruction {
 
     /// Get the funct3 field, or zero if the instruction does not use funct3.
     pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
+        match self.codes().kind.into() {
             R | I | S | B => self.func3,
             _ => 0,
         }
@@ -257,7 +256,7 @@ impl DecodedInstruction {
 
     /// Get the register source 1, or zero if the instruction does not use rs1.
     pub fn rs1_or_zero(&self) -> u32 {
-        match self.codes().format {
+        match self.codes().kind.into() {
             R | I | S | B => self.rs1,
             _ => 0,
         }
@@ -270,7 +269,7 @@ impl DecodedInstruction {
 
     /// Get the register source 2, or zero if the instruction does not use rs2.
     pub fn rs2_or_zero(&self) -> u32 {
-        match self.codes().format {
+        match self.codes().kind.into() {
             R | S | B => self.rs2,
             _ => 0,
         }
@@ -283,17 +282,16 @@ impl DecodedInstruction {
 
     /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
     pub fn imm_or_funct7(&self) -> u32 {
-        match self.codes() {
-            InsnCodes { format: R, .. } => self.func7,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI,
-                ..
-            } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
-            InsnCodes { format: I, .. } => self.imm_i(),
-            InsnCodes { format: S, .. } => self.imm_s(),
-            InsnCodes { format: B, .. } => self.imm_b(),
-            InsnCodes { format: U, .. } => self.imm_u(),
-            InsnCodes { format: J, .. } => self.imm_j(),
+        match (self.codes().kind.into(), self.codes().kind) {
+            (R, _) => self.func7,
+            // TODO(Matthias): this seems fish, because we can'd do it statically.
+            // decode the shift as a multiplication by 2.pow(rs2)
+            (_, SLLI | SRLI | SRAI) => 1 << self.rs2(),
+            (I, _) => self.imm_i(),
+            (S, _) => self.imm_s(),
+            (B, _) => self.imm_b(),
+            (U, _) => self.imm_u(),
+            (J, _) => self.imm_j(),
         }
     }
 
@@ -377,15 +375,8 @@ fn test_decode_imm() {
     }
 }
 
-const fn insn(
-    format: InsnFormat,
-    kind: InsnKind,
-    opcode: u32,
-    func3: i32,
-    func7: i32,
-) -> InsnCodes {
+const fn insn(kind: InsnKind, opcode: u32, func3: i32, func7: i32) -> InsnCodes {
     InsnCodes {
-        format,
         kind,
         opcode,
         func3: func3 as u32,
@@ -408,55 +399,82 @@ impl From<InsnKind> for InsnCategory {
     }
 }
 
+#[test]
+pub fn test_format() {
+    for ins in RV32IM_ISA.iter() {
+        assert_eq!(ins.kind.codes().format, ins.format);
+    }
+}
+
+impl From<InsnKind> for InsnFormat {
+    fn from(kind: InsnKind) -> Self {
+        Self::const_from(kind)
+    }
+}
+
+impl InsnFormat {
+    pub(crate) const fn const_from(kind: InsnKind) -> Self {
+        match kind {
+            LUI | AUIPC => U,
+            JAL | JALR => J,
+            BEQ | BNE | BLT | BGE | BLTU | BGEU => B,
+            LB | LH | LW | LBU | LHU | ADDI | SLTI | SLTIU | XORI | ORI | ANDI | SLLI | SRLI
+            | SRAI => I,
+            SB | SH | SW => S,
+            _ => R,
+        }
+    }
+}
+
 const RV32IM_ISA: InstructionTable = [
-    insn(R, INVALID, 0x00, 0x0, 0x00),
-    insn(R, ADD, 0x33, 0x0, 0x00),
-    insn(R, SUB, 0x33, 0x0, 0x20),
-    insn(R, XOR, 0x33, 0x4, 0x00),
-    insn(R, OR, 0x33, 0x6, 0x00),
-    insn(R, AND, 0x33, 0x7, 0x00),
-    insn(R, SLL, 0x33, 0x1, 0x00),
-    insn(R, SRL, 0x33, 0x5, 0x00),
-    insn(R, SRA, 0x33, 0x5, 0x20),
-    insn(R, SLT, 0x33, 0x2, 0x00),
-    insn(R, SLTU, 0x33, 0x3, 0x00),
-    insn(I, ADDI, 0x13, 0x0, -1),
-    insn(I, XORI, 0x13, 0x4, -1),
-    insn(I, ORI, 0x13, 0x6, -1),
-    insn(I, ANDI, 0x13, 0x7, -1),
-    insn(I, SLLI, 0x13, 0x1, 0x00),
-    insn(I, SRLI, 0x13, 0x5, 0x00),
-    insn(I, SRAI, 0x13, 0x5, 0x20),
-    insn(I, SLTI, 0x13, 0x2, -1),
-    insn(I, SLTIU, 0x13, 0x3, -1),
-    insn(B, BEQ, 0x63, 0x0, -1),
-    insn(B, BNE, 0x63, 0x1, -1),
-    insn(B, BLT, 0x63, 0x4, -1),
-    insn(B, BGE, 0x63, 0x5, -1),
-    insn(B, BLTU, 0x63, 0x6, -1),
-    insn(B, BGEU, 0x63, 0x7, -1),
+    insn(INVALID, 0x00, 0x0, 0x00),
+    insn(ADD, 0x33, 0x0, 0x00),
+    insn(SUB, 0x33, 0x0, 0x20),
+    insn(XOR, 0x33, 0x4, 0x00),
+    insn(OR, 0x33, 0x6, 0x00),
+    insn(AND, 0x33, 0x7, 0x00),
+    insn(SLL, 0x33, 0x1, 0x00),
+    insn(SRL, 0x33, 0x5, 0x00),
+    insn(SRA, 0x33, 0x5, 0x20),
+    insn(SLT, 0x33, 0x2, 0x00),
+    insn(SLTU, 0x33, 0x3, 0x00),
+    insn(ADDI, 0x13, 0x0, -1),
+    insn(XORI, 0x13, 0x4, -1),
+    insn(ORI, 0x13, 0x6, -1),
+    insn(ANDI, 0x13, 0x7, -1),
+    insn(SLLI, 0x13, 0x1, 0x00),
+    insn(SRLI, 0x13, 0x5, 0x00),
+    insn(SRAI, 0x13, 0x5, 0x20),
+    insn(SLTI, 0x13, 0x2, -1),
+    insn(SLTIU, 0x13, 0x3, -1),
+    insn(BEQ, 0x63, 0x0, -1),
+    insn(BNE, 0x63, 0x1, -1),
+    insn(BLT, 0x63, 0x4, -1),
+    insn(BGE, 0x63, 0x5, -1),
+    insn(BLTU, 0x63, 0x6, -1),
+    insn(BGEU, 0x63, 0x7, -1),
     insn(J, JAL, 0x6f, -1, -1),
-    insn(I, JALR, 0x67, 0x0, -1),
-    insn(U, LUI, 0x37, -1, -1),
-    insn(U, AUIPC, 0x17, -1, -1),
-    insn(R, MUL, 0x33, 0x0, 0x01),
-    insn(R, MULH, 0x33, 0x1, 0x01),
-    insn(R, MULHSU, 0x33, 0x2, 0x01),
-    insn(R, MULHU, 0x33, 0x3, 0x01),
-    insn(R, DIV, 0x33, 0x4, 0x01),
-    insn(R, DIVU, 0x33, 0x5, 0x01),
-    insn(R, REM, 0x33, 0x6, 0x01),
-    insn(R, REMU, 0x33, 0x7, 0x01),
-    insn(I, LB, 0x03, 0x0, -1),
-    insn(I, LH, 0x03, 0x1, -1),
-    insn(I, LW, 0x03, 0x2, -1),
-    insn(I, LBU, 0x03, 0x4, -1),
-    insn(I, LHU, 0x03, 0x5, -1),
-    insn(S, SB, 0x23, 0x0, -1),
-    insn(S, SH, 0x23, 0x1, -1),
-    insn(S, SW, 0x23, 0x2, -1),
-    insn(I, EANY, 0x73, 0x0, 0x00),
-    insn(I, MRET, 0x73, 0x0, 0x18),
+    insn(JALR, 0x67, 0x0, -1),
+    insn(LUI, 0x37, -1, -1),
+    insn(AUIPC, 0x17, -1, -1),
+    insn(MUL, 0x33, 0x0, 0x01),
+    insn(MULH, 0x33, 0x1, 0x01),
+    insn(MULHSU, 0x33, 0x2, 0x01),
+    insn(MULHU, 0x33, 0x3, 0x01),
+    insn(DIV, 0x33, 0x4, 0x01),
+    insn(DIVU, 0x33, 0x5, 0x01),
+    insn(REM, 0x33, 0x6, 0x01),
+    insn(REMU, 0x33, 0x7, 0x01),
+    insn(LB, 0x03, 0x0, -1),
+    insn(LH, 0x03, 0x1, -1),
+    insn(LW, 0x03, 0x2, -1),
+    insn(LBU, 0x03, 0x4, -1),
+    insn(LHU, 0x03, 0x5, -1),
+    insn(SB, 0x23, 0x0, -1),
+    insn(SH, 0x23, 0x1, -1),
+    insn(SW, 0x23, 0x2, -1),
+    insn(EANY, 0x73, 0x0, 0x00),
+    insn(MRET, 0x73, 0x0, 0x18),
 ];
 
 #[cfg(test)]
