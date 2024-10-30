@@ -183,7 +183,6 @@ mod test {
         verify::<SltiuOp>("lt = false, 0xFFFFFFFF < 4095", 0xFFFFFFFF, 4095, 0);
     }
 
-    // TODO refactor
     #[test]
     fn test_sltiu_random() {
         let mut rng = rand::thread_rng();
@@ -230,7 +229,6 @@ mod test {
         );
     }
 
-    // TODO refactor
     #[test]
     fn test_slti_random() {
         let mut rng = rand::thread_rng();
