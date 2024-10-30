@@ -239,13 +239,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| {
-                    let config =
-                        SetLessThanImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
+                SetLessThanImmInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let (raw_witin, lkm) = SetLessThanImmInstruction::<GoldilocksExt2, I>::assign_instances(
