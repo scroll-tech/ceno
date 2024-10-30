@@ -122,7 +122,7 @@ fn main() {
 
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
             &zkvm_cs,
-            prog_config.clone(),
+            &prog_config,
             &program,
         );
 

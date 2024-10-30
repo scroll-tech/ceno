@@ -235,13 +235,13 @@ fn test_single_add_instance_e2e() {
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
-        u16_range_config.clone(),
+        &u16_range_config,
         &(),
     );
 
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
         &zkvm_cs,
-        prog_config.clone(),
+        &prog_config,
         &program,
     );
 
