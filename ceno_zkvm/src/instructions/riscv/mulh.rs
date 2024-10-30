@@ -434,7 +434,7 @@ mod test {
                     insn_code,
                     rs1 as u32,
                     rs2 as u32,
-                    Change::new(0, signed_prod_high as u32),
+                    Change::new(0, signed_prod_high),
                     0,
                 ),
             ])
@@ -445,7 +445,7 @@ mod test {
         cb.require_equal(
             || "assert_rd_written",
             rd_written_expr,
-            Expression::from(signed_prod_high as u32),
+            Expression::from(signed_prod_high),
         )
         .unwrap();
 
