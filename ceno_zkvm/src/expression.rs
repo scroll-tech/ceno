@@ -621,7 +621,7 @@ impl WitIn {
             || "from_expr",
             |cb| {
                 let name = name().into();
-                let wit = cb.create_witin(|| name.clone())?;
+                let wit = cb.create_witin(|| name.clone());
                 if !debug {
                     cb.require_zero(|| name.clone(), wit.expr() - input)?;
                 }
@@ -637,22 +637,6 @@ impl WitIn {
     ) {
         instance[self.id as usize] = MaybeUninit::new(value);
     }
-}
-
-#[macro_export]
-/// this is to avoid non-monomial expression
-macro_rules! create_witin_from_expr {
-    // Handle the case for a single expression
-    ($name:expr, $builder:expr, $debug:expr, $e:expr) => {
-        WitIn::from_expr($name, $builder, $e, $debug)
-    };
-    // Recursively handle multiple expressions and create a flat tuple with error handling
-    ($name:expr, $builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
-        {
-            // Return a Result tuple, handling errors
-            Ok::<_, ZKVMError>((WitIn::from_expr($name, $builder, $e, $debug)?, $(WitIn::from_expr($name, $builder, $rest)?),*))
-        }
-    };
 }
 
 pub trait ToExpr<E: ExtensionField> {
@@ -757,7 +741,9 @@ pub mod fmt {
     ) -> String {
         match expression {
             Expression::WitIn(wit_in) => {
-                wtns.push(*wit_in);
+                if !wtns.contains(wit_in) {
+                    wtns.push(*wit_in);
+                }
                 format!("WitIn({})", wit_in)
             }
             Expression::Challenge(id, pow, scaler, offset) => {
@@ -890,7 +876,7 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
+        let x = cb.create_witin(|| "x");
 
         // scaledsum * challenge
         // 3 * x + 2
@@ -956,9 +942,9 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
-        let y = cb.create_witin(|| "y").unwrap();
-        let z = cb.create_witin(|| "z").unwrap();
+        let x = cb.create_witin(|| "x");
+        let y = cb.create_witin(|| "y");
+        let z = cb.create_witin(|| "z");
         // scaledsum * challenge
         // 3 * x + 2
         let expr: Expression<E> =
@@ -998,8 +984,8 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
-        let y = cb.create_witin(|| "y").unwrap();
+        let x = cb.create_witin(|| "x");
+        let y = cb.create_witin(|| "y");
         // scaledsum * challenge
         // (x + 1) * (y + 1)
         let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())

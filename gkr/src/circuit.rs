@@ -42,14 +42,6 @@ where
         in_eq_vec: &[E],
         challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
     ) -> E;
-    // TODO(Matthias, by 2024-11-01): review whether we need this function after all.
-    #[allow(dead_code)]
-    fn fix_out_variables(
-        &self,
-        in_size: usize,
-        out_eq_vec: &[E],
-        challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
-    ) -> Vec<E>;
 }
 
 impl<E> EvaluateGate1In<E> for &[Gate1In<ConstantType<E>>]
@@ -67,18 +59,6 @@ where
                 * in_eq_vec[gate.idx_in[0]]
                 * gate.scalar.eval(challenges)
         })
-    }
-    fn fix_out_variables(
-        &self,
-        in_size: usize,
-        out_eq_vec: &[E],
-        challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
-    ) -> Vec<E> {
-        let mut ans = vec![E::ZERO; in_size];
-        for gate in self.iter() {
-            ans[gate.idx_in[0]] += out_eq_vec[gate.idx_out] * gate.scalar.eval(challenges);
-        }
-        ans
     }
 }
 

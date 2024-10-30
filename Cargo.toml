@@ -29,7 +29,7 @@ cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 ff = "0.13"
-goldilocks = { git = "https://github.com/zhenfeizhang/Goldilocks" }
+goldilocks = { git = "https://github.com/hero78119/Goldilocks" }
 itertools = "0.13"
 paste = "1"
 plonky2 = "0.2"
@@ -50,9 +50,6 @@ tracing = { version = "0.1", features = [
 ] }
 tracing-flame = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-[patch."https://github.com/zhenfeizhang/Goldilocks"]
-goldilocks = { git = "https://github.com/hero78119/Goldilocks" }
 
 [profile.release]
 lto = "thin"

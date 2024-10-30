@@ -115,6 +115,35 @@ impl StepRecord {
         )
     }
 
+    pub fn new_im_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_code: u32,
+        rs1_read: Word,
+        rd: Change<Word>,
+        mem_op: ReadOp,
+        prev_cycle: Cycle,
+    ) -> StepRecord {
+        let pc = Change::new(pc, pc + PC_STEP_SIZE);
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            Some(rs1_read),
+            None,
+            Some(rd),
+            Some(WriteOp {
+                addr: mem_op.addr,
+                value: Change {
+                    before: mem_op.value,
+                    after: mem_op.value,
+                },
+                previous_cycle: mem_op.previous_cycle,
+            }),
+            prev_cycle,
+        )
+    }
+
     pub fn new_u_instruction(
         cycle: Cycle,
         pc: ByteAddr,
