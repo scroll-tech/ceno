@@ -11,7 +11,7 @@ use std::mem::MaybeUninit;
 
 pub struct SignedExtendConfig {
     /// most significant bit
-    msb: WitIn,
+    pub msb: WitIn,
     /// number of bits contained in the value
     n_bits: usize,
 }

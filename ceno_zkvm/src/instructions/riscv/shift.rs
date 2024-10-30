@@ -6,7 +6,7 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, IsLtConfig},
+    gadgets::{AssertLTConfig, SignedExtendConfig},
     instructions::Instruction,
     set_val,
 };
@@ -28,7 +28,7 @@ pub struct ShiftConfig<E: ExtensionField> {
     assert_lt_config: AssertLTConfig,
 
     // SRA
-    is_lt_config: Option<IsLtConfig>,
+    signed_extend_config: Option<SignedExtendConfig>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
@@ -76,7 +76,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
         let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
 
-        let (rs1_read, rd_written, is_lt_config) = match I::INST_KIND {
+        let (rs1_read, rd_written, signed_extend_config) = match I::INST_KIND {
             InsnKind::SLL => {
                 let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
                 let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
@@ -93,18 +93,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
                 let (inflow, is_lt_config) = match I::INST_KIND {
                     InsnKind::SRA => {
-                        let max_signed_limb_expr: Expression<_> =
-                            ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
-                        let is_rs1_neg = IsLtConfig::construct_circuit(
+                        let signed_extend_config = SignedExtendConfig::construct_limb(
                             circuit_builder,
-                            || "lhs_msb",
-                            max_signed_limb_expr,
-                            rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
-                            1,
+                            rs1_read.limbs.iter().last().unwrap().expr(),
                         )?;
-                        let msb_expr: Expression<E> = is_rs1_neg.is_lt.expr();
+                        let msb_expr = signed_extend_config.msb.expr();
                         let ones = pow2_rs2_low5.expr() - Expression::ONE;
-                        (msb_expr * ones, Some(is_rs1_neg))
+                        (msb_expr * ones, Some(signed_extend_config))
                     }
                     InsnKind::SRL => (Expression::ZERO, None),
                     _ => unreachable!(),
@@ -146,7 +141,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             pow2_rs2_low5,
             outflow,
             assert_lt_config,
-            is_lt_config,
+            signed_extend_config,
         })
     }
 
@@ -156,7 +151,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {
-        // rs2 & derived values
+        // rs2 & its derived values
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         let rs2_low5 = rs2_read.as_u64() & 0b11111;
         lk_multiplicity.assert_ux::<5>(rs2_low5);
@@ -182,17 +177,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
         config.rd_written.assign_value(instance, rd_written);
 
+        // outflow
         let outflow = match I::INST_KIND {
             InsnKind::SLL => (rs1_read.as_u64() * pow2_rs2_low5) >> UInt::<E>::TOTAL_BITS,
             InsnKind::SRL => rs1_read.as_u64() & (pow2_rs2_low5 - 1),
             InsnKind::SRA => {
-                let max_signed_limb_expr = (1 << (UInt::<E>::LIMB_BITS - 1)) - 1;
-                config.is_lt_config.as_ref().unwrap().assign_instance(
-                    instance,
-                    lk_multiplicity,
-                    max_signed_limb_expr,
-                    rs1_read.as_u64() >> UInt::<E>::LIMB_BITS,
-                )?;
+                if let Some(signed_ext_config) = config.signed_extend_config.as_ref() {
+                    signed_ext_config.assign_instance::<E>(
+                        instance,
+                        lk_multiplicity,
+                        *rs1_read.as_u16_limbs().last().unwrap() as u64,
+                    )?;
+                }
                 rs1_read.as_u64() & (pow2_rs2_low5 - 1)
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
