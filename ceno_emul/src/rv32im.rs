@@ -24,9 +24,6 @@ pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
 
-    // Handle a machine return
-    fn mret(&self) -> Result<bool>;
-
     // Handle a trap
     fn trap(&self, cause: TrapCause) -> Result<bool>;
 
