@@ -7,7 +7,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{IsLtConfig, IsZeroConfig},
+    gadgets::IsLtConfig,
     instructions::{
         Instruction,
         riscv::{
@@ -132,10 +132,7 @@ pub struct MulhConfig<E: ExtensionField> {
     rd_written: UInt<E>,
     rs1_signed: Signed,
     rs2_signed: Signed,
-    signed_prod: WitIn,
-    is_prod_zero: IsZeroConfig,
-    nonzero_prod_sign_bit: WitIn,
-    prod_sign_bit: WitIn,
+    rd_sign_bit: IsLtConfig,
     unsigned_prod_low: UInt<E>,
     r_insn: RInstructionConfig<E>,
 }
@@ -148,11 +145,27 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
     }
 
     /// Circuit is validated by the following strategy:
-    /// 1. Compute witnesses for the signed values associated with rs1 and rs2
-    /// 2. Computed the signed product
-    /// 3. Compute the sign bit for the signed product
-    /// 4. Verify that the rd output can be used as a high 32-bit limb of a
-    ///    64-bit 2s-complement value equal to the signed product
+    /// 1. Compute the signed values associated with `rs1` and `rs2`
+    /// 2. Compute the high order bit of `rd`, which is the sign bit of the 2s
+    ///    complement value for which rd represents the high limb
+    /// 3. Verify that the product of signed inputs `rs1` and `rs2` is equal to
+    ///    the result of interpreting rd as the high limb of a 2s complement
+    ///    value with some 32-bit low limb
+    ///
+    /// The correctness here is a bit subtle.  The signed values of 32-bit
+    /// inputs `rs1` and `rs2` have values between `-2^31` and `2^31 - 1`, so
+    /// their product is constrained to lie between `-2^62 + 2^31` and
+    /// `2^62`.  In a prime field of size smaller than `2^64`, the range of
+    /// values represented by a 64-bit 2s complement value, integers between
+    /// `-2^63` and `2^63 - 1`, have some ambiguity.  If `p = 2^64 - k`, then
+    /// the values between `-2^63` and `-2^63 + k - 1` correspond with the values
+    /// between `2^63 - k` and `2^63 - 1`.
+    ///
+    /// However, as long as the values required by signed products don't overlap
+    /// with this ambiguous range, an arbitrary 64-bit 2s complement value can
+    /// represent a signed 32-bit product in only one way, so there is no
+    /// ambiguity in the representation.  This is the case for the Goldilocks
+    /// field with order `p = 2^64 - 2^32 + 1`.
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<MulhConfig<E>, ZKVMError> {
@@ -163,58 +176,20 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
         let rs2_signed = Signed::construct_circuit(circuit_builder, || "rs2", &rs2_read)?;
 
-        let signed_prod = circuit_builder.create_witin(|| "signed_prod")?;
-        circuit_builder.require_equal(
-            || "assign signed_prod",
-            rs1_signed.val.expr() * rs2_signed.val.expr(),
-            signed_prod.expr(),
-        )?;
-
-        // Witness the sign bit of the product, distinguishing negative and
-        // non-negative values, according to:
-        //   negative * negative = non-negative * non-negative = non-negative
-        //   negative * positive = positive * negative = negative
-        //   negative * zero = zero * negative = non-negative
-        //
-        // For the nonzero cases, the product sign bit is b1*(1-b2) +
-        // (1-b1)*b2. However, if either input is zero, the result is
-        // nonnegative.
-        //
-        // To compute this, find whether rs1*rs2 is zero, then multiply the
-        // above sign bit by the "product is nonzero" bit.
-
-        let is_prod_zero = IsZeroConfig::construct_circuit(
+        let rd_sign_bit = IsLtConfig::construct_circuit(
             circuit_builder,
-            || "is_prod_zero",
-            signed_prod.expr(),
-        )?;
-
-        let rs1_sign_bit: Expression<E> = rs1_signed.is_negative.expr();
-        let rs2_sign_bit: Expression<E> = rs2_signed.is_negative.expr();
-
-        let nonzero_prod_sign_bit = circuit_builder.create_witin(|| "nonzero_prod_sign_bit")?;
-        let sign_expr = rs1_sign_bit.clone() * (Expression::ONE - rs2_sign_bit.clone())
-            + (Expression::ONE - rs1_sign_bit) * rs2_sign_bit;
-        circuit_builder.require_equal(
-            || "assign nonzero_prod_sign_bit",
-            nonzero_prod_sign_bit.expr(),
-            sign_expr,
-        )?;
-
-        let prod_sign_bit = circuit_builder.create_witin(|| "prod_sign_bit")?;
-        circuit_builder.require_equal(
-            || "assign prod_sign_bit",
-            prod_sign_bit.expr(),
-            (Expression::ONE - is_prod_zero.expr()) * nonzero_prod_sign_bit.expr(),
+            || "rd_sign_bit",
+            ((1u64 << (LIMB_BITS - 1)) - 1).into(),
+            rd_written.expr().last().unwrap().clone(),
+            1,
         )?;
 
         let unsigned_prod_low = UInt::new(|| "unsigned_prod_low", circuit_builder)?;
-
         circuit_builder.require_equal(
             || "validate_prod_high_limb",
-            signed_prod.expr(),
-            unsigned_prod_low.value() + Expression::<E>::from(1u64 << 32) * rd_written.value()
-                - Expression::<E>::from(1u128 << 64) * prod_sign_bit.expr(),
+            rs1_signed.val.expr() * rs2_signed.val.expr(),
+            Expression::<E>::from(1u64 << 32) * rd_written.value() + unsigned_prod_low.value()
+                - Expression::<E>::from(1u128 << 64) * rd_sign_bit.expr(),
         )?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
@@ -231,10 +206,7 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
             rd_written,
             rs1_signed,
             rs2_signed,
-            signed_prod,
-            is_prod_zero,
-            nonzero_prod_sign_bit,
-            prod_sign_bit,
+            rd_sign_bit,
             unsigned_prod_low,
             r_insn,
         })
@@ -273,33 +245,20 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
                 .rs2_signed
                 .assign_instance::<E>(instance, lk_multiplicity, &rs2_read)?;
 
-        // Signed product
-        let signed_prod = (rs1_signed as i64) * (rs2_signed as i64);
-        let signed_prod_field_elt: E::BaseField = i64_to_base(signed_prod);
-        set_val!(instance, config.signed_prod, signed_prod_field_elt);
-
-        // Evaluate sign bit of signed product
+        // Sign bit of rd register
+        let rd_high_limb = *rd_written.limbs.last().unwrap() as u64;
+        let sign_cutoff = (1u64 << (LIMB_BITS - 1)) - 1;
         config
-            .is_prod_zero
-            .assign_instance(instance, signed_prod_field_elt)?;
+            .rd_sign_bit
+            .assign_instance(instance, lk_multiplicity, sign_cutoff, rd_high_limb)?;
 
-        let nonzero_prod_sign_bit =
-            (rs1_signed >= 0 && rs2_signed < 0) || (rs1_signed < 0 && rs2_signed >= 0);
-        set_val!(
-            instance,
-            config.nonzero_prod_sign_bit,
-            nonzero_prod_sign_bit as u64
-        );
-
-        let prod_sign_bit = signed_prod < 0;
-        set_val!(instance, config.prod_sign_bit, prod_sign_bit as u64);
-
-        // Evaluate low limb of
-        let unsigned_prod_low = ((signed_prod as u64) % (1u64 << BIT_WIDTH)) as u32;
-        let prod_low_val = Value::new(unsigned_prod_low, lk_multiplicity);
+        // Low limb of product in 2s complement form
+        let prod = ((rs1_signed as i64) * (rs2_signed as i64)) as u64;
+        let unsigned_prod_low = (prod % (1u64 << BIT_WIDTH)) as u32;
+        let unsigned_prod_low_val = Value::new(unsigned_prod_low, lk_multiplicity);
         config
             .unsigned_prod_low
-            .assign_limbs(instance, prod_low_val.as_u16_limbs());
+            .assign_limbs(instance, unsigned_prod_low_val.as_u16_limbs());
 
         // R-type instruction
         config
