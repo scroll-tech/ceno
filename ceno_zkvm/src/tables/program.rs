@@ -83,10 +83,10 @@ impl InsnRecord<u32> {
         InsnRecord::new(
             pc,
             insn.opcode(),
-            insn.rd_or_zero(),
+            insn.rd(),
             insn.funct3_or_zero(),
-            insn.rs1_or_zero(),
-            insn.rs2_or_zero(),
+            insn.rs1(),
+            insn.rs2(),
             insn.imm_or_funct7(),
         )
     }
@@ -94,7 +94,7 @@ impl InsnRecord<u32> {
     /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
     /// Convert negative values from two's complement to field.
     pub fn imm_or_funct7_field<F: SmallField>(insn: &DecodedInstruction) -> F {
-        if insn.imm_is_negative() {
+        if insn.imm_field_is_negative() {
             -F::from(-(insn.imm_or_funct7() as i32) as u64)
         } else {
             F::from(insn.imm_or_funct7() as u64)

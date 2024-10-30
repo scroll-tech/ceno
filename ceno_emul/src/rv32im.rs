@@ -217,9 +217,9 @@ impl DecodedInstruction {
         }
     }
 
-    pub fn encoded(&self) -> u32 {
-        self.insn
-    }
+    // pub fn encoded(&self) -> u32 {
+    //     self.insn
+    // }
 
     pub fn opcode(&self) -> u32 {
         self.opcode
@@ -230,25 +230,9 @@ impl DecodedInstruction {
         self.rd
     }
 
-    /// Get the register destination, or zero if the instruction does not write to a register.
-    pub fn rd_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | U | J => self.rd,
-            _ => 0,
-        }
-    }
-
     /// Get the funct3 field, regardless of the instruction format.
     pub fn funct3(&self) -> u32 {
         self.func3
-    }
-
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.func3,
-            _ => 0,
-        }
     }
 
     /// Get the rs1 field, regardless of the instruction format.
@@ -256,25 +240,9 @@ impl DecodedInstruction {
         self.rs1
     }
 
-    /// Get the register source 1, or zero if the instruction does not use rs1.
-    pub fn rs1_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.rs1,
-            _ => 0,
-        }
-    }
-
     /// Get the rs2 field, regardless of the instruction format.
     pub fn rs2(&self) -> u32 {
         self.rs2
-    }
-
-    /// Get the register source 2, or zero if the instruction does not use rs2.
-    pub fn rs2_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | S | B => self.rs2,
-            _ => 0,
-        }
     }
 
     /// Get the funct7 field, regardless of the instruction format.
@@ -298,8 +266,8 @@ impl DecodedInstruction {
         }
     }
 
-    /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
-    pub fn imm_is_negative(&self) -> bool {
+    ///  Indicate whether the immediate is interpreted as a signed integer, and it is negative.
+    pub fn imm_field_is_negative(&self) -> bool {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
@@ -308,10 +276,6 @@ impl DecodedInstruction {
             } => false,
             _ => self.top_bit != 0,
         }
-    }
-
-    pub fn sign_bit(&self) -> u32 {
-        self.top_bit
     }
 
     pub fn codes(&self) -> InsnCodes {
@@ -324,18 +288,18 @@ impl DecodedInstruction {
     }
 
     pub fn imm_b(&self) -> u32 {
-        (self.top_bit * 0xfffff000)
+        (self.top_bit * 0xffff_f000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
     pub fn imm_i(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
+        (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
     pub fn imm_s(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
+        (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rd
     }
 
     pub fn imm_j(&self) -> u32 {
@@ -348,7 +312,7 @@ impl DecodedInstruction {
     }
 
     pub fn imm_u(&self) -> u32 {
-        self.insn & 0xfffff000
+        self.insn & 0xffff_f000
     }
 }
 
