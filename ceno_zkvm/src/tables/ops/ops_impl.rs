@@ -51,9 +51,11 @@ impl OpTableConfig {
         num_fixed: usize,
         content: Vec<[u64; 3]>,
     ) -> RowMajorMatrix<F> {
+        eprintln!("generate_fixed_traces: num_fixed = {}, content.len() = {}", num_fixed, content.len());
         let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
 
         fixed
+            // TODO(Matthias): I doubt that the parallelism here helps at all.
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
             .zip(content.into_par_iter())

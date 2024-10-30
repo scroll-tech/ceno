@@ -19,11 +19,19 @@ pub trait OpsTable {
     /// The content of the table: [[a, b, result], ...]
     fn content() -> Vec<[u64; 3]>;
 
+    // TODO(Matthias): pack and upnack look pretty stupid.
+    // Why do we need to pack those into 64 bits here, but not eg pack the result as well?
+    // What's the point?
+    // OK, so both `a` and `b` have to be within 8 bits?  Should we assert that?
+    // (Otherwise, unpack don't work.)
     fn pack(a: u64, b: u64) -> u64 {
+        assert!(a < 256);
+        assert!(b < 256);
         a | (b << 8)
     }
 
     fn unpack(i: u64) -> (u64, u64) {
+        assert!(i < 1 << 16);
         (i & 0xff, (i >> 8) & 0xff)
     }
 }
