@@ -152,7 +152,7 @@ mod test {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::test_utils::imm_i},
+        instructions::Instruction,
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
@@ -230,32 +230,15 @@ mod test {
         random_verify::<SltiOp>();
     }
 
-    fn verify<I: RIVInstruction>(
-        name: &'static str,
-        rs1_read: u32,
-        imm: u32,
-        expected_rd_written: u32,
-    ) {
+    fn verify<I: RIVInstruction>(name: &'static str, rs1_read: u32, imm: u32, expected_rd: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let (prefix, insn_code, rd_written) = match I::INST_KIND {
-            InsnKind::SLTIU => (
-                "SLTIU",
-                encode_rv32(I::INST_KIND, 2, 0, 4, imm),
-                (rs1_read < imm) as u32,
-            ),
-            InsnKind::SLTI => (
-                "SLTI",
-                encode_rv32(I::INST_KIND, 2, 0, 4, imm_i(imm as i32)),
-                ((rs1_read as i32) < (imm as i32)) as u32,
-            ),
-            _ => unreachable!(),
-        };
+        let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
 
         let config = cb
             .namespace(
-                || format!("{prefix}_({name})"),
+                || format!("{:?}_({name})", I::INST_KIND),
                 |cb| {
                     let config =
                         SetLessThanImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
@@ -273,19 +256,17 @@ mod test {
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,
                 rs1_read,
-                Change::new(0, rd_written),
+                Change::new(0, expected_rd),
                 0,
             )],
         )
         .unwrap();
 
-        assert_eq!(expected_rd_written, rd_written, "rd written mismatch");
-
-        let expected_rd_written =
-            UInt::from_const_unchecked(Value::new_unchecked(rd_written).as_u16_limbs().to_vec());
+        let expected_rd =
+            UInt::from_const_unchecked(Value::new_unchecked(expected_rd).as_u16_limbs().to_vec());
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd)
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
