@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     Value,
+    error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
     gadgets::{AssertLTConfig, SignedExtendConfig},
     instructions::Instruction,
@@ -58,6 +59,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     fn construct_circuit(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
+        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5");
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
@@ -76,22 +80,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
         let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
 
-        let (rs1_read, rd_written, signed_extend_config) = match I::INST_KIND {
+        let signed_extend_config = match I::INST_KIND {
             InsnKind::SLL => {
-                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
                 circuit_builder.require_equal(
                     || "shift check",
                     rs1_read.value() * pow2_rs2_low5.expr(),
                     outflow.expr() * two_pow_total_bits + rd_written.value(),
                 )?;
-                (rs1_read, rd_written, None)
+                None
             }
             InsnKind::SRL | InsnKind::SRA => {
-                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-
-                let (inflow, is_lt_config) = match I::INST_KIND {
+                let (inflow, signed_extend_config) = match I::INST_KIND {
                     InsnKind::SRA => {
                         let signed_extend_config = SignedExtendConfig::construct_limb(
                             circuit_builder,
@@ -110,7 +109,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                     rd_written.value() * pow2_rs2_low5.expr() + outflow.expr(),
                     inflow * two_pow_total_bits + rs1_read.value(),
                 )?;
-                (rs1_read, rd_written, is_lt_config)
+                signed_extend_config
             }
             _ => unreachable!(),
         };
@@ -156,7 +155,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rs2_low5 = rs2_read.as_u64() & 0b11111;
         lk_multiplicity.assert_ux::<5>(rs2_low5);
         lk_multiplicity.lookup_pow2(rs2_low5);
-        set_val!(instance, config.rs2_low5, rs2_low5);
 
         let pow2_rs2_low5 = 1u64 << rs2_low5;
 
@@ -165,35 +163,39 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             lk_multiplicity,
         );
         config.rs2_high.assign_value(instance, rs2_high);
-
         config.rs2_read.assign_value(instance, rs2_read);
+
         set_val!(instance, config.pow2_rs2_low5, pow2_rs2_low5);
+        set_val!(instance, config.rs2_low5, rs2_low5);
 
         // rs1
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        config.rs1_read.assign_value(instance, rs1_read.clone());
 
         // rd
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-        config.rd_written.assign_value(instance, rd_written);
 
         // outflow
         let outflow = match I::INST_KIND {
             InsnKind::SLL => (rs1_read.as_u64() * pow2_rs2_low5) >> UInt::<E>::TOTAL_BITS,
             InsnKind::SRL => rs1_read.as_u64() & (pow2_rs2_low5 - 1),
             InsnKind::SRA => {
-                if let Some(signed_ext_config) = config.signed_extend_config.as_ref() {
-                    signed_ext_config.assign_instance::<E>(
-                        instance,
-                        lk_multiplicity,
-                        *rs1_read.as_u16_limbs().last().unwrap() as u64,
-                    )?;
-                }
+                let Some(signed_ext_config) = config.signed_extend_config.as_ref() else {
+                    Err(ZKVMError::CircuitError)?
+                };
+                signed_ext_config.assign_instance::<E>(
+                    instance,
+                    lk_multiplicity,
+                    *rs1_read.as_u16_limbs().last().unwrap() as u64,
+                )?;
                 rs1_read.as_u64() & (pow2_rs2_low5 - 1)
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
+
         set_val!(instance, config.outflow, outflow);
+
+        config.rs1_read.assign_value(instance, rs1_read);
+        config.rd_written.assign_value(instance, rd_written);
 
         config.assert_lt_config.assign_instance(
             instance,
@@ -225,7 +227,7 @@ mod tests {
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
-    use super::{ShiftLogicalInstruction, SllOp, SrlOp};
+    use super::{ShiftLogicalInstruction, SllOp, SraOp, SrlOp};
 
     #[test]
     fn test_opcode_sll() {
@@ -249,6 +251,25 @@ mod tests {
         verify::<SrlOp>("base is zero", 0b_0000, 1, 0b_0000);
     }
 
+    #[test]
+    fn test_opcode_sra() {
+        // positive rs1
+        // rs2 = 3
+        verify::<SraOp>("32 >> 3", 32, 3, 32 >> 3);
+        verify::<SraOp>("33 >> 3", 33, 3, 33 >> 3);
+        // rs2 = 31
+        verify::<SraOp>("32 >> 31", 32, 31, 32 >> 31);
+        verify::<SraOp>("33 >> 31", 33, 31, 33 >> 31);
+
+        // negative rs1
+        // rs2 = 3
+        verify::<SraOp>("-32 >> 3", (-32_i32) as u32, 3, (-32_i32 >> 3) as u32);
+        verify::<SraOp>("-33 >> 3", (-33_i32) as u32, 3, (-33_i32 >> 3) as u32);
+        // rs2 = 31
+        verify::<SraOp>("-32 >> 31", (-32_i32) as u32, 31, (-32_i32 >> 31) as u32);
+        verify::<SraOp>("-33 >> 31", (-33_i32) as u32, 31, (-33_i32 >> 31) as u32);
+    }
+
     fn verify<I: RIVInstruction>(
         name: &'static str,
         rs1_read: u32,
@@ -270,19 +291,19 @@ mod tests {
                 encode_rv32(InsnKind::SRL, 2, 3, 4, 0),
                 rs1_read >> shift,
             ),
+            InsnKind::SRA => (
+                "SRA",
+                encode_rv32(InsnKind::SRA, 2, 3, 4, 0),
+                (rs1_read as i32 >> shift) as u32,
+            ),
             _ => unreachable!(),
         };
 
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-                |cb| {
-                    let config =
-                        ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
+                ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         config
