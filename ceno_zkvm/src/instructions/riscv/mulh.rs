@@ -1,14 +1,13 @@
-use std::{fmt::Display, marker::PhantomData, ops::Neg};
+use std::{fmt::Display, marker::PhantomData};
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::IsLtConfig,
+    gadgets::{IsLtConfig, IsZeroConfig},
     instructions::{
         Instruction,
         riscv::{
@@ -19,6 +18,7 @@ use crate::{
     },
     set_val,
     uint::Value,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -132,7 +132,10 @@ pub struct MulhConfig<E: ExtensionField> {
     rd_written: UInt<E>,
     rs1_signed: Signed,
     rs2_signed: Signed,
-    rd_signed: Signed,
+    signed_prod: WitIn,
+    is_prod_zero: IsZeroConfig,
+    nonzero_prod_sign_bit: WitIn,
+    prod_sign_bit: WitIn,
     unsigned_prod_low: UInt<E>,
     r_insn: RInstructionConfig<E>,
 }
@@ -144,6 +147,12 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         format!("{:?}", InsnKind::MULH)
     }
 
+    /// Circuit is validated by the following strategy:
+    /// 1. Compute witnesses for the signed values associated with rs1 and rs2
+    /// 2. Computed the signed product
+    /// 3. Compute the sign bit for the signed product
+    /// 4. Verify that the rd output can be used as a high 32-bit limb of a
+    ///    64-bit 2s-complement value equal to the signed product
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<MulhConfig<E>, ZKVMError> {
@@ -153,42 +162,59 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
 
         let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
         let rs2_signed = Signed::construct_circuit(circuit_builder, || "rs2", &rs2_read)?;
-        let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
 
-        let unsigned_prod_low = UInt::new(|| "prod_low", circuit_builder)?;
-
+        let signed_prod = circuit_builder.create_witin(|| "signed_prod")?;
         circuit_builder.require_equal(
-            || "unsigned_prod_equal",
-            rs1_signed.abs_value.expr() * rs2_signed.abs_value.expr(),
-            unsigned_prod_low.value()
-                + Expression::<E>::from(1u64 << 32) * rd_signed.abs_value.expr(),
+            || "assign signed_prod",
+            rs1_signed.val.expr() * rs2_signed.val.expr(),
+            signed_prod.expr(),
         )?;
 
-        // Check that signs are compatible:
+        // Witness the sign bit of the product, distinguishing negative and
+        // non-negative values, according to:
         //   negative * negative = non-negative * non-negative = non-negative
         //   negative * positive = positive * negative = negative
         //   negative * zero = zero * negative = non-negative
         //
-        // For the nonzero cases, b1*(1-b2) + (1-b1)*b2 - b3 = 0 validates.
-        // If either input is zero, the result is nonnegative.
-        // Taking product of LHS above with abs value of rs1 and rs2 inputs
-        // gives value which can be zero only when one of the above outcomes
-        // holds.
+        // For the nonzero cases, the product sign bit is b1*(1-b2) +
+        // (1-b1)*b2. However, if either input is zero, the result is
+        // nonnegative.
         //
-        // Note in particular since the above LHS has values in {-1, 0, 1},
-        // this product with two 31-bit unsigned values is zero in Goldilocks
-        // field only when one of the unsigned values is zero, or the LHS is
-        // zero -- no overflow can take place.
+        // To compute this, find whether rs1*rs2 is zero, then multiply the
+        // above sign bit by the "product is nonzero" bit.
+
+        let is_prod_zero = IsZeroConfig::construct_circuit(
+            circuit_builder,
+            || "is_prod_zero",
+            signed_prod.expr(),
+        )?;
 
         let rs1_sign_bit: Expression<E> = rs1_signed.is_negative.expr();
         let rs2_sign_bit: Expression<E> = rs2_signed.is_negative.expr();
-        let rd_sign_bit: Expression<E> = rd_signed.is_negative.expr();
-        let sign_check = rs1_sign_bit.clone() * (Expression::ONE - rs2_sign_bit.clone())
-                + (Expression::ONE - rs1_sign_bit) * rs2_sign_bit - rd_sign_bit;
 
-        circuit_builder.require_zero(
-            || "check_signs",
-            sign_check * rs1_signed.abs_value.expr() * rs2_signed.abs_value.expr()
+        let nonzero_prod_sign_bit = circuit_builder.create_witin(|| "nonzero_prod_sign_bit")?;
+        let sign_expr = rs1_sign_bit.clone() * (Expression::ONE - rs2_sign_bit.clone())
+            + (Expression::ONE - rs1_sign_bit) * rs2_sign_bit;
+        circuit_builder.require_equal(
+            || "assign nonzero_prod_sign_bit",
+            nonzero_prod_sign_bit.expr(),
+            sign_expr,
+        )?;
+
+        let prod_sign_bit = circuit_builder.create_witin(|| "prod_sign_bit")?;
+        circuit_builder.require_equal(
+            || "assign prod_sign_bit",
+            prod_sign_bit.expr(),
+            (Expression::ONE - is_prod_zero.expr()) * nonzero_prod_sign_bit.expr(),
+        )?;
+
+        let unsigned_prod_low = UInt::new(|| "unsigned_prod_low", circuit_builder)?;
+
+        circuit_builder.require_equal(
+            || "validate_prod_high_limb",
+            signed_prod.expr(),
+            unsigned_prod_low.value() + Expression::<E>::from(1u64 << 32) * rd_written.value()
+                - Expression::<E>::from(1u128 << 64) * prod_sign_bit.expr(),
         )?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
@@ -205,7 +231,10 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
             rd_written,
             rs1_signed,
             rs2_signed,
-            rd_signed,
+            signed_prod,
+            is_prod_zero,
+            nonzero_prod_sign_bit,
+            prod_sign_bit,
             unsigned_prod_low,
             r_insn,
         })
@@ -217,10 +246,6 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
         // Read registers from step
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         config
@@ -237,37 +262,60 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
             .rd_written
             .assign_limbs(instance, rd_written.as_u16_limbs());
 
-        // Assign sign values
-        let (_, rs1_abs) =
+        // Signed register values
+        let rs1_signed =
             config
                 .rs1_signed
-                .assign_instance(instance, lk_multiplicity, &rs1_read)?;
+                .assign_instance::<E>(instance, lk_multiplicity, &rs1_read)?;
 
-        let (_, rs2_abs) =
+        let rs2_signed =
             config
                 .rs2_signed
-                .assign_instance(instance, lk_multiplicity, &rs2_read)?;
+                .assign_instance::<E>(instance, lk_multiplicity, &rs2_read)?;
 
+        // Signed product
+        let signed_prod = (rs1_signed as i64) * (rs2_signed as i64);
+        let signed_prod_field_elt: E::BaseField = i64_to_base(signed_prod);
+        set_val!(instance, config.signed_prod, signed_prod_field_elt);
+
+        // Evaluate sign bit of signed product
         config
-            .rd_signed
-            .assign_instance(instance, lk_multiplicity, &rd_written)?;
+            .is_prod_zero
+            .assign_instance(instance, signed_prod_field_elt)?;
 
-        // Extract low limbs value of unsigned product
-        let unsigned_prod_low = Value::new(
-            ((rs1_abs * rs2_abs) % (1u64 << BIT_WIDTH)) as u32,
-            lk_multiplicity,
+        let nonzero_prod_sign_bit =
+            (rs1_signed >= 0 && rs2_signed < 0) || (rs1_signed < 0 && rs2_signed >= 0);
+        set_val!(
+            instance,
+            config.nonzero_prod_sign_bit,
+            nonzero_prod_sign_bit as u64
         );
+
+        let prod_sign_bit = signed_prod < 0;
+        set_val!(instance, config.prod_sign_bit, prod_sign_bit as u64);
+
+        // Evaluate low limb of
+        let unsigned_prod_low = ((signed_prod as u64) % (1u64 << BIT_WIDTH)) as u32;
+        let prod_low_val = Value::new(unsigned_prod_low, lk_multiplicity);
         config
             .unsigned_prod_low
-            .assign_limbs(instance, unsigned_prod_low.as_u16_limbs());
+            .assign_limbs(instance, prod_low_val.as_u16_limbs());
+
+        // R-type instruction
+        config
+            .r_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
     }
 }
 
+/// Transform a value represented as a `UInt` into a `WitIn` containing its
+/// corresponding signed value, interpreting the bits as a 2s-complement
+/// encoding.  Gadget allocates 3 `WitIn` values in total.
 struct Signed {
     pub is_negative: IsLtConfig,
-    pub abs_value: WitIn,
+    pub val: WitIn,
 }
 
 impl Signed {
@@ -278,7 +326,7 @@ impl Signed {
     >(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
-        val: &UInt<E>,
+        unsigned_val: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
         cb.namespace(
             || "signed",
@@ -288,47 +336,39 @@ impl Signed {
                 let is_negative = IsLtConfig::construct_circuit(
                     cb,
                     || name.clone(),
-                    (1u64 << (LIMB_BITS - 1)).into(),
-                    val.expr().last().unwrap().clone(),
+                    ((1u64 << (LIMB_BITS - 1)) - 1).into(),
+                    unsigned_val.expr().last().unwrap().clone(),
                     1,
                 )?;
-                let abs_value = cb.create_witin(|| format!("{name} abs_value witin"))?;
+                let val = cb.create_witin(|| format!("{name} signed_val witin"))?;
                 cb.require_equal(
-                    || "abs_value",
-                    abs_value.expr(),
-                    (1u64 - 2 * is_negative.expr())
-                        * (val.value() - (1u64 << 32) * is_negative.expr()),
+                    || "signed_val",
+                    val.expr(),
+                    unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr(),
                 )?;
 
-                Ok(Self {
-                    is_negative,
-                    abs_value,
-                })
+                Ok(Self { is_negative, val })
             },
         )
     }
 
-    pub fn assign_instance<F: SmallField>(
+    pub fn assign_instance<E: ExtensionField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
-    ) -> Result<(bool, u64), ZKVMError> {
+    ) -> Result<i32, ZKVMError> {
         let high_limb = *val.limbs.last().unwrap() as u64;
-        let sign_cutoff = 1u64 << (LIMB_BITS - 1);
+        let sign_cutoff = (1u64 << (LIMB_BITS - 1)) - 1;
         self.is_negative
             .assign_instance(instance, lkm, sign_cutoff, high_limb)?;
-        let is_negative = sign_cutoff < high_limb;
-        let abs_value = {
-            let unsigned = val.as_u64();
-            if unsigned >= (1u64 << 31) {
-                (unsigned as i64 - (1i64 << BIT_WIDTH)).neg() as u64
-            } else {
-                unsigned
-            }
-        };
-        set_val!(instance, self.abs_value, abs_value);
-        Ok((is_negative, abs_value))
+
+        let signed_val = val.as_u32() as i32;
+
+        let field_elt: E::BaseField = i64_to_base(signed_val as i64);
+        set_val!(instance, self.val, field_elt);
+
+        Ok(signed_val)
     }
 }
 
@@ -397,11 +437,16 @@ mod test {
     fn test_opcode_mulh() {
         let test_cases = vec![
             (2, 11),
-            (0, -1),
-            (0, 1),
-            (1, 0),
-            (-1, -1),
-            (i32::MAX, i32::MIN), // TODO handle problem with abs value of min
+            (7, 0),
+            (0, 5),
+            (0, -3),
+            (-19, 0),
+            (0, 0),
+            (-12, -31),
+            (2, -1),
+            (1, i32::MIN),
+            (i32::MAX, -1),
+            (i32::MAX, i32::MIN),
             (i32::MAX, i32::MAX),
             (i32::MIN, i32::MIN),
         ];
@@ -418,11 +463,9 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let signed_prod_high = (rs1 as i64).wrapping_mul(rs2 as i64) >> 32;
+        let signed_prod_high = ((rs1 as i64).wrapping_mul(rs2 as i64) >> 32) as u32;
 
-        println!("{rs1} {rs2} {signed_prod_high}");
-
-        // // values assignment
+        // values assignment
         let insn_code = encode_rv32(InsnKind::MULH, 2, 3, 4, 0);
         let (raw_witin, lkm) =
             MulhInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
@@ -438,8 +481,7 @@ mod test {
             ])
             .unwrap();
 
-        // verify value write to register, which is only hi
-        // let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());
+        // verify value written to register
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
             || "assert_rd_written",
