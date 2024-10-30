@@ -24,9 +24,6 @@ pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
 
-    // Handle a machine return
-    fn mret(&self) -> Result<bool>;
-
     // Handle a trap
     fn trap(&self, cause: TrapCause) -> Result<bool>;
 
@@ -182,8 +179,8 @@ pub enum InsnKind {
     SB,
     SH,
     SW,
+    /// ECALL and EBREAK etc.
     EANY,
-    MRET,
 }
 use InsnKind::*;
 
@@ -284,17 +281,17 @@ impl DecodedInstruction {
 
     /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
     pub fn imm_or_funct7(&self) -> u32 {
-        match self.codes() {
-            InsnCodes { format: R, .. } => self.func7,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI,
-                ..
-            } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
-            InsnCodes { format: I, .. } => self.imm_i(),
-            InsnCodes { format: S, .. } => self.imm_s(),
-            InsnCodes { format: B, .. } => self.imm_b(),
-            InsnCodes { format: U, .. } => self.imm_u(),
-            InsnCodes { format: J, .. } => self.imm_j(),
+        match self.codes().format {
+            R => self.func7,
+            I => match self.codes().kind {
+                // decode the shift as a multiplication/division by 1 << immediate
+                SLLI | SRLI | SRAI => 1 << (self.imm_i() & 0x1f),
+                _ => self.imm_i(),
+            },
+            S => self.imm_s(),
+            B => self.imm_b(),
+            U => self.imm_u(),
+            J => self.imm_j(),
         }
     }
 
@@ -397,7 +394,7 @@ const fn insn(
     }
 }
 
-type InstructionTable = [InsnCodes; 48];
+type InstructionTable = [InsnCodes; 47];
 type FastInstructionTable = [u8; 1 << 10];
 
 const RV32IM_ISA: InstructionTable = [
@@ -448,7 +445,6 @@ const RV32IM_ISA: InstructionTable = [
     insn(S, SH, Store, 0x23, 0x1, -1),
     insn(S, SW, Store, 0x23, 0x2, -1),
     insn(I, EANY, System, 0x73, 0x0, 0x00),
-    insn(I, MRET, System, 0x73, 0x0, 0x18),
 ];
 
 #[cfg(test)]
@@ -556,6 +552,7 @@ impl Emulator {
         let decoded = DecodedInstruction::new(word);
         let insn = self.table.lookup(&decoded);
         ctx.on_insn_decoded(&decoded);
+        tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
@@ -775,6 +772,7 @@ impl Emulator {
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm_s()));
         let shift = 8 * (addr.0 & 3);
         if !ctx.check_data_store(addr) {
+            tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
             return ctx.trap(TrapCause::StoreAccessFault);
         }
         let mut data = ctx.peek_memory(addr.waddr());
@@ -817,7 +815,6 @@ impl Emulator {
                 1 => ctx.trap(TrapCause::Breakpoint),
                 _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
             },
-            InsnKind::MRET => ctx.mret(),
             _ => unreachable!(),
         }
     }

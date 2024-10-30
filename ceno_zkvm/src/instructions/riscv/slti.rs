@@ -45,7 +45,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm = cb.create_witin(|| "imm")?;
+        let imm = cb.create_witin(|| "imm");
 
         let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         let is_rs1_neg = IsLtConfig::construct_circuit(
