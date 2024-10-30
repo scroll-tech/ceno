@@ -284,17 +284,17 @@ impl DecodedInstruction {
 
     /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
     pub fn imm_or_funct7(&self) -> u32 {
-        match self.codes() {
-            InsnCodes { format: R, .. } => self.func7,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI,
-                ..
-            } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
-            InsnCodes { format: I, .. } => self.imm_i(),
-            InsnCodes { format: S, .. } => self.imm_s(),
-            InsnCodes { format: B, .. } => self.imm_b(),
-            InsnCodes { format: U, .. } => self.imm_u(),
-            InsnCodes { format: J, .. } => self.imm_j(),
+        match self.codes().format {
+            R => self.func7,
+            I => match self.codes().kind {
+                // decode the shift as a multiplication/division by 1 << immediate
+                SLLI | SRLI | SRAI => 1 << (self.imm_i() & 0x1f),
+                _ => self.imm_i(),
+            },
+            S => self.imm_s(),
+            B => self.imm_b(),
+            U => self.imm_u(),
+            J => self.imm_j(),
         }
     }
 
