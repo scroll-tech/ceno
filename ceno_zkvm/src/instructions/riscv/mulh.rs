@@ -299,7 +299,7 @@ impl Signed {
                     unsigned_val.expr().last().unwrap().clone(),
                     1,
                 )?;
-                let val = cb.create_witin(|| format!("{name} signed_val witin"))?;
+                let val = cb.create_witin(|| format!("{name} signed_val witin"));
                 cb.require_equal(
                     || "signed_val",
                     val.expr(),
