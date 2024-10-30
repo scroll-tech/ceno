@@ -299,6 +299,11 @@ impl DecodedInstruction {
     }
 
     /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
+    /// example:
+    /// imm = ux::MAX - 1 implies
+    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
+    /// imm_field = ux::MAX - 1 otherwise
+    /// see InsnRecord::imm_or_funct7_field
     pub fn imm_field_is_negative(&self) -> bool {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
