@@ -261,9 +261,9 @@ fn test_single_add_instance_e2e() {
         .collect::<Vec<_>>();
     let mut add_records = vec![];
     let mut halt_records = vec![];
-    all_records.into_iter().for_each(|record| {
-        let kind = record.insn().kind().1;
-        match kind {
+    all_records
+        .into_iter()
+        .for_each(|record| match record.insn().kind() {
             ADD => add_records.push(record),
             EANY => {
                 if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
@@ -271,8 +271,7 @@ fn test_single_add_instance_e2e() {
                 }
             }
             _ => {}
-        }
-    });
+        });
     assert_eq!(add_records.len(), 1);
     assert_eq!(halt_records.len(), 1);
 
