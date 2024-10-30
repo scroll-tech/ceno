@@ -126,6 +126,19 @@ impl IsLtConfig {
             .assign_instance_signed(instance, lkm, lhs, rhs)?;
         Ok(())
     }
+
+    pub fn assign_instance_rhs_signed<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        lhs: u32,
+        rhs: SWord,
+    ) -> Result<(), ZKVMError> {
+        set_val!(instance, self.is_lt, ((lhs as i64) < (rhs as i64)) as u64);
+        self.config
+            .assign_instance_rhs_signed(instance, lkm, lhs, rhs)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +222,30 @@ impl InnerLtConfig {
             Self::range(self.diff.len()) - lhs.abs_diff(rhs) as u64
         } else {
             lhs.abs_diff(rhs) as u64
+        };
+        self.diff.iter().enumerate().for_each(|(i, wit)| {
+            // extract the 16 bit limb from diff and assign to instance
+            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
+            lkm.assert_ux::<16>(val);
+            set_val!(instance, wit, val);
+        });
+        Ok(())
+    }
+
+    // TODO: refactor with the above function
+    pub fn assign_instance_rhs_signed<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        lhs: u32,
+        rhs: SWord,
+    ) -> Result<(), ZKVMError> {
+        let lhs = lhs as i64;
+        let rhs = rhs as i64;
+        let diff = if lhs < rhs {
+            Self::range(self.diff.len()) - lhs.abs_diff(rhs)
+        } else {
+            lhs.abs_diff(rhs)
         };
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance

@@ -303,7 +303,7 @@ impl DecodedInstruction {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI | SLTIU,
+                kind: SLLI | SRLI | SRAI | ADDI,
                 ..
             } => false,
             _ => self.top_bit != 0,
@@ -330,15 +330,8 @@ impl DecodedInstruction {
             | (self.rd & 0x1e)
     }
 
-    /// checks if the imm requires sign extension
-    pub fn requires_sign_ext(&self) -> bool {
-        !matches!(self.codes(), InsnCodes { kind: SLTIU, .. })
-    }
-
     pub fn imm_i(&self) -> u32 {
-        ((self.requires_sign_ext() as u32) * self.top_bit * 0xffff_f000)
-            | (self.func7 << 5)
-            | self.rs2
+        (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
     pub fn imm_s(&self) -> u32 {
