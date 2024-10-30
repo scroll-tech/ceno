@@ -352,7 +352,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     challenges: &[E],
@@ -361,7 +361,7 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
     eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
@@ -673,12 +673,11 @@ mod tests {
         type B = goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a").unwrap();
-        let b = cb.create_witin(|| "b").unwrap();
-        let c = cb.create_witin(|| "c").unwrap();
+        let a = cb.create_witin(|| "a");
+        let b = cb.create_witin(|| "b");
+        let c = cb.create_witin(|| "c");
 
-        let expr: Expression<E> =
-            a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3.into() + 2.into());
+        let expr: Expression<E> = a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3 + 2);
 
         let res = wit_infer_by_expr(
             &[],
@@ -700,14 +699,14 @@ mod tests {
         type B = goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a").unwrap();
-        let b = cb.create_witin(|| "b").unwrap();
-        let c = cb.create_witin(|| "c").unwrap();
+        let a = cb.create_witin(|| "a");
+        let b = cb.create_witin(|| "b");
+        let c = cb.create_witin(|| "c");
 
         let expr: Expression<E> = a.expr()
             + b.expr()
             + a.expr() * b.expr()
-            + (c.expr() * 3.into() + 2.into())
+            + (c.expr() * 3 + 2)
             + Expression::Challenge(0, 1, E::ONE, E::ONE);
 
         let res = wit_infer_by_expr(

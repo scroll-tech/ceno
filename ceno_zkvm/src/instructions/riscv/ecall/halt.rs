@@ -34,7 +34,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        let prev_x10_ts = cb.create_witin(|| "prev_x10_ts")?;
+        let prev_x10_ts = cb.create_witin(|| "prev_x10_ts");
         let exit_code = {
             let exit_code = cb.query_exit_code()?;
             [exit_code[0].expr(), exit_code[1].expr()]
@@ -52,7 +52,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             || "read x10",
             E::BaseField::from(ceno_emul::CENO_PLATFORM.reg_arg0() as u64),
             prev_x10_ts.expr(),
-            ecall_cfg.ts.expr() + (Tracer::SUBCYCLE_RS2 as usize).into(),
+            ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
         )?;
 

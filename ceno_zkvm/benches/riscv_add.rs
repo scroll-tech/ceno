@@ -7,7 +7,6 @@ use ceno_zkvm::{
     scheme::prover::ZKVMProver,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
-use const_env::from_env;
 use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
@@ -37,31 +36,9 @@ cfg_if::cfg_if! {
 criterion_main!(op_add);
 
 const NUM_SAMPLES: usize = 10;
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
 
 fn bench_add(c: &mut Criterion) {
     type Pcs = BasefoldDefault<E>;
-    let max_threads = {
-        if !RAYON_NUM_THREADS.is_power_of_two() {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            {
-                use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
-                let max_thread_id = 1 << ceil_log2(RAYON_NUM_THREADS);
-                create_local_pool_once(1 << ceil_log2(RAYON_NUM_THREADS), true);
-                max_thread_id
-            }
-        } else {
-            RAYON_NUM_THREADS
-        }
-    };
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let _ = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -128,7 +105,6 @@ fn bench_add(c: &mut Criterion) {
                                 commit,
                                 &[],
                                 num_instances,
-                                max_threads,
                                 &mut transcript,
                                 &challenges,
                             )

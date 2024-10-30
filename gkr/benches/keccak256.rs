@@ -3,11 +3,11 @@
 
 use std::time::Duration;
 
-use const_env::from_env;
 use criterion::*;
 
 use gkr::gadgets::keccak256::{keccak256_circuit, prove_keccak256, verify_keccak256};
 use goldilocks::GoldilocksExt2;
+use multilinear_extensions::util::max_usable_threads;
 
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
@@ -28,8 +28,6 @@ cfg_if::cfg_if! {
 criterion_main!(keccak256);
 
 const NUM_SAMPLES: usize = 10;
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
 
 fn bench_keccak256(c: &mut Criterion) {
     println!(
@@ -37,26 +35,7 @@ fn bench_keccak256(c: &mut Criterion) {
         keccak256_circuit::<GoldilocksExt2>().layers.len()
     );
 
-    let max_thread_id = {
-        if !RAYON_NUM_THREADS.is_power_of_two() {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            {
-                use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
-                let max_thread_id = 1 << ceil_log2(RAYON_NUM_THREADS);
-                create_local_pool_once(1 << ceil_log2(RAYON_NUM_THREADS), true);
-                max_thread_id
-            }
-        } else {
-            RAYON_NUM_THREADS
-        }
-    };
+    let max_thread_id = max_usable_threads();
 
     let circuit = keccak256_circuit::<GoldilocksExt2>();
 

@@ -136,11 +136,6 @@ impl<E: ExtensionField> PartialOrd for Expression<E> {
     }
 }
 
-#[allow(dead_code)]
-fn cmp_field<F: SmallField>(a: &F, b: &F) -> Ordering {
-    a.to_canonical_u64().cmp(&b.to_canonical_u64())
-}
-
 fn cmp_ext<E: ExtensionField>(a: &E, b: &E) -> Ordering {
     let a = a.as_bases().iter().map(|f| f.to_canonical_u64());
     let b = b.as_bases().iter().map(|f| f.to_canonical_u64());

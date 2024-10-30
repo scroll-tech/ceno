@@ -126,8 +126,6 @@ impl<E: ExtensionField> LogicConfig<E> {
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         chip_handler::test::DebugIndex,
@@ -205,17 +203,6 @@ mod test {
         cb.require_equal(|| "assert_rd_written", rd_written_expr, expected.value())
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

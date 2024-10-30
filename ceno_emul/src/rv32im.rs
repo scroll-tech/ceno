@@ -88,7 +88,6 @@ pub struct Emulator {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
@@ -218,28 +217,6 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn from_raw(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> Self {
-        // limit the range of inputs
-        let rs2 = rs2 & 0x1f; // 5bits mask
-        let rs1 = rs1 & 0x1f;
-        let rd = rd & 0x1f;
-        let func7 = kind.codes().func7;
-        let func3 = kind.codes().func3;
-        let opcode = kind.codes().opcode;
-        let insn = func7 << 25 | rs2 << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode;
-        Self {
-            insn,
-            top_bit: func7 | 0x80,
-            func7,
-            rs2,
-            rs1,
-            func3,
-            rd,
-            opcode,
-        }
-    }
-
     pub fn encoded(&self) -> u32 {
         self.insn
     }
@@ -326,7 +303,7 @@ impl DecodedInstruction {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI | SW | LW,
+                kind: SLLI | SRLI | SRAI | ADDI,
                 ..
             } => false,
             _ => self.top_bit != 0,
@@ -579,6 +556,7 @@ impl Emulator {
         let decoded = DecodedInstruction::new(word);
         let insn = self.table.lookup(&decoded);
         ctx.on_insn_decoded(&decoded);
+        tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
@@ -798,6 +776,7 @@ impl Emulator {
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm_s()));
         let shift = 8 * (addr.0 & 3);
         if !ctx.check_data_store(addr) {
+            tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
             return ctx.trap(TrapCause::StoreAccessFault);
         }
         let mut data = ctx.peek_memory(addr.waddr());
