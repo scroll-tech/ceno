@@ -197,7 +197,6 @@ impl InsnKind {
 pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
-    category: InsnCategory,
     pub opcode: u32,
     pub func3: u32,
     pub func7: u32,
@@ -318,9 +317,8 @@ impl DecodedInstruction {
         FastDecodeTable::get().lookup(self)
     }
 
-    pub fn kind(&self) -> (InsnCategory, InsnKind) {
-        let i = FastDecodeTable::get().lookup(self);
-        (i.category, i.kind)
+    pub fn kind(&self) -> InsnKind {
+        self.codes().kind
     }
 
     pub fn imm_b(&self) -> u32 {
@@ -382,7 +380,6 @@ fn test_decode_imm() {
 const fn insn(
     format: InsnFormat,
     kind: InsnKind,
-    category: InsnCategory,
     opcode: u32,
     func3: i32,
     func7: i32,
@@ -390,7 +387,6 @@ const fn insn(
     InsnCodes {
         format,
         kind,
-        category,
         opcode,
         func3: func3 as u32,
         func7: func7 as u32,
@@ -400,55 +396,67 @@ const fn insn(
 type InstructionTable = [InsnCodes; 48];
 type FastInstructionTable = [u8; 1 << 10];
 
+impl From<InsnKind> for InsnCategory {
+    fn from(kind: InsnKind) -> Self {
+        match kind {
+            INVALID => Invalid,
+            LB | LH | LW | LBU | LHU => Load,
+            SB | SH | SW => Store,
+            EANY | MRET => System,
+            _ => Compute,
+        }
+    }
+}
+
 const RV32IM_ISA: InstructionTable = [
-    insn(R, INVALID, Invalid, 0x00, 0x0, 0x00),
-    insn(R, ADD, Compute, 0x33, 0x0, 0x00),
-    insn(R, SUB, Compute, 0x33, 0x0, 0x20),
-    insn(R, XOR, Compute, 0x33, 0x4, 0x00),
-    insn(R, OR, Compute, 0x33, 0x6, 0x00),
-    insn(R, AND, Compute, 0x33, 0x7, 0x00),
-    insn(R, SLL, Compute, 0x33, 0x1, 0x00),
-    insn(R, SRL, Compute, 0x33, 0x5, 0x00),
-    insn(R, SRA, Compute, 0x33, 0x5, 0x20),
-    insn(R, SLT, Compute, 0x33, 0x2, 0x00),
-    insn(R, SLTU, Compute, 0x33, 0x3, 0x00),
-    insn(I, ADDI, Compute, 0x13, 0x0, -1),
-    insn(I, XORI, Compute, 0x13, 0x4, -1),
-    insn(I, ORI, Compute, 0x13, 0x6, -1),
-    insn(I, ANDI, Compute, 0x13, 0x7, -1),
-    insn(I, SLLI, Compute, 0x13, 0x1, 0x00),
-    insn(I, SRLI, Compute, 0x13, 0x5, 0x00),
-    insn(I, SRAI, Compute, 0x13, 0x5, 0x20),
-    insn(I, SLTI, Compute, 0x13, 0x2, -1),
-    insn(I, SLTIU, Compute, 0x13, 0x3, -1),
-    insn(B, BEQ, Compute, 0x63, 0x0, -1),
-    insn(B, BNE, Compute, 0x63, 0x1, -1),
-    insn(B, BLT, Compute, 0x63, 0x4, -1),
-    insn(B, BGE, Compute, 0x63, 0x5, -1),
-    insn(B, BLTU, Compute, 0x63, 0x6, -1),
-    insn(B, BGEU, Compute, 0x63, 0x7, -1),
-    insn(J, JAL, Compute, 0x6f, -1, -1),
-    insn(I, JALR, Compute, 0x67, 0x0, -1),
-    insn(U, LUI, Compute, 0x37, -1, -1),
-    insn(U, AUIPC, Compute, 0x17, -1, -1),
-    insn(R, MUL, Compute, 0x33, 0x0, 0x01),
-    insn(R, MULH, Compute, 0x33, 0x1, 0x01),
-    insn(R, MULHSU, Compute, 0x33, 0x2, 0x01),
-    insn(R, MULHU, Compute, 0x33, 0x3, 0x01),
-    insn(R, DIV, Compute, 0x33, 0x4, 0x01),
-    insn(R, DIVU, Compute, 0x33, 0x5, 0x01),
-    insn(R, REM, Compute, 0x33, 0x6, 0x01),
-    insn(R, REMU, Compute, 0x33, 0x7, 0x01),
-    insn(I, LB, Load, 0x03, 0x0, -1),
-    insn(I, LH, Load, 0x03, 0x1, -1),
-    insn(I, LW, Load, 0x03, 0x2, -1),
-    insn(I, LBU, Load, 0x03, 0x4, -1),
-    insn(I, LHU, Load, 0x03, 0x5, -1),
-    insn(S, SB, Store, 0x23, 0x0, -1),
-    insn(S, SH, Store, 0x23, 0x1, -1),
-    insn(S, SW, Store, 0x23, 0x2, -1),
-    insn(I, EANY, System, 0x73, 0x0, 0x00),
-    insn(I, MRET, System, 0x73, 0x0, 0x18),
+    insn(R, INVALID, 0x00, 0x0, 0x00),
+    insn(R, ADD, 0x33, 0x0, 0x00),
+    insn(R, SUB, 0x33, 0x0, 0x20),
+    insn(R, XOR, 0x33, 0x4, 0x00),
+    insn(R, OR, 0x33, 0x6, 0x00),
+    insn(R, AND, 0x33, 0x7, 0x00),
+    insn(R, SLL, 0x33, 0x1, 0x00),
+    insn(R, SRL, 0x33, 0x5, 0x00),
+    insn(R, SRA, 0x33, 0x5, 0x20),
+    insn(R, SLT, 0x33, 0x2, 0x00),
+    insn(R, SLTU, 0x33, 0x3, 0x00),
+    insn(I, ADDI, 0x13, 0x0, -1),
+    insn(I, XORI, 0x13, 0x4, -1),
+    insn(I, ORI, 0x13, 0x6, -1),
+    insn(I, ANDI, 0x13, 0x7, -1),
+    insn(I, SLLI, 0x13, 0x1, 0x00),
+    insn(I, SRLI, 0x13, 0x5, 0x00),
+    insn(I, SRAI, 0x13, 0x5, 0x20),
+    insn(I, SLTI, 0x13, 0x2, -1),
+    insn(I, SLTIU, 0x13, 0x3, -1),
+    insn(B, BEQ, 0x63, 0x0, -1),
+    insn(B, BNE, 0x63, 0x1, -1),
+    insn(B, BLT, 0x63, 0x4, -1),
+    insn(B, BGE, 0x63, 0x5, -1),
+    insn(B, BLTU, 0x63, 0x6, -1),
+    insn(B, BGEU, 0x63, 0x7, -1),
+    insn(J, JAL, 0x6f, -1, -1),
+    insn(I, JALR, 0x67, 0x0, -1),
+    insn(U, LUI, 0x37, -1, -1),
+    insn(U, AUIPC, 0x17, -1, -1),
+    insn(R, MUL, 0x33, 0x0, 0x01),
+    insn(R, MULH, 0x33, 0x1, 0x01),
+    insn(R, MULHSU, 0x33, 0x2, 0x01),
+    insn(R, MULHU, 0x33, 0x3, 0x01),
+    insn(R, DIV, 0x33, 0x4, 0x01),
+    insn(R, DIVU, 0x33, 0x5, 0x01),
+    insn(R, REM, 0x33, 0x6, 0x01),
+    insn(R, REMU, 0x33, 0x7, 0x01),
+    insn(I, LB, 0x03, 0x0, -1),
+    insn(I, LH, 0x03, 0x1, -1),
+    insn(I, LW, 0x03, 0x2, -1),
+    insn(I, LBU, 0x03, 0x4, -1),
+    insn(I, LHU, 0x03, 0x5, -1),
+    insn(S, SB, 0x23, 0x0, -1),
+    insn(S, SH, 0x23, 0x1, -1),
+    insn(S, SW, 0x23, 0x2, -1),
+    insn(I, EANY, 0x73, 0x0, 0x00),
+    insn(I, MRET, 0x73, 0x0, 0x18),
 ];
 
 #[cfg(test)]
@@ -558,7 +566,7 @@ impl Emulator {
         ctx.on_insn_decoded(&decoded);
         tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
-        if match insn.category {
+        if match insn.kind.into() {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
             InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
             InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
