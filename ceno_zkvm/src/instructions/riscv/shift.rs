@@ -5,8 +5,8 @@ use ff_ext::ExtensionField;
 
 use crate::{
     Value,
-    expression::{ToExpr, WitIn},
-    gadgets::DivConfig,
+    expression::{Expression, ToExpr, WitIn},
+    gadgets::{AssertLTConfig, IsLtConfig},
     instructions::Instruction,
     set_val,
 };
@@ -22,27 +22,30 @@ pub struct ShiftConfig<E: ExtensionField> {
 
     rs2_high: UInt<E>,
     rs2_low5: WitIn,
-    pow2_rs2_low5: UInt<E>,
+    pow2_rs2_low5: WitIn,
 
-    // for SRL division arithmetics
-    remainder: Option<UInt<E>>,
-    div_config: Option<DivConfig<E>>,
+    outflow: WitIn,
+    assert_lt_config: AssertLTConfig,
+
+    // SRA
+    is_lt_config: Option<IsLtConfig>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
-#[cfg(test)]
-struct SllOp;
-#[cfg(test)]
+pub struct SllOp;
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 
-#[cfg(test)]
-struct SrlOp;
-#[cfg(test)]
+pub struct SrlOp;
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
+}
+
+pub struct SraOp;
+impl RIVInstruction for SraOp {
+    const INST_KIND: InsnKind = InsnKind::SRA;
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
@@ -58,37 +61,61 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5");
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
-        let mut pow2_rs2_low5 = UInt::new_unchecked(|| "pow2_rs2_low5", circuit_builder)?;
+        let pow2_rs2_low5 = circuit_builder.create_witin(|| "pow2_rs2_low5");
         // rs2 = rs2_high | rs2_low5
         let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
-        let (rs1_read, rd_written, remainder, div_config) = match I::INST_KIND {
+        let outflow = circuit_builder.create_witin(|| "outflow");
+        let assert_lt_config = AssertLTConfig::construct_circuit(
+            circuit_builder,
+            || "outflow < pow2_rs2_low5",
+            outflow.expr(),
+            pow2_rs2_low5.expr(),
+            2,
+        )?;
+
+        let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
+
+        let (rs1_read, rd_written, is_lt_config) = match I::INST_KIND {
             InsnKind::SLL => {
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rd_written = rs1_read.mul(
-                    || "rd_written = rs1_read * pow2_rs2_low5",
-                    circuit_builder,
-                    &mut pow2_rs2_low5,
-                    true,
+                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+                circuit_builder.require_equal(
+                    || "shift check",
+                    rs1_read.value() * pow2_rs2_low5.expr(),
+                    outflow.expr() * two_pow_total_bits + rd_written.value(),
                 )?;
-                (rs1_read, rd_written, None, None)
+                (rs1_read, rd_written, None)
             }
-            InsnKind::SRL => {
-                let mut rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let remainder = UInt::new(|| "remainder", circuit_builder)?;
-                let div_config = DivConfig::construct_circuit(
-                    circuit_builder,
-                    || "srl_div",
-                    &mut pow2_rs2_low5,
-                    &mut rd_written,
-                    &remainder,
+            InsnKind::SRL | InsnKind::SRA => {
+                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+
+                let (inflow, is_lt_config) = match I::INST_KIND {
+                    InsnKind::SRA => {
+                        let max_signed_limb_expr: Expression<_> =
+                            ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
+                        let is_rs1_neg = IsLtConfig::construct_circuit(
+                            circuit_builder,
+                            || "lhs_msb",
+                            max_signed_limb_expr,
+                            rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
+                            1,
+                        )?;
+                        let msb_expr: Expression<E> = is_rs1_neg.is_lt.expr();
+                        let ones = pow2_rs2_low5.expr() - Expression::ONE;
+                        (msb_expr * ones, Some(is_rs1_neg))
+                    }
+                    InsnKind::SRL => (Expression::ZERO, None),
+                    _ => unreachable!(),
+                };
+
+                circuit_builder.require_equal(
+                    || "shift check",
+                    rd_written.value() * pow2_rs2_low5.expr() + outflow.expr(),
+                    inflow * two_pow_total_bits + rs1_read.value(),
                 )?;
-                (
-                    div_config.dividend.clone(),
-                    rd_written,
-                    Some(remainder),
-                    Some(div_config),
-                )
+                (rs1_read, rd_written, is_lt_config)
             }
             _ => unreachable!(),
         };
@@ -101,7 +128,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rd_written.register_expr(),
         )?;
 
-        circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.value())?;
+        circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.expr())?;
         circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr())?;
         circuit_builder.require_equal(
             || "rs2 == rs2_high * 2^5 + rs2_low5",
@@ -117,8 +144,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs2_high,
             rs2_low5,
             pow2_rs2_low5,
-            div_config,
-            remainder,
+            outflow,
+            assert_lt_config,
+            is_lt_config,
         })
     }
 
@@ -128,64 +156,59 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {
+        // rs2 & derived values
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         let rs2_low5 = rs2_read.as_u64() & 0b11111;
-        let pow2_rs2_low5 = Value::new_unchecked((1 << rs2_low5) as u32);
+        lk_multiplicity.assert_ux::<5>(rs2_low5);
+        lk_multiplicity.lookup_pow2(rs2_low5);
+        set_val!(instance, config.rs2_low5, rs2_low5);
+
+        let pow2_rs2_low5 = 1u64 << rs2_low5;
+
         let rs2_high = Value::new(
             ((rs2_read.as_u64() - rs2_low5) >> 5) as u32,
             lk_multiplicity,
         );
+        config.rs2_high.assign_value(instance, rs2_high);
 
-        match I::INST_KIND {
-            InsnKind::SLL => {
-                let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-                let rd_written = rs1_read.mul(&pow2_rs2_low5, lk_multiplicity, true);
-                config.rs1_read.assign_value(instance, rs1_read);
-                config
-                    .rd_written
-                    .assign_mul_outcome(instance, lk_multiplicity, &rd_written)?;
-            }
-            InsnKind::SRL => {
-                let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-                let remainder = Value::new(
-                    // rs1 - rd * pow2_rs2_low5
-                    step.rs1()
-                        .unwrap()
-                        .value
-                        .wrapping_sub((rd_written.as_u64() * pow2_rs2_low5.as_u64()) as u32),
-                    lk_multiplicity,
-                );
+        config.rs2_read.assign_value(instance, rs2_read);
+        set_val!(instance, config.pow2_rs2_low5, pow2_rs2_low5);
 
-                config.div_config.as_ref().unwrap().assign_instance(
+        // rs1
+        let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
+        config.rs1_read.assign_value(instance, rs1_read.clone());
+
+        // rd
+        let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
+        config.rd_written.assign_value(instance, rd_written);
+
+        let outflow = match I::INST_KIND {
+            InsnKind::SLL => (rs1_read.as_u64() * pow2_rs2_low5) >> UInt::<E>::TOTAL_BITS,
+            InsnKind::SRL => rs1_read.as_u64() & (pow2_rs2_low5 - 1),
+            InsnKind::SRA => {
+                let max_signed_limb_expr = (1 << (UInt::<E>::LIMB_BITS - 1)) - 1;
+                config.is_lt_config.as_ref().unwrap().assign_instance(
                     instance,
                     lk_multiplicity,
-                    &pow2_rs2_low5,
-                    &rd_written,
-                    &remainder,
+                    max_signed_limb_expr,
+                    rs1_read.as_u64() >> UInt::<E>::LIMB_BITS,
                 )?;
-
-                config.rd_written.assign_value(instance, rd_written);
-                config
-                    .remainder
-                    .as_ref()
-                    .unwrap()
-                    .assign_value(instance, remainder);
+                rs1_read.as_u64() & (pow2_rs2_low5 - 1)
             }
-            _ => unreachable!(),
-        }
+            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
+        };
+        set_val!(instance, config.outflow, outflow);
+
+        config.assert_lt_config.assign_instance(
+            instance,
+            lk_multiplicity,
+            outflow,
+            pow2_rs2_low5,
+        )?;
 
         config
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
-        config.rs2_read.assign_value(instance, rs2_read);
-
-        set_val!(instance, config.rs2_low5, rs2_low5);
-        lk_multiplicity.assert_ux::<5>(rs2_low5);
-
-        config.rs2_high.assign_value(instance, rs2_high);
-        config.pow2_rs2_low5.assign_value(instance, pow2_rs2_low5);
-
-        lk_multiplicity.lookup_pow2(rs2_low5);
 
         Ok(())
     }
