@@ -235,7 +235,7 @@ mod test {
     fn test_slti_random() {
         let mut rng = rand::thread_rng();
         let a: i32 = rng.gen();
-        let b: i32 = rng.gen::<i32>() % 2048;
+        let b: i32 = rng.gen_range(-2048..2048);
         println!("random: {} <? {}", a, b); // For debugging, do not delete.
         verify::<SltiOp>("random 1", a as u32, b as u32, (a < b) as u32);
     }
