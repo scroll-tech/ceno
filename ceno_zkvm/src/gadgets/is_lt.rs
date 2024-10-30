@@ -86,7 +86,7 @@ impl IsLtConfig {
             || "is_lt",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"));
                 cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
 
                 let config = InnerLtConfig::construct_circuit(
@@ -109,9 +109,21 @@ impl IsLtConfig {
         lhs: u64,
         rhs: u64,
     ) -> Result<(), ZKVMError> {
-        let is_lt = lhs < rhs;
-        set_val!(instance, self.is_lt, is_lt as u64);
+        set_val!(instance, self.is_lt, (lhs < rhs) as u64);
         self.config.assign_instance(instance, lkm, lhs, rhs)?;
+        Ok(())
+    }
+
+    pub fn assign_instance_signed<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lkm: &mut LkMultiplicity,
+        lhs: SWord,
+        rhs: SWord,
+    ) -> Result<(), ZKVMError> {
+        set_val!(instance, self.is_lt, (lhs < rhs) as u64);
+        self.config
+            .assign_instance_signed(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 }
@@ -141,7 +153,7 @@ impl InnerLtConfig {
             cb.namespace(
                 || format!("var {var_name}"),
                 |cb| {
-                    let witin = cb.create_witin(|| var_name.to_string())?;
+                    let witin = cb.create_witin(|| var_name.to_string());
                     cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
                     Ok(witin)
                 },
@@ -281,7 +293,7 @@ impl SignedLtConfig {
             || "is_signed_lt",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"))?;
+                let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"));
                 cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
                 let config =
                     InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
@@ -337,12 +349,9 @@ impl InnerSignedLtConfig {
             1,
         )?;
 
-        // Convert two's complement representation into field arithmetic.
-        // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
-        let neg_shift = -Expression::Constant((1_u64 << 32).into());
-        let lhs_value = lhs.value() + is_lhs_neg.expr() * neg_shift.clone();
-        let rhs_value = rhs.value() + is_rhs_neg.expr() * neg_shift;
-
+        // Convert to field arithmetic.
+        let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
+        let rhs_value = rhs.to_field_expr(is_rhs_neg.expr());
         let config = InnerLtConfig::construct_circuit(
             cb,
             format!("{name} (lhs < rhs)"),
