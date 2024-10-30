@@ -185,7 +185,11 @@ mod test {
 
     #[test]
     fn test_sltiu_random() {
-        random_verify::<SltiuOp>();
+        let mut rng = rand::thread_rng();
+        let a: u32 = rng.gen::<u32>();
+        let b: u32 = rng.gen::<u32>() % 4096;
+        println!("random: {} <? {}", a, b); // For debugging, do not delete.
+        verify::<SltiuOp>("random unsigned comparison", a, b, (a < b) as u32);
     }
 
     #[test]
@@ -227,7 +231,11 @@ mod test {
 
     #[test]
     fn test_slti_random() {
-        random_verify::<SltiOp>();
+        let mut rng = rand::thread_rng();
+        let a: i32 = rng.gen();
+        let b: i32 = rng.gen::<i32>() % 2048;
+        println!("random: {} <? {}", a, b); // For debugging, do not delete.
+        verify::<SltiOp>("random 1", a as u32, b as u32, (a < b) as u32);
     }
 
     fn verify<I: RIVInstruction>(name: &'static str, rs1_read: u32, imm: u32, expected_rd: u32) {
@@ -265,25 +273,5 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    fn random_verify<I: RIVInstruction>() {
-        let mut rng = rand::thread_rng();
-        let (a, b, result) = match I::INST_KIND {
-            InsnKind::SLTIU => {
-                let a: u32 = rng.gen();
-                let b: u32 = rng.gen::<u32>() % 4096;
-                println!("random: {} <? {}", a, b); // For debugging, do not delete.
-                (a, b, a < b)
-            }
-            InsnKind::SLTI => {
-                let a: i32 = rng.gen();
-                let b: i32 = rng.gen_range(-2048..2048);
-                println!("random: {} <? {}", a, b); // For debugging, do not delete.
-                (a as u32, b as u32, a < b)
-            }
-            _ => unreachable!(),
-        };
-        verify::<I>("random 1", a, b, result as u32);
     }
 }
