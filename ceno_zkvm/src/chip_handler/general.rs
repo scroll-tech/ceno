@@ -1,11 +1,12 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     instructions::riscv::constants::{
-        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
+        UINT_LIMBS,
     },
     structs::ROMType,
     tables::InsnRecord,
@@ -32,7 +33,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_fixed(name_fn)
     }
 
-    pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
+    pub fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], ZKVMError> {
         Ok([
             self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
             self.cs
@@ -54,6 +55,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn query_end_cycle(&mut self) -> Result<Instance, ZKVMError> {
         self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
+    }
+
+    pub fn query_public_io(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "public_io", PUBLIC_IO_IDX)
     }
 
     pub fn lk_record<NR, N>(
@@ -87,27 +92,27 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.r_table_record(name_fn, table_len, rlc_record)
+        self.cs.r_table_record(name_fn, table_spec, rlc_record)
     }
 
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.w_table_record(name_fn, table_len, rlc_record)
+        self.cs.w_table_record(name_fn, table_spec, rlc_record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
