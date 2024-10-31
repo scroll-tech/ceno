@@ -286,12 +286,17 @@ impl DecodedInstruction {
         }
     }
 
-    /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
-    pub fn imm_is_negative(&self) -> bool {
+    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
+    /// example:
+    /// imm = ux::MAX - 1 implies
+    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
+    /// imm_field = ux::MAX - 1 otherwise
+    /// see InsnRecord::imm_or_funct7_field
+    pub fn imm_field_is_negative(&self) -> bool {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI,
+                kind: SLLI | SRLI | SRAI | ADDI | SLTIU,
                 ..
             } => false,
             _ => self.top_bit != 0,
@@ -310,7 +315,7 @@ impl DecodedInstruction {
     }
 
     fn imm_i(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
+        (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
     /// Shift amount field of SLLI, SRLI, SRAI.
