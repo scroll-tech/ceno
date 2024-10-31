@@ -30,7 +30,7 @@ use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
 
-const PROGRAM_SIZE: usize = 512;
+const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
 //  - x1 is initialized to 1,
@@ -118,7 +118,7 @@ fn main() {
 
     zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
         &zkvm_cs,
-        prog_config.clone(),
+        &prog_config,
         &program,
     );
 
@@ -196,11 +196,20 @@ fn main() {
             .iter()
             .map(|rec| {
                 let index = rec.addr as usize;
-                let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
-                MemFinalRecord {
-                    addr: rec.addr,
-                    value: vm.peek_register(index),
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                if index < VMState::REG_COUNT {
+                    let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                    MemFinalRecord {
+                        addr: rec.addr,
+                        value: vm.peek_register(index),
+                        cycle: *final_access.get(&vma).unwrap_or(&0),
+                    }
+                } else {
+                    // The table is padded beyond the number of registers.
+                    MemFinalRecord {
+                        addr: rec.addr,
+                        value: 0,
+                        cycle: 0,
+                    }
                 }
             })
             .collect_vec();

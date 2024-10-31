@@ -42,7 +42,7 @@ impl<E: ExtensionField> JInstructionConfig<E> {
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
-            rd.id.expr(),
+            Some(rd.id.expr()),
             0.into(),
             0.into(),
             0.into(),

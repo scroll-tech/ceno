@@ -45,7 +45,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             (insn_kind.codes().opcode as usize).into(),
-            0.into(),
+            None,
             (insn_kind.codes().func3 as usize).into(),
             rs1.id.expr(),
             rs2.id.expr(),

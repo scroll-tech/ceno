@@ -30,6 +30,7 @@ use std::{
 };
 use strum::IntoEnumIterator;
 
+const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
 pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_base());
 
@@ -49,6 +50,11 @@ pub(crate) enum MockProverError<E: ExtensionField> {
         right: E::BaseField,
         name: String,
         inst_id: usize,
+    },
+    DegreeTooHigh {
+        expression: Expression<E>,
+        degree: usize,
+        name: String,
     },
     LookupError {
         expression: Expression<E>,
@@ -178,6 +184,18 @@ impl<E: ExtensionField> MockProverError<E> {
                     Inst[{inst_id}]:\n{wtns_fmt}\n",
                 );
             }
+            Self::DegreeTooHigh {
+                expression,
+                degree,
+                name,
+            } => {
+                let expression_fmt = fmt::expr(expression, &mut wtns, false);
+                println!(
+                    "\nDegreeTooHigh {name:?}: Expression degree is too high\n\
+                    Expression: {expression_fmt}\n\
+                    Degree: {degree} > {MAX_CONSTRAINT_DEGREE}\n",
+                );
+            }
             Self::LookupError {
                 expression,
                 evaluated,
@@ -251,6 +269,7 @@ impl<E: ExtensionField> MockProverError<E> {
             | Self::AssertEqualError { inst_id, .. }
             | Self::LookupError { inst_id, .. }
             | Self::LkMultiplicityError { inst_id, .. } => *inst_id,
+            Self::DegreeTooHigh { .. } => unreachable!(),
         }
     }
 
@@ -438,6 +457,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     .chain(&cb.cs.assert_zero_sumcheck_expressions_namespace_map),
             )
         {
+            if expr.degree() > MAX_CONSTRAINT_DEGREE {
+                errors.push(MockProverError::DegreeTooHigh {
+                    expression: expr.clone(),
+                    degree: expr.degree(),
+                    name: name.clone(),
+                });
+            }
+
             // require_equal does not always have the form of Expr::Sum as
             // the sum of witness and constant is expressed as scaled sum
             if name.contains("require_equal") && expr.unpack_sum().is_some() {
@@ -701,6 +728,7 @@ Hints:
             .collect_vec();
         Self::assert_satisfied(cb, &wits_in, programs, challenge, lkm);
     }
+
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],

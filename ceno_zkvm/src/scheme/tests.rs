@@ -235,13 +235,13 @@ fn test_single_add_instance_e2e() {
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
-        u16_range_config.clone(),
+        &u16_range_config,
         &(),
     );
 
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
         &zkvm_cs,
-        prog_config.clone(),
+        &prog_config,
         &program,
     );
 
@@ -262,7 +262,7 @@ fn test_single_add_instance_e2e() {
     let mut add_records = vec![];
     let mut halt_records = vec![];
     all_records.into_iter().for_each(|record| {
-        let kind = record.insn().kind().1;
+        let kind = record.insn().codes().kind;
         match kind {
             ADD => add_records.push(record),
             EANY => {

@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, WORD_SIZE, Word};
+use ceno_emul::{Addr, CENO_PLATFORM, VMState, WORD_SIZE, Word};
 use ram_circuit::{
     DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileTable, PubIORamCircuit,
 };
@@ -46,7 +46,7 @@ impl NonVolatileTable for RegTable {
     }
 
     fn len() -> usize {
-        32 // register size 32
+        VMState::REG_COUNT.next_power_of_two()
     }
 
     fn addr(entry_index: usize) -> Addr {

@@ -73,7 +73,7 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub table_len: usize,
 }
 
-// TODO encaptulate few information of table spec to SetTableAddrType value
+// TODO encapsulate few information of table spec to SetTableAddrType value
 // once confirm syntax is friendly and parsed by recursive verifier
 #[derive(Clone, Debug)]
 pub enum SetTableAddrType {
