@@ -16,6 +16,8 @@ use crate::{
     witness::LkMultiplicity,
 };
 
+use super::SignedExtendConfig;
+
 #[derive(Debug, Clone)]
 pub struct AssertLTConfig(InnerLtConfig);
 
@@ -319,8 +321,8 @@ impl SignedLtConfig {
 
 #[derive(Debug)]
 struct InnerSignedLtConfig {
-    is_lhs_neg: IsLtConfig,
-    is_rhs_neg: IsLtConfig,
+    is_lhs_neg: SignedExtendConfig,
+    is_rhs_neg: SignedExtendConfig,
     config: InnerLtConfig,
 }
 
@@ -333,8 +335,10 @@ impl InnerSignedLtConfig {
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // Extract the sign bit.
-        let is_lhs_neg = lhs.is_negative(cb, || "lhs_msb")?;
-        let is_rhs_neg = rhs.is_negative(cb, || "rhs_msb")?;
+        let is_lhs_neg =
+            SignedExtendConfig::construct_limb(cb, lhs.limbs.iter().last().unwrap().expr())?;
+        let is_rhs_neg =
+            SignedExtendConfig::construct_limb(cb, rhs.limbs.iter().last().unwrap().expr())?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
@@ -362,20 +366,17 @@ impl InnerSignedLtConfig {
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        let max_signed_limb = (1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1;
         let lhs_value = Value::new_unchecked(lhs as Word);
         let rhs_value = Value::new_unchecked(rhs as Word);
-        self.is_lhs_neg.assign_instance(
+        self.is_lhs_neg.assign_instance::<E>(
             instance,
             lkm,
-            max_signed_limb,
-            *lhs_value.limbs.last().unwrap() as u64,
+            *lhs_value.as_u16_limbs().last().unwrap() as u64,
         )?;
-        self.is_rhs_neg.assign_instance(
+        self.is_rhs_neg.assign_instance::<E>(
             instance,
             lkm,
-            max_signed_limb,
-            *rhs_value.limbs.last().unwrap() as u64,
+            *rhs_value.as_u16_limbs().last().unwrap() as u64,
         )?;
 
         self.config

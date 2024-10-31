@@ -9,6 +9,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
+#[derive(Debug)]
 pub struct SignedExtendConfig {
     /// most significant bit
     msb: WitIn,
@@ -29,6 +30,10 @@ impl SignedExtendConfig {
         val: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         Self::construct_circuit(cb, 8, val)
+    }
+
+    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+        self.msb.expr()
     }
 
     fn construct_circuit<E: ExtensionField>(
