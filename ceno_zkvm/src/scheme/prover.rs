@@ -378,6 +378,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
 
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
+        tracing::debug!(
+            "main-sel sumcheck preparion with log2_num_instances={log2_num_instances}, num_threads={num_threads}",
+        );
         let alpha_pow = get_challenge_pows(
             MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
             transcript,
@@ -1182,13 +1185,14 @@ impl TowerProver {
                     }
                 }
 
-                tracing::debug!("generated tower proof at round {}/{}", round, max_round_index);
+
                 let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
                     num_threads,
                     virtual_polys.get_batched_polys(),
                     transcript,
                 );
                 proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
+                tracing::debug!("generated tower proof at round {}/{}", round, max_round_index);
 
                 // rt' = r_merge || rt
                 let r_merge = (0..log_num_fanin)

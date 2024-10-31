@@ -80,6 +80,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             })
             .collect::<Vec<_>>();
 
+        tracing::debug!(
+            "start prove_batch_polys sumcheck with max_thread_id={max_thread_id}, rayon::current_num_threads()={}",
+            rayon::current_num_threads(),
+        );
+
         let scoped_fn = |s: &Scope<'a>| {
             // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last
             // work thread
@@ -99,10 +104,16 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &mut prover_state,
                             &challenge,
                         );
-                        if thread_id < 2 {
-                            tracing::debug!("thread {}: sumcheck round {}/{}", thread_id, i+1, num_variables);
-                        }
+
                         thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
+                        if thread_id < 1 || thread_id > max_thread_id - 4 {
+                            tracing::debug!(
+                                "thread {}: sumcheck round {}/{} appended",
+                                thread_id,
+                                i + 1,
+                                num_variables
+                            );
+                        }
 
                         challenge = Some(
                             thread_based_transcript.get_and_append_challenge(b"Internal round"),
@@ -130,6 +141,9 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     } else {
                         tx_prover_state.send(None).unwrap();
                     }
+                    if thread_id < 2 {
+                        tracing::debug!("thread {}: finished", thread_id,);
+                    }
                 });
             }
 
@@ -147,27 +161,52 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             // NOTE inline main thread flow with worker thread to improve efficiency
             // refactor to shared closure cause to 5% throuput drop
             let mut challenge = None;
-            for _ in 0..num_variables {
+            for i in 0..num_variables {
                 let prover_msg =
                     IOPProverStateV2::prove_round_and_update_state(&mut prover_state, &challenge);
-                thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
+                // thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
+
+                tracing::debug!(
+                    "main thread: sumcheck round {}/{} appended",
+                    i + 1,
+                    num_variables
+                );
 
                 // for each round, we must collect #SIZE prover message
                 let mut evaluations = AdditiveVec::new(max_degree + 1);
 
                 // sum for all round poly evaluations vector
-                for _ in 0..max_thread_id {
+                evaluations += AdditiveVec(prover_msg.evaluations);
+                for m in 0..max_thread_id - 1 {
                     let round_poly_coeffs = thread_based_transcript.read_field_element_exts();
+                    if m == 0 || m == 32 || m == 60 || m > max_thread_id - 3 {
+                        tracing::debug!(
+                            "main thread: sumcheck round {}/{} read {} msgs",
+                            i + 1,
+                            num_variables,
+                            m + 1
+                        );
+                    }
                     evaluations += AdditiveVec(round_poly_coeffs);
                 }
+                tracing::debug!(
+                    "main thread: sumcheck round {}/{} get challenged",
+                    i + 1,
+                    num_variables
+                );
 
                 let span = entered_span!("main_thread_get_challenge");
                 transcript.append_field_element_exts(&evaluations.0);
 
                 let next_challenge = transcript.get_and_append_challenge(b"Internal round");
-                (0..max_thread_id).for_each(|_| {
+                (0..max_thread_id - 1).for_each(|_| {
                     thread_based_transcript.send_challenge(next_challenge.elements);
                 });
+                tracing::debug!(
+                    "main thread: sumcheck round {}/{} send challenged",
+                    i + 1,
+                    num_variables
+                );
 
                 exit_span!(span);
 
@@ -175,8 +214,13 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     evaluations: evaluations.0,
                 });
 
-                challenge =
-                    Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
+                challenge = Some(next_challenge);
+                tracing::debug!(
+                    "main thread: sumcheck round {}/{} get challenged",
+                    i + 1,
+                    num_variables
+                );
+                assert_eq!(next_challenge, challenge.unwrap().clone());
                 thread_based_transcript.commit_rolling();
             }
             exit_span!(span);
