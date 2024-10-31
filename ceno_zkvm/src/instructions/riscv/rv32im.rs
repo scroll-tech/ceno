@@ -13,6 +13,7 @@ use crate::{
             mulh::MulhuInstruction,
             shift::{SllInstruction, SrlInstruction},
             shift_imm::{SlliInstruction, SraiInstruction, SrliInstruction},
+            slti::SltiInstruction,
             sltu::SltuInstruction,
             *,
         },
@@ -29,7 +30,6 @@ use itertools::Itertools;
 use num_traits::cast::ToPrimitive;
 use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;
-use crate::instructions::riscv::slti::SltiInstruction;
 
 use super::{
     arith::AddInstruction,

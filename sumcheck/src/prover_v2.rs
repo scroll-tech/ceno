@@ -100,7 +100,12 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &challenge,
                         );
                         if thread_id < 2 {
-                            tracing::debug!("thread {}: sumcheck round {}/{}", thread_id, i+1, num_variables);
+                            tracing::debug!(
+                                "thread {}: sumcheck round {}/{}",
+                                thread_id,
+                                i + 1,
+                                num_variables
+                            );
                         }
                         thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 

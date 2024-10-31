@@ -1,7 +1,13 @@
 use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
-use crate::{Program, addr::{ByteAddr, RegIdx, Word, WordAddr}, platform::Platform, rv32im::{DecodedInstruction, Emulator, TrapCause}, tracer::{Change, StepRecord, Tracer}, PC_STEP_SIZE};
+use crate::{
+    PC_STEP_SIZE, Program,
+    addr::{ByteAddr, RegIdx, Word, WordAddr},
+    platform::Platform,
+    rv32im::{DecodedInstruction, Emulator, TrapCause},
+    tracer::{Change, StepRecord, Tracer},
+};
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
 
