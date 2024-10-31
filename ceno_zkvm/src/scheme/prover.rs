@@ -358,7 +358,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(span);
 
-        tracing::debug!("tower sumcheck");
+        tracing::debug!("tower sumcheck finished");
         // batch sumcheck: selector + main degree > 1 constraints
         let span = entered_span!("sumcheck::main_sel");
         let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
@@ -1182,6 +1182,7 @@ impl TowerProver {
                     }
                 }
 
+                tracing::debug!("generated tower proof at round {}/{}", round, max_round_index);
                 let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
                     num_threads,
                     virtual_polys.get_batched_polys(),
