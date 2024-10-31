@@ -145,7 +145,10 @@ fn main() {
     let verifier = ZKVMVerifier::new(vk);
 
     for instance_num_vars in args.start..args.end {
-        let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
+        // The performance benchmark is hook on number of "add" opcode instances.
+        // Each iteration in the loop contributes 2 add instances,
+        // so we divide by 2 here to ensure "instance_num_vars" aligns with the actual number of add instances.
+        let step_loop = 1 << (instance_num_vars - 1);
 
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         let public_io_init = init_public_io(&[1, u32::MAX, step_loop]);
