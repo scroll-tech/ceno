@@ -131,7 +131,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             InsnKind::SLTIU => {
                 config
                     .lt
-                    .assign_instance_rhs_signed(instance, lkm, rs1, imm as SWord)?;
+                    .assign_instance(instance, lkm, rs1 as u64, imm as u64)?;
             }
             InsnKind::SLTI => {
                 config.is_rs1_neg.as_ref().unwrap().assign_instance(
@@ -171,14 +171,16 @@ mod test {
         verify::<SltiuOp>("lt = true, 1 < 2", 1, 2, 1);
         verify::<SltiuOp>("lt = true, 10 < 20", 10, 20, 1);
         verify::<SltiuOp>("lt = true, 0 < imm upper boundary", 0, 2047, 1);
+        // negative imm is treated as positive
+        verify::<SltiuOp>("lt = true, 0 < u32::MAX-1", 0, -1, 1);
+        verify::<SltiuOp>("lt = true, 1 < u32::MAX-1", 1, -1, 1);
+        verify::<SltiuOp>("lt = true, 0 < imm lower bondary", 0, -2048, 1);
     }
 
     #[test]
     fn test_sltiu_false() {
         verify::<SltiuOp>("lt = false, 1 < 0", 1, 0, 0);
         verify::<SltiuOp>("lt = false, 2 < 1", 2, 1, 0);
-        verify::<SltiuOp>("lt = false, 0 < -1", 0, -1, 0); //
-        verify::<SltiuOp>("lt = false, 1 < -1", 1, -1, 0);
         verify::<SltiuOp>("lt = false, 100 < 50", 100, 50, 0);
         verify::<SltiuOp>("lt = false, 500 < 100", 500, 100, 0);
         verify::<SltiuOp>("lt = false, 100000 < 2047", 100000, 2047, 0);
@@ -196,12 +198,7 @@ mod test {
         let a: u32 = rng.gen::<u32>();
         let b: i32 = rng.gen_range(-2048..2048);
         println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify::<SltiuOp>(
-            "random unsigned comparison",
-            a,
-            b,
-            ((a as i64) < (b as i64)) as u32,
-        );
+        verify::<SltiuOp>("random unsigned comparison", a, b, (a < (b as u32)) as u32);
     }
 
     #[test]
@@ -271,7 +268,11 @@ mod test {
             UInt::from_const_unchecked(Value::new_unchecked(expected_rd).as_u16_limbs().to_vec());
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd)
+            .require_equal(
+                || format!("{:?}_({name})_assert_rd_written", I::INST_KIND),
+                &mut cb,
+                &expected_rd,
+            )
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
