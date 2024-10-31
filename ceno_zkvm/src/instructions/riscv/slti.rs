@@ -178,8 +178,8 @@ mod test {
         verify::<SltiuOp>("lt = false, 100000 < 0", 100000, 0, 0);
         verify::<SltiuOp>("lt = false, 0 == 0", 0, 0, 0);
         verify::<SltiuOp>("lt = false, 1 == 1", 1, 1, 0);
-        // -2048 <= imm <= 2047
         verify::<SltiuOp>("lt = false, imm upper bondary", u32::MAX, 2047, 0);
+        // negative imm is treated as positive
         verify::<SltiuOp>("lt = false, imm lower bondary", u32::MAX, -2048, 0);
     }
 
