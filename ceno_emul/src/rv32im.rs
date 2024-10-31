@@ -101,6 +101,7 @@ pub enum TrapCause {
 pub struct DecodedInstruction {
     insn: u32,
     top_bit: u32,
+    // The bit fields of the instruction encoding, regardless of the instruction format.
     func7: u32,
     rs2: u32,
     rs1: u32,
@@ -110,7 +111,7 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum InsnCategory {
+enum InsnCategory {
     Compute,
     Branch,
     Load,
@@ -235,11 +236,6 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct3 field, regardless of the instruction format.
-    pub fn funct3(&self) -> u32 {
-        self.func3
-    }
-
     /// Get the funct3 field, or zero if the instruction does not use funct3.
     pub fn funct3_or_zero(&self) -> u32 {
         match self.codes().format {
@@ -274,18 +270,13 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct7 field, regardless of the instruction format.
-    pub fn funct7(&self) -> u32 {
-        self.func7
-    }
-
     /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
     pub fn imm_or_funct7(&self) -> u32 {
         match self.codes().format {
             R => self.func7,
             I => match self.codes().kind {
                 // decode the shift as a multiplication/division by 1 << immediate
-                SLLI | SRLI | SRAI => 1 << (self.imm_i() & 0x1f),
+                SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
                 _ => self.imm_i(),
             },
             S => self.imm_s(),
@@ -307,35 +298,31 @@ impl DecodedInstruction {
         }
     }
 
-    pub fn sign_bit(&self) -> u32 {
-        self.top_bit
-    }
-
     pub fn codes(&self) -> InsnCodes {
         FastDecodeTable::get().lookup(self)
     }
 
-    pub fn kind(&self) -> (InsnCategory, InsnKind) {
-        let i = FastDecodeTable::get().lookup(self);
-        (i.category, i.kind)
-    }
-
-    pub fn imm_b(&self) -> u32 {
+    fn imm_b(&self) -> u32 {
         (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
-    pub fn imm_i(&self) -> u32 {
+    fn imm_i(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
     }
 
-    pub fn imm_s(&self) -> u32 {
+    /// Shift amount field of SLLI, SRLI, SRAI.
+    fn imm_shamt(&self) -> u32 {
+        self.rs2
+    }
+
+    fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
-    pub fn imm_j(&self) -> u32 {
+    fn imm_j(&self) -> u32 {
         (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
             | (self.func3 << 12)
@@ -344,7 +331,7 @@ impl DecodedInstruction {
             | (self.rs2 & 0x1e)
     }
 
-    pub fn imm_u(&self) -> u32 {
+    fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
     }
 }
