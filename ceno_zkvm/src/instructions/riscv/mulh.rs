@@ -134,7 +134,7 @@ pub struct MulhConfig<E: ExtensionField> {
     rs1_signed_wit: WitIn,
     rs2_signed: Signed<E>,
     rs2_signed_wit: WitIn,
-    rd_sign_bit: IsLtConfig,
+    rd_signed: Signed<E>,
     unsigned_prod_low: UInt<E>,
     r_insn: RInstructionConfig<E>,
 }
@@ -161,15 +161,9 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         let rs2_signed_wit = circuit_builder.flatten_expr(|| "rs2_signed", rs2_signed.expr())?;
 
         // 2. Compute the high order bit of `rd`, which is the sign bit of the 2s
-        //    complement value for which rd represents the high limb
+        //    complement value for which `rd` represents the high 32-bit limb
 
-        let rd_sign_bit = IsLtConfig::construct_circuit(
-            circuit_builder,
-            || "rd_sign_bit",
-            ((1u64 << (LIMB_BITS - 1)) - 1).into(),
-            rd_written.expr().last().unwrap().clone(),
-            1,
-        )?;
+        let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
 
         // 3. Verify that the product of signed inputs `rs1` and `rs2` is equal to
         //    the result of interpreting `rd` as the high limb of a 2s complement
@@ -180,7 +174,7 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
             || "validate_prod_high_limb",
             rs1_signed_wit.expr() * rs2_signed_wit.expr(),
             Expression::<E>::from(1u64 << 32) * rd_written.value() + unsigned_prod_low.value()
-                - Expression::<E>::from(1u128 << 64) * rd_sign_bit.expr(),
+                - Expression::<E>::from(1u128 << 64) * rd_signed.is_negative.expr(),
         )?;
 
         // The soundness here is a bit subtle.  The signed values of 32-bit
@@ -214,7 +208,7 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
             rs1_signed_wit,
             rs2_signed,
             rs2_signed_wit,
-            rd_sign_bit,
+            rd_signed,
             unsigned_prod_low,
             r_insn,
         })
@@ -256,11 +250,9 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         set_val!(instance, config.rs2_signed_wit, field_elt);
 
         // Sign bit of rd register
-        let rd_high_limb = *rd_written.limbs.last().unwrap() as u64;
-        let sign_cutoff = (1u64 << (LIMB_BITS - 1)) - 1;
-        config
-            .rd_sign_bit
-            .assign_instance(instance, lk_multiplicity, sign_cutoff, rd_high_limb)?;
+        config.
+            rd_signed
+            .assign_instance(instance, lk_multiplicity, &rd_written)?;
 
         // Low limb of product in 2s complement form
         let prod = ((rs1_signed as i64) * (rs2_signed as i64)) as u64;
@@ -281,7 +273,7 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
 
 /// Transform a value represented as a `UInt` into a `WitIn` containing its
 /// corresponding signed value, interpreting the bits as a 2s-complement
-/// encoding.  Gadget allocates 3 `WitIn` values in total.
+/// encoding.  Gadget allocates 2 `WitIn` values in total.
 struct Signed<E: ExtensionField> {
     pub is_negative: IsLtConfig,
     val: Expression<E>,
