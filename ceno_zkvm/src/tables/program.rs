@@ -87,7 +87,7 @@ impl InsnRecord<u32> {
         InsnRecord([
             pc,
             insn.opcode(),
-            insn.rd_or_null(),
+            insn.rd_internal(),
             insn.funct3_or_zero(),
             insn.rs1_or_zero(),
             insn.rs2_or_zero(),
