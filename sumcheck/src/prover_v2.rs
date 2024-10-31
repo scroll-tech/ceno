@@ -94,11 +94,14 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 s.spawn(move |_| {
                     let mut challenge = None;
                     let span = entered_span!("prove_rounds");
-                    for _ in 0..num_variables {
+                    for i in 0..num_variables {
                         let prover_msg = IOPProverStateV2::prove_round_and_update_state(
                             &mut prover_state,
                             &challenge,
                         );
+                        if thread_id < 2 {
+                            tracing::debug!("thread {}: sumcheck round {}/{}", thread_id, i+1, num_variables);
+                        }
                         thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
                         challenge = Some(
