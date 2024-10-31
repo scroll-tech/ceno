@@ -124,13 +124,6 @@ impl EmuContext for VMState {
         }
     }
 
-    // No traps are implemented so MRET is not legal.
-    fn mret(&self) -> Result<bool> {
-        #[allow(clippy::unusual_byte_groupings)]
-        let mret = 0b001100000010_00000_000_00000_1110011;
-        self.trap(TrapCause::IllegalInstruction(mret))
-    }
-
     fn trap(&self, cause: TrapCause) -> Result<bool> {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }

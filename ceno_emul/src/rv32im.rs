@@ -24,9 +24,6 @@ pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
 
-    // Handle a machine return
-    fn mret(&self) -> Result<bool>;
-
     // Handle a trap
     fn trap(&self, cause: TrapCause) -> Result<bool>;
 
@@ -104,6 +101,7 @@ pub enum TrapCause {
 pub struct DecodedInstruction {
     insn: u32,
     top_bit: u32,
+    // The bit fields of the instruction encoding, regardless of the instruction format.
     func7: u32,
     rs2: u32,
     rs1: u32,
@@ -113,8 +111,9 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum InsnCategory {
+enum InsnCategory {
     Compute,
+    Branch,
     Load,
     Store,
     System,
@@ -182,8 +181,8 @@ pub enum InsnKind {
     SB,
     SH,
     SW,
+    /// ECALL and EBREAK etc.
     EANY,
-    MRET,
 }
 use InsnKind::*;
 
@@ -238,11 +237,6 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct3 field, regardless of the instruction format.
-    pub fn funct3(&self) -> u32 {
-        self.func3
-    }
-
     /// Get the funct3 field, or zero if the instruction does not use funct3.
     pub fn funct3_or_zero(&self) -> u32 {
         match self.codes().format {
@@ -277,24 +271,19 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct7 field, regardless of the instruction format.
-    pub fn funct7(&self) -> u32 {
-        self.func7
-    }
-
     /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
     pub fn imm_or_funct7(&self) -> u32 {
-        match self.codes() {
-            InsnCodes { format: R, .. } => self.func7,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI,
-                ..
-            } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
-            InsnCodes { format: I, .. } => self.imm_i(),
-            InsnCodes { format: S, .. } => self.imm_s(),
-            InsnCodes { format: B, .. } => self.imm_b(),
-            InsnCodes { format: U, .. } => self.imm_u(),
-            InsnCodes { format: J, .. } => self.imm_j(),
+        match self.codes().format {
+            R => self.func7,
+            I => match self.codes().kind {
+                // decode the shift as a multiplication/division by 1 << immediate
+                SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
+                _ => self.imm_i(),
+            },
+            S => self.imm_s(),
+            B => self.imm_b(),
+            U => self.imm_u(),
+            J => self.imm_j(),
         }
     }
 
@@ -315,35 +304,31 @@ impl DecodedInstruction {
         }
     }
 
-    pub fn sign_bit(&self) -> u32 {
-        self.top_bit
-    }
-
     pub fn codes(&self) -> InsnCodes {
         FastDecodeTable::get().lookup(self)
     }
 
-    pub fn kind(&self) -> (InsnCategory, InsnKind) {
-        let i = FastDecodeTable::get().lookup(self);
-        (i.category, i.kind)
-    }
-
-    pub fn imm_b(&self) -> u32 {
+    fn imm_b(&self) -> u32 {
         (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
-    pub fn imm_i(&self) -> u32 {
+    fn imm_i(&self) -> u32 {
         (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
-    pub fn imm_s(&self) -> u32 {
+    /// Shift amount field of SLLI, SRLI, SRAI.
+    fn imm_shamt(&self) -> u32 {
+        self.rs2
+    }
+
+    fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
-    pub fn imm_j(&self) -> u32 {
+    fn imm_j(&self) -> u32 {
         (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
             | (self.func3 << 12)
@@ -352,7 +337,7 @@ impl DecodedInstruction {
             | (self.rs2 & 0x1e)
     }
 
-    pub fn imm_u(&self) -> u32 {
+    fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
     }
 }
@@ -402,7 +387,7 @@ const fn insn(
     }
 }
 
-type InstructionTable = [InsnCodes; 48];
+type InstructionTable = [InsnCodes; 47];
 type FastInstructionTable = [u8; 1 << 10];
 
 const RV32IM_ISA: InstructionTable = [
@@ -426,12 +411,12 @@ const RV32IM_ISA: InstructionTable = [
     insn(I, SRAI, Compute, 0x13, 0x5, 0x20),
     insn(I, SLTI, Compute, 0x13, 0x2, -1),
     insn(I, SLTIU, Compute, 0x13, 0x3, -1),
-    insn(B, BEQ, Compute, 0x63, 0x0, -1),
-    insn(B, BNE, Compute, 0x63, 0x1, -1),
-    insn(B, BLT, Compute, 0x63, 0x4, -1),
-    insn(B, BGE, Compute, 0x63, 0x5, -1),
-    insn(B, BLTU, Compute, 0x63, 0x6, -1),
-    insn(B, BGEU, Compute, 0x63, 0x7, -1),
+    insn(B, BEQ, Branch, 0x63, 0x0, -1),
+    insn(B, BNE, Branch, 0x63, 0x1, -1),
+    insn(B, BLT, Branch, 0x63, 0x4, -1),
+    insn(B, BGE, Branch, 0x63, 0x5, -1),
+    insn(B, BLTU, Branch, 0x63, 0x6, -1),
+    insn(B, BGEU, Branch, 0x63, 0x7, -1),
     insn(J, JAL, Compute, 0x6f, -1, -1),
     insn(I, JALR, Compute, 0x67, 0x0, -1),
     insn(U, LUI, Compute, 0x37, -1, -1),
@@ -453,7 +438,6 @@ const RV32IM_ISA: InstructionTable = [
     insn(S, SH, Store, 0x23, 0x1, -1),
     insn(S, SW, Store, 0x23, 0x2, -1),
     insn(I, EANY, System, 0x73, 0x0, 0x00),
-    insn(I, MRET, System, 0x73, 0x0, 0x18),
 ];
 
 #[cfg(test)]
@@ -565,6 +549,7 @@ impl Emulator {
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
+            InsnCategory::Branch => self.step_branch(ctx, insn.kind, &decoded)?,
             InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
             InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
             InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
@@ -586,15 +571,7 @@ impl Emulator {
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
-        let mut rd = decoded.rd;
         let imm_i = decoded.imm_i();
-        let mut br_cond = |cond| -> u32 {
-            rd = 0;
-            if cond {
-                new_pc = pc.wrapping_add(decoded.imm_b());
-            }
-            0
-        };
         let out = match kind {
             // Instructions that do not read rs1 nor rs2.
             JAL => {
@@ -662,12 +639,6 @@ impl Emulator {
                                     0
                                 }
                             }
-                            BEQ => br_cond(rs1 == rs2),
-                            BNE => br_cond(rs1 != rs2),
-                            BLT => br_cond((rs1 as i32) < (rs2 as i32)),
-                            BGE => br_cond((rs1 as i32) >= (rs2 as i32)),
-                            BLTU => br_cond(rs1 < rs2),
-                            BGEU => br_cond(rs1 >= rs2),
                             MUL => rs1.wrapping_mul(rs2),
                             MULH => {
                                 (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32)
@@ -713,7 +684,42 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(rd as usize, out)?;
+        ctx.store_register(decoded.rd as usize, out)?;
+        ctx.set_pc(new_pc);
+        Ok(true)
+    }
+
+    fn step_branch<M: EmuContext>(
+        &self,
+        ctx: &mut M,
+        kind: InsnKind,
+        decoded: &DecodedInstruction,
+    ) -> Result<bool> {
+        use InsnKind::*;
+
+        let pc = ctx.get_pc();
+        let rs1 = ctx.load_register(decoded.rs1 as RegIdx)?;
+        let rs2 = ctx.load_register(decoded.rs2 as RegIdx)?;
+
+        let taken = match kind {
+            BEQ => rs1 == rs2,
+            BNE => rs1 != rs2,
+            BLT => (rs1 as i32) < (rs2 as i32),
+            BGE => (rs1 as i32) >= (rs2 as i32),
+            BLTU => rs1 < rs2,
+            BGEU => rs1 >= rs2,
+            _ => unreachable!("Illegal branch instruction: {:?}", kind),
+        };
+
+        let new_pc = if taken {
+            pc.wrapping_add(decoded.imm_b())
+        } else {
+            pc + WORD_SIZE
+        };
+
+        if !new_pc.is_aligned() {
+            return ctx.trap(TrapCause::InstructionAddressMisaligned);
+        }
         ctx.set_pc(new_pc);
         Ok(true)
     }
@@ -824,7 +830,6 @@ impl Emulator {
                 1 => ctx.trap(TrapCause::Breakpoint),
                 _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
             },
-            InsnKind::MRET => ctx.mret(),
             _ => unreachable!(),
         }
     }
