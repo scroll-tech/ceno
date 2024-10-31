@@ -116,7 +116,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let insn = step.insn();
 
         let rs1 = step.rs1().unwrap().value;
-        let imm: i32 = insn.imm_or_funct7() as i32;
+        let imm: i32 = insn.imm_internal() as i32;
         let rd = step.rd().unwrap().value.after;
 
         let (sum, overflowing) = rs1.overflowing_add_signed(imm);
@@ -128,7 +128,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             .rd_written
             .assign_value(instance, Value::new(rd, lk_multiplicity));
 
-        let imm_field = InsnRecord::imm_or_funct7_field::<E::BaseField>(&insn);
+        let imm_field = InsnRecord::imm_internal_field::<E::BaseField>(&insn);
         set_val!(instance, config.imm, imm_field);
 
         config

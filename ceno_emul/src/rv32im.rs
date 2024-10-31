@@ -271,8 +271,8 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
-    pub fn imm_or_funct7(&self) -> u32 {
+    /// The internal view of the immediate, for use in circuits.
+    pub fn imm_internal(&self) -> u32 {
         match self.codes().format {
             R => self.func7,
             I => match self.codes().kind {
@@ -287,12 +287,13 @@ impl DecodedInstruction {
         }
     }
 
+    /// The internal interpretation of the immediate sign, for use in circuits.
     /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
     /// example:
     /// imm = ux::MAX - 1 implies
     /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
     /// imm_field = ux::MAX - 1 otherwise
-    /// see InsnRecord::imm_or_funct7_field
+    /// see InsnRecord::imm_internal_field
     pub fn imm_field_is_negative(&self) -> bool {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
@@ -364,7 +365,7 @@ fn test_decode_imm() {
             0x20,
         ),
     ] {
-        let imm = DecodedInstruction::new(i).imm_or_funct7();
+        let imm = DecodedInstruction::new(i).imm_internal();
         assert_eq!(imm, expected);
     }
 }

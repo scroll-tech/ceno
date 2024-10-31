@@ -62,7 +62,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+        let imm = Value::new(step.insn().imm_internal(), lk_multiplicity);
 
         let result = rs1_read.add(&imm, lk_multiplicity, true);
 

@@ -205,12 +205,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_value = step.memory_op().unwrap().value.before;
         let memory_read = Value::new(memory_value, lk_multiplicity);
         // imm is signed 12-bit value
-        let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
+        let imm: E::BaseField = InsnRecord::imm_internal_field(&step.insn());
         let unaligned_addr = ByteAddr::from(
             step.rs1()
                 .unwrap()
                 .value
-                .wrapping_add(step.insn().imm_or_funct7()),
+                .wrapping_add(step.insn().imm_internal()),
         );
         let shift = unaligned_addr.shift();
         let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];

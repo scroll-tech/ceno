@@ -136,7 +136,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let imm = step.insn().imm_or_funct7();
+        let imm = step.insn().imm_internal();
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
 
