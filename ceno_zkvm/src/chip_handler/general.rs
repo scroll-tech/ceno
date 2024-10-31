@@ -165,6 +165,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(limb)
     }
 
+    /// Create a new WitIn constrained to be equal to input expression.
+    pub fn flatten_expr<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR + Clone,
+    {
+        let wit = self.cs.create_witin(name_fn.clone());
+        self.require_equal(name_fn, wit.expr(), expr)?;
+
+        Ok(wit)
+    }
+
     pub fn require_zero<NR, N>(
         &mut self,
         name_fn: N,
