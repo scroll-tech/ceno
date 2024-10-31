@@ -576,7 +576,9 @@ impl Emulator {
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
         let imm_i = decoded.imm_i();
+        let mut skip_rd = false;
         let mut br_cond = |cond| -> u32 {
+            skip_rd = true;
             if cond {
                 new_pc = pc.wrapping_add(decoded.imm_b());
             }
@@ -700,7 +702,9 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(decoded.rd_or_null() as usize, out)?;
+        if !skip_rd {
+            ctx.store_register(decoded.rd_or_null() as usize, out)?;
+        }
         ctx.set_pc(new_pc);
         Ok(true)
     }

@@ -27,7 +27,7 @@ use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
 
-const PROGRAM_SIZE: usize = 512;
+const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
 //  - x1 is initialized to 1,
@@ -192,6 +192,7 @@ fn main() {
                         cycle: *final_access.get(&vma).unwrap_or(&0),
                     }
                 } else {
+                    // The table is padded beyond the number of registers.
                     MemFinalRecord { value: 0, cycle: 0 }
                 }
             })
