@@ -14,6 +14,12 @@ Ceno is built in Rust, so [installing the Rust toolchain](https://www.rust-lang.
 cargo install cargo-make
 ```
 
+You will also need to install the Risc-V target for Rust. You can do this with the following command:
+
+```sh
+rustup target add riscv32im-unknown-none-elf
+```
+
 ## Building Ceno and running tests
 
 To run the tests, you can use the following command:
@@ -29,4 +35,4 @@ cargo check
 cargo clippy
 ```
 
-Neither `cargo build` nor `cargo make build` work.  That's a known problem and we're working on it.
+Alas, `cargo build` doesn't work. That's a known problem and we're working on it.  Please use `cargo make build` instead for now.

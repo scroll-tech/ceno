@@ -72,12 +72,6 @@ impl Platform {
         (vma >> 8) as RegIdx
     }
 
-    /// Virtual address of the program counter.
-    pub const fn pc_vma(&self) -> Addr {
-        // first 33 indices are reserved for registers X0..X31 and X32 (dark register)
-        self.register_vma(64)
-    }
-
     // Startup.
 
     pub const fn pc_base(&self) -> Addr {
@@ -129,6 +123,7 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::VMState;
 
     #[test]
     fn test_no_overlap() {
@@ -140,7 +135,7 @@ mod tests {
         assert!(!p.is_ram(p.rom_start()));
         assert!(!p.is_ram(p.rom_end()));
         // Registers do not overlap with ROM or RAM.
-        for reg in [p.pc_vma(), p.register_vma(0), p.register_vma(31)] {
+        for reg in [p.register_vma(0), p.register_vma(VMState::REG_COUNT - 1)] {
             assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));
         }

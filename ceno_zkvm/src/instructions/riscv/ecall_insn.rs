@@ -40,7 +40,7 @@ impl EcallInstructionConfig {
         cb.lk_fetch(&InsnRecord::new(
             pc.expr(),
             (EANY.codes().opcode as usize).into(),
-            0.into(),
+            None,
             (EANY.codes().func3 as usize).into(),
             0.into(),
             0.into(),

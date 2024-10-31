@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, WORD_SIZE, Word};
+use ceno_emul::{Addr, VMState, WORD_SIZE, Word};
 use ram_circuit::RamTableCircuit;
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
@@ -34,7 +34,7 @@ impl RamTable for RegTable {
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
 
     fn len() -> usize {
-        32 // register size 32
+        VMState::REG_COUNT.next_power_of_two()
     }
 
     fn addr(entry_index: usize) -> Addr {

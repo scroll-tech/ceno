@@ -223,7 +223,7 @@ impl<E: ExtensionField> WriteRD<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rd() as u64);
+        set_val!(instance, self.id, step.insn().rd_internal() as u64);
         set_val!(instance, self.prev_ts, step.rd().unwrap().previous_cycle);
 
         // Register state
