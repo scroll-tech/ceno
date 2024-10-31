@@ -6,7 +6,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, ToExpr},
     gadgets::IsLtConfig,
     instructions::{
         Instruction,
@@ -16,9 +16,7 @@ use crate::{
             r_insn::RInstructionConfig,
         },
     },
-    set_val,
     uint::Value,
-    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -131,9 +129,7 @@ pub struct MulhConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
     rd_written: UInt<E>,
     rs1_signed: Signed<E>,
-    rs1_signed_wit: WitIn,
     rs2_signed: Signed<E>,
-    rs2_signed_wit: WitIn,
     rd_signed: Signed<E>,
     unsigned_prod_low: UInt<E>,
     r_insn: RInstructionConfig<E>,
@@ -152,29 +148,21 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
-        // 1. Compute the signed values associated with `rs1` and `rs2`
+        // 1. Compute the signed values associated with `rs1`, `rs2`, and `rd`
 
         let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
-        let rs1_signed_wit = circuit_builder.flatten_expr(|| "rs1_signed", rs1_signed.expr())?;
-
         let rs2_signed = Signed::construct_circuit(circuit_builder, || "rs2", &rs2_read)?;
-        let rs2_signed_wit = circuit_builder.flatten_expr(|| "rs2_signed", rs2_signed.expr())?;
-
-        // 2. Compute the high order bit of `rd`, which is the sign bit of the 2s
-        //    complement value for which `rd` represents the high 32-bit limb
-
         let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
 
-        // 3. Verify that the product of signed inputs `rs1` and `rs2` is equal to
+        // 2. Verify that the product of signed inputs `rs1` and `rs2` is equal to
         //    the result of interpreting `rd` as the high limb of a 2s complement
         //    value with some 32-bit low limb
 
         let unsigned_prod_low = UInt::new(|| "unsigned_prod_low", circuit_builder)?;
         circuit_builder.require_equal(
             || "validate_prod_high_limb",
-            rs1_signed_wit.expr() * rs2_signed_wit.expr(),
-            Expression::<E>::from(1u64 << 32) * rd_written.value() + unsigned_prod_low.value()
-                - Expression::<E>::from(1u128 << 64) * rd_signed.is_negative.expr(),
+            rs1_signed.expr() * rs2_signed.expr(),
+            rd_signed.expr() * (1u64 << 32) + unsigned_prod_low.value(),
         )?;
 
         // The soundness here is a bit subtle.  The signed values of 32-bit
@@ -205,9 +193,7 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
             rs2_read,
             rd_written,
             rs1_signed,
-            rs1_signed_wit,
             rs2_signed,
-            rs2_signed_wit,
             rd_signed,
             unsigned_prod_low,
             r_insn,
@@ -240,16 +226,11 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         let rs1_signed = config
             .rs1_signed
             .assign_instance(instance, lk_multiplicity, &rs1_read)?;
-        let field_elt: E::BaseField = i64_to_base(rs1_signed as i64);
-        set_val!(instance, config.rs1_signed_wit, field_elt);
 
         let rs2_signed = config
             .rs2_signed
             .assign_instance(instance, lk_multiplicity, &rs2_read)?;
-        let field_elt: E::BaseField = i64_to_base(rs2_signed as i64);
-        set_val!(instance, config.rs2_signed_wit, field_elt);
 
-        // Sign bit of rd register
         config
             .rd_signed
             .assign_instance(instance, lk_multiplicity, &rd_written)?;
