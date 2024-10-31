@@ -47,14 +47,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
         let imm = cb.create_witin(|| "imm");
 
-        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
-        let is_rs1_neg = IsLtConfig::construct_circuit(
-            cb,
-            || "lhs_msb",
-            max_signed_limb_expr,
-            rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
-            1,
-        )?;
+        let is_rs1_neg = IsLtConfig::constrain_last_limb(cb, || "lhs_msb", &rs1_read, 1)?;
 
         let lt = IsLtConfig::construct_circuit(
             cb,

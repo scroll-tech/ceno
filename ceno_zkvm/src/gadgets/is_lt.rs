@@ -11,7 +11,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::constants::{UINT_LIMBS, UInt},
+    instructions::riscv::constants::{LIMB_BITS, UINT_LIMBS, UInt},
     set_val,
     witness::LkMultiplicity,
 };
@@ -69,6 +69,25 @@ pub struct IsLtConfig {
 impl IsLtConfig {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
         self.is_lt.expr()
+    }
+
+    pub fn constrain_last_limb<
+        E: ExtensionField,
+        NR: Into<String> + Display + Clone,
+        N: FnOnce() -> NR,
+    >(
+        cb: &mut CircuitBuilder<E>,
+        name_fn: N,
+        limbs: &UInt<E>,
+        max_num_u16_limbs: usize,
+    ) -> Result<Self, ZKVMError> {
+        Self::construct_circuit(
+            cb,
+            name_fn,
+            ((1u64 << (LIMB_BITS - 1)) - 1).into(),
+            limbs.expr().last().unwrap().clone(),
+            max_num_u16_limbs,
+        )
     }
 
     pub fn construct_circuit<
@@ -332,22 +351,9 @@ impl InnerSignedLtConfig {
         rhs: &UInt<E>,
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
-        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         // Extract the sign bit.
-        let is_lhs_neg = IsLtConfig::construct_circuit(
-            cb,
-            || "lhs_msb",
-            max_signed_limb_expr.clone(),
-            lhs.limbs.iter().last().unwrap().expr(), // msb limb
-            1,
-        )?;
-        let is_rhs_neg = IsLtConfig::construct_circuit(
-            cb,
-            || "rhs_msb",
-            max_signed_limb_expr,
-            rhs.limbs.iter().last().unwrap().expr(), // msb limb
-            1,
-        )?;
+        let is_lhs_neg = IsLtConfig::constrain_last_limb(cb, || "lhs_msb", lhs, 1)?;
+        let is_rhs_neg = IsLtConfig::constrain_last_limb(cb, || "rhs_msb", rhs, 1)?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
