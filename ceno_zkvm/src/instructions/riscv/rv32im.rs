@@ -277,8 +277,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, self.and_table_config.clone(), &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, self.ltu_config.clone(), &());
 
-        fixed.register_table_circuit::<RegTableCircuit<E>>(cs, self.reg_config.clone(), reg_init);
-        fixed.register_table_circuit::<MemTableCircuit<E>>(cs, self.mem_config.clone(), mem_init);
+        fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
+        fixed.register_table_circuit::<MemTableCircuit<E>>(cs, &self.mem_config, mem_init);
     }
 
     pub fn assign_opcode_circuit(
