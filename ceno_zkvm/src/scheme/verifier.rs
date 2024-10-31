@@ -74,11 +74,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
+        for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {
+            tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
         }
-        for (_, (_, proof)) in vm_proof.table_proofs.iter() {
+        for (name, (_, proof)) in vm_proof.table_proofs.iter() {
+            tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
         }
@@ -88,7 +90,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::debug!("challenges: {:?}", challenges);
+        tracing::debug!("challenges in verifier: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
