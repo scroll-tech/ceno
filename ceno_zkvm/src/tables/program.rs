@@ -161,7 +161,6 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         let pc_base = program.base_address;
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
-        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
 
         fixed
             .par_iter_mut()
@@ -189,6 +188,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 );
             });
 
+        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
 
