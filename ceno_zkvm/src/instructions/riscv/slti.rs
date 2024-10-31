@@ -59,8 +59,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
         let imm = cb.create_witin(|| "imm");
 
-        let (value_expr, is_rs1_neg, max_num_u16_limbs) = match I::INST_KIND {
-            InsnKind::SLTIU => (rs1_read.value(), None, UINT_LIMBS + 1),
+        let (value_expr, is_rs1_neg) = match I::INST_KIND {
+            InsnKind::SLTIU => (rs1_read.value(), None),
             InsnKind::SLTI => {
                 let max_signed_limb_expr: Expression<_> =
                     ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
@@ -71,22 +71,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                     rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
                     1,
                 )?;
-                (
-                    rs1_read.to_field_expr(is_rs1_neg.expr()),
-                    Some(is_rs1_neg),
-                    UINT_LIMBS,
-                )
+                (rs1_read.to_field_expr(is_rs1_neg.expr()), Some(is_rs1_neg))
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
-        let lt = IsLtConfig::construct_circuit(
-            cb,
-            || "rs1 < imm",
-            value_expr,
-            imm.expr(),
-            max_num_u16_limbs,
-        )?;
+        let lt =
+            IsLtConfig::construct_circuit(cb, || "rs1 < imm", value_expr, imm.expr(), UINT_LIMBS)?;
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
