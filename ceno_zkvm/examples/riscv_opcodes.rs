@@ -185,10 +185,14 @@ fn main() {
             .iter()
             .map(|rec| {
                 let index = rec.addr as usize;
-                let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
-                MemFinalRecord {
-                    value: vm.peek_register(index),
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                if index < VMState::REG_COUNT {
+                    let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                    MemFinalRecord {
+                        value: vm.peek_register(index),
+                        cycle: *final_access.get(&vma).unwrap_or(&0),
+                    }
+                } else {
+                    MemFinalRecord { value: 0, cycle: 0 }
                 }
             })
             .collect_vec();

@@ -34,7 +34,7 @@ impl RamTable for RegTable {
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
 
     fn len() -> usize {
-        VMState::REG_COUNT
+        VMState::REG_COUNT.next_power_of_two()
     }
 
     fn addr(entry_index: usize) -> Addr {
