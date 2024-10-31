@@ -145,27 +145,6 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
     }
 
     /// Circuit is validated by the following strategy:
-    /// 1. Compute the signed values associated with `rs1` and `rs2`
-    /// 2. Compute the high order bit of `rd`, which is the sign bit of the 2s
-    ///    complement value for which rd represents the high limb
-    /// 3. Verify that the product of signed inputs `rs1` and `rs2` is equal to
-    ///    the result of interpreting rd as the high limb of a 2s complement
-    ///    value with some 32-bit low limb
-    ///
-    /// The correctness here is a bit subtle.  The signed values of 32-bit
-    /// inputs `rs1` and `rs2` have values between `-2^31` and `2^31 - 1`, so
-    /// their product is constrained to lie between `-2^62 + 2^31` and
-    /// `2^62`.  In a prime field of size smaller than `2^64`, the range of
-    /// values represented by a 64-bit 2s complement value, integers between
-    /// `-2^63` and `2^63 - 1`, have some ambiguity.  If `p = 2^64 - k`, then
-    /// the values between `-2^63` and `-2^63 + k - 1` correspond with the values
-    /// between `2^63 - k` and `2^63 - 1`.
-    ///
-    /// However, as long as the values required by signed products don't overlap
-    /// with this ambiguous range, an arbitrary 64-bit 2s complement value can
-    /// represent a signed 32-bit product in only one way, so there is no
-    /// ambiguity in the representation.  This is the case for the Goldilocks
-    /// field with order `p = 2^64 - 2^32 + 1`.
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<MulhConfig<E>, ZKVMError> {
@@ -173,9 +152,12 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
+        // 1. Compute the signed values associated with `rs1` and `rs2`
         let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
         let rs2_signed = Signed::construct_circuit(circuit_builder, || "rs2", &rs2_read)?;
 
+        // 2. Compute the high order bit of `rd`, which is the sign bit of the 2s
+        //    complement value for which rd represents the high limb
         let rd_sign_bit = IsLtConfig::construct_circuit(
             circuit_builder,
             || "rd_sign_bit",
@@ -185,12 +167,31 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         )?;
 
         let unsigned_prod_low = UInt::new(|| "unsigned_prod_low", circuit_builder)?;
+
+        // 3. Verify that the product of signed inputs `rs1` and `rs2` is equal to
+        //    the result of interpreting rd as the high limb of a 2s complement
+        //    value with some 32-bit low limb
         circuit_builder.require_equal(
             || "validate_prod_high_limb",
             rs1_signed.val.expr() * rs2_signed.val.expr(),
             Expression::<E>::from(1u64 << 32) * rd_written.value() + unsigned_prod_low.value()
                 - Expression::<E>::from(1u128 << 64) * rd_sign_bit.expr(),
         )?;
+
+        // The correctness here is a bit subtle.  The signed values of 32-bit
+        // inputs `rs1` and `rs2` have values between `-2^31` and `2^31 - 1`, so
+        // their product is constrained to lie between `-2^62 + 2^31` and
+        // `2^62`.  In a prime field of size smaller than `2^64`, the range of
+        // values represented by a 64-bit 2s complement value, integers between
+        // `-2^63` and `2^63 - 1`, have some ambiguity.  If `p = 2^64 - k`, then
+        // the values between `-2^63` and `-2^63 + k - 1` correspond with the values
+        // between `2^63 - k` and `2^63 - 1`.
+        //
+        // However, as long as the values required by signed products don't overlap
+        // with this ambiguous range, an arbitrary 64-bit 2s complement value can
+        // represent a signed 32-bit product in only one way, so there is no
+        // ambiguity in the representation.  This is the case for the Goldilocks
+        // field with order `p = 2^64 - 2^32 + 1`.
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
