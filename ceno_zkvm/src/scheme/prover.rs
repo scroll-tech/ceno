@@ -71,9 +71,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // commit to main traces
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
-        // sort by circuit name, and we rely on an assumption that
-        // table circuit witnesses come after opcode circuit witnesses
-        for (circuit_name, witness) in witnesses.witnesses {
+
+        let mut opcodes = vec![];
+        let mut tables = vec![];
+        for (circuit_name, (is_opcode, witness)) in witnesses.witnesses {
+            if is_opcode {
+                opcodes.push((circuit_name, witness));
+            } else {
+                tables.push((circuit_name, witness));
+            }
+        }
+        // commit to opcode circuits first and then commit to table circuits
+        for (circuit_name, witness) in opcodes.into_iter().chain(tables.into_iter()) {
             let commit_dur = std::time::Instant::now();
             let num_instances = witness.num_instances();
             let witness = match num_instances {
@@ -349,6 +358,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(span);
 
+        tracing::debug!("tower sumcheck");
         // batch sumcheck: selector + main degree > 1 constraints
         let span = entered_span!("sumcheck::main_sel");
         let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
@@ -520,11 +530,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }
         }
 
+        tracing::debug!("main sel sumcheck start");
         let (main_sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
             transcript,
         );
+        tracing::debug!("main sel sumcheck end");
+
         let main_sel_evals = state.get_mle_final_evaluations();
         assert_eq!(
             main_sel_evals.len(),

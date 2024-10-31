@@ -205,7 +205,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    pub witnesses: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    pub witnesses: BTreeMap<String, (bool, RowMajorMatrix<E::BaseField>)>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
@@ -227,7 +227,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             ),
             _ => OC::assign_instances(config, cs.num_witin as usize, records)?,
         };
-        assert!(self.witnesses.insert(OC::name(), witness).is_none());
+        assert!(self.witnesses.insert(OC::name(), (true, witness)).is_none());
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
@@ -278,7 +278,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        assert!(self.witnesses.insert(TC::name(), witness).is_none());
+        assert!(
+            self.witnesses
+                .insert(TC::name(), (false, witness))
+                .is_none()
+        );
 
         Ok(())
     }

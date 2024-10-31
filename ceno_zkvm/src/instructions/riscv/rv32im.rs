@@ -272,10 +272,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs);
 
-        fixed.register_table_circuit::<U16TableCircuit<E>>(cs, self.u16_range_config.clone(), &());
-        fixed.register_table_circuit::<U14TableCircuit<E>>(cs, self.u14_range_config.clone(), &());
-        fixed.register_table_circuit::<AndTableCircuit<E>>(cs, self.and_table_config.clone(), &());
-        fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, self.ltu_config.clone(), &());
+        fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
+        fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
+        fixed.register_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &());
+        fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
 
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
         fixed.register_table_circuit::<MemTableCircuit<E>>(cs, &self.mem_config, mem_init);
@@ -375,12 +375,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [
-                INVALID, SRA, SLT, SLTIU, MULH, MULHSU, DIV, REM, REMU, EANY, MRET
-            ]
-            .into_iter()
-            .map(|insn_kind| insn_kind.to_usize().unwrap())
-            .collect::<BTreeSet<_>>(),
+            [INVALID, SRA, SLT, SLTIU, MULH, MULHSU, DIV, REM, REMU, EANY,]
+                .into_iter()
+                .map(|insn_kind| insn_kind.to_usize().unwrap())
+                .collect::<BTreeSet<_>>(),
         );
         Ok(())
     }
