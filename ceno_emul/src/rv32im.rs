@@ -201,6 +201,7 @@ pub struct InsnCodes {
 }
 
 impl DecodedInstruction {
+    /// A virtual register which absorbs the writes to x0.
     pub const RD_NULL: u32 = 32;
 
     pub fn new(insn: u32) -> Self {
