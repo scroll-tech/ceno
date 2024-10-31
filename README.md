@@ -29,4 +29,4 @@ cargo check
 cargo clippy
 ```
 
-Neither `cargo build` nor `cargo make build` work.  That's a known problem and we're working on it.
+Alas, `cargo build` doesn't work. That's a known problem and we're working on it.  Please use `cargo make build` instead for now.
