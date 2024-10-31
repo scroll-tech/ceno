@@ -250,8 +250,8 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
         set_val!(instance, config.rs2_signed_wit, field_elt);
 
         // Sign bit of rd register
-        config.
-            rd_signed
+        config
+            .rd_signed
             .assign_instance(instance, lk_multiplicity, &rd_written)?;
 
         // Low limb of product in 2s complement form
