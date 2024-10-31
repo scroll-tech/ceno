@@ -79,14 +79,13 @@ impl IsLtConfig {
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
         limbs: &UInt<E>,
-        max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
         Self::construct_circuit(
             cb,
             name_fn,
             ((1u64 << (LIMB_BITS - 1)) - 1).into(),
             limbs.expr().last().unwrap().clone(),
-            max_num_u16_limbs,
+            1,
         )
     }
 
@@ -352,8 +351,8 @@ impl InnerSignedLtConfig {
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // Extract the sign bit.
-        let is_lhs_neg = IsLtConfig::constrain_last_limb(cb, || "lhs_msb", lhs, 1)?;
-        let is_rhs_neg = IsLtConfig::constrain_last_limb(cb, || "rhs_msb", rhs, 1)?;
+        let is_lhs_neg = IsLtConfig::constrain_last_limb(cb, || "lhs_msb", lhs)?;
+        let is_rhs_neg = IsLtConfig::constrain_last_limb(cb, || "rhs_msb", rhs)?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
