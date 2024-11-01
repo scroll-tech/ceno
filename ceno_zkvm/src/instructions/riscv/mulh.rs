@@ -531,8 +531,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let signed_unsigned_prod_high =
-            ((rs1 as i64).wrapping_mul(rs2 as i64) >> 32) as u32;
+        let signed_unsigned_prod_high = ((rs1 as i64).wrapping_mul(rs2 as i64) >> 32) as u32;
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MULHSU, 2, 3, 4, 0);
