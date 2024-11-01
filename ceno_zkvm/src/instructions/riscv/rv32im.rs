@@ -114,7 +114,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut lw_records = Vec::new();
         steps
             .into_iter()
-            .for_each(|record| match record.insn().codes().kind {
+            .for_each(|record| match record.insn().kind {
                 ADD => add_records.push(record),
                 BLTU => bltu_records.push(record),
                 JAL => jal_records.push(record),

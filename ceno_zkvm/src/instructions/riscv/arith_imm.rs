@@ -62,7 +62,8 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        let imm = Value::new(step.insn().imm_internal(), lk_multiplicity);
+        // TODO: make value accept an i64.
+        let imm = Value::new(step.insn().imm as u32, lk_multiplicity);
 
         let result = rs1_read.add(&imm, lk_multiplicity, true);
 

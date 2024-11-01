@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, mem};
 use crate::{
     CENO_PLATFORM, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
-    rv32im::DecodedInstruction,
+    rv32im::ActuallyDecodedInstruction as DecodedInstruction,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -204,17 +204,17 @@ impl StepRecord {
             pc,
             insn_code,
             rs1: rs1_read.map(|rs1| ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
+                addr: CENO_PLATFORM.register_vma(insn.rs1 as RegIdx).into(),
                 value: rs1,
                 previous_cycle,
             }),
             rs2: rs2_read.map(|rs2| ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
+                addr: CENO_PLATFORM.register_vma(insn.rs2 as RegIdx).into(),
                 value: rs2,
                 previous_cycle,
             }),
             rd: rd.map(|rd| WriteOp {
-                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
+                addr: CENO_PLATFORM.register_vma(insn.rd as RegIdx).into(),
                 value: rd,
                 previous_cycle,
             }),
@@ -235,6 +235,7 @@ impl StepRecord {
         self.insn_code
     }
 
+    // TODO(Matthias): this is a code smell.  We just need the PC, and then look up the decoded instruction.
     /// The instruction as a decoded structure.
     pub fn insn(&self) -> DecodedInstruction {
         DecodedInstruction::new(self.insn_code)

@@ -262,7 +262,7 @@ fn test_single_add_instance_e2e() {
     let mut add_records = vec![];
     let mut halt_records = vec![];
     all_records.into_iter().for_each(|record| {
-        let kind = record.insn().codes().kind;
+        let kind = record.insn().kind;
         match kind {
             ADD => add_records.push(record),
             EANY => {

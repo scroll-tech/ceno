@@ -10,7 +10,9 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
+use ceno_emul::{
+    ActuallyDecodedInstruction as DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE,
+};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -31,11 +33,11 @@ macro_rules! declare_program {
 }
 
 #[derive(Clone, Debug)]
-pub struct InsnRecord<T>([T; 7]);
+pub struct InsnRecord<T>([T; 6]);
 
 impl<T> InsnRecord<T> {
-    pub fn new(pc: T, opcode: T, rd: T, funct3: T, rs1: T, rs2: T, imm_internal: T) -> Self {
-        InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_internal])
+    pub fn new(pc: T, kind: T, rd: T, rs1: T, rs2: T, imm: T) -> Self {
+        InsnRecord([pc, kind, rd, rs1, rs2, imm])
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -46,58 +48,46 @@ impl<T> InsnRecord<T> {
         &self.0[0]
     }
 
-    pub fn opcode(&self) -> &T {
+    pub fn kind(&self) -> &T {
         &self.0[1]
     }
 
-    pub fn rd_or_zero(&self) -> &T {
+    pub fn rdo(&self) -> &T {
         &self.0[2]
     }
 
-    pub fn funct3_or_zero(&self) -> &T {
+    pub fn rs1(&self) -> &T {
         &self.0[3]
     }
 
-    pub fn rs1_or_zero(&self) -> &T {
+    pub fn rs2(&self) -> &T {
         &self.0[4]
     }
 
-    pub fn rs2_or_zero(&self) -> &T {
-        &self.0[5]
-    }
-
+    // TODO: Remove this.  nothing complicated about imm anymore.
     /// Iterate through the fields, except immediate because it is complicated.
     fn without_imm(&self) -> &[T] {
-        &self.0[0..6]
+        &self.0[0..5]
     }
 
     /// The internal view of the immediate. See `DecodedInstruction::imm_internal`.
-    pub fn imm_internal(&self) -> &T {
-        &self.0[6]
+    pub fn imm(&self) -> &T {
+        &self.0[5]
     }
 }
 
-impl InsnRecord<u32> {
+impl InsnRecord<i64> {
     fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
         InsnRecord::new(
-            pc,
-            insn.opcode(),
-            insn.rd_or_zero(),
-            insn.funct3_or_zero(),
-            insn.rs1_or_zero(),
-            insn.rs2_or_zero(),
-            insn.imm_internal(),
+            pc as i64,
+            insn.kind as i64,
+            insn.rd as i64,
+            insn.rs1 as i64,
+            insn.rs2 as i64,
+            // TODO: review this, we actually nede to store whether it's signed.
+            // What is this used for?
+            insn.imm,
         )
-    }
-
-    /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
-    /// Convert negative values from two's complement to field.
-    pub fn imm_internal_field<F: SmallField>(insn: &DecodedInstruction) -> F {
-        if insn.imm_field_is_negative() {
-            -F::from(-(insn.imm_internal() as i32) as u64)
-        } else {
-            F::from(insn.imm_internal() as u64)
-        }
     }
 }
 

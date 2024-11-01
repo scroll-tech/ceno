@@ -111,7 +111,7 @@ impl<E: ExtensionField> ReadRS1<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rs1() as u64);
+        set_val!(instance, self.id, step.insn().rs1 as u64);
 
         // Register state
         set_val!(instance, self.prev_ts, step.rs1().unwrap().previous_cycle);
@@ -166,7 +166,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rs2() as u64);
+        set_val!(instance, self.id, step.insn().rs2 as u64);
 
         // Register state
         set_val!(instance, self.prev_ts, step.rs2().unwrap().previous_cycle);
@@ -223,7 +223,7 @@ impl<E: ExtensionField> WriteRD<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rd() as u64);
+        set_val!(instance, self.id, step.insn().rd as u64);
         set_val!(instance, self.prev_ts, step.rd().unwrap().previous_cycle);
 
         // Register state

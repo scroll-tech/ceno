@@ -5,7 +5,7 @@ use crate::{
     Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
-    rv32im::{DecodedInstruction, Emulator, TrapCause},
+    rv32im::{ActuallyDecodedInstruction as DecodedInstruction, Emulator, TrapCause},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
