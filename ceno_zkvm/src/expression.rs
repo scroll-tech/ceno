@@ -5,7 +5,7 @@ use std::{
     fmt::Display,
     iter::Sum,
     mem::MaybeUninit,
-    ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
 use ff::Field;
@@ -332,6 +332,26 @@ macro_rules! binop_assign_instances {
 binop_assign_instances!(AddAssign, add_assign, Add, add);
 binop_assign_instances!(SubAssign, sub_assign, Sub, sub);
 binop_assign_instances!(MulAssign, mul_assign, Mul, mul);
+
+impl<E: ExtensionField> Shl<usize> for Expression<E> {
+    type Output = Expression<E>;
+    fn shl(self, rhs: usize) -> Expression<E> {
+        self * (1 << rhs)
+    }
+}
+
+impl<E: ExtensionField> Shl<usize> for &Expression<E> {
+    type Output = Expression<E>;
+    fn shl(self, rhs: usize) -> Expression<E> {
+        self.clone() << rhs
+    }
+}
+
+impl<E: ExtensionField> ShlAssign<usize> for Expression<E> {
+    fn shl_assign(&mut self, rhs: usize) {
+        *self = self.clone() << rhs;
+    }
+}
 
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
