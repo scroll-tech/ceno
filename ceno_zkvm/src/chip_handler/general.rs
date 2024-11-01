@@ -225,10 +225,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "require_one",
-            |cb| cb.cs.require_zero(name_fn, Expression::from(1) - expr),
-        )
+        self.namespace(|| "require_one", |cb| cb.cs.require_zero(name_fn, 1 - expr))
     }
 
     pub fn condition_require_equal<NR, N>(
@@ -260,7 +257,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         when_true: &Expression<E>,
         when_false: &Expression<E>,
     ) -> Expression<E> {
-        cond.clone() * when_true.clone() + (1 - cond.clone()) * when_false.clone()
+        cond * when_true + (1 - cond) * when_false
     }
 
     pub(crate) fn assert_ux<NR, N, const C: usize>(
@@ -346,10 +343,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.namespace(
             || "assert_bit",
-            |cb| {
-                cb.cs
-                    .require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
-            },
+            |cb| cb.cs.require_zero(name_fn, &expr * (1 - &expr)),
         )
     }
 
@@ -417,14 +411,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         let is_eq = self.create_witin(|| "is_eq");
         let diff_inverse = self.create_witin(|| "diff_inverse");
 
+        self.require_zero(|| "is equal", is_eq.expr() * &lhs - is_eq.expr() * &rhs)?;
         self.require_zero(
             || "is equal",
-            is_eq.expr().clone() * lhs.clone() - is_eq.expr() * rhs.clone(),
-        )?;
-        self.require_zero(
-            || "is equal",
-            Expression::from(1) - is_eq.expr().clone() - diff_inverse.expr() * lhs
-                + diff_inverse.expr() * rhs,
+            1 - is_eq.expr() - diff_inverse.expr() * lhs + diff_inverse.expr() * rhs,
         )?;
 
         Ok((is_eq, diff_inverse))

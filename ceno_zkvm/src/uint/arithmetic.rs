@@ -179,9 +179,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 let idx = i + j;
                 if idx < c_limbs.len() {
                     if result_c.get(idx).is_none() {
-                        result_c.push(a.clone() * b.clone());
+                        result_c.push(a * b);
                     } else {
-                        result_c[idx] = result_c[idx].clone() + a.clone() * b.clone();
+                        result_c[idx] += a * b;
                     }
                 }
             });

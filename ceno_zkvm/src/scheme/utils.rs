@@ -446,7 +446,7 @@ mod tests {
         let expected_final_product: E = last_layer
             .iter()
             .map(|f| match f.evaluations() {
-                FieldType::Ext(e) => e.iter().cloned().reduce(|a, b| a * b).unwrap(),
+                FieldType::Ext(e) => e.iter().copied().reduce(|a, b| a * b).unwrap(),
                 _ => unreachable!(""),
             })
             .product();
