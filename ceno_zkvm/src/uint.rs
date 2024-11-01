@@ -8,8 +8,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, IsLtConfig},
-    instructions::riscv::constants::{LIMB_BITS, UInt},
+    gadgets::{AssertLTConfig, SignedExtendConfig},
+    instructions::riscv::constants::UInt,
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
@@ -21,7 +21,6 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use std::{
     borrow::Cow,
-    fmt::Display,
     mem::{self, MaybeUninit},
     ops::Index,
 };
@@ -541,18 +540,8 @@ impl<E: ExtensionField> UInt<E> {
     ///
     /// Also called Most Significant Bit extraction, when
     /// interpreted as an unsigned int.
-    pub fn is_negative<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
-        &self,
-        cb: &mut CircuitBuilder<E>,
-        name_fn: N,
-    ) -> Result<IsLtConfig, ZKVMError> {
-        IsLtConfig::construct_circuit(
-            cb,
-            name_fn,
-            ((1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1).into(),
-            self.expr().last().unwrap().clone(),
-            LIMB_BITS.div_ceil(LIMB_BITS),
-        )
+    pub fn is_negative(&self, cb: &mut CircuitBuilder<E>) -> Result<SignedExtendConfig, ZKVMError> {
+        SignedExtendConfig::construct_limb(cb, self.limbs.iter().last().unwrap().expr())
     }
 }
 

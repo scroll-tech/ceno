@@ -335,10 +335,8 @@ impl InnerSignedLtConfig {
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // Extract the sign bit.
-        let is_lhs_neg =
-            SignedExtendConfig::construct_limb(cb, lhs.limbs.iter().last().unwrap().expr())?;
-        let is_rhs_neg =
-            SignedExtendConfig::construct_limb(cb, rhs.limbs.iter().last().unwrap().expr())?;
+        let is_lhs_neg = lhs.is_negative(cb)?;
+        let is_rhs_neg = rhs.is_negative(cb)?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());

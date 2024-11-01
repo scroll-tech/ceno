@@ -6,13 +6,13 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
-    gadgets::IsLtConfig,
+    expression::Expression,
+    gadgets::SignedExtendConfig,
     instructions::{
         Instruction,
         riscv::{
             RIVInstruction,
-            constants::{BIT_WIDTH, LIMB_BITS, UInt, UIntMul},
+            constants::{BIT_WIDTH, UInt, UIntMul},
             r_insn::RInstructionConfig,
         },
     },
@@ -256,7 +256,7 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
 /// corresponding signed value, interpreting the bits as a 2s-complement
 /// encoding.  Gadget allocates 2 `WitIn` values in total.
 struct Signed<E: ExtensionField> {
-    pub is_negative: IsLtConfig,
+    pub is_negative: SignedExtendConfig,
     val: Expression<E>,
 }
 
@@ -266,23 +266,13 @@ impl<E: ExtensionField> Signed<E> {
         name_fn: N,
         unsigned_val: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
-        cb.namespace(
-            || "signed",
-            |cb| {
-                let name = name_fn();
-                // is_lt is set if top limb of val is negative
-                let is_negative = IsLtConfig::construct_circuit(
-                    cb,
-                    || name.clone(),
-                    ((1u64 << (LIMB_BITS - 1)) - 1).into(),
-                    unsigned_val.expr().last().unwrap().clone(),
-                    1,
-                )?;
-                let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
+        cb.namespace(name_fn, |cb| {
+            // is_lt is set if top limb of val is negative
+            let is_negative = unsigned_val.is_negative(cb)?;
+            let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
 
-                Ok(Self { is_negative, val })
-            },
-        )
+            Ok(Self { is_negative, val })
+        })
     }
 
     pub fn assign_instance(
@@ -291,11 +281,11 @@ impl<E: ExtensionField> Signed<E> {
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
     ) -> Result<i32, ZKVMError> {
-        let high_limb = *val.limbs.last().unwrap() as u64;
-        let sign_cutoff = (1u64 << (LIMB_BITS - 1)) - 1;
-        self.is_negative
-            .assign_instance(instance, lkm, sign_cutoff, high_limb)?;
-
+        self.is_negative.assign_instance::<E>(
+            instance,
+            lkm,
+            *val.as_u16_limbs().last().unwrap() as u64,
+        )?;
         let signed_val = val.as_u32() as i32;
 
         Ok(signed_val)
