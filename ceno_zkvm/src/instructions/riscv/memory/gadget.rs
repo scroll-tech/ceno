@@ -33,7 +33,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
          -> Result<Vec<WitIn>, ZKVMError> {
             (0..num_bytes)
                 .map(|i| {
-                    let byte = cb.create_witin(|| format!("{}.le_bytes[{}]", anno, i))?;
+                    let byte = cb.create_witin(|| format!("{}.le_bytes[{}]", anno, i));
                     cb.assert_ux::<_, _, 8>(|| "byte range check", byte.expr())?;
 
                     Ok(byte)
@@ -84,7 +84,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
-                let expected_limb_change = cb.create_witin(|| "expected_limb_change")?;
+                let expected_limb_change = cb.create_witin(|| "expected_limb_change");
                 cb.condition_require_equal(
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
                     low_bits[0].clone(),
@@ -94,7 +94,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
-                let expected_change = cb.create_witin(|| "expected_change")?;
+                let expected_change = cb.create_witin(|| "expected_change");
                 cb.condition_require_equal(
                     || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
                     low_bits[1].clone(),
@@ -117,7 +117,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 let prev_limbs = prev_word.expr();
                 let rs2_limbs = rs2_word.expr();
 
-                let expected_change = cb.create_witin(|| "expected_change")?;
+                let expected_change = cb.create_witin(|| "expected_change");
 
                 // alloc a new witIn to cache degree 2 expression
                 cb.condition_require_equal(

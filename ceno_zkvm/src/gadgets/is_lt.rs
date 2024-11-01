@@ -86,7 +86,7 @@ impl IsLtConfig {
             || "is_lt",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"))?;
+                let is_lt = cb.create_witin(|| format!("{name} is_lt witin"));
                 cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
 
                 let config = InnerLtConfig::construct_circuit(
@@ -153,7 +153,7 @@ impl InnerLtConfig {
             cb.namespace(
                 || format!("var {var_name}"),
                 |cb| {
-                    let witin = cb.create_witin(|| var_name.to_string())?;
+                    let witin = cb.create_witin(|| var_name.to_string());
                     cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
                     Ok(witin)
                 },
@@ -293,7 +293,7 @@ impl SignedLtConfig {
             || "is_signed_lt",
             |cb| {
                 let name = name_fn();
-                let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"))?;
+                let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"));
                 cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
                 let config =
                     InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
@@ -332,22 +332,9 @@ impl InnerSignedLtConfig {
         rhs: &UInt<E>,
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
-        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         // Extract the sign bit.
-        let is_lhs_neg = IsLtConfig::construct_circuit(
-            cb,
-            || "lhs_msb",
-            max_signed_limb_expr.clone(),
-            lhs.limbs.iter().last().unwrap().expr(), // msb limb
-            1,
-        )?;
-        let is_rhs_neg = IsLtConfig::construct_circuit(
-            cb,
-            || "rhs_msb",
-            max_signed_limb_expr,
-            rhs.limbs.iter().last().unwrap().expr(), // msb limb
-            1,
-        )?;
+        let is_lhs_neg = lhs.is_negative(cb, || "lhs_msb")?;
+        let is_rhs_neg = rhs.is_negative(cb, || "rhs_msb")?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());

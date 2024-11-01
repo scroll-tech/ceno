@@ -10,7 +10,7 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{CENO_PLATFORM, DecodedInstruction, PC_STEP_SIZE, WORD_SIZE};
+use ceno_emul::{DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -34,7 +34,11 @@ macro_rules! declare_program {
 pub struct InsnRecord<T>([T; 7]);
 
 impl<T> InsnRecord<T> {
-    pub fn new(pc: T, opcode: T, rd: T, funct3: T, rs1: T, rs2: T, imm_or_funct7: T) -> Self {
+    pub fn new(pc: T, opcode: T, rd: Option<T>, funct3: T, rs1: T, rs2: T, imm_or_funct7: T) -> Self
+    where
+        T: From<u32>,
+    {
+        let rd = rd.unwrap_or_else(|| T::from(DecodedInstruction::RD_NULL));
         InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_or_funct7])
     }
 
@@ -50,7 +54,7 @@ impl<T> InsnRecord<T> {
         &self.0[1]
     }
 
-    pub fn rd_or_zero(&self) -> &T {
+    pub fn rd_or_null(&self) -> &T {
         &self.0[2]
     }
 
@@ -80,21 +84,21 @@ impl<T> InsnRecord<T> {
 
 impl InsnRecord<u32> {
     fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
-        InsnRecord::new(
+        InsnRecord([
             pc,
             insn.opcode(),
-            insn.rd_or_zero(),
+            insn.rd_internal(),
             insn.funct3_or_zero(),
             insn.rs1_or_zero(),
             insn.rs2_or_zero(),
             insn.imm_or_funct7(),
-        )
+        ])
     }
 
     /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
     /// Convert negative values from two's complement to field.
     pub fn imm_or_funct7_field<F: SmallField>(insn: &DecodedInstruction) -> F {
-        if insn.imm_is_negative() {
+        if insn.imm_field_is_negative() {
             -F::from(-(insn.imm_or_funct7() as i32) as u64)
         } else {
             F::from(insn.imm_or_funct7() as u64)
@@ -117,8 +121,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     for ProgramTableCircuit<E, PROGRAM_SIZE>
 {
     type TableConfig = ProgramTableConfig;
-    type FixedInput = [u32; PROGRAM_SIZE];
-    type WitnessInput = usize;
+    type FixedInput = Program;
+    type WitnessInput = Program;
 
     fn name() -> String {
         "PROGRAM".into()
@@ -135,7 +139,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             cb.create_fixed(|| "imm_or_funct7")?,
         ]);
 
-        let mlt = cb.create_witin(|| "mlt")?;
+        let mlt = cb.create_witin(|| "mlt");
 
         let record_exprs = {
             let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
@@ -153,9 +157,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         num_fixed: usize,
         program: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
-        // TODO: get bytecode of the program.
-        let num_instructions = program.len();
-        let pc_start = CENO_PLATFORM.pc_start();
+        let num_instructions = program.instructions.len();
+        let pc_base = program.base_address;
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 
@@ -164,8 +167,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
-                let pc = pc_start + (i * PC_STEP_SIZE) as u32;
-                let insn = DecodedInstruction::new(program[i]);
+                let pc = pc_base + (i * PC_STEP_SIZE) as u32;
+                let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
 
                 // Copy all the fields except immediate.
@@ -185,6 +188,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 );
             });
 
+        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
 
@@ -192,13 +196,13 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
-        num_instructions: &usize,
+        program: &Program,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
-        let mut prog_mlt = vec![0_usize; *num_instructions];
+        let mut prog_mlt = vec![0_usize; program.instructions.len()];
         for (pc, mlt) in multiplicity {
-            let i = (*pc as usize - CENO_PLATFORM.pc_start() as usize) / WORD_SIZE;
+            let i = (*pc as usize - program.base_address as usize) / WORD_SIZE;
             prog_mlt[i] = *mlt;
         }
 

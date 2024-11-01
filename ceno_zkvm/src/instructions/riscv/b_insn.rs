@@ -1,5 +1,3 @@
-#![allow(dead_code)] // TODO: remove after BLT, BEQ, …
-
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
@@ -57,13 +55,13 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts)?;
 
         // Immediate
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             insn_kind.codes().opcode.into(),
-            0.into(),
+            None,
             insn_kind.codes().func3.into(),
             rs1.id.expr(),
             rs2.id.expr(),

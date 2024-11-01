@@ -713,7 +713,7 @@ impl WitIn {
             || "from_expr",
             |cb| {
                 let name = name().into();
-                let wit = cb.create_witin(|| name.clone())?;
+                let wit = cb.create_witin(|| name.clone());
                 if !debug {
                     cb.require_zero(|| name.clone(), wit.expr() - input)?;
                 }
@@ -847,7 +847,9 @@ pub mod fmt {
     ) -> String {
         match expression {
             Expression::WitIn(wit_in) => {
-                wtns.push(*wit_in);
+                if !wtns.contains(wit_in) {
+                    wtns.push(*wit_in);
+                }
                 format!("WitIn({})", wit_in)
             }
             Expression::Challenge(id, pow, scaler, offset) => {
@@ -980,7 +982,7 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
+        let x = cb.create_witin(|| "x");
 
         // scaledsum * challenge
         // 3 * x + 2
@@ -1045,9 +1047,9 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
-        let y = cb.create_witin(|| "y").unwrap();
-        let z = cb.create_witin(|| "z").unwrap();
+        let x = cb.create_witin(|| "x");
+        let y = cb.create_witin(|| "y");
+        let z = cb.create_witin(|| "z");
         // scaledsum * challenge
         // 3 * x + 2
         let expr: Expression<E> = 3 * x.expr() + 2;
@@ -1082,8 +1084,8 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
-        let y = cb.create_witin(|| "y").unwrap();
+        let x = cb.create_witin(|| "x");
+        let y = cb.create_witin(|| "y");
         // scaledsum * challenge
         // (x + 1) * (y + 1)
         let expr: Expression<E> = (1 + x.expr()) * (2 + y.expr());
