@@ -21,7 +21,8 @@ use crate::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, LtuTableCircuit, MemFinalRecord, MemInitRecord, MemTableCircuit,
-        RegTableCircuit, TableCircuit, U14TableCircuit, U16TableCircuit,
+        OrTableCircuit, RegTableCircuit, TableCircuit, U5TableCircuit, U8TableCircuit,
+        U14TableCircuit, U16TableCircuit, XorTableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind, InsnKind::*, StepRecord};
@@ -30,7 +31,6 @@ use itertools::Itertools;
 use num_traits::cast::ToPrimitive;
 use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;
-use crate::tables::{OrTableCircuit, U5TableCircuit, U8TableCircuit, XorTableCircuit};
 
 use super::{
     arith::AddInstruction,
