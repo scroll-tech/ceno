@@ -861,7 +861,7 @@ Hints:
                         })
                         .unwrap();
                     let values = input_value_exprs
-                        .into_iter()
+                        .iter()
                         .map(|expr| {
                             eval_by_expr_with_instance(
                                 &[],
@@ -873,7 +873,7 @@ Hints:
                             .as_bases()[0]
                         })
                         .collect_vec();
-                    panic!(
+                    tracing::error!(
                         "{}: value {:x?} does not occur in {:?} table at row {}",
                         lk_input_annotation, values, rom_type, row,
                     );
