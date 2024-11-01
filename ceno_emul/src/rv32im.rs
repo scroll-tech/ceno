@@ -107,7 +107,6 @@ struct DecodedInstructionOld {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DecodedInstruction {
-    // insn: u32,
     // This should be able to handle i32::MIN to u32::MAX.
     // Convert to field type in the straightforward way.
     pub imm: i64,
@@ -118,7 +117,7 @@ pub struct DecodedInstruction {
 
     // This should only be her for debugging.
     #[allow(dead_code)]
-    pub insn: u32,
+    pub word: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -228,8 +227,8 @@ impl DecodedInstruction {
     /// A virtual register which absorbs the writes to x0.
     pub const RD_NULL: u32 = 32;
 
-    pub fn new(insn: u32) -> Self {
-        let d = DecodedInstructionOld::new(insn);
+    pub fn new(word: u32) -> Self {
+        let d = DecodedInstructionOld::new(word);
         let InsnCodes { kind, format, .. } = d.codes();
 
         let imm = match (format, kind) {
@@ -266,7 +265,7 @@ impl DecodedInstruction {
             rs2,
             rd,
             kind,
-            insn,
+            word,
         }
     }
 }
@@ -525,7 +524,7 @@ impl Emulator {
             InsnCategory::Load => self.step_load(ctx, &insn)?,
             InsnCategory::Store => self.step_store(ctx, &insn)?,
             InsnCategory::System => self.step_system(ctx, &insn)?,
-            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.insn))?,
+            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.word))?,
         } {
             ctx.on_normal_end(&insn);
         };
@@ -770,7 +769,7 @@ impl Emulator {
             InsnKind::EANY => match decoded.imm {
                 0 => ctx.ecall(),
                 1 => ctx.trap(TrapCause::Breakpoint),
-                _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
+                _ => ctx.trap(TrapCause::IllegalInstruction(decoded.word)),
             },
             _ => unreachable!(),
         }

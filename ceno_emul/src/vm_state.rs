@@ -193,7 +193,7 @@ impl EmuContext for VMState {
             .get(&pc)
             .ok_or_else(|| anyhow!("Invalid PC"))?;
         // let value = self.peek_memory(pc);
-        self.tracer.fetch(pc, i.insn);
+        self.tracer.fetch(pc, i.word);
         Ok(*i)
     }
 
