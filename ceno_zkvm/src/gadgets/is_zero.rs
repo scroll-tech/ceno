@@ -6,7 +6,7 @@ use goldilocks::SmallField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, ToExpr, WitIn, impl_from_via_ToExpr},
     set_val,
 };
 
@@ -14,6 +14,8 @@ pub struct IsZeroConfig {
     is_zero: WitIn,
     inverse: WitIn,
 }
+
+impl_from_via_ToExpr!(IsZeroConfig);
 
 impl<E: ExtensionField> ToExpr<E> for IsZeroConfig {
     type Output = Expression<E>;
@@ -61,6 +63,7 @@ impl IsZeroConfig {
 }
 
 pub struct IsEqualConfig(IsZeroConfig);
+impl_from_via_ToExpr!(IsEqualConfig);
 
 impl<E: ExtensionField> ToExpr<E> for IsEqualConfig {
     type Output = Expression<E>;
@@ -68,7 +71,6 @@ impl<E: ExtensionField> ToExpr<E> for IsEqualConfig {
         self.0.expr()
     }
 }
-
 
 impl IsEqualConfig {
     pub fn construct_circuit<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(

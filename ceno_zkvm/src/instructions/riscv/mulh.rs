@@ -263,7 +263,7 @@ struct Signed<E: ExtensionField> {
 impl<E: ExtensionField> ToExpr<E> for Signed<E> {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
-            self.val.clone()
+        self.val.clone()
     }
 }
 

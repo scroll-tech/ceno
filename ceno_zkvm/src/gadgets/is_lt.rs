@@ -10,7 +10,7 @@ use crate::{
     chip_handler::utils::power_sequence,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{Expression, ToExpr, WitIn, impl_from_via_ToExpr},
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     set_val,
     witness::LkMultiplicity,
@@ -65,6 +65,8 @@ pub struct IsLtConfig {
     pub is_lt: WitIn,
     config: InnerLtConfig,
 }
+
+impl_from_via_ToExpr!(IsLtConfig);
 
 impl<E: ExtensionField> ToExpr<E> for IsLtConfig {
     type Output = Expression<E>;
@@ -276,6 +278,8 @@ pub struct SignedLtConfig {
     is_lt: WitIn,
     config: InnerSignedLtConfig,
 }
+
+impl_from_via_ToExpr!(SignedLtConfig);
 
 impl<E: ExtensionField> ToExpr<E> for SignedLtConfig {
     type Output = Expression<E>;

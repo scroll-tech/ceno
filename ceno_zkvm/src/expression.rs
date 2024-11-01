@@ -805,19 +805,23 @@ impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     }
 }
 
-macro_rules! impl_from_via_ToExpr {
-    ($($t:ty),*) => {
-        $(
-            impl<E: ExtensionField> From<$t> for Expression<E> {
-                fn from(value: $t) -> Self {
-                    value.expr()
-                }
-            }
-        )*
-    };
+macro impl_from_via_ToExpr_internal($t:ty) {
+    impl<E: ExtensionField> From<$t> for Expression<E> {
+        fn from(value: $t) -> Self {
+            value.expr()
+        }
+    }
 }
+
+pub macro impl_from_via_ToExpr($($t:ty),*) {
+        $(
+            impl_from_via_ToExpr_internal!($t);
+            impl_from_via_ToExpr_internal!(&$t);
+            impl_from_via_ToExpr_internal!(&mut $t);
+        )*
+}
+
 impl_from_via_ToExpr!(WitIn, Fixed, Instance);
-impl_from_via_ToExpr!(&WitIn, &Fixed, &Instance);
 
 // Implement From trait for unsigned types of at most 64 bits
 macro_rules! impl_from_unsigned {
