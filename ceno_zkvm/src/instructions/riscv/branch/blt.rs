@@ -6,7 +6,7 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
+    expression::{Expression, ToExpr},
     gadgets::SignedLtConfig,
     instructions::{
         Instruction,

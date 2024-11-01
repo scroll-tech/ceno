@@ -66,11 +66,14 @@ pub struct IsLtConfig {
     config: InnerLtConfig,
 }
 
-impl IsLtConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> ToExpr<E> for IsLtConfig {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
         self.is_lt.expr()
     }
+}
 
+impl IsLtConfig {
     pub fn construct_circuit<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,
@@ -274,11 +277,14 @@ pub struct SignedLtConfig {
     config: InnerSignedLtConfig,
 }
 
-impl SignedLtConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> ToExpr<E> for SignedLtConfig {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
         self.is_lt.expr()
     }
+}
 
+impl SignedLtConfig {
     pub fn construct_circuit<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,

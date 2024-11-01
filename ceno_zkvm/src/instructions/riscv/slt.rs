@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 
 use super::{constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::SignedLtConfig,
+    circuit_builder::CircuitBuilder, error::ZKVMError, expression::ToExpr, gadgets::SignedLtConfig,
     instructions::Instruction, uint::Value, witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
