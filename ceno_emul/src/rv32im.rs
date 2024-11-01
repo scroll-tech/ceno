@@ -203,6 +203,9 @@ pub struct InsnCodes {
 }
 
 impl DecodedInstruction {
+    /// A virtual register which absorbs the writes to x0.
+    pub const RD_NULL: u32 = 32;
+
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -224,16 +227,12 @@ impl DecodedInstruction {
         self.opcode
     }
 
-    /// Get the rd field, regardless of the instruction format.
-    pub fn rd(&self) -> u32 {
-        self.rd
-    }
-
-    /// Get the register destination, or zero if the instruction does not write to a register.
-    pub fn rd_or_zero(&self) -> u32 {
+    /// The internal register destination. It is either the regular rd, or an internal RD_NULL if
+    /// the instruction does not write to a register or writes to x0.
+    pub fn rd_internal(&self) -> u32 {
         match self.codes().format {
-            R | I | U | J => self.rd,
-            _ => 0,
+            R | I | U | J if self.rd != 0 => self.rd,
+            _ => Self::RD_NULL,
         }
     }
 
@@ -685,7 +684,7 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(decoded.rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
         ctx.set_pc(new_pc);
         Ok(true)
     }
@@ -772,7 +771,7 @@ impl Emulator {
             }
             _ => unreachable!(),
         };
-        ctx.store_register(decoded.rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
         ctx.set_pc(ctx.get_pc() + WORD_SIZE);
         Ok(true)
     }

@@ -34,7 +34,11 @@ macro_rules! declare_program {
 pub struct InsnRecord<T>([T; 7]);
 
 impl<T> InsnRecord<T> {
-    pub fn new(pc: T, opcode: T, rd: T, funct3: T, rs1: T, rs2: T, imm_internal: T) -> Self {
+    pub fn new(pc: T, opcode: T, rd: Option<T>, funct3: T, rs1: T, rs2: T, imm_internal: T) -> Self
+    where
+        T: From<u32>,
+    {
+        let rd = rd.unwrap_or_else(|| T::from(DecodedInstruction::RD_NULL));
         InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_internal])
     }
 
@@ -50,7 +54,7 @@ impl<T> InsnRecord<T> {
         &self.0[1]
     }
 
-    pub fn rd_or_zero(&self) -> &T {
+    pub fn rd_internal(&self) -> &T {
         &self.0[2]
     }
 
@@ -79,15 +83,15 @@ impl<T> InsnRecord<T> {
 
 impl InsnRecord<u32> {
     fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
-        InsnRecord::new(
+        InsnRecord([
             pc,
             insn.opcode(),
-            insn.rd_or_zero(),
+            insn.rd_internal(),
             insn.funct3_or_zero(),
             insn.rs1_or_zero(),
             insn.rs2_or_zero(),
             insn.imm_internal(),
-        )
+        ])
     }
 
     /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
@@ -183,6 +187,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 );
             });
 
+        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
 

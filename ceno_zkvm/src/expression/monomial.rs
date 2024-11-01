@@ -39,7 +39,7 @@ impl<E: ExtensionField> Expression<E> {
                 for a in a {
                     for b in &b {
                         res.push(Term {
-                            coeff: a.coeff.clone() * b.coeff.clone(),
+                            coeff: &a.coeff * &b.coeff,
                             vars: a.vars.iter().chain(b.vars.iter()).cloned().collect(),
                         });
                     }
@@ -54,7 +54,7 @@ impl<E: ExtensionField> Expression<E> {
                 for x in x {
                     for a in &a {
                         res.push(Term {
-                            coeff: x.coeff.clone() * a.coeff.clone(),
+                            coeff: &x.coeff * &a.coeff,
                             vars: x.vars.iter().chain(a.vars.iter()).cloned().collect(),
                         });
                     }
