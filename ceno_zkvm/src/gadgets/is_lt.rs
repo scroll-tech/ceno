@@ -70,6 +70,7 @@ impl IsLtConfig {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
         self.is_lt.expr()
     }
+
     pub fn construct_circuit<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,
