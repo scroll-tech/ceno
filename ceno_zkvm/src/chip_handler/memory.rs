@@ -24,10 +24,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
+                    vec![RAMType::Memory.into(), memory_addr.clone()],
                     vec![value.clone()],
                     vec![prev_ts.clone()],
                 ]
@@ -36,10 +33,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
                 [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
+                    vec![RAMType::Memory.into(), memory_addr.clone()],
                     vec![value],
                     vec![ts.clone()],
                 ]
@@ -76,10 +70,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
+                    vec![RAMType::Memory.into(), memory_addr.clone()],
                     vec![prev_values],
                     vec![prev_ts.clone()],
                 ]
@@ -88,10 +79,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
             // Write (a, v, t)
             let write_record = cb.rlc_chip_record(
                 [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
+                    vec![RAMType::Memory.into(), memory_addr.clone()],
                     vec![value],
                     vec![ts.clone()],
                 ]

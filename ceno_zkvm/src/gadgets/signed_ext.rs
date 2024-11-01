@@ -53,8 +53,8 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         // - if val < 2^(N_BITS-1), then 2*val < 2^N_BITS, msb can only be zero.
         // - otherwise, 2*val >= 2^N_BITS, then msb can only be one.
         let assert_ux = match n_bits {
-            8 => CircuitBuilder::<E>::assert_ux::<_, _, 8>,
-            16 => CircuitBuilder::<E>::assert_ux::<_, _, 16>,
+            8 => CircuitBuilder::assert_ux::<_, _, 8>,
+            16 => CircuitBuilder::assert_ux::<_, _, 16>,
             _ => unreachable!("unsupported n_bits = {}", n_bits),
         };
         assert_ux(
