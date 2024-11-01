@@ -15,11 +15,14 @@ pub struct IsZeroConfig {
     inverse: WitIn,
 }
 
-impl IsZeroConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> ToExpr<E> for IsZeroConfig {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
         self.is_zero.expr()
     }
+}
 
+impl IsZeroConfig {
     pub fn construct_circuit<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
