@@ -89,7 +89,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
                     low_bits[0].clone(),
                     expected_limb_change.expr(),
-                    (1 << 8) * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()),
+                    (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()) << 8,
                     rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr(),
                 )?;
 
@@ -99,7 +99,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
                     low_bits[1].clone(),
                     expected_change.expr(),
-                    (1 << 16) * expected_limb_change.expr(),
+                    expected_limb_change.expr() << 16,
                     expected_limb_change.expr(),
                 )?;
 
@@ -125,7 +125,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     low_bits[1].clone(),
                     expected_change.expr(),
-                    (1 << 16) * (&rs2_limbs[0] - &prev_limbs[1]),
+                    (&rs2_limbs[0] - &prev_limbs[1]) << 16,
                     &rs2_limbs[0] - &prev_limbs[0],
                 )?;
 

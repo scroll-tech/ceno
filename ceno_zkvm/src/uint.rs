@@ -508,7 +508,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.expr()
             .into_iter()
             .rev()
-            .reduce(|sum, limb| sum * (1 << C) + limb)
+            .reduce(|sum, limb| (sum << C) + limb)
             .unwrap()
     }
 
@@ -689,7 +689,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
             val: limbs
                 .iter()
                 .rev()
-                .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
+                .fold(0u32, |acc, &v| (acc << 16) + v as u32)
                 .into(),
             limbs: Cow::Owned(limbs),
         }
@@ -700,7 +700,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
             val: limbs
                 .iter()
                 .rev()
-                .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
+                .fold(0u32, |acc, &v| (acc << 16) + v as u32)
                 .into(),
             limbs: Cow::Borrowed(limbs),
         }
