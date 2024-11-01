@@ -77,13 +77,7 @@ pub trait EmuContext {
 }
 
 /// An implementation of the basic ISA (RV32IM), that is instruction decoding and functional units.
-pub struct Emulator {
-    // TODO(Matthias): remove this,
-    // Perhaps replace it with the decoded program?
-    // Ie pc to decoded instruction.
-    #[allow(dead_code)]
-    table: &'static FastDecodeTable,
-}
+pub struct Emulator {}
 
 #[derive(Debug)]
 pub enum TrapCause {
@@ -215,9 +209,6 @@ impl InsnKind {
 pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
-    // TODO(Matthias): remove.
-    #[allow(dead_code)]
-    category: InsnCategory,
     pub opcode: u32,
     pub func3: u32,
     pub func7: u32,
@@ -331,7 +322,7 @@ impl DecodedInstructionOld {
 const fn insn(
     format: InsnFormat,
     kind: InsnKind,
-    category: InsnCategory,
+    _category: InsnCategory,
     opcode: u32,
     func3: i32,
     func7: i32,
@@ -339,7 +330,6 @@ const fn insn(
     InsnCodes {
         format,
         kind,
-        category,
         opcode,
         func3: func3 as u32,
         func7: func7 as u32,
@@ -499,9 +489,7 @@ static FAST_DECODE_TABLE: OnceLock<FastDecodeTable> = OnceLock::new();
 
 impl Emulator {
     pub fn new() -> Self {
-        Self {
-            table: FastDecodeTable::get(),
-        }
+        Self {}
     }
 
     pub fn step<C: EmuContext>(&self, ctx: &mut C) -> Result<()> {
