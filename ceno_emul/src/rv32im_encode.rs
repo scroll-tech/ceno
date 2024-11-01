@@ -1,4 +1,4 @@
-use crate::{InsnKind, rv32im::InsnFormat};
+use crate::{rv32im::InsnFormat, DecodedInstruction, InsnKind};
 
 const MASK_4_BITS: u32 = 0xF;
 const MASK_5_BITS: u32 = 0x1F;
@@ -15,6 +15,7 @@ const MASK_12_BITS: u32 = 0xFFF;
 ///
 /// Fields not required by the instruction's format type are ignored, so one can
 /// safely pass an arbitrary value for these, say 0.
+// TODO(Matthias): remove and replace with `Into<u32> for DecodedInstruction`
 pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> u32 {
     match kind.codes().format {
         InsnFormat::R => encode_r(kind, rs1, rs2, rd),
@@ -23,6 +24,12 @@ pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) 
         InsnFormat::B => encode_b(kind, rs1, rs2, imm),
         InsnFormat::U => encode_u(kind, rd, imm),
         InsnFormat::J => encode_j(kind, rd, imm),
+    }
+}
+
+impl From<DecodedInstruction> for u32 {
+    fn from(_: DecodedInstruction) -> u32 {
+        todo!()
     }
 }
 
