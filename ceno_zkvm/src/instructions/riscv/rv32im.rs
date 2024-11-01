@@ -30,6 +30,7 @@ use itertools::Itertools;
 use num_traits::cast::ToPrimitive;
 use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;
+use crate::tables::{OrTableCircuit, U5TableCircuit, U8TableCircuit, XorTableCircuit};
 
 use super::{
     arith::AddInstruction,
@@ -92,8 +93,12 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub u8_range_config: <U8TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub u5_range_config: <U5TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub and_table_config: <AndTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub or_table_config: <OrTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
 
     // RW tables.
@@ -155,8 +160,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
+        let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
+        let u5_range_config = cs.register_table_circuit::<U5TableCircuit<E>>();
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
         let and_table_config = cs.register_table_circuit::<AndTableCircuit<E>>();
+        let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
+        let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
 
         // RW tables
@@ -211,7 +220,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             // tables
             u16_range_config,
             u14_range_config,
+            u8_range_config,
+            u5_range_config,
             and_table_config,
+            or_table_config,
+            xor_table_config,
             ltu_config,
 
             reg_config,
@@ -274,7 +287,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
         fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
+        fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
+        fixed.register_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &());
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &());
+        fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
+        fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
 
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
@@ -392,7 +409,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
         witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
+        witness.assign_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &())?;
+        witness.assign_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &())?;
         witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
+        witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
+        witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
         witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
 
         // assign register finalization.
