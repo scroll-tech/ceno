@@ -11,7 +11,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::constants::{LIMB_BITS, UINT_LIMBS, UInt},
+    instructions::riscv::constants::{UINT_LIMBS, UInt},
     set_val,
     witness::LkMultiplicity,
 };
@@ -70,29 +70,6 @@ impl IsLtConfig {
     pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
         self.is_lt.expr()
     }
-
-    /// Determine whether a UInt is negative (as 2s complement)
-    ///
-    /// Also called Most Significant Bit extraction, when
-    /// interpreted as an unsigned int.
-    pub fn is_negative<
-        E: ExtensionField,
-        NR: Into<String> + Display + Clone,
-        N: FnOnce() -> NR,
-    >(
-        cb: &mut CircuitBuilder<E>,
-        name_fn: N,
-        limbs: &UInt<E>,
-    ) -> Result<Self, ZKVMError> {
-        Self::construct_circuit(
-            cb,
-            name_fn,
-            ((1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1).into(),
-            limbs.expr().last().unwrap().clone(),
-            LIMB_BITS.div_ceil(LIMB_BITS),
-        )
-    }
-
     pub fn construct_circuit<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,
@@ -355,8 +332,8 @@ impl InnerSignedLtConfig {
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // Extract the sign bit.
-        let is_lhs_neg = IsLtConfig::is_negative(cb, || "lhs_msb", lhs)?;
-        let is_rhs_neg = IsLtConfig::is_negative(cb, || "rhs_msb", rhs)?;
+        let is_lhs_neg = lhs.is_negative(cb, || "lhs_msb")?;
+        let is_rhs_neg = rhs.is_negative(cb, || "rhs_msb")?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());

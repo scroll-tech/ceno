@@ -8,7 +8,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::{AssertLTConfig, IsLtConfig},
+    instructions::riscv::constants::{LIMB_BITS, UInt},
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
@@ -20,6 +21,7 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use std::{
     borrow::Cow,
+    fmt::Display,
     mem::{self, MaybeUninit},
     ops::Index,
 };
@@ -531,6 +533,26 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         // Convert two's complement representation into field arithmetic.
         // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
         self.value() - is_neg * (1_u64 << 32)
+    }
+}
+
+impl<E: ExtensionField> UInt<E> {
+    /// Determine whether a UInt is negative (as 2s complement)
+    ///
+    /// Also called Most Significant Bit extraction, when
+    /// interpreted as an unsigned int.
+    pub fn is_negative<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+        name_fn: N,
+    ) -> Result<IsLtConfig, ZKVMError> {
+        IsLtConfig::construct_circuit(
+            cb,
+            name_fn,
+            ((1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1).into(),
+            self.expr().last().unwrap().clone(),
+            LIMB_BITS.div_ceil(LIMB_BITS),
+        )
     }
 }
 

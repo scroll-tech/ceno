@@ -62,7 +62,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         let (value_expr, is_rs1_neg) = match I::INST_KIND {
             InsnKind::SLTIU => (rs1_read.value(), None),
             InsnKind::SLTI => {
-                let is_rs1_neg = IsLtConfig::is_negative(cb, || "lhs_msb", &rs1_read)?;
+                let is_rs1_neg = rs1_read.is_negative(cb, || "lhs_msb")?;
                 (rs1_read.to_field_expr(is_rs1_neg.expr()), Some(is_rs1_neg))
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
