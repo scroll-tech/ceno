@@ -31,19 +31,17 @@ pub struct ShiftConfig<E: ExtensionField> {
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
-#[cfg(test)]
-struct SllOp;
-#[cfg(test)]
+pub struct SllOp;
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
+pub type SllInstruction<E> = ShiftLogicalInstruction<E, SllOp>;
 
-#[cfg(test)]
-struct SrlOp;
-#[cfg(test)]
+pub struct SrlOp;
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
 }
+pub type SrlInstruction<E> = ShiftLogicalInstruction<E, SrlOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftConfig<E>;
