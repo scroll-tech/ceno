@@ -347,6 +347,13 @@ impl<E: ExtensionField> Shl<usize> for &Expression<E> {
     }
 }
 
+impl<E: ExtensionField> Shl<usize> for &mut Expression<E> {
+    type Output = Expression<E>;
+    fn shl(self, rhs: usize) -> Expression<E> {
+        self.clone() << rhs
+    }
+}
+
 impl<E: ExtensionField> ShlAssign<usize> for Expression<E> {
     fn shl_assign(&mut self, rhs: usize) {
         *self = self.clone() << rhs;
