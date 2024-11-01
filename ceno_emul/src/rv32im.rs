@@ -15,7 +15,7 @@
 // limitations under the License.
 
 use anyhow::{Result, anyhow};
-use std::sync::OnceLock;
+use std::{collections::HashMap, sync::OnceLock};
 use strum_macros::EnumIter;
 
 use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
@@ -81,7 +81,7 @@ pub trait EmuContext {
 
 /// An implementation of the basic ISA (RV32IM), that is instruction decoding and functional units.
 pub struct Emulator {
-    table: &'static FastDecodeTable,
+    decoder_cache: HashMap<u32, (DecodedInstruction, InsnCodes)>,
 }
 
 #[derive(Debug)]
@@ -519,11 +519,19 @@ static FAST_DECODE_TABLE: OnceLock<FastDecodeTable> = OnceLock::new();
 impl Emulator {
     pub fn new() -> Self {
         Self {
-            table: FastDecodeTable::get(),
+            decoder_cache: HashMap::new(),
         }
     }
 
-    pub fn step<C: EmuContext>(&self, ctx: &mut C) -> Result<()> {
+    fn decode(&mut self, insn: u32) -> &(DecodedInstruction, InsnCodes) {
+        self.decoder_cache.entry(insn).or_insert_with(|| {
+            let decoded = DecodedInstruction::new(insn);
+            let codes = decoded.codes();
+            (decoded, codes)
+        })
+    }
+
+    pub fn step<C: EmuContext>(&mut self, ctx: &mut C) -> Result<()> {
         let pc = ctx.get_pc();
 
         if !ctx.check_insn_load(pc) {
@@ -542,8 +550,7 @@ impl Emulator {
             ));
         }
 
-        let decoded = DecodedInstruction::new(word);
-        let insn = self.table.lookup(&decoded);
+        let (decoded, insn) = self.decode(word).clone();
         ctx.on_insn_decoded(&decoded);
         tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 

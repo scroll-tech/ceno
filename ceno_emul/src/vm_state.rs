@@ -83,17 +83,17 @@ impl VMState {
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
-        let emu = Emulator::new();
+        let mut emu = Emulator::new();
         from_fn(move || {
             if self.halted() {
                 None
             } else {
-                Some(self.step(&emu))
+                Some(self.step(&mut emu))
             }
         })
     }
 
-    fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
+    fn step(&mut self, emu: &mut Emulator) -> Result<StepRecord> {
         emu.step(self)?;
         let step = self.tracer.advance();
         if step.is_busy_loop() && !self.halted() {
