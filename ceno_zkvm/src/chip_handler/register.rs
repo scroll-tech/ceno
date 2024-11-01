@@ -26,9 +26,7 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
             // READ (a, v, t)
             let read_record = cb.rlc_chip_record(
                 [
-                    vec![Expression::<E>::Constant(E::BaseField::from(
-                        RAMType::Register as u64,
-                    ))],
+                    vec![RAMType::Register.into()],
                     vec![register_id.expr()],
                     value.to_vec(),
                     vec![prev_ts.clone()],
