@@ -1,9 +1,13 @@
-use super::utils::{eval_by_expr, wit_infer_by_expr};
+use super::{
+    PublicValues,
+    utils::{eval_by_expr, wit_infer_by_expr},
+};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     expression::{Expression, fmt},
     scheme::utils::eval_by_expr_with_fixed,
+    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
         TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
@@ -20,7 +24,7 @@ use goldilocks::SmallField;
 use itertools::{Itertools, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -36,7 +40,7 @@ pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_base());
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
-pub(crate) enum MockProverError<E: ExtensionField> {
+pub enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
         evaluated: E::BaseField,
@@ -263,6 +267,7 @@ impl<E: ExtensionField> MockProverError<E> {
         }
     }
 
+    #[cfg(test)]
     fn inst_id(&self) -> usize {
         match self {
             Self::AssertZeroError { inst_id, .. }
@@ -278,7 +283,7 @@ impl<E: ExtensionField> MockProverError<E> {
     }
 }
 
-pub(crate) struct MockProver<E: ExtensionField> {
+pub struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
@@ -737,6 +742,102 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         Self::assert_with_expected_errors(cb, wits_in, programs, &[], challenge, lkm);
+    }
+
+    pub fn assert_satisfied_full(
+        cs: ZKVMConstraintSystem<E>,
+        mut fixed_trace: ZKVMFixedTraces<E>,
+        mut witnesses: ZKVMWitnesses<E>,
+        pi: &PublicValues<u32>,
+    ) {
+        let instance = pi.to_vec::<E>();
+        let challenges = [0x100, 0x10000].map(|i| E::from(i));
+
+        // Lookup errors
+        let mut rom_inputs = HashMap::<ROMType, Vec<(Vec<E>, String, Vec<Expression<E>>)>>::new();
+        let mut rom_tables = HashMap::<ROMType, Vec<(E, E::BaseField)>>::new();
+        for (circuit_name, cs) in cs.circuit_css {
+            let (is_opcode, witness) = witnesses.witnesses.remove(&circuit_name).unwrap();
+            let num_instances = witness.num_instances();
+            if num_instances == 0 {
+                continue;
+            }
+            let witness = witness
+                .into_mles()
+                .into_iter()
+                .map(|w| w.into())
+                .collect_vec();
+            let fixed: Vec<_> = fixed_trace
+                .circuit_fixed_traces
+                .remove(&circuit_name)
+                .unwrap()
+                .map_or(vec![], |fixed| {
+                    fixed
+                        .into_mles()
+                        .into_iter()
+                        .map(|f| f.into())
+                        .collect_vec()
+                });
+            if is_opcode {
+                // gather lookup inputs
+                for ((expr, annotation), (rom_type, values)) in cs
+                    .lk_expressions
+                    .iter()
+                    .zip(cs.lk_expressions_namespace_map.clone().into_iter())
+                    .zip(cs.lk_expressions_items_map.clone().into_iter())
+                {
+                    let lk_input =
+                        (wit_infer_by_expr(&fixed, &witness, &instance, &challenges, expr)
+                            .get_ext_field_vec())[..num_instances]
+                            .to_vec();
+                    if let Some(inputs) = rom_inputs.get_mut(&rom_type) {
+                        inputs.push((lk_input, annotation, values));
+                    } else {
+                        rom_inputs.insert(rom_type, vec![(lk_input, annotation, values)]);
+                    }
+                }
+            } else {
+                // gather lookup tables
+                for (expr, (rom_type, _)) in cs
+                    .lk_table_expressions
+                    .iter()
+                    .zip(cs.lk_expressions_items_map.clone().into_iter())
+                {
+                    let lk_table =
+                        wit_infer_by_expr(&fixed, &witness, &instance, &challenges, &expr.values)
+                            .get_ext_field_vec()
+                            .to_vec();
+                    let multiplicity = wit_infer_by_expr(
+                        &fixed,
+                        &witness,
+                        &instance,
+                        &challenges,
+                        &expr.multiplicity,
+                    )
+                    .get_base_field_vec()
+                    .to_vec();
+
+                    assert!(
+                        rom_tables
+                            .insert(
+                                rom_type,
+                                lk_table
+                                    .into_iter()
+                                    .zip(multiplicity.into_iter())
+                                    .collect_vec(),
+                            )
+                            .is_none(),
+                        "cannot assign to rom table {:?} twice",
+                        rom_type
+                    );
+                }
+            }
+        }
+
+        assert_eq!(
+            rom_inputs.keys().cloned().collect::<HashSet<ROMType>>(),
+            rom_tables.keys().cloned().collect::<HashSet<ROMType>>()
+        );
     }
 }
 

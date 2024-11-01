@@ -43,7 +43,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
@@ -175,7 +175,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMFixedTraces<E: ExtensionField> {
     pub circuit_fixed_traces: BTreeMap<String, Option<RowMajorMatrix<E::BaseField>>>,
 }
@@ -203,7 +203,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
     pub witnesses: BTreeMap<String, (bool, RowMajorMatrix<E::BaseField>)>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,

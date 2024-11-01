@@ -123,9 +123,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
-    #[cfg(test)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
-    #[cfg(test)]
     pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
@@ -160,9 +158,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
-            #[cfg(test)]
             debug_map: HashMap::new(),
-            #[cfg(test)]
             lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
@@ -251,12 +247,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
             std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
-                .chain(
-                    #[cfg(test)]
-                    items.clone(),
-                    #[cfg(not(test))]
-                    items,
-                )
+                .chain(items.clone())
                 .collect(),
         );
         assert_eq!(
@@ -268,7 +259,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
-        #[cfg(test)]
         self.lk_expressions_items_map.push((rom_type, items));
         Ok(())
     }
@@ -277,13 +267,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         table_len: usize,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        items: Vec<Expression<E>>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let rlc_record = self.rlc_chip_record(
+            vec![(rom_type as usize).into()]
+                .into_iter()
+                .chain(items.clone())
+                .collect_vec(),
+        );
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -297,6 +294,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name_fn().into());
         self.lk_table_expressions_namespace_map.push(path);
+        self.lk_expressions_items_map.push((rom_type, items));
 
         Ok(())
     }

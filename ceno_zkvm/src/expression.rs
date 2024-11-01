@@ -12,7 +12,6 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
-#[cfg(test)]
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
 use crate::{
@@ -836,7 +835,6 @@ pub mod fmt {
         if add_parens { format!("({})", s) } else { s }
     }
 
-    #[cfg(test)]
     pub fn wtns<E: ExtensionField>(
         wtns: &[WitnessId],
         wits_in: &[ArcMultilinearExtension<E>],
