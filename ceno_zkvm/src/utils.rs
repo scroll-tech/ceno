@@ -144,6 +144,23 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
     ans
 }
 
+/// evaluate MLE M(x0, x1, x2, ..., xn) address vector with it evaluation format a*[0, 1, 2, 3, ....2^n-1] + b
+/// on r = [r0, r1, r2, ...rn] succintly
+/// a, b, is constant
+/// the result M(r0, r1,... rn) = r0 + r1 * 2 + r2 * 2^2 + .... rn * 2^n
+pub fn eval_wellform_address_vec<E: ExtensionField>(offset: u64, scaled: u64, r: &[E]) -> E {
+    let (offset, scaled) = (E::from(offset), E::from(scaled));
+    offset
+        + scaled
+            * r.iter()
+                .scan(E::ONE, |state, x| {
+                    let result = *x * *state;
+                    *state *= E::from(2); // Update the state for the next power of 2
+                    Some(result)
+                })
+                .sum::<E>()
+}
+
 /// transpose 2d vector without clone
 pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
     assert!(!v.is_empty());

@@ -262,7 +262,7 @@ fn test_single_add_instance_e2e() {
     let mut add_records = vec![];
     let mut halt_records = vec![];
     all_records.into_iter().for_each(|record| {
-        let kind = record.insn().kind().1;
+        let kind = record.insn().codes().kind;
         match kind {
             ADD => add_records.push(record),
             EANY => {
@@ -299,7 +299,7 @@ fn test_single_add_instance_e2e() {
         )
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)

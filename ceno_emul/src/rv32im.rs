@@ -101,6 +101,7 @@ pub enum TrapCause {
 pub struct DecodedInstruction {
     insn: u32,
     top_bit: u32,
+    // The bit fields of the instruction encoding, regardless of the instruction format.
     func7: u32,
     rs2: u32,
     rs1: u32,
@@ -110,8 +111,9 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum InsnCategory {
+enum InsnCategory {
     Compute,
+    Branch,
     Load,
     Store,
     System,
@@ -201,6 +203,9 @@ pub struct InsnCodes {
 }
 
 impl DecodedInstruction {
+    /// A virtual register which absorbs the writes to x0.
+    pub const RD_NULL: u32 = 32;
+
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -222,22 +227,13 @@ impl DecodedInstruction {
         self.opcode
     }
 
-    /// Get the rd field, regardless of the instruction format.
-    pub fn rd(&self) -> u32 {
-        self.rd
-    }
-
-    /// Get the register destination, or zero if the instruction does not write to a register.
-    pub fn rd_or_zero(&self) -> u32 {
+    /// The internal register destination. It is either the regular rd, or an internal RD_NULL if
+    /// the instruction does not write to a register or writes to x0.
+    pub fn rd_internal(&self) -> u32 {
         match self.codes().format {
-            R | I | U | J => self.rd,
-            _ => 0,
+            R | I | U | J if self.rd != 0 => self.rd,
+            _ => Self::RD_NULL,
         }
-    }
-
-    /// Get the funct3 field, regardless of the instruction format.
-    pub fn funct3(&self) -> u32 {
-        self.func3
     }
 
     /// Get the funct3 field, or zero if the instruction does not use funct3.
@@ -274,18 +270,13 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct7 field, regardless of the instruction format.
-    pub fn funct7(&self) -> u32 {
-        self.func7
-    }
-
-    /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
-    pub fn imm_or_funct7(&self) -> u32 {
+    /// The internal view of the immediate, for use in circuits.
+    pub fn imm_internal(&self) -> u32 {
         match self.codes().format {
             R => self.func7,
             I => match self.codes().kind {
                 // decode the shift as a multiplication/division by 1 << immediate
-                SLLI | SRLI | SRAI => 1 << (self.imm_i() & 0x1f),
+                SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
                 _ => self.imm_i(),
             },
             S => self.imm_s(),
@@ -295,47 +286,49 @@ impl DecodedInstruction {
         }
     }
 
-    /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
-    pub fn imm_is_negative(&self) -> bool {
+    /// The internal interpretation of the immediate sign, for use in circuits.
+    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
+    /// example:
+    /// imm = ux::MAX - 1 implies
+    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
+    /// imm_field = ux::MAX - 1 otherwise
+    /// see InsnRecord::imm_internal_field
+    pub fn imm_field_is_negative(&self) -> bool {
         match self.codes() {
             InsnCodes { format: R | U, .. } => false,
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI,
+                kind: SLLI | SRLI | SRAI | ADDI | SLTIU,
                 ..
             } => false,
             _ => self.top_bit != 0,
         }
     }
 
-    pub fn sign_bit(&self) -> u32 {
-        self.top_bit
-    }
-
     pub fn codes(&self) -> InsnCodes {
         FastDecodeTable::get().lookup(self)
     }
 
-    pub fn kind(&self) -> (InsnCategory, InsnKind) {
-        let i = FastDecodeTable::get().lookup(self);
-        (i.category, i.kind)
-    }
-
-    pub fn imm_b(&self) -> u32 {
+    fn imm_b(&self) -> u32 {
         (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
-    pub fn imm_i(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
+    fn imm_i(&self) -> u32 {
+        (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
-    pub fn imm_s(&self) -> u32 {
+    /// Shift amount field of SLLI, SRLI, SRAI.
+    fn imm_shamt(&self) -> u32 {
+        self.rs2
+    }
+
+    fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
-    pub fn imm_j(&self) -> u32 {
+    fn imm_j(&self) -> u32 {
         (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
             | (self.func3 << 12)
@@ -344,7 +337,7 @@ impl DecodedInstruction {
             | (self.rs2 & 0x1e)
     }
 
-    pub fn imm_u(&self) -> u32 {
+    fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
     }
 }
@@ -371,7 +364,7 @@ fn test_decode_imm() {
             0x20,
         ),
     ] {
-        let imm = DecodedInstruction::new(i).imm_or_funct7();
+        let imm = DecodedInstruction::new(i).imm_internal();
         assert_eq!(imm, expected);
     }
 }
@@ -418,12 +411,12 @@ const RV32IM_ISA: InstructionTable = [
     insn(I, SRAI, Compute, 0x13, 0x5, 0x20),
     insn(I, SLTI, Compute, 0x13, 0x2, -1),
     insn(I, SLTIU, Compute, 0x13, 0x3, -1),
-    insn(B, BEQ, Compute, 0x63, 0x0, -1),
-    insn(B, BNE, Compute, 0x63, 0x1, -1),
-    insn(B, BLT, Compute, 0x63, 0x4, -1),
-    insn(B, BGE, Compute, 0x63, 0x5, -1),
-    insn(B, BLTU, Compute, 0x63, 0x6, -1),
-    insn(B, BGEU, Compute, 0x63, 0x7, -1),
+    insn(B, BEQ, Branch, 0x63, 0x0, -1),
+    insn(B, BNE, Branch, 0x63, 0x1, -1),
+    insn(B, BLT, Branch, 0x63, 0x4, -1),
+    insn(B, BGE, Branch, 0x63, 0x5, -1),
+    insn(B, BLTU, Branch, 0x63, 0x6, -1),
+    insn(B, BGEU, Branch, 0x63, 0x7, -1),
     insn(J, JAL, Compute, 0x6f, -1, -1),
     insn(I, JALR, Compute, 0x67, 0x0, -1),
     insn(U, LUI, Compute, 0x37, -1, -1),
@@ -556,6 +549,7 @@ impl Emulator {
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
+            InsnCategory::Branch => self.step_branch(ctx, insn.kind, &decoded)?,
             InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
             InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
             InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
@@ -577,15 +571,7 @@ impl Emulator {
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
-        let mut rd = decoded.rd;
         let imm_i = decoded.imm_i();
-        let mut br_cond = |cond| -> u32 {
-            rd = 0;
-            if cond {
-                new_pc = pc.wrapping_add(decoded.imm_b());
-            }
-            0
-        };
         let out = match kind {
             // Instructions that do not read rs1 nor rs2.
             JAL => {
@@ -653,12 +639,6 @@ impl Emulator {
                                     0
                                 }
                             }
-                            BEQ => br_cond(rs1 == rs2),
-                            BNE => br_cond(rs1 != rs2),
-                            BLT => br_cond((rs1 as i32) < (rs2 as i32)),
-                            BGE => br_cond((rs1 as i32) >= (rs2 as i32)),
-                            BLTU => br_cond(rs1 < rs2),
-                            BGEU => br_cond(rs1 >= rs2),
                             MUL => rs1.wrapping_mul(rs2),
                             MULH => {
                                 (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32)
@@ -704,7 +684,42 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
+        ctx.set_pc(new_pc);
+        Ok(true)
+    }
+
+    fn step_branch<M: EmuContext>(
+        &self,
+        ctx: &mut M,
+        kind: InsnKind,
+        decoded: &DecodedInstruction,
+    ) -> Result<bool> {
+        use InsnKind::*;
+
+        let pc = ctx.get_pc();
+        let rs1 = ctx.load_register(decoded.rs1 as RegIdx)?;
+        let rs2 = ctx.load_register(decoded.rs2 as RegIdx)?;
+
+        let taken = match kind {
+            BEQ => rs1 == rs2,
+            BNE => rs1 != rs2,
+            BLT => (rs1 as i32) < (rs2 as i32),
+            BGE => (rs1 as i32) >= (rs2 as i32),
+            BLTU => rs1 < rs2,
+            BGEU => rs1 >= rs2,
+            _ => unreachable!("Illegal branch instruction: {:?}", kind),
+        };
+
+        let new_pc = if taken {
+            pc.wrapping_add(decoded.imm_b())
+        } else {
+            pc + WORD_SIZE
+        };
+
+        if !new_pc.is_aligned() {
+            return ctx.trap(TrapCause::InstructionAddressMisaligned);
+        }
         ctx.set_pc(new_pc);
         Ok(true)
     }
@@ -756,7 +771,7 @@ impl Emulator {
             }
             _ => unreachable!(),
         };
-        ctx.store_register(decoded.rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
         ctx.set_pc(ctx.get_pc() + WORD_SIZE);
         Ok(true)
     }
