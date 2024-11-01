@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
@@ -513,11 +513,6 @@ impl Emulator {
 
     pub fn step<C: EmuContext>(&self, ctx: &mut C) -> Result<()> {
         let pc = ctx.get_pc();
-
-        if !ctx.check_insn_load(pc) {
-            ctx.trap(TrapCause::InstructionAccessFault)?;
-            return Err(anyhow!("Fatal: could not fetch instruction at pc={:?}", pc));
-        }
 
         let insn = ctx.fetch(pc.waddr())?;
         tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
