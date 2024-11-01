@@ -18,7 +18,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 
-use crate::addr::WORD_SIZE;
+use crate::{ByteAddr, DecodedInstruction, WordAddr, addr::WORD_SIZE};
 use anyhow::{Context, Result, anyhow, bail};
 use elf::{
     ElfBytes,
@@ -35,7 +35,7 @@ pub struct Program {
     /// This is the lowest address of the program's executable code
     pub base_address: u32,
     /// The instructions of the program
-    pub instructions: Vec<u32>,
+    pub instructions: BTreeMap<WordAddr, DecodedInstruction>,
     /// The initial memory image
     pub image: BTreeMap<u32, u32>,
 }
@@ -51,7 +51,15 @@ impl Program {
         Self {
             entry,
             base_address,
-            instructions,
+            instructions: instructions
+                .into_iter()
+                .enumerate()
+                .map(|(i, insn)| {
+                    let addr = base_address + (i * WORD_SIZE) as u32;
+                    let addr = ByteAddr(addr).waddr();
+                    (addr, DecodedInstruction::from(insn))
+                })
+                .collect(),
             image,
         }
     }
@@ -162,11 +170,6 @@ impl Program {
         assert!(entry >= base_address);
         assert!((entry - base_address) as usize <= instructions.len() * WORD_SIZE);
 
-        Ok(Program {
-            entry,
-            base_address,
-            image,
-            instructions,
-        })
+        Ok(Program::new(entry, base_address, instructions, image))
     }
 }

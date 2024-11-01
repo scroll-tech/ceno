@@ -185,10 +185,16 @@ impl EmuContext for VMState {
         *self.memory.get(&addr).unwrap_or(&0)
     }
 
-    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        let value = self.peek_memory(pc);
-        self.tracer.fetch(pc, value);
-        Ok(value)
+    // TODO: figure out how to return a reference.
+    fn fetch(&mut self, pc: WordAddr) -> Result<DecodedInstruction> {
+        let i = self
+            .program
+            .instructions
+            .get(&pc)
+            .ok_or_else(|| anyhow!("Invalid PC"))?;
+        // let value = self.peek_memory(pc);
+        self.tracer.fetch(pc, i.insn);
+        Ok(*i)
     }
 
     fn check_data_load(&self, addr: ByteAddr) -> bool {

@@ -1,4 +1,4 @@
-use crate::{rv32im::InsnFormat, DecodedInstruction, InsnKind};
+use crate::{DecodedInstruction, InsnKind, rv32im::InsnFormat};
 
 const MASK_4_BITS: u32 = 0xF;
 const MASK_5_BITS: u32 = 0x1F;

@@ -55,10 +55,8 @@ pub trait EmuContext {
     fn peek_memory(&self, addr: WordAddr) -> Word;
 
     // Load from memory, in the context of instruction fetching.
-    // Only called after check_insn_load returns true.
-    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        self.load_memory(pc)
-    }
+    // TODO: figure out how to return a reference.
+    fn fetch(&mut self, pc: WordAddr) -> Result<DecodedInstruction>;
 
     // Check access for instruction load
     fn check_insn_load(&self, _addr: ByteAddr) -> bool {
@@ -107,7 +105,7 @@ struct DecodedInstructionOld {
     opcode: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DecodedInstruction {
     // insn: u32,
     // This should be able to handle i32::MIN to u32::MAX.
@@ -118,9 +116,9 @@ pub struct DecodedInstruction {
     pub rd: u32,
     pub kind: InsnKind,
 
-    // Only for debugging.
+    // This should only be her for debugging.
     #[allow(dead_code)]
-    insn: u32,
+    pub insn: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -217,6 +215,12 @@ pub struct InsnCodes {
 impl From<DecodedInstructionOld> for DecodedInstruction {
     fn from(d: DecodedInstructionOld) -> Self {
         DecodedInstruction::new(d.insn)
+    }
+}
+
+impl From<u32> for DecodedInstruction {
+    fn from(word: u32) -> Self {
+        DecodedInstruction::new(word)
     }
 }
 
@@ -500,19 +504,19 @@ impl Emulator {
             return Err(anyhow!("Fatal: could not fetch instruction at pc={:?}", pc));
         }
 
-        let word = ctx.fetch(pc.waddr())?;
-        if word & 0x03 != 0x03 {
-            // Opcode must end in 0b11 in RV32IM.
-            ctx.trap(TrapCause::IllegalInstruction(word))?;
-            return Err(anyhow!(
-                "Fatal: illegal instruction at pc={:?}: 0x{:08x}",
-                pc,
-                word
-            ));
-        }
+        let insn = ctx.fetch(pc.waddr())?;
+        // if word & 0x03 != 0x03 {
+        //     // Opcode must end in 0b11 in RV32IM.
+        //     ctx.trap(TrapCause::IllegalInstruction(word))?;
+        //     return Err(anyhow!(
+        //         "Fatal: illegal instruction at pc={:?}: 0x{:08x}",
+        //         pc,
+        //         word
+        //     ));
+        // }
 
         // TODO: decode once at the beginning, instead of all the time like here.
-        let insn = DecodedInstruction::new(word);
+        // let insn = DecodedInstruction::new(word);
         tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.kind.into() {
@@ -521,7 +525,7 @@ impl Emulator {
             InsnCategory::Load => self.step_load(ctx, &insn)?,
             InsnCategory::Store => self.step_store(ctx, &insn)?,
             InsnCategory::System => self.step_system(ctx, &insn)?,
-            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(word))?,
+            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.insn))?,
         } {
             ctx.on_normal_end(&insn);
         };

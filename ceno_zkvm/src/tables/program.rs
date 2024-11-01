@@ -11,7 +11,7 @@ use crate::{
     utils::i64_to_base,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
+use ceno_emul::{ByteAddr, DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -60,12 +60,6 @@ impl<T> InsnRecord<T> {
 
     pub fn rs2(&self) -> &T {
         &self.0[4]
-    }
-
-    // TODO: Remove this.  nothing complicated about imm anymore.
-    /// Iterate through the fields, except immediate because it is complicated.
-    fn without_imm(&self) -> &[T] {
-        &self.0[0..5]
     }
 
     /// The internal view of the immediate. See `DecodedInstruction::imm_internal`.
@@ -150,10 +144,12 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
                 let pc = pc_base + (i * PC_STEP_SIZE) as u32;
-                let insn = DecodedInstruction::new(program.instructions[i]);
+                let pc_word = ByteAddr(pc).waddr();
+                // TODO: don't uwrap, handle properly, ie iterate over the instructions, instead of over some range.
+                let insn = *program.instructions.get(&pc_word).unwrap();
                 let values = InsnRecord::from_decoded(pc, &insn);
 
-                for (col, val) in config.record.0.iter().zip_eq(values.without_imm()) {
+                for (col, val) in config.record.0.iter().zip_eq(values.as_slice()) {
                     set_fixed_val!(row, *col, i64_to_base(*val));
                 }
             });
