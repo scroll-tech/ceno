@@ -107,15 +107,31 @@ struct DecodedInstructionOld {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DecodedInstruction {
-    // This should be able to handle i32::MIN to u32::MAX.
-    // Convert to field type in the straightforward way.
-    pub imm: i64,
-    pub rs1: u32,
-    pub rs2: u32,
-    pub rd: u32,
     pub kind: InsnKind,
+    /// The index of the first source register.
+    ///
+    /// Instructions that do not read a source register will have this set to 0.
+    pub rs1: u32,
+    /// The index of the second source register.
+    ///
+    /// Instructions that do not read a second source register will have this set to 0.
+    pub rs2: u32,
+    /// The index of the destination register.
+    ///
+    /// Instructions that do not write to a destination register will have this set to `RD_NULL`.
+    pub rd: u32,
+    /// The immediate value.
+    ///
+    /// This should be able to handle i32::MIN to u32::MAX, so we need i64.
+    /// Conversion to a field element can happen with eg `crate::utils::i64_to_base`
+    ///
+    /// Instructions that don't use an immediate value will have this set to 0.
+    pub imm: i64,
 
-    // This should only be her for debugging.
+    /// The original encoded instruction word.
+    ///
+    /// This is useful for debugging and logging.
+    /// TODO(Matthias): we still use this otherwise, remove those uses.
     #[allow(dead_code)]
     pub word: u32,
 }
