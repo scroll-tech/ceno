@@ -205,7 +205,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    witnesses: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
@@ -223,7 +223,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
             OC::assign_instances(config, cs.num_witin as usize, records)?;
-        assert!(self.witnesses.insert(OC::name(), witness).is_none());
+        assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
             self.lk_mlts
@@ -276,14 +276,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             input,
         )?;
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
-        assert!(!self.witnesses.contains_key(&TC::name()));
+        assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
         Ok(())
     }
 
     /// Iterate opcode circuits, then table circuits, sorted by name.
     pub fn into_iter_sorted(self) -> impl Iterator<Item = (String, RowMajorMatrix<E::BaseField>)> {
-        self.witnesses.into_iter().chain(self.witnesses_tables)
+        self.witnesses_opcodes
+            .into_iter()
+            .chain(self.witnesses_tables)
     }
 }
 
