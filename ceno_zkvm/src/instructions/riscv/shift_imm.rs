@@ -56,6 +56,23 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
+        // treat bit shifting as a bit "inflow" and "outflow" process, flowing from left to right or vice versa
+        // this approach simplifies constraint and witness allocation compared to using multiplication/division gadget,
+        // as the divisor/multiplier is a power of 2.
+        //
+        // example: right shift (bit flow from left to right)
+        //    inflow || rs1_read == rd_written || outflow
+        // in this case, inflow consists of either all 0s or all 1s for sign extension (if the value is signed).
+        //
+        // for left shifts, the inflow is always 0:
+        //    rs1_read || inflow == outflow || rd_written
+        //
+        // additional constraint: outflow < (1 << shift), which lead to unique solution
+
+        // soundness: take Goldilocks as example, both sides of the equation are 63 bits numbers (<2**63)
+        // rd * imm + outflow == inflow * 2**32 + rs1
+        // 32 + 31.   31.        31 + 32.         32.     (Bit widths)
+
         // Note: `imm` wtns is set to 2**imm (upto 32 bit) just for efficient verification.
         let imm = circuit_builder.create_witin(|| "imm");
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;

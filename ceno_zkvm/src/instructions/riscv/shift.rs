@@ -29,7 +29,7 @@ pub struct ShiftConfig<E: ExtensionField> {
     assert_lt_config: AssertLTConfig,
 
     // SRA
-    signed_extend_config: Option<SignedExtendConfig>,
+    signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
@@ -59,6 +59,23 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     fn construct_circuit(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
+        // treat bit shifting as a bit "inflow" and "outflow" process, flowing from left to right or vice versa
+        // this approach simplifies constraint and witness allocation compared to using multiplication/division gadget,
+        // as the divisor/multiplier is a power of 2.
+        //
+        // example: right shift (bit flow from left to right)
+        //    inflow || rs1_read == rd_written || outflow
+        // in this case, inflow consists of either all 0s or all 1s for sign extension (if the value is signed).
+        //
+        // for left shifts, the inflow is always 0:
+        //    rs1_read || inflow == outflow || rd_written
+        //
+        // additional constraint: outflow < (1 << shift), which lead to unique solution
+
+        // soundness: take Goldilocks as example, both sides of the equation are 63 bits numbers (<2**63)
+        // rd_written * pow2_rs2_low5 + outflow == inflow * 2**32 + rs1_read
+        // 32 + 31.                     31.        31 + 32.         32.     (Bit widths)
+
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
@@ -92,11 +109,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             InsnKind::SRL | InsnKind::SRA => {
                 let (inflow, signed_extend_config) = match I::INST_KIND {
                     InsnKind::SRA => {
-                        let signed_extend_config = SignedExtendConfig::construct_limb(
-                            circuit_builder,
-                            rs1_read.limbs.iter().last().unwrap().expr(),
-                        )?;
-                        let msb_expr = signed_extend_config.msb.expr();
+                        let signed_extend_config = rs1_read.is_negative(circuit_builder)?;
+                        let msb_expr = signed_extend_config.expr();
                         let ones = pow2_rs2_low5.expr() - Expression::ONE;
                         (msb_expr * ones, Some(signed_extend_config))
                     }
@@ -182,7 +196,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                 let Some(signed_ext_config) = config.signed_extend_config.as_ref() else {
                     Err(ZKVMError::CircuitError)?
                 };
-                signed_ext_config.assign_instance::<E>(
+                signed_ext_config.assign_instance(
                     instance,
                     lk_multiplicity,
                     *rs1_read.as_u16_limbs().last().unwrap() as u64,
