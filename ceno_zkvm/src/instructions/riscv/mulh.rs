@@ -260,6 +260,13 @@ struct Signed<E: ExtensionField> {
     val: Expression<E>,
 }
 
+impl<E: ExtensionField> ToExpr<E> for Signed<E> {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+            self.val.clone()
+    }
+}
+
 impl<E: ExtensionField> Signed<E> {
     pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
@@ -299,10 +306,6 @@ impl<E: ExtensionField> Signed<E> {
         let signed_val = val.as_u32() as i32;
 
         Ok(signed_val)
-    }
-
-    pub fn expr(&self) -> Expression<E> {
-        self.val.clone()
     }
 }
 

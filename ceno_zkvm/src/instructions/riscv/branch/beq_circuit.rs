@@ -4,16 +4,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use crate::{
-    Value,
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::Expression,
-    gadgets::IsEqualConfig,
-    instructions::{
-        Instruction,
-        riscv::{RIVInstruction, b_insn::BInstructionConfig, constants::UInt},
-    },
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, expression::{Expression, ToExpr}, gadgets::IsEqualConfig, instructions::{
+        riscv::{b_insn::BInstructionConfig, constants::UInt, RIVInstruction}, Instruction
+    }, witness::LkMultiplicity, Value
 };
 
 pub struct BeqConfig<E: ExtensionField> {

@@ -62,11 +62,15 @@ impl IsZeroConfig {
 
 pub struct IsEqualConfig(IsZeroConfig);
 
-impl IsEqualConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> ToExpr<E> for IsEqualConfig {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
         self.0.expr()
     }
+}
 
+
+impl IsEqualConfig {
     pub fn construct_circuit<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
