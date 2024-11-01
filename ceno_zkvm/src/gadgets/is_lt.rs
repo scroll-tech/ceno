@@ -6,18 +6,12 @@ use goldilocks::SmallField;
 use itertools::izip;
 
 use crate::{
-    Value,
-    chip_handler::utils::power_sequence,
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn, impl_from_via_ToExpr},
-    instructions::riscv::constants::{UINT_LIMBS, UInt},
-    set_val,
-    witness::LkMultiplicity,
+    chip_handler::utils::power_sequence, circuit_builder::CircuitBuilder, error::ZKVMError, expression::{impl_from_via_ToExpr, mixed_binop_instances, Expression, ToExpr, WitIn}, instructions::riscv::constants::{UInt, UINT_LIMBS}, set_val, witness::LkMultiplicity, Value
 };
 
 #[derive(Debug, Clone)]
 pub struct AssertLTConfig(InnerLtConfig);
+
 
 impl AssertLTConfig {
     pub fn construct_circuit<
@@ -67,6 +61,7 @@ pub struct IsLtConfig {
 }
 
 impl_from_via_ToExpr!(IsLtConfig);
+mixed_binop_instances!(IsLtConfig);
 
 impl<E: ExtensionField> ToExpr<E> for IsLtConfig {
     type Output = Expression<E>;

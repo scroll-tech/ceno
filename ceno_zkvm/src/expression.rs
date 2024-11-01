@@ -544,58 +544,67 @@ ref_binop_instances!(Add, add);
 ref_binop_instances!(Sub, sub);
 ref_binop_instances!(Mul, mul);
 
-macro_rules! mixed_binop_instances {
-    ($op: ident, $fun: ident, ($($t:ty),*)) => {
-        $(impl<E: ExtensionField> $op<Expression<E>> for $t {
-            type Output = Expression<E>;
+// impl<E: ExtensiofnField, T: ToExpr<E>> Add<T> for Expression<E> {
+//     type Output = Expression<E>;
+//     fn add(self, rhs: T) -> Expression<E> {
+//         self + rhs.expr()
+//     }
+// }
 
-            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
-                Expression::<E>::from(self).$fun(rhs)
-            }
+macro mixed_binop_instances_internal($op: ident, $fun: ident, $t:ty) {
+    impl<E: ExtensionField> $op<Expression<E>> for $t {
+        type Output = Expression<E>;
+
+        fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+            Expression::<E>::from(self).$fun(rhs)
         }
+    }
 
-        impl<E: ExtensionField> $op<$t> for Expression<E> {
-            type Output = Expression<E>;
+    impl<E: ExtensionField> $op<$t> for Expression<E> {
+        type Output = Expression<E>;
 
-            fn $fun(self, rhs: $t) -> Expression<E> {
-                self.$fun(Expression::<E>::from(rhs))
-            }
+        fn $fun(self, rhs: $t) -> Expression<E> {
+            self.$fun(Expression::<E>::from(rhs))
         }
+    }
 
-        impl<E: ExtensionField> $op<&Expression<E>> for $t {
-            type Output = Expression<E>;
+    impl<E: ExtensionField> $op<&Expression<E>> for $t {
+        type Output = Expression<E>;
 
-            fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
-                Expression::<E>::from(self).$fun(rhs)
-            }
+        fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
+            Expression::<E>::from(self).$fun(rhs)
         }
+    }
 
-        impl<E: ExtensionField> $op<$t> for &Expression<E> {
-            type Output = Expression<E>;
+    impl<E: ExtensionField> $op<$t> for &Expression<E> {
+        type Output = Expression<E>;
 
-            fn $fun(self, rhs: $t) -> Expression<E> {
-                self.$fun(Expression::<E>::from(rhs))
-            }
+        fn $fun(self, rhs: $t) -> Expression<E> {
+            self.$fun(Expression::<E>::from(rhs))
         }
-    )*
-    };
+    }
 }
 
-mixed_binop_instances!(
-    Add,
-    add,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
-);
-mixed_binop_instances!(
-    Sub,
-    sub,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
-);
-mixed_binop_instances!(
-    Mul,
-    mul,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
-);
+pub macro mixed_binop_instances ($($t:ty),*) {
+    $(mixed_binop_instances_internal!(
+        Add,
+        add,
+        $t
+    );
+    mixed_binop_instances_internal!(
+        Sub,
+        sub,
+        $t
+    );
+    mixed_binop_instances_internal!(
+        Mul,
+        mul,
+        $t
+    );
+)*
+}
+
+mixed_binop_instances!(u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize);
 
 impl<E: ExtensionField> Mul for Expression<E> {
     type Output = Expression<E>;
