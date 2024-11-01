@@ -47,7 +47,7 @@ impl<E: ExtensionField> Instruction<E> for SltiInstruction<E> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
         let imm = cb.create_witin(|| "imm");
 
-        let is_rs1_neg = IsLtConfig::constrain_last_limb(cb, || "lhs_msb", &rs1_read)?;
+        let is_rs1_neg = IsLtConfig::is_negative(cb, || "lhs_msb", &rs1_read)?;
 
         let lt = IsLtConfig::construct_circuit(
             cb,

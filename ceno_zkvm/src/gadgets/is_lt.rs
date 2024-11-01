@@ -71,7 +71,11 @@ impl IsLtConfig {
         self.is_lt.expr()
     }
 
-    pub fn constrain_last_limb<
+    /// Determine whether a UInt is negative (as 2s complement)
+    ///
+    /// Also called Most Significant Bit extraction, when
+    /// interpreted as an unsigned int.
+    pub fn is_negative<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,
         N: FnOnce() -> NR,
@@ -351,8 +355,8 @@ impl InnerSignedLtConfig {
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         // Extract the sign bit.
-        let is_lhs_neg = IsLtConfig::constrain_last_limb(cb, || "lhs_msb", lhs)?;
-        let is_rhs_neg = IsLtConfig::constrain_last_limb(cb, || "rhs_msb", rhs)?;
+        let is_lhs_neg = IsLtConfig::is_negative(cb, || "lhs_msb", lhs)?;
+        let is_rhs_neg = IsLtConfig::is_negative(cb, || "rhs_msb", rhs)?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
