@@ -336,7 +336,7 @@ binop_assign_instances!(MulAssign, mul_assign, Mul, mul);
 impl<E: ExtensionField> Shl<usize> for Expression<E> {
     type Output = Expression<E>;
     fn shl(self, rhs: usize) -> Expression<E> {
-        self * (1 << rhs)
+        self * (1_usize << rhs)
     }
 }
 
