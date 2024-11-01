@@ -176,6 +176,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 let pc = pc_base + (i * PC_STEP_SIZE) as u32;
                 let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
+                tracing::debug!("program: pc={:x}, insn={:x?}", pc, values.as_slice());
 
                 // Copy all the fields except immediate.
                 for (col, val) in config

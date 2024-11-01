@@ -6,7 +6,7 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     expression::{Expression, fmt},
-    scheme::utils::eval_by_expr_with_fixed,
+    scheme::utils::{eval_by_expr_with_fixed, eval_by_expr_with_instance},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
@@ -753,9 +753,11 @@ Hints:
         let instance = pi.to_vec::<E>();
         let challenges = [0x100, 0x10000].map(|i| E::from(i));
 
+        let mut wit_mles = HashMap::new();
         // Lookup errors
-        let mut rom_inputs = HashMap::<ROMType, Vec<(Vec<E>, String, Vec<Expression<E>>)>>::new();
-        let mut rom_tables = HashMap::<ROMType, Vec<(E, E::BaseField)>>::new();
+        let mut rom_inputs =
+            HashMap::<ROMType, Vec<(Vec<E>, String, String, Vec<Expression<E>>)>>::new();
+        let mut rom_tables = HashMap::<ROMType, HashMap<E, E::BaseField>>::new();
         for (circuit_name, cs) in cs.circuit_css {
             let (is_opcode, witness) = witnesses.witnesses.remove(&circuit_name).unwrap();
             let num_instances = witness.num_instances();
@@ -791,9 +793,14 @@ Hints:
                             .get_ext_field_vec())[..num_instances]
                             .to_vec();
                     if let Some(inputs) = rom_inputs.get_mut(&rom_type) {
-                        inputs.push((lk_input, annotation, values));
+                        inputs.push((lk_input, circuit_name.clone(), annotation, values));
                     } else {
-                        rom_inputs.insert(rom_type, vec![(lk_input, annotation, values)]);
+                        rom_inputs.insert(rom_type, vec![(
+                            lk_input,
+                            circuit_name.clone(),
+                            annotation,
+                            values,
+                        )]);
                     }
                 }
             } else {
@@ -824,7 +831,7 @@ Hints:
                                 lk_table
                                     .into_iter()
                                     .zip(multiplicity.into_iter())
-                                    .collect_vec(),
+                                    .collect::<HashMap<_, _>>(),
                             )
                             .is_none(),
                         "cannot assign to rom table {:?} twice",
@@ -832,12 +839,47 @@ Hints:
                     );
                 }
             }
+            wit_mles.insert(circuit_name, witness);
         }
 
-        assert_eq!(
-            rom_inputs.keys().cloned().collect::<HashSet<ROMType>>(),
-            rom_tables.keys().cloned().collect::<HashSet<ROMType>>()
-        );
+        for (rom_type, inputs) in rom_inputs.into_iter() {
+            let table = rom_tables.get_mut(&rom_type).unwrap();
+            for (lk_input_values, circuit_name, lk_input_annotation, input_value_exprs) in inputs {
+                for (row, input_value) in lk_input_values.into_iter().enumerate() {
+                    if let Some(multiplicity) = table.get_mut(&input_value) {
+                        if !multiplicity.is_zero_vartime() {
+                            *multiplicity -= E::BaseField::ONE;
+                            continue;
+                        }
+                    }
+                    let witness = wit_mles
+                        .get(&circuit_name)
+                        .map(|mles| {
+                            mles.iter()
+                                .map(|mle| E::from(mle.get_base_field_vec()[row]))
+                                .collect_vec()
+                        })
+                        .unwrap();
+                    let values = input_value_exprs
+                        .into_iter()
+                        .map(|expr| {
+                            eval_by_expr_with_instance(
+                                &[],
+                                &witness,
+                                &instance,
+                                challenges.as_slice(),
+                                &expr,
+                            )
+                            .as_bases()[0]
+                        })
+                        .collect_vec();
+                    panic!(
+                        "{}: value {:x?} does not occur in {:?} table at row {}",
+                        lk_input_annotation, values, rom_type, row,
+                    );
+                }
+            }
+        }
     }
 }
 
