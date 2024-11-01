@@ -12,7 +12,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 #[derive(Debug)]
 pub struct SignedExtendConfig<E> {
     /// most significant bit
-    pub msb: WitIn,
+    msb: WitIn,
     /// number of bits contained in the value
     n_bits: usize,
 
