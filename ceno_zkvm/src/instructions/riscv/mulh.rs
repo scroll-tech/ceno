@@ -256,7 +256,7 @@ impl<E: ExtensionField> Instruction<E> for MulhInstruction<E> {
 /// corresponding signed value, interpreting the bits as a 2s-complement
 /// encoding.  Gadget allocates 2 `WitIn` values in total.
 struct Signed<E: ExtensionField> {
-    pub is_negative: SignedExtendConfig,
+    pub is_negative: SignedExtendConfig<E>,
     val: Expression<E>,
 }
 
@@ -267,7 +267,6 @@ impl<E: ExtensionField> Signed<E> {
         unsigned_val: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
         cb.namespace(name_fn, |cb| {
-            // is_lt is set if top limb of val is negative
             let is_negative = unsigned_val.is_negative(cb)?;
             let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
 
@@ -281,7 +280,7 @@ impl<E: ExtensionField> Signed<E> {
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
     ) -> Result<i32, ZKVMError> {
-        self.is_negative.assign_instance::<E>(
+        self.is_negative.assign_instance(
             instance,
             lkm,
             *val.as_u16_limbs().last().unwrap() as u64,

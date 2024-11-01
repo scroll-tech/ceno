@@ -232,16 +232,12 @@ pub fn cal_lt_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) ->
 }
 
 #[derive(Debug)]
-pub struct AssertSignedLtConfig {
-    config: InnerSignedLtConfig,
+pub struct AssertSignedLtConfig<E> {
+    config: InnerSignedLtConfig<E>,
 }
 
-impl AssertSignedLtConfig {
-    pub fn construct_circuit<
-        E: ExtensionField,
-        NR: Into<String> + Display + Clone,
-        N: FnOnce() -> NR,
-    >(
+impl<E: ExtensionField> AssertSignedLtConfig<E> {
+    pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
         lhs: &UInt<E>,
@@ -258,34 +254,30 @@ impl AssertSignedLtConfig {
         )
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        self.config.assign_instance::<E>(instance, lkm, lhs, rhs)?;
+        self.config.assign_instance(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct SignedLtConfig {
+pub struct SignedLtConfig<E> {
     is_lt: WitIn,
-    config: InnerSignedLtConfig,
+    config: InnerSignedLtConfig<E>,
 }
 
-impl SignedLtConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> SignedLtConfig<E> {
+    pub fn expr(&self) -> Expression<E> {
         self.is_lt.expr()
     }
 
-    pub fn construct_circuit<
-        E: ExtensionField,
-        NR: Into<String> + Display + Clone,
-        N: FnOnce() -> NR,
-    >(
+    pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
         lhs: &UInt<E>,
@@ -305,7 +297,7 @@ impl SignedLtConfig {
         )
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
@@ -314,20 +306,20 @@ impl SignedLtConfig {
     ) -> Result<(), ZKVMError> {
         set_val!(instance, self.is_lt, (lhs < rhs) as u64);
         self.config
-            .assign_instance::<E>(instance, lkm, lhs as SWord, rhs as SWord)?;
+            .assign_instance(instance, lkm, lhs as SWord, rhs as SWord)?;
         Ok(())
     }
 }
 
 #[derive(Debug)]
-struct InnerSignedLtConfig {
-    is_lhs_neg: SignedExtendConfig,
-    is_rhs_neg: SignedExtendConfig,
+struct InnerSignedLtConfig<E> {
+    is_lhs_neg: SignedExtendConfig<E>,
+    is_rhs_neg: SignedExtendConfig<E>,
     config: InnerLtConfig,
 }
 
-impl InnerSignedLtConfig {
-    pub fn construct_circuit<E: ExtensionField, NR: Into<String> + Display + Clone>(
+impl<E: ExtensionField> InnerSignedLtConfig<E> {
+    pub fn construct_circuit<NR: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: NR,
         lhs: &UInt<E>,
@@ -357,7 +349,7 @@ impl InnerSignedLtConfig {
         })
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
@@ -366,12 +358,12 @@ impl InnerSignedLtConfig {
     ) -> Result<(), ZKVMError> {
         let lhs_value = Value::new_unchecked(lhs as Word);
         let rhs_value = Value::new_unchecked(rhs as Word);
-        self.is_lhs_neg.assign_instance::<E>(
+        self.is_lhs_neg.assign_instance(
             instance,
             lkm,
             *lhs_value.as_u16_limbs().last().unwrap() as u64,
         )?;
-        self.is_rhs_neg.assign_instance::<E>(
+        self.is_rhs_neg.assign_instance(
             instance,
             lkm,
             *rhs_value.as_u16_limbs().last().unwrap() as u64,

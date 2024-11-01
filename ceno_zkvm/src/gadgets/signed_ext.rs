@@ -7,36 +7,38 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::ExtensionField;
-use std::mem::MaybeUninit;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 #[derive(Debug)]
-pub struct SignedExtendConfig {
+pub struct SignedExtendConfig<E> {
     /// most significant bit
     msb: WitIn,
     /// number of bits contained in the value
     n_bits: usize,
+
+    _marker: PhantomData<E>,
 }
 
-impl SignedExtendConfig {
-    pub fn construct_limb<E: ExtensionField>(
+impl<E: ExtensionField> SignedExtendConfig<E> {
+    pub fn construct_limb(
         cb: &mut CircuitBuilder<E>,
         val: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         Self::construct_circuit(cb, 16, val)
     }
 
-    pub fn construct_byte<E: ExtensionField>(
+    pub fn construct_byte(
         cb: &mut CircuitBuilder<E>,
         val: Expression<E>,
     ) -> Result<Self, ZKVMError> {
         Self::construct_circuit(cb, 8, val)
     }
 
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+    pub fn expr(&self) -> Expression<E> {
         self.msb.expr()
     }
 
-    fn construct_circuit<E: ExtensionField>(
+    fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         n_bits: usize,
         val: Expression<E>, // it's assumed that val is within [0, 2^N_BITS)
@@ -61,11 +63,15 @@ impl SignedExtendConfig {
             2 * val - msb.expr() * (1 << n_bits),
         )?;
 
-        Ok(SignedExtendConfig { msb, n_bits })
+        Ok(SignedExtendConfig {
+            msb,
+            n_bits,
+            _marker: PhantomData,
+        })
     }
 
     /// Get the signed extended value
-    pub fn signed_extended_value<E: ExtensionField>(&self, val: Expression<E>) -> UInt<E> {
+    pub fn signed_extended_value(&self, val: Expression<E>) -> UInt<E> {
         assert_eq!(UInt::<E>::LIMB_BITS, 16);
 
         let limb0 = match self.n_bits {
@@ -76,7 +82,7 @@ impl SignedExtendConfig {
         UInt::from_exprs_unchecked(vec![limb0, self.msb.expr() * 0xffff])
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,

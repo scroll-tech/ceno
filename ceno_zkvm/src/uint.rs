@@ -540,8 +540,11 @@ impl<E: ExtensionField> UInt<E> {
     ///
     /// Also called Most Significant Bit extraction, when
     /// interpreted as an unsigned int.
-    pub fn is_negative(&self, cb: &mut CircuitBuilder<E>) -> Result<SignedExtendConfig, ZKVMError> {
-        SignedExtendConfig::construct_limb(cb, self.limbs.iter().last().unwrap().expr())
+    pub fn is_negative(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<SignedExtendConfig<E>, ZKVMError> {
+        SignedExtendConfig::<E>::construct_limb(cb, self.limbs.iter().last().unwrap().expr())
     }
 }
 

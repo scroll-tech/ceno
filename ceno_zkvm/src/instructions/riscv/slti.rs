@@ -32,7 +32,7 @@ pub struct SetLessThanImmConfig<E: ExtensionField> {
     lt: IsLtConfig,
 
     // SLTI
-    is_rs1_neg: Option<SignedExtendConfig>,
+    is_rs1_neg: Option<SignedExtendConfig<E>>,
 }
 
 pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -116,7 +116,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                     .assign_instance(instance, lkm, rs1 as u64, imm as u64)?;
             }
             InsnKind::SLTI => {
-                config.is_rs1_neg.as_ref().unwrap().assign_instance::<E>(
+                config.is_rs1_neg.as_ref().unwrap().assign_instance(
                     instance,
                     lkm,
                     *rs1_value.as_u16_limbs().last().unwrap() as u64,

@@ -26,7 +26,7 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     assert_lt_config: AssertLTConfig,
 
     // SRAI
-    is_lt_config: Option<SignedExtendConfig>,
+    is_lt_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -139,7 +139,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             InsnKind::SLLI => (rs1_read.as_u64() * imm as u64) >> UInt::<E>::TOTAL_BITS,
             InsnKind::SRAI | InsnKind::SRLI => {
                 if I::INST_KIND == InsnKind::SRAI {
-                    config.is_lt_config.as_ref().unwrap().assign_instance::<E>(
+                    config.is_lt_config.as_ref().unwrap().assign_instance(
                         instance,
                         lk_multiplicity,
                         *rs1_read.as_u16_limbs().last().unwrap() as u64,
