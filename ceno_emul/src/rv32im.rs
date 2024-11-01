@@ -520,18 +520,6 @@ impl Emulator {
         }
 
         let insn = ctx.fetch(pc.waddr())?;
-        // if word & 0x03 != 0x03 {
-        //     // Opcode must end in 0b11 in RV32IM.
-        //     ctx.trap(TrapCause::IllegalInstruction(word))?;
-        //     return Err(anyhow!(
-        //         "Fatal: illegal instruction at pc={:?}: 0x{:08x}",
-        //         pc,
-        //         word
-        //     ));
-        // }
-
-        // TODO: decode once at the beginning, instead of all the time like here.
-        // let insn = DecodedInstruction::new(word);
         tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.kind.into() {
