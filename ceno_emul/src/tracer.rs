@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, mem};
 use crate::{
     CENO_PLATFORM, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
-    rv32im::ActuallyDecodedInstruction as DecodedInstruction,
+    rv32im::DecodedInstruction,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.

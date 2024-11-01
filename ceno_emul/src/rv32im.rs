@@ -28,7 +28,7 @@ pub trait EmuContext {
     fn trap(&self, cause: TrapCause) -> Result<bool>;
 
     // Callback when instructions end normally
-    fn on_normal_end(&mut self, _decoded: &ActuallyDecodedInstruction) {}
+    fn on_normal_end(&mut self, _decoded: &DecodedInstruction) {}
 
     // Get the program counter
     fn get_pc(&self) -> ByteAddr;
@@ -114,7 +114,7 @@ struct DecodedInstructionOld {
 }
 
 #[derive(Clone, Debug)]
-pub struct ActuallyDecodedInstruction {
+pub struct DecodedInstruction {
     // insn: u32,
     // This should be able to handle i32::MIN to u32::MAX.
     // Convert to field type in the straightforward way.
@@ -223,13 +223,13 @@ pub struct InsnCodes {
     pub func7: u32,
 }
 
-impl From<DecodedInstructionOld> for ActuallyDecodedInstruction {
+impl From<DecodedInstructionOld> for DecodedInstruction {
     fn from(d: DecodedInstructionOld) -> Self {
-        ActuallyDecodedInstruction::new(d.insn)
+        DecodedInstruction::new(d.insn)
     }
 }
 
-impl ActuallyDecodedInstruction {
+impl DecodedInstruction {
     /// A virtual register which absorbs the writes to x0.
     pub const RD_NULL: u32 = 32;
 
@@ -524,7 +524,7 @@ impl Emulator {
         }
 
         // TODO: decode once at the beginning, instead of all the time like here.
-        let insn = ActuallyDecodedInstruction::new(word);
+        let insn = DecodedInstruction::new(word);
         tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.kind.into() {
@@ -544,7 +544,7 @@ impl Emulator {
     fn step_compute<M: EmuContext>(
         &self,
         ctx: &mut M,
-        decoded: &ActuallyDecodedInstruction,
+        decoded: &DecodedInstruction,
     ) -> Result<bool> {
         use InsnKind::*;
 
@@ -653,7 +653,7 @@ impl Emulator {
     fn step_branch<M: EmuContext>(
         &self,
         ctx: &mut M,
-        decoded: &ActuallyDecodedInstruction,
+        decoded: &DecodedInstruction,
     ) -> Result<bool> {
         use InsnKind::*;
 
@@ -684,11 +684,7 @@ impl Emulator {
         Ok(true)
     }
 
-    fn step_load<M: EmuContext>(
-        &self,
-        ctx: &mut M,
-        decoded: &ActuallyDecodedInstruction,
-    ) -> Result<bool> {
+    fn step_load<M: EmuContext>(&self, ctx: &mut M, decoded: &DecodedInstruction) -> Result<bool> {
         let rs1 = ctx.load_register(decoded.rs1 as usize)?;
         // LOAD instructions do not read rs2.
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
@@ -735,11 +731,7 @@ impl Emulator {
         Ok(true)
     }
 
-    fn step_store<M: EmuContext>(
-        &self,
-        ctx: &mut M,
-        decoded: &ActuallyDecodedInstruction,
-    ) -> Result<bool> {
+    fn step_store<M: EmuContext>(&self, ctx: &mut M, decoded: &DecodedInstruction) -> Result<bool> {
         let rs1 = ctx.load_register(decoded.rs1 as usize)?;
         let rs2 = ctx.load_register(decoded.rs2 as usize)?;
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
@@ -779,7 +771,7 @@ impl Emulator {
     fn step_system<M: EmuContext>(
         &self,
         ctx: &mut M,
-        decoded: &ActuallyDecodedInstruction,
+        decoded: &DecodedInstruction,
     ) -> Result<bool> {
         match decoded.kind {
             // TODO(Matthias): this is silly.  Catch illegal instructions in the decode stage.

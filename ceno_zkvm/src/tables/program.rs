@@ -11,9 +11,7 @@ use crate::{
     utils::i64_to_base,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{
-    ActuallyDecodedInstruction as DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE,
-};
+use ceno_emul::{DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
