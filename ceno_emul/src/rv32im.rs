@@ -99,7 +99,7 @@ pub enum TrapCause {
 }
 
 #[derive(Clone, Debug, Default)]
-struct DecodedInstruction {
+struct DecodedInstructionOld {
     insn: u32,
     // TOP bit only has an impact on imm, it seems.
     // So use it there.
@@ -223,15 +223,18 @@ pub struct InsnCodes {
     pub func7: u32,
 }
 
-impl From<DecodedInstruction> for ActuallyDecodedInstruction {
-    fn from(d: DecodedInstruction) -> Self {
+impl From<DecodedInstructionOld> for ActuallyDecodedInstruction {
+    fn from(d: DecodedInstructionOld) -> Self {
         ActuallyDecodedInstruction::new(d.insn)
     }
 }
 
 impl ActuallyDecodedInstruction {
+    /// A virtual register which absorbs the writes to x0.
+    pub const RD_NULL: u32 = 32;
+
     pub fn new(insn: u32) -> Self {
-        let d = DecodedInstruction::new(insn);
+        let d = DecodedInstructionOld::new(insn);
         let InsnCodes { kind, format, .. } = d.codes();
 
         let imm = match (format, kind) {
@@ -257,8 +260,7 @@ impl ActuallyDecodedInstruction {
             (I | U | J, _) => d.rs2,
         };
         let rd = match (format, d.rd) {
-            // TODO: properly encode rd_null, read from a constant or so, instead of hard-coding.
-            (R | I | U | J, 0) => 32,
+            (R | I | U | J, 0) => Self::RD_NULL,
             (R | I | U | J, rd) => rd,
             (S | B, _) => 0,
         };
@@ -274,7 +276,7 @@ impl ActuallyDecodedInstruction {
     }
 }
 
-impl DecodedInstruction {
+impl DecodedInstructionOld {
     /// A virtual register which absorbs the writes to x0.
     pub const RD_NULL: u32 = 32;
 
@@ -291,12 +293,10 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
     pub fn encoded(&self) -> u32 {
         self.insn
     }
 
-    #[allow(dead_code)]
     pub fn opcode(&self) -> u32 {
         self.opcode
     }
@@ -310,7 +310,6 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
     /// Get the funct3 field, or zero if the instruction does not use funct3.
     pub fn funct3_or_zero(&self) -> u32 {
         match self.codes().format {
@@ -319,13 +318,11 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
     /// Get the rs1 field, regardless of the instruction format.
     pub fn rs1(&self) -> u32 {
         self.rs1
     }
 
-    #[allow(dead_code)]
     /// Get the register source 1, or zero if the instruction does not use rs1.
     pub fn rs1_or_zero(&self) -> u32 {
         match self.codes().format {
@@ -334,13 +331,11 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
     /// Get the rs2 field, regardless of the instruction format.
     pub fn rs2(&self) -> u32 {
         self.rs2
     }
 
-    #[allow(dead_code)]
     /// Get the register source 2, or zero if the instruction does not use rs2.
     pub fn rs2_or_zero(&self) -> u32 {
         match self.codes().format {
@@ -443,7 +438,7 @@ fn test_decode_imm() {
             0x20,
         ),
     ] {
-        let imm = DecodedInstruction::new(i).imm_internal();
+        let imm = DecodedInstructionOld::new(i).imm_internal();
         assert_eq!(imm, expected);
     }
 }
@@ -609,7 +604,7 @@ impl FastDecodeTable {
         }
     }
 
-    fn lookup(&self, decoded: &DecodedInstruction) -> InsnCodes {
+    fn lookup(&self, decoded: &DecodedInstructionOld) -> InsnCodes {
         let isa_idx = self.table[Self::map10(decoded.opcode, decoded.func3, decoded.func7)];
         RV32IM_ISA[isa_idx as usize]
     }
