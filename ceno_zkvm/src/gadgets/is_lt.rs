@@ -83,9 +83,9 @@ impl IsLtConfig {
         Self::construct_circuit(
             cb,
             name_fn,
-            ((1u64 << (LIMB_BITS - 1)) - 1).into(),
+            ((1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1).into(),
             limbs.expr().last().unwrap().clone(),
-            1,
+            LIMB_BITS.div_ceil(LIMB_BITS),
         )
     }
 
