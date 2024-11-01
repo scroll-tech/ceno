@@ -27,7 +27,7 @@ use elf::{
     file::Class,
 };
 
-/// A RISC Zero program
+/// A Ceno program
 #[derive(Clone, Debug)]
 pub struct Program {
     /// The entrypoint of the program

@@ -54,7 +54,7 @@ pub trait EmuContext {
     // Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> Word;
 
-    // Load from memory, in the context of instruction fetching.
+    // Load from an instruction from the cache.
     // TODO: figure out how to return a reference.
     fn fetch(&mut self, pc: WordAddr) -> Result<DecodedInstruction>;
 
