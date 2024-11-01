@@ -156,7 +156,7 @@ fn main() {
             .iter()
             .rev()
             .find(|record| {
-                record.insn().codes().kind == EANY
+                record.insn().kind == EANY
                     && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
             })
             .expect("halt record not found");

@@ -13,7 +13,6 @@ use crate::{
         riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr},
     },
     set_val,
-    tables::InsnRecord,
     utils::i64_to_base,
     witness::LkMultiplicity,
 };

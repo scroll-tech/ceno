@@ -15,7 +15,6 @@ use crate::{
     gadgets::IsLtConfig,
     instructions::Instruction,
     set_val,
-    tables::InsnRecord,
     uint::Value,
     utils::i64_to_base,
     witness::LkMultiplicity,

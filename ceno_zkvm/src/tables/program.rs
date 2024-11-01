@@ -14,7 +14,6 @@ use ceno_emul::{
     ActuallyDecodedInstruction as DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE,
 };
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -118,10 +117,9 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             cb.create_fixed(|| "pc")?,
             cb.create_fixed(|| "opcode")?,
             cb.create_fixed(|| "rd")?,
-            cb.create_fixed(|| "funct3")?,
             cb.create_fixed(|| "rs1")?,
             cb.create_fixed(|| "rs2")?,
-            cb.create_fixed(|| "imm_internal")?,
+            cb.create_fixed(|| "imm")?,
         ]);
 
         let mlt = cb.create_witin(|| "mlt");
@@ -156,21 +154,9 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
 
-                // Copy all the fields except immediate.
-                for (col, val) in config
-                    .record
-                    .without_imm()
-                    .iter()
-                    .zip_eq(values.without_imm())
-                {
+                for (col, val) in config.record.0.iter().zip_eq(values.without_imm()) {
                     set_fixed_val!(row, *col, E::BaseField::from(*val as u64));
                 }
-
-                set_fixed_val!(
-                    row,
-                    config.record.imm_internal(),
-                    InsnRecord::imm_internal_field(&insn)
-                );
             });
 
         fixed

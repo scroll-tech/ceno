@@ -11,7 +11,6 @@ use crate::{
         },
     },
     set_val,
-    tables::InsnRecord,
     utils::i64_to_base,
     witness::LkMultiplicity,
 };

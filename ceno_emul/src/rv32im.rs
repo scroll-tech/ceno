@@ -232,27 +232,31 @@ impl From<DecodedInstruction> for ActuallyDecodedInstruction {
 impl ActuallyDecodedInstruction {
     pub fn new(insn: u32) -> Self {
         let d = DecodedInstruction::new(insn);
+        let InsnCodes { kind, format, .. } = d.codes();
 
-        let imm = match (d.codes().format, d.codes().kind) {
+        let imm = match (format, kind) {
             (R, _) => 0,
             // decode the shift as a multiplication/division by 1 << immediate
             (I, SLLI | SRLI | SRAI) => (1 << d.imm_shamt()).into(),
             (I, SLTI) => (d.imm_i() as i32).into(),
+            // EBREAK and ECALL ain't actually I-type in the spec, but it's convenient to pretend.
+            (I, EANY) => d.rs1.into(),
             (I, _) => d.imm_i().into(),
             (S, _) => d.imm_s().into(),
             (B, _) => d.imm_b().into(),
             (U, _) => d.imm_u().into(),
             (J, _) => d.imm_j().into(),
         };
-        let rs1 = match d.codes().format {
-            R | I | S | B => d.rs1,
-            U | J => 0,
+        let rs1 = match (format, kind) {
+            (_, EANY) => 0,
+            (R | I | S | B, _) => d.rs1,
+            (U | J, _) => 0,
         };
-        let rs2 = match d.codes().format {
-            R | S | B => 0,
-            I | U | J => d.rs2,
+        let rs2 = match (format, kind) {
+            (R | S | B, _) | (_, EANY) => 0,
+            (I | U | J, _) => d.rs2,
         };
-        let rd = match (d.codes().format, d.rd) {
+        let rd = match (format, d.rd) {
             // TODO: properly encode rd_null, read from a constant or so, instead of hard-coding.
             (R | I | U | J, 0) => 32,
             (R | I | U | J, rd) => rd,
@@ -536,6 +540,9 @@ const RV32IM_ISA: InstructionTable = [
     insn(S, SB, Store, 0x23, 0x0, -1),
     insn(S, SH, Store, 0x23, 0x1, -1),
     insn(S, SW, Store, 0x23, 0x2, -1),
+    // TODO: EANY is just an artifact of our previous approach to decoding.
+    // Replace with ECALL and EBREAK
+    // They are not actually I types in the spec, but it's convenient to pretend.
     insn(I, EANY, System, 0x73, 0x0, 0x00),
 ];
 
@@ -647,12 +654,11 @@ impl Emulator {
 
         if match insn.kind.into() {
             InsnCategory::Compute => self.step_compute(ctx, &insn)?,
-            _ => todo!(),
-            // InsnCategory::Branch => self.step_branch(ctx,  &insn)?,
-            // InsnCategory::Load => self.step_load(ctx, , &insn)?,
-            // InsnCategory::Store => self.step_store(ctx,  &insn)?,
-            // InsnCategory::System => self.step_system(ctx,  &insn)?,
-            // InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(word))?,
+            InsnCategory::Branch => self.step_branch(ctx, &insn)?,
+            InsnCategory::Load => self.step_load(ctx, &insn)?,
+            InsnCategory::Store => self.step_store(ctx, &insn)?,
+            InsnCategory::System => self.step_system(ctx, &insn)?,
+            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(word))?,
         } {
             ctx.on_normal_end(&insn);
         };
@@ -772,8 +778,7 @@ impl Emulator {
     fn step_branch<M: EmuContext>(
         &self,
         ctx: &mut M,
-        kind: InsnKind,
-        decoded: &DecodedInstruction,
+        decoded: &ActuallyDecodedInstruction,
     ) -> Result<bool> {
         use InsnKind::*;
 
@@ -781,18 +786,18 @@ impl Emulator {
         let rs1 = ctx.load_register(decoded.rs1 as RegIdx)?;
         let rs2 = ctx.load_register(decoded.rs2 as RegIdx)?;
 
-        let taken = match kind {
+        let taken = match decoded.kind {
             BEQ => rs1 == rs2,
             BNE => rs1 != rs2,
             BLT => (rs1 as i32) < (rs2 as i32),
             BGE => (rs1 as i32) >= (rs2 as i32),
             BLTU => rs1 < rs2,
             BGEU => rs1 >= rs2,
-            _ => unreachable!("Illegal branch instruction: {:?}", kind),
+            _ => unreachable!("Illegal branch instruction: {:?}", decoded.kind),
         };
 
         let new_pc = if taken {
-            pc.wrapping_add(decoded.imm_b())
+            pc.wrapping_add(decoded.imm as u32)
         } else {
             pc + WORD_SIZE
         };
@@ -807,18 +812,17 @@ impl Emulator {
     fn step_load<M: EmuContext>(
         &self,
         ctx: &mut M,
-        kind: InsnKind,
-        decoded: &DecodedInstruction,
+        decoded: &ActuallyDecodedInstruction,
     ) -> Result<bool> {
         let rs1 = ctx.load_register(decoded.rs1 as usize)?;
         // LOAD instructions do not read rs2.
-        let addr = ByteAddr(rs1.wrapping_add(decoded.imm_i()));
+        let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
         if !ctx.check_data_load(addr) {
             return ctx.trap(TrapCause::LoadAccessFault(addr));
         }
         let data = ctx.load_memory(addr.waddr())?;
         let shift = 8 * (addr.0 & 3);
-        let out = match kind {
+        let out = match decoded.kind {
             InsnKind::LB => {
                 let mut out = (data >> shift) & 0xff;
                 if out & 0x80 != 0 {
@@ -859,19 +863,18 @@ impl Emulator {
     fn step_store<M: EmuContext>(
         &self,
         ctx: &mut M,
-        kind: InsnKind,
-        decoded: &DecodedInstruction,
+        decoded: &ActuallyDecodedInstruction,
     ) -> Result<bool> {
         let rs1 = ctx.load_register(decoded.rs1 as usize)?;
         let rs2 = ctx.load_register(decoded.rs2 as usize)?;
-        let addr = ByteAddr(rs1.wrapping_add(decoded.imm_s()));
+        let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
         let shift = 8 * (addr.0 & 3);
         if !ctx.check_data_store(addr) {
             tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
             return ctx.trap(TrapCause::StoreAccessFault);
         }
         let mut data = ctx.peek_memory(addr.waddr());
-        match kind {
+        match decoded.kind {
             InsnKind::SB => {
                 data ^= data & (0xff << shift);
                 data |= (rs2 & 0xff) << shift;
@@ -901,11 +904,11 @@ impl Emulator {
     fn step_system<M: EmuContext>(
         &self,
         ctx: &mut M,
-        kind: InsnKind,
-        decoded: &DecodedInstruction,
+        decoded: &ActuallyDecodedInstruction,
     ) -> Result<bool> {
-        match kind {
-            InsnKind::EANY => match decoded.rs2 {
+        match decoded.kind {
+            // TODO(Matthias): this is silly.  Catch illegal instructions in the decode stage.
+            InsnKind::EANY => match decoded.imm {
                 0 => ctx.ecall(),
                 1 => ctx.trap(TrapCause::Breakpoint),
                 _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
