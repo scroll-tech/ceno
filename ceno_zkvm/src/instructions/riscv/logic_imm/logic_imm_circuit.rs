@@ -57,7 +57,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         UInt8::<E>::logic_assign::<I::OpsTable>(
             lkm,
             step.rs1().unwrap().value.into(),
-            step.insn().imm_internal().into(),
+            step.insn().imm as u64,
         );
 
         config.assign_instance(instance, lkm, step)
@@ -112,7 +112,10 @@ impl<E: ExtensionField> LogicConfig<E> {
         let rs1_read = split_to_u8(step.rs1().unwrap().value);
         self.rs1_read.assign_limbs(instance, &rs1_read);
 
-        let imm = split_to_u8::<u16>(step.insn().imm_internal());
+        // TODO(Matthias): We should do this split at decoding time.
+        // Perhaps have a second decoder from `DecodedInstruction` to
+        // something that explicitly knows about ExtensionField etc.
+        let imm = split_to_u8::<u16>(step.insn().imm as u32);
         self.imm.assign_limbs(instance, &imm);
 
         let rd_written = split_to_u8(step.rd().unwrap().value.after);

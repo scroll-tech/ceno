@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
@@ -26,9 +26,6 @@ pub trait EmuContext {
 
     // Handle a trap
     fn trap(&self, cause: TrapCause) -> Result<bool>;
-
-    // Callback when instructions are decoded
-    fn on_insn_decoded(&mut self, _decoded: &DecodedInstruction) {}
 
     // Callback when instructions end normally
     fn on_normal_end(&mut self, _decoded: &DecodedInstruction) {}
@@ -57,11 +54,9 @@ pub trait EmuContext {
     // Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> Word;
 
-    // Load from memory, in the context of instruction fetching.
-    // Only called after check_insn_load returns true.
-    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        self.load_memory(pc)
-    }
+    // Load from an instruction from the cache.
+    // TODO: figure out how to return a reference.
+    fn fetch(&mut self, pc: WordAddr) -> Result<DecodedInstruction>;
 
     // Check access for instruction load
     fn check_insn_load(&self, _addr: ByteAddr) -> bool {
@@ -80,9 +75,7 @@ pub trait EmuContext {
 }
 
 /// An implementation of the basic ISA (RV32IM), that is instruction decoding and functional units.
-pub struct Emulator {
-    table: &'static FastDecodeTable,
-}
+pub struct Emulator {}
 
 #[derive(Debug)]
 pub enum TrapCause {
@@ -98,8 +91,10 @@ pub enum TrapCause {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct DecodedInstruction {
+struct DecodedInstructionOld {
     insn: u32,
+    // TOP bit only has an impact on imm, it seems.
+    // So use it there.
     top_bit: u32,
     // The bit fields of the instruction encoding, regardless of the instruction format.
     func7: u32,
@@ -108,6 +103,37 @@ pub struct DecodedInstruction {
     func3: u32,
     rd: u32,
     opcode: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DecodedInstruction {
+    pub kind: InsnKind,
+    /// The index of the first source register.
+    ///
+    /// Instructions that do not read a source register will have this set to 0.
+    pub rs1: u32,
+    /// The index of the second source register.
+    ///
+    /// Instructions that do not read a second source register will have this set to 0.
+    pub rs2: u32,
+    /// The index of the destination register.
+    ///
+    /// Instructions that do not write to a destination register will have this set to `RD_NULL`.
+    pub rd: u32,
+    /// The immediate value.
+    ///
+    /// This should be able to handle i32::MIN to u32::MAX, so we need i64.
+    /// Conversion to a field element can happen with eg `crate::utils::i64_to_base`
+    ///
+    /// Instructions that don't use an immediate value will have this set to 0.
+    pub imm: i64,
+
+    /// The original encoded instruction word.
+    ///
+    /// This is useful for debugging and logging.
+    /// TODO(Matthias): we still use this otherwise, remove those uses.
+    #[allow(dead_code)]
+    pub word: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -196,16 +222,71 @@ impl InsnKind {
 pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
-    category: InsnCategory,
     pub opcode: u32,
     pub func3: u32,
     pub func7: u32,
+}
+
+impl From<DecodedInstructionOld> for DecodedInstruction {
+    fn from(d: DecodedInstructionOld) -> Self {
+        DecodedInstruction::new(d.insn)
+    }
+}
+
+impl From<u32> for DecodedInstruction {
+    fn from(word: u32) -> Self {
+        DecodedInstruction::new(word)
+    }
 }
 
 impl DecodedInstruction {
     /// A virtual register which absorbs the writes to x0.
     pub const RD_NULL: u32 = 32;
 
+    pub fn new(word: u32) -> Self {
+        let d = DecodedInstructionOld::new(word);
+        let InsnCodes { kind, format, .. } = d.codes();
+
+        let imm = match (format, kind) {
+            (R, _) => 0,
+            // decode the shift as a multiplication/division by 1 << immediate
+            (I, SLLI | SRLI | SRAI) => (1 << d.imm_shamt()).into(),
+            (I, SLTI) => (d.imm_i() as i32).into(),
+            // EBREAK and ECALL ain't actually I-type in the spec, but it's convenient to pretend.
+            (I, EANY) => d.rs1.into(),
+            (I, _) => d.imm_i().into(),
+            (S, _) => d.imm_s().into(),
+            (B, _) => d.imm_b().into(),
+            (U, _) => d.imm_u().into(),
+            (J, _) => d.imm_j().into(),
+        };
+        let rs1 = match (format, kind) {
+            (_, EANY) => 0,
+            (R | I | S | B, _) => d.rs1,
+            (U | J, _) => 0,
+        };
+        let rs2 = match (format, kind) {
+            (R | S | B, _) | (_, EANY) => 0,
+            (I | U | J, _) => d.rs2,
+        };
+        let rd = match (format, d.rd) {
+            (R | I | U | J, 0) => Self::RD_NULL,
+            (R | I | U | J, rd) => rd,
+            (S | B, _) => 0,
+        };
+        let kind = d.codes().kind;
+        Self {
+            imm,
+            rs1,
+            rs2,
+            rd,
+            kind,
+            word,
+        }
+    }
+}
+
+impl DecodedInstructionOld {
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -216,91 +297,6 @@ impl DecodedInstruction {
             func3: (insn & 0x00007000) >> 12,
             rd: (insn & 0x00000f80) >> 7,
             opcode: insn & 0x0000007f,
-        }
-    }
-
-    pub fn encoded(&self) -> u32 {
-        self.insn
-    }
-
-    pub fn opcode(&self) -> u32 {
-        self.opcode
-    }
-
-    /// The internal register destination. It is either the regular rd, or an internal RD_NULL if
-    /// the instruction does not write to a register or writes to x0.
-    pub fn rd_internal(&self) -> u32 {
-        match self.codes().format {
-            R | I | U | J if self.rd != 0 => self.rd,
-            _ => Self::RD_NULL,
-        }
-    }
-
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.func3,
-            _ => 0,
-        }
-    }
-
-    /// Get the rs1 field, regardless of the instruction format.
-    pub fn rs1(&self) -> u32 {
-        self.rs1
-    }
-
-    /// Get the register source 1, or zero if the instruction does not use rs1.
-    pub fn rs1_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.rs1,
-            _ => 0,
-        }
-    }
-
-    /// Get the rs2 field, regardless of the instruction format.
-    pub fn rs2(&self) -> u32 {
-        self.rs2
-    }
-
-    /// Get the register source 2, or zero if the instruction does not use rs2.
-    pub fn rs2_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | S | B => self.rs2,
-            _ => 0,
-        }
-    }
-
-    /// The internal view of the immediate, for use in circuits.
-    pub fn imm_internal(&self) -> u32 {
-        match self.codes().format {
-            R => self.func7,
-            I => match self.codes().kind {
-                // decode the shift as a multiplication/division by 1 << immediate
-                SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
-                _ => self.imm_i(),
-            },
-            S => self.imm_s(),
-            B => self.imm_b(),
-            U => self.imm_u(),
-            J => self.imm_j(),
-        }
-    }
-
-    /// The internal interpretation of the immediate sign, for use in circuits.
-    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
-    /// example:
-    /// imm = ux::MAX - 1 implies
-    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
-    /// imm_field = ux::MAX - 1 otherwise
-    /// see InsnRecord::imm_internal_field
-    pub fn imm_field_is_negative(&self) -> bool {
-        match self.codes() {
-            InsnCodes { format: R | U, .. } => false,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI | SLTIU,
-                ..
-            } => false,
-            _ => self.top_bit != 0,
         }
     }
 
@@ -342,37 +338,10 @@ impl DecodedInstruction {
     }
 }
 
-#[cfg(test)]
-#[test]
-#[allow(clippy::identity_op)]
-fn test_decode_imm() {
-    for (i, expected) in [
-        // Example of I-type: ADDI.
-        // imm    | rs1     | funct3      | rd     | opcode
-        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
-        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
-        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (
-            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
-            1 << 31,
-        ),
-        // Example of R-type with funct7: SUB.
-        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-        (
-            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
-            0x20,
-        ),
-    ] {
-        let imm = DecodedInstruction::new(i).imm_internal();
-        assert_eq!(imm, expected);
-    }
-}
-
 const fn insn(
     format: InsnFormat,
     kind: InsnKind,
-    category: InsnCategory,
+    _category: InsnCategory,
     opcode: u32,
     func3: i32,
     func7: i32,
@@ -380,10 +349,28 @@ const fn insn(
     InsnCodes {
         format,
         kind,
-        category,
         opcode,
         func3: func3 as u32,
         func7: func7 as u32,
+    }
+}
+
+impl From<InsnKind> for InsnCategory {
+    fn from(kind: InsnKind) -> Self {
+        // TODO: double check this.
+        // Perhaps get it via a macro from RV32IM_ISA.
+        match kind {
+            INVALID => Invalid,
+            ADD | SUB | XOR | OR | AND | SLL | SRL | SRA | SLT | SLTU | MUL | MULH | MULHSU
+            | MULHU | DIV | DIVU | REM | REMU => Compute,
+            ADDI | XORI | ORI | ANDI | SLLI | SRLI | SRAI | SLTI | SLTIU => Compute,
+            BEQ | BNE | BLT | BGE | BLTU | BGEU => Branch,
+            JAL | JALR => Compute,
+            LUI | AUIPC => Compute,
+            LB | LH | LW | LBU | LHU => Load,
+            SB | SH | SW => Store,
+            EANY => System,
+        }
     }
 }
 
@@ -437,6 +424,9 @@ const RV32IM_ISA: InstructionTable = [
     insn(S, SB, Store, 0x23, 0x0, -1),
     insn(S, SH, Store, 0x23, 0x1, -1),
     insn(S, SW, Store, 0x23, 0x2, -1),
+    // TODO: EANY is just an artifact of our previous approach to decoding.
+    // Replace with ECALL and EBREAK
+    // They are not actually I types in the spec, but it's convenient to pretend.
     insn(I, EANY, System, 0x73, 0x0, 0x00),
 ];
 
@@ -508,7 +498,7 @@ impl FastDecodeTable {
         }
     }
 
-    fn lookup(&self, decoded: &DecodedInstruction) -> InsnCodes {
+    fn lookup(&self, decoded: &DecodedInstructionOld) -> InsnCodes {
         let isa_idx = self.table[Self::map10(decoded.opcode, decoded.func3, decoded.func7)];
         RV32IM_ISA[isa_idx as usize]
     }
@@ -518,44 +508,24 @@ static FAST_DECODE_TABLE: OnceLock<FastDecodeTable> = OnceLock::new();
 
 impl Emulator {
     pub fn new() -> Self {
-        Self {
-            table: FastDecodeTable::get(),
-        }
+        Self {}
     }
 
     pub fn step<C: EmuContext>(&self, ctx: &mut C) -> Result<()> {
         let pc = ctx.get_pc();
 
-        if !ctx.check_insn_load(pc) {
-            ctx.trap(TrapCause::InstructionAccessFault)?;
-            return Err(anyhow!("Fatal: could not fetch instruction at pc={:?}", pc));
-        }
-
-        let word = ctx.fetch(pc.waddr())?;
-        if word & 0x03 != 0x03 {
-            // Opcode must end in 0b11 in RV32IM.
-            ctx.trap(TrapCause::IllegalInstruction(word))?;
-            return Err(anyhow!(
-                "Fatal: illegal instruction at pc={:?}: 0x{:08x}",
-                pc,
-                word
-            ));
-        }
-
-        let decoded = DecodedInstruction::new(word);
-        let insn = self.table.lookup(&decoded);
-        ctx.on_insn_decoded(&decoded);
+        let insn = ctx.fetch(pc.waddr())?;
         tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
-        if match insn.category {
-            InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
-            InsnCategory::Branch => self.step_branch(ctx, insn.kind, &decoded)?,
-            InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
-            InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
-            InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
-            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(word))?,
+        if match insn.kind.into() {
+            InsnCategory::Compute => self.step_compute(ctx, &insn)?,
+            InsnCategory::Branch => self.step_branch(ctx, &insn)?,
+            InsnCategory::Load => self.step_load(ctx, &insn)?,
+            InsnCategory::Store => self.step_store(ctx, &insn)?,
+            InsnCategory::System => self.step_system(ctx, &insn)?,
+            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.word))?,
         } {
-            ctx.on_normal_end(&decoded);
+            ctx.on_normal_end(&insn);
         };
 
         Ok(())
@@ -564,127 +534,108 @@ impl Emulator {
     fn step_compute<M: EmuContext>(
         &self,
         ctx: &mut M,
-        kind: InsnKind,
         decoded: &DecodedInstruction,
     ) -> Result<bool> {
         use InsnKind::*;
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
-        let imm_i = decoded.imm_i();
-        let out = match kind {
+
+        let rs1 = ctx.load_register(decoded.rs1 as usize)?;
+        let rs2 = ctx.load_register(decoded.rs2 as usize)?;
+        let imm = decoded.imm;
+
+        let out = match decoded.kind {
             // Instructions that do not read rs1 nor rs2.
             JAL => {
-                new_pc = pc.wrapping_add(decoded.imm_j());
+                new_pc = pc.wrapping_add(imm as u32);
                 (pc + WORD_SIZE).0
             }
-            LUI => decoded.imm_u(),
-            AUIPC => (pc.wrapping_add(decoded.imm_u())).0,
+            // TODO: consider using better types for imm,
+            // perhaps an enum with kind, so we can avoid the cast.
+            LUI => decoded.imm as u32,
+            AUIPC => (pc.wrapping_add(imm as u32)).0,
 
-            _ => {
-                // Instructions that read rs1 but not rs2.
-                let rs1 = ctx.load_register(decoded.rs1 as usize)?;
-
-                match kind {
-                    ADDI => rs1.wrapping_add(imm_i),
-                    XORI => rs1 ^ imm_i,
-                    ORI => rs1 | imm_i,
-                    ANDI => rs1 & imm_i,
-                    SLLI => rs1 << (imm_i & 0x1f),
-                    SRLI => rs1 >> (imm_i & 0x1f),
-                    SRAI => ((rs1 as i32) >> (imm_i & 0x1f)) as u32,
-                    SLTI => {
-                        if (rs1 as i32) < (imm_i as i32) {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    SLTIU => {
-                        if rs1 < imm_i {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    JALR => {
-                        new_pc = ByteAddr(rs1.wrapping_add(imm_i) & 0xfffffffe);
-                        (pc + WORD_SIZE).0
-                    }
-
-                    _ => {
-                        // Instructions that use rs1 and rs2.
-                        let rs2 = ctx.load_register(decoded.rs2 as usize)?;
-
-                        match kind {
-                            ADD => rs1.wrapping_add(rs2),
-                            SUB => rs1.wrapping_sub(rs2),
-                            XOR => rs1 ^ rs2,
-                            OR => rs1 | rs2,
-                            AND => rs1 & rs2,
-                            SLL => rs1 << (rs2 & 0x1f),
-                            SRL => rs1 >> (rs2 & 0x1f),
-                            SRA => ((rs1 as i32) >> (rs2 & 0x1f)) as u32,
-                            SLT => {
-                                if (rs1 as i32) < (rs2 as i32) {
-                                    1
-                                } else {
-                                    0
-                                }
-                            }
-                            SLTU => {
-                                if rs1 < rs2 {
-                                    1
-                                } else {
-                                    0
-                                }
-                            }
-                            MUL => rs1.wrapping_mul(rs2),
-                            MULH => {
-                                (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32)
-                                    as u32
-                            }
-                            MULHSU => (sign_extend_u32(rs1).wrapping_mul(rs2 as i64) >> 32) as u32,
-                            MULHU => (((rs1 as u64).wrapping_mul(rs2 as u64)) >> 32) as u32,
-                            DIV => {
-                                if rs2 == 0 {
-                                    u32::MAX
-                                } else {
-                                    ((rs1 as i32).wrapping_div(rs2 as i32)) as u32
-                                }
-                            }
-                            DIVU => {
-                                if rs2 == 0 {
-                                    u32::MAX
-                                } else {
-                                    rs1 / rs2
-                                }
-                            }
-                            REM => {
-                                if rs2 == 0 {
-                                    rs1
-                                } else {
-                                    ((rs1 as i32).wrapping_rem(rs2 as i32)) as u32
-                                }
-                            }
-                            REMU => {
-                                if rs2 == 0 {
-                                    rs1
-                                } else {
-                                    rs1 % rs2
-                                }
-                            }
-
-                            _ => unreachable!("Illegal compute instruction: {:?}", kind),
-                        }
-                    }
+            ADDI => rs1.wrapping_add(imm as u32),
+            XORI => rs1 ^ imm as u32,
+            ORI => rs1 | imm as u32,
+            ANDI => rs1 & imm as u32,
+            SLLI => rs1 << imm,
+            SRLI => rs1 >> imm,
+            SRAI => ((rs1 as i32) >> imm) as u32,
+            SLTI => {
+                if (rs1 as i32) < (imm as i32) {
+                    1
+                } else {
+                    0
                 }
             }
+            SLTIU => (rs1 < imm as u32).into(),
+            JALR => {
+                new_pc = ByteAddr(rs1.wrapping_add(imm as u32) & !1);
+                (pc + WORD_SIZE).0
+            }
+
+            ADD => rs1.wrapping_add(rs2),
+            SUB => rs1.wrapping_sub(rs2),
+            XOR => rs1 ^ rs2,
+            OR => rs1 | rs2,
+            AND => rs1 & rs2,
+            SLL => rs1 << (rs2 & 0x1f),
+            SRL => rs1 >> (rs2 & 0x1f),
+            SRA => ((rs1 as i32) >> (rs2 & 0x1f)) as u32,
+            SLT => {
+                if (rs1 as i32) < (rs2 as i32) {
+                    1
+                } else {
+                    0
+                }
+            }
+            SLTU => {
+                if rs1 < rs2 {
+                    1
+                } else {
+                    0
+                }
+            }
+            MUL => rs1.wrapping_mul(rs2),
+            MULH => (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32) as u32,
+            MULHSU => (sign_extend_u32(rs1).wrapping_mul(rs2 as i64) >> 32) as u32,
+            MULHU => (((rs1 as u64).wrapping_mul(rs2 as u64)) >> 32) as u32,
+            DIV => {
+                if rs2 == 0 {
+                    u32::MAX
+                } else {
+                    ((rs1 as i32).wrapping_div(rs2 as i32)) as u32
+                }
+            }
+            DIVU => {
+                if rs2 == 0 {
+                    u32::MAX
+                } else {
+                    rs1 / rs2
+                }
+            }
+            REM => {
+                if rs2 == 0 {
+                    rs1
+                } else {
+                    ((rs1 as i32).wrapping_rem(rs2 as i32)) as u32
+                }
+            }
+            REMU => {
+                if rs2 == 0 {
+                    rs1
+                } else {
+                    rs1 % rs2
+                }
+            }
+            _ => unreachable!("Illegal compute instruction: {:?}", decoded),
         };
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(decoded.rd_internal() as usize, out)?;
+        ctx.store_register(decoded.rd as usize, out)?;
         ctx.set_pc(new_pc);
         Ok(true)
     }
@@ -692,7 +643,6 @@ impl Emulator {
     fn step_branch<M: EmuContext>(
         &self,
         ctx: &mut M,
-        kind: InsnKind,
         decoded: &DecodedInstruction,
     ) -> Result<bool> {
         use InsnKind::*;
@@ -701,18 +651,18 @@ impl Emulator {
         let rs1 = ctx.load_register(decoded.rs1 as RegIdx)?;
         let rs2 = ctx.load_register(decoded.rs2 as RegIdx)?;
 
-        let taken = match kind {
+        let taken = match decoded.kind {
             BEQ => rs1 == rs2,
             BNE => rs1 != rs2,
             BLT => (rs1 as i32) < (rs2 as i32),
             BGE => (rs1 as i32) >= (rs2 as i32),
             BLTU => rs1 < rs2,
             BGEU => rs1 >= rs2,
-            _ => unreachable!("Illegal branch instruction: {:?}", kind),
+            _ => unreachable!("Illegal branch instruction: {:?}", decoded.kind),
         };
 
         let new_pc = if taken {
-            pc.wrapping_add(decoded.imm_b())
+            pc.wrapping_add(decoded.imm as u32)
         } else {
             pc + WORD_SIZE
         };
@@ -724,21 +674,16 @@ impl Emulator {
         Ok(true)
     }
 
-    fn step_load<M: EmuContext>(
-        &self,
-        ctx: &mut M,
-        kind: InsnKind,
-        decoded: &DecodedInstruction,
-    ) -> Result<bool> {
+    fn step_load<M: EmuContext>(&self, ctx: &mut M, decoded: &DecodedInstruction) -> Result<bool> {
         let rs1 = ctx.load_register(decoded.rs1 as usize)?;
         // LOAD instructions do not read rs2.
-        let addr = ByteAddr(rs1.wrapping_add(decoded.imm_i()));
+        let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
         if !ctx.check_data_load(addr) {
             return ctx.trap(TrapCause::LoadAccessFault(addr));
         }
         let data = ctx.load_memory(addr.waddr())?;
         let shift = 8 * (addr.0 & 3);
-        let out = match kind {
+        let out = match decoded.kind {
             InsnKind::LB => {
                 let mut out = (data >> shift) & 0xff;
                 if out & 0x80 != 0 {
@@ -771,27 +716,22 @@ impl Emulator {
             }
             _ => unreachable!(),
         };
-        ctx.store_register(decoded.rd_internal() as usize, out)?;
+        ctx.store_register(decoded.rd as usize, out)?;
         ctx.set_pc(ctx.get_pc() + WORD_SIZE);
         Ok(true)
     }
 
-    fn step_store<M: EmuContext>(
-        &self,
-        ctx: &mut M,
-        kind: InsnKind,
-        decoded: &DecodedInstruction,
-    ) -> Result<bool> {
+    fn step_store<M: EmuContext>(&self, ctx: &mut M, decoded: &DecodedInstruction) -> Result<bool> {
         let rs1 = ctx.load_register(decoded.rs1 as usize)?;
         let rs2 = ctx.load_register(decoded.rs2 as usize)?;
-        let addr = ByteAddr(rs1.wrapping_add(decoded.imm_s()));
+        let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
         let shift = 8 * (addr.0 & 3);
         if !ctx.check_data_store(addr) {
             tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
             return ctx.trap(TrapCause::StoreAccessFault);
         }
         let mut data = ctx.peek_memory(addr.waddr());
-        match kind {
+        match decoded.kind {
             InsnKind::SB => {
                 data ^= data & (0xff << shift);
                 data |= (rs2 & 0xff) << shift;
@@ -821,14 +761,14 @@ impl Emulator {
     fn step_system<M: EmuContext>(
         &self,
         ctx: &mut M,
-        kind: InsnKind,
         decoded: &DecodedInstruction,
     ) -> Result<bool> {
-        match kind {
-            InsnKind::EANY => match decoded.rs2 {
+        match decoded.kind {
+            // TODO(Matthias): this is silly.  Catch illegal instructions in the decode stage.
+            InsnKind::EANY => match decoded.imm {
                 0 => ctx.ecall(),
                 1 => ctx.trap(TrapCause::Breakpoint),
-                _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
+                _ => ctx.trap(TrapCause::IllegalInstruction(decoded.word)),
             },
             _ => unreachable!(),
         }
