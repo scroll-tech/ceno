@@ -30,7 +30,7 @@ pub struct LoadConfig<E: ExtensionField> {
     memory_read: UInt<E>,
     target_limb: Option<WitIn>,
     target_limb_bytes: Option<Vec<WitIn>>,
-    signed_extend_config: Option<SignedExtendConfig>,
+    signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
@@ -249,7 +249,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             _ => 0,
         };
         if let Some(signed_ext_config) = config.signed_extend_config.as_ref() {
-            signed_ext_config.assign_instance::<E>(instance, lk_multiplicity, val)?;
+            signed_ext_config.assign_instance(instance, lk_multiplicity, val)?;
         }
 
         Ok(())

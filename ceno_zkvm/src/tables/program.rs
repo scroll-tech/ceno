@@ -1,5 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
+use crate::utils::i64_to_base;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -51,7 +52,7 @@ impl<T> InsnRecord<T> {
         &self.0[1]
     }
 
-    pub fn rdo(&self) -> &T {
+    pub fn rd(&self) -> &T {
         &self.0[2]
     }
 
@@ -155,10 +156,11 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 let values = InsnRecord::from_decoded(pc, &insn);
 
                 for (col, val) in config.record.0.iter().zip_eq(values.without_imm()) {
-                    set_fixed_val!(row, *col, E::BaseField::from(*val as u64));
+                    set_fixed_val!(row, *col, i64_to_base(*val));
                 }
             });
 
+        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
 

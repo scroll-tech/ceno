@@ -106,7 +106,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         circuit_builder.require_equal(
             || "rs2 == rs2_high * 2^5 + rs2_low5",
             rs2_read.value(),
-            rs2_high.value() * (1 << 5) + rs2_low5.expr(),
+            (rs2_high.value() << 5) + rs2_low5.expr(),
         )?;
 
         Ok(ShiftConfig {

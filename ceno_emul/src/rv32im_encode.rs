@@ -8,6 +8,13 @@ const MASK_8_BITS: u32 = 0xFF;
 const MASK_10_BITS: u32 = 0x3FF;
 const MASK_12_BITS: u32 = 0xFFF;
 
+/// Generate bit encoding of a RISC-V instruction.
+///
+/// Values `rs1`, `rs2` and `rd1` are 5-bit register indices, and `imm` is of
+/// bit length depending on the requirements of the instruction format type.
+///
+/// Fields not required by the instruction's format type are ignored, so one can
+/// safely pass an arbitrary value for these, say 0.
 pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> u32 {
     match kind.codes().format {
         InsnFormat::R => encode_r(kind, rs1, rs2, rd),

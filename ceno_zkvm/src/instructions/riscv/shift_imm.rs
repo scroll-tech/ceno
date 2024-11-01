@@ -4,7 +4,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, IsLtConfig},
+    gadgets::{AssertLTConfig, SignedExtendConfig},
     instructions::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig},
@@ -26,7 +26,7 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     assert_lt_config: AssertLTConfig,
 
     // SRAI
-    is_lt_config: Option<IsLtConfig>,
+    is_lt_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -84,18 +84,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             InsnKind::SRAI | InsnKind::SRLI => {
                 let (inflow, is_lt_config) = match I::INST_KIND {
                     InsnKind::SRAI => {
-                        let max_signed_limb_expr: Expression<_> =
-                            ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
-                        let is_rs1_neg = IsLtConfig::construct_circuit(
-                            circuit_builder,
-                            || "lhs_msb",
-                            max_signed_limb_expr,
-                            rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
-                            1,
-                        )?;
-                        let msb_expr: Expression<E> = is_rs1_neg.is_lt.expr();
-                        let ones = imm.expr() - Expression::ONE;
-                        (msb_expr * ones, Some(is_rs1_neg))
+                        let is_rs1_neg = rs1_read.is_negative(circuit_builder)?;
+                        let ones = imm.expr() - 1;
+                        (is_rs1_neg.expr() * ones, Some(is_rs1_neg))
                     }
                     InsnKind::SRLI => (Expression::ZERO, None),
                     _ => unreachable!(),
@@ -148,12 +139,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             InsnKind::SLLI => (rs1_read.as_u64() * imm as u64) >> UInt::<E>::TOTAL_BITS,
             InsnKind::SRAI | InsnKind::SRLI => {
                 if I::INST_KIND == InsnKind::SRAI {
-                    let max_signed_limb_expr = (1 << (UInt::<E>::LIMB_BITS - 1)) - 1;
                     config.is_lt_config.as_ref().unwrap().assign_instance(
                         instance,
                         lk_multiplicity,
-                        max_signed_limb_expr,
-                        rs1_read.as_u64() >> UInt::<E>::LIMB_BITS,
+                        *rs1_read.as_u16_limbs().last().unwrap() as u64,
                     )?;
                 }
 

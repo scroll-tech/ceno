@@ -3,8 +3,9 @@ use crate::{
     instructions::Instruction,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, MemFinalRecord, MemInitRecord, MemTableCircuit,
-        RegTableCircuit, TableCircuit, U14TableCircuit, U16TableCircuit,
+        AndTableCircuit, LtuTableCircuit, MemCircuit, MemFinalRecord, MemInitRecord,
+        ProgramDataCircuit, PubIOCircuit, RegTableCircuit, TableCircuit, U14TableCircuit,
+        U16TableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind, StepRecord};
@@ -35,7 +36,9 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // RW tables.
     pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub mem_config: <MemTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub mem_config: <MemCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub program_data_config: <ProgramDataCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 
 impl<E: ExtensionField> Rv32imConfig<E> {
@@ -56,7 +59,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // RW tables
         let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
-        let mem_config = cs.register_table_circuit::<MemTableCircuit<E>>();
+        let mem_config = cs.register_table_circuit::<MemCircuit<E>>();
+
+        // RO tables
+        let program_data_config = cs.register_table_circuit::<ProgramDataCircuit<E>>();
+        let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
 
         Self {
             add_config,
@@ -72,6 +79,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
             reg_config,
             mem_config,
+            program_data_config,
+            public_io_config,
         }
     }
 
@@ -80,7 +89,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
         reg_init: &[MemInitRecord],
-        mem_init: &[MemInitRecord],
+        program_data_init: &[MemInitRecord],
     ) {
         fixed.register_opcode_circuit::<AddInstruction<E>>(cs);
         fixed.register_opcode_circuit::<BltuInstruction>(cs);
@@ -95,7 +104,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
 
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
-        fixed.register_table_circuit::<MemTableCircuit<E>>(cs, &self.mem_config, mem_init);
+        fixed.register_table_circuit::<ProgramDataCircuit<E>>(
+            cs,
+            &self.program_data_config,
+            program_data_init,
+        );
+        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, &());
     }
 
     pub fn assign_opcode_circuit(
@@ -149,6 +163,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness: &mut ZKVMWitnesses<E>,
         reg_final: &[MemFinalRecord],
         mem_final: &[MemFinalRecord],
+        program_data_final: &[MemFinalRecord],
+        public_io_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
         witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
@@ -161,8 +177,21 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .unwrap();
         // assign memory finalization.
         witness
-            .assign_table_circuit::<MemTableCircuit<E>>(cs, &self.mem_config, mem_final)
+            .assign_table_circuit::<MemCircuit<E>>(cs, &self.mem_config, mem_final)
             .unwrap();
+        // assign program_data finalization.
+        witness
+            .assign_table_circuit::<ProgramDataCircuit<E>>(
+                cs,
+                &self.program_data_config,
+                program_data_final,
+            )
+            .unwrap();
+
+        witness
+            .assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, public_io_final)
+            .unwrap();
+
         Ok(())
     }
 }
