@@ -284,7 +284,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
             shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8)));
+            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
         let combined_limbs = x
@@ -314,7 +314,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
             shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() * (1 << 8)));
+            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
         let split_limbs = x

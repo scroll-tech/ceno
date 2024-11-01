@@ -54,7 +54,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 bytes
                     .iter()
                     .enumerate()
-                    .map(|(idx, byte)| (1 << (idx * 8)) * byte.expr())
+                    .map(|(idx, byte)| byte.expr() << (idx * 8))
                     .sum(),
             )?;
 

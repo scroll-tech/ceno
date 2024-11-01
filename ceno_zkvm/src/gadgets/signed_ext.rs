@@ -53,7 +53,7 @@ impl SignedExtendConfig {
         assert_ux(
             cb,
             || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
-            2 * val - msb.expr() * (1 << n_bits),
+            2 * val - (msb.expr() << n_bits),
         )?;
 
         Ok(SignedExtendConfig { msb, n_bits })

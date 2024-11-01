@@ -417,7 +417,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Express the value of the low bits.
         let low_sum: Expression<E> = (n_zeros..Self::N_LOW_BITS)
             .zip_eq(low_bits.iter())
-            .map(|(pos, bit)| bit.expr() * (1 << pos))
+            .map(|(pos, bit)| bit.expr() << pos)
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
@@ -537,8 +537,8 @@ mod test {
 
         if is_ok {
             cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;
-            cb.require_equal(|| "", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
-            cb.require_equal(|| "", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
+            cb.require_equal(|| "", mem_addr.expr_align2(), (addr & !1).into())?;
+            cb.require_equal(|| "", mem_addr.expr_align4(), (addr & !3).into())?;
         }
         MockProver::assert_with_expected_errors(
             &cb,
