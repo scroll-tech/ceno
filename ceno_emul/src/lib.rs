@@ -1,5 +1,3 @@
-// TODO: remove when we are done with the PR.
-#![allow(dead_code)]
 mod addr;
 pub use addr::*;
 

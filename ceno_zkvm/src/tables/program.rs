@@ -1,6 +1,5 @@
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
-use crate::utils::i64_to_base;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -9,6 +8,7 @@ use crate::{
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
+    utils::i64_to_base,
     witness::RowMajorMatrix,
 };
 use ceno_emul::{

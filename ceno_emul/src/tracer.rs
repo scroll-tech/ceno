@@ -214,9 +214,7 @@ impl StepRecord {
                 previous_cycle,
             }),
             rd: rd.map(|rd| WriteOp {
-                addr: CENO_PLATFORM
-                    .register_vma(insn.rd as RegIdx)
-                    .into(),
+                addr: CENO_PLATFORM.register_vma(insn.rd as RegIdx).into(),
                 value: rd,
                 previous_cycle,
             }),

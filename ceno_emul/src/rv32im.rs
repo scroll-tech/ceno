@@ -277,9 +277,6 @@ impl ActuallyDecodedInstruction {
 }
 
 impl DecodedInstructionOld {
-    /// A virtual register which absorbs the writes to x0.
-    pub const RD_NULL: u32 = 32;
-
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -290,91 +287,6 @@ impl DecodedInstructionOld {
             func3: (insn & 0x00007000) >> 12,
             rd: (insn & 0x00000f80) >> 7,
             opcode: insn & 0x0000007f,
-        }
-    }
-
-    pub fn encoded(&self) -> u32 {
-        self.insn
-    }
-
-    pub fn opcode(&self) -> u32 {
-        self.opcode
-    }
-
-    /// The internal register destination. It is either the regular rd, or an internal RD_NULL if
-    /// the instruction does not write to a register or writes to x0.
-    pub fn rd_internal(&self) -> u32 {
-        match self.codes().format {
-            R | I | U | J if self.rd != 0 => self.rd,
-            _ => Self::RD_NULL,
-        }
-    }
-
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.func3,
-            _ => 0,
-        }
-    }
-
-    /// Get the rs1 field, regardless of the instruction format.
-    pub fn rs1(&self) -> u32 {
-        self.rs1
-    }
-
-    /// Get the register source 1, or zero if the instruction does not use rs1.
-    pub fn rs1_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.rs1,
-            _ => 0,
-        }
-    }
-
-    /// Get the rs2 field, regardless of the instruction format.
-    pub fn rs2(&self) -> u32 {
-        self.rs2
-    }
-
-    /// Get the register source 2, or zero if the instruction does not use rs2.
-    pub fn rs2_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | S | B => self.rs2,
-            _ => 0,
-        }
-    }
-
-    /// The internal view of the immediate, for use in circuits.
-    pub fn imm_internal(&self) -> u32 {
-        match self.codes().format {
-            R => self.func7,
-            I => match self.codes().kind {
-                // decode the shift as a multiplication/division by 1 << immediate
-                SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
-                _ => self.imm_i(),
-            },
-            S => self.imm_s(),
-            B => self.imm_b(),
-            U => self.imm_u(),
-            J => self.imm_j(),
-        }
-    }
-
-    /// The internal interpretation of the immediate sign, for use in circuits.
-    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
-    /// example:
-    /// imm = ux::MAX - 1 implies
-    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
-    /// imm_field = ux::MAX - 1 otherwise
-    /// see InsnRecord::imm_internal_field
-    pub fn imm_field_is_negative(&self) -> bool {
-        match self.codes() {
-            InsnCodes { format: R | U, .. } => false,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI | SLTIU,
-                ..
-            } => false,
-            _ => self.top_bit != 0,
         }
     }
 
@@ -413,33 +325,6 @@ impl DecodedInstructionOld {
 
     fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
-    }
-}
-
-#[cfg(test)]
-#[test]
-#[allow(clippy::identity_op)]
-fn test_decode_imm() {
-    for (i, expected) in [
-        // Example of I-type: ADDI.
-        // imm    | rs1     | funct3      | rd     | opcode
-        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
-        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
-        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (
-            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
-            1 << 31,
-        ),
-        // Example of R-type with funct7: SUB.
-        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-        (
-            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
-            0x20,
-        ),
-    ] {
-        let imm = DecodedInstructionOld::new(i).imm_internal();
-        assert_eq!(imm, expected);
     }
 }
 
