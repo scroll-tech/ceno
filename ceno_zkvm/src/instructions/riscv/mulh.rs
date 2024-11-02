@@ -70,14 +70,13 @@
 use std::{fmt::Display, marker::PhantomData};
 
 use ceno_emul::{InsnKind, StepRecord};
-use ff::Field;
 use ff_ext::ExtensionField;
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    gadgets::SignedExtendConfig,
+    expression::Expression,
+    gadgets::{IsEqualConfig, SignedExtendConfig},
     instructions::{
         Instruction,
         riscv::{
@@ -86,7 +85,6 @@ use crate::{
             r_insn::RInstructionConfig,
         },
     },
-    set_val,
     uint::Value,
     utils::i64_to_base,
     witness::LkMultiplicity,
@@ -124,12 +122,12 @@ pub struct MulhConfig<E: ExtensionField> {
 
 enum MulhSignDependencies<E: ExtensionField> {
     UU {
-        constrain_rd_inv: WitIn,
+        constrain_rd: IsEqualConfig,
     },
     SU {
         rs1_signed: Signed<E>,
         rd_signed: Signed<E>,
-        constrain_rd_inv: WitIn,
+        constrain_rd: IsEqualConfig,
     },
     SS {
         rs1_signed: Signed<E>,
@@ -180,20 +178,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
 
             InsnKind::MULHU => {
-                // constrain that rd does not represent 2^32 - 1 by witnessing
-                // the multiplicative inverse of (2^32 - 1) - rd, which must
-                // therefore be nonzero
-                let constrain_rd_inv = circuit_builder.create_witin(|| "constrain_rd_inv");
+                // constrain that rd does not represent 2^32 - 1
                 let rd_avoid = Expression::<E>::from((1u64 << BIT_WIDTH) - 1);
-                let nonzero_expr: Expression<E> = rd_avoid - rd_written.value();
-                circuit_builder
-                    .require_one(|| "constrain_rd", nonzero_expr * constrain_rd_inv.expr())?;
+                let constrain_rd = IsEqualConfig::construct_non_equal(
+                    circuit_builder,
+                    || "constrain_rd",
+                    rd_written.value(),
+                    rd_avoid,
+                )?;
 
                 (
                     rs1_read.value(),
                     rs2_read.value(),
                     rd_written.value(),
-                    MulhSignDependencies::UU { constrain_rd_inv },
+                    MulhSignDependencies::UU { constrain_rd },
                 )
             }
 
@@ -201,14 +199,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
                 let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
 
-                // constrain that (signed) rd does not represent 2^31 - 1 by
-                // witnessing the multiplicative inverse of (2^31 - 1) - rd,
-                // which must therefore be nonzero
-                let constrain_rd_inv = circuit_builder.create_witin(|| "constrain_rd_inv");
+                // constrain that (signed) rd does not represent 2^31 - 1
                 let rd_avoid = Expression::<E>::from((1u64 << (BIT_WIDTH - 1)) - 1);
-                let nonzero_expr: Expression<E> = rd_avoid - rd_signed.expr();
-                circuit_builder
-                    .require_one(|| "constrain_rd", nonzero_expr * constrain_rd_inv.expr())?;
+                let constrain_rd = IsEqualConfig::construct_non_equal(
+                    circuit_builder,
+                    || "constrain_rd",
+                    rd_signed.expr(),
+                    rd_avoid,
+                )?;
 
                 (
                     rs1_signed.expr(),
@@ -217,7 +215,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                     MulhSignDependencies::SU {
                         rs1_signed,
                         rd_signed,
-                        constrain_rd_inv,
+                        constrain_rd,
                     },
                 )
             }
@@ -291,13 +289,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let prod = (rs1_s as i64) * (rs2_s as i64);
                 ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
             }
-            MulhSignDependencies::UU { constrain_rd_inv } => {
-                // assign (u32::MAX - rd) field inverse to witness
-                let nonzero_val = ((1i64 << BIT_WIDTH) - 1) - (rd as i64);
-                let inv_field_elt = i64_to_base::<E::BaseField>(nonzero_val)
-                    .invert()
-                    .expect("rd cannot be u32::MAX");
-                set_val!(instance, constrain_rd_inv, inv_field_elt);
+            MulhSignDependencies::UU { constrain_rd } => {
+                // assign nonzero value (u32::MAX - rd)
+                let rd_f = E::BaseField::from(rd as u64);
+                let avoid_f = E::BaseField::from((1u64 << BIT_WIDTH) - 1);
+                constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
                 let prod = rs1_val.as_u64() * rs2_val.as_u64();
                 (prod % (1u64 << BIT_WIDTH)) as u32
@@ -305,18 +301,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             MulhSignDependencies::SU {
                 rs1_signed,
                 rd_signed,
-                constrain_rd_inv,
+                constrain_rd,
             } => {
                 // Signed register values
                 let rs1_s = rs1_signed.assign_instance(instance, lk_multiplicity, &rs1_val)?;
                 let rd_s = rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
 
-                // assign (i32::MAX - rd) field inverse to witness
-                let nonzero_val = ((1i64 << (BIT_WIDTH - 1)) - 1) - (rd_s as i64);
-                let inv_field_elt = i64_to_base::<E::BaseField>(nonzero_val)
-                    .invert()
-                    .expect("rd cannot be u32::MAX");
-                set_val!(instance, constrain_rd_inv, inv_field_elt);
+                // assign nonzero value (i32::MAX - rd)
+                let rd_f = i64_to_base(rd_s as i64);
+                let avoid_f = i64_to_base((1i64 << (BIT_WIDTH - 1)) - 1);
+                constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
+                // let nonzero_val = ((1i64 << (BIT_WIDTH - 1)) - 1) - (rd_s as i64);
+                // constrain_rd.assign_instance(instance, i64_to_base(nonzero_val))?;
 
                 let prod = (rs1_s as i64).wrapping_mul(rs2 as i64);
                 ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
