@@ -143,7 +143,9 @@ mod test {
 
     use super::LogicOp;
 
+    /// An arbitrary test value.
     const TEST: u32 = 0xabed_5eff;
+    /// An example of a sign-extended negative immediate value.
     const NEG: u32 = 0xffff_ff55;
 
     #[test]
