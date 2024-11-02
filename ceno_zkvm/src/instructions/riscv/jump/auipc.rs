@@ -13,6 +13,7 @@ use crate::{
         riscv::{constants::UInt, u_insn::UInstructionConfig},
     },
     set_val,
+    tables::InsnRecord,
     witness::LkMultiplicity,
 };
 
@@ -74,10 +75,11 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         let pc: u32 = step.pc().before.0;
-        let imm: u32 = step.insn().imm_internal();
+        let imm: u32 = step.insn().immediate();
         let (sum, overflow) = pc.overflowing_add(imm);
 
-        set_val!(instance, config.imm, imm as u64);
+        let imm_field: E::BaseField = InsnRecord::imm_internal_field(&step.insn());
+        set_val!(instance, config.imm, imm_field);
         set_val!(instance, config.overflow_bit, overflow as u64);
 
         let sum_limbs = Value::new(sum, lk_multiplicity);

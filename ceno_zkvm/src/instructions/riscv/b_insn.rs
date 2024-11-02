@@ -100,7 +100,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         set_val!(
             instance,
             self.imm,
-            InsnRecord::imm_internal_field::<E::BaseField>(&step.insn())
+            InsnRecord::<E::BaseField>::imm_internal_field(&step.insn())
         );
 
         // Fetch the instruction.
