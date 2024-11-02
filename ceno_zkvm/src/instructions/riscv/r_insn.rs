@@ -48,7 +48,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             Some(rd.id.expr()),
             rs1.id.expr(),
             rs2.id.expr(),
-            insn_kind.codes().func7.into(),
+            0.into(),
         ))?;
 
         Ok(RInstructionConfig {
