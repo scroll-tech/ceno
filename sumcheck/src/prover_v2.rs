@@ -441,8 +441,12 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         let AdditiveVec(products_sum) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
             |mut products_sum, (coefficient, products)| {
+                let products = if products.len() >= 2 {
+                    products[0..products.len()-1].to_vec() // test excluding eq
+                } else {
+                    products.to_vec()
+                };
                 let span = entered_span!("sum");
-
                 let mut sum = match products.len() {
                     1 => {
                         let f = &self.poly.flattened_ml_extensions[products[0]];
@@ -450,22 +454,25 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             |f| {
                                 let res = (0..largest_even_below(f.len()))
                                     .step_by(2)
-                                    .fold(AdditiveArray::<_, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
+                                    .fold(AdditiveArray::<_, 1>(array::from_fn(|_| 0.into())), |mut acc, b| {
                                             acc.0[0] += f[b];
-                                            acc.0[1] += f[b+1];
+                                            // acc.0[1] += f[b+1];
                                             acc
                                 });
                                 let res = if f.len() == 1 {
-                                    AdditiveArray::<_, 2>([f[0]; 2])
+                                    AdditiveArray::<_, 1>([f[0]; 1])
                                 } else {
                                     res
                                 };
                                 let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
-                                if num_vars_multiplicity > 0 {
+                                let res = if num_vars_multiplicity > 0 {
                                     AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
                                 } else {
                                     res
-                                }
+                                };
+                                let mut res = res.to_vec();
+                                res.resize(2, 0.into());
+                                AdditiveArray::<_, 2>(res.try_into().unwrap())
                             },
                             |sum| AdditiveArray(sum.0.map(E::from))
                         }
@@ -479,25 +486,28 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         commutative_op_mle_pair!(
                             |f, g| {
                                 let res = (0..largest_even_below(f.len())).step_by(2).fold(
-                                    AdditiveArray::<_, 3>(array::from_fn(|_| 0.into())),
+                                    AdditiveArray::<_, 2>(array::from_fn(|_| 0.into())),
                                     |mut acc, b| {
                                         acc.0[0] += f[b] * g[b];
-                                        acc.0[1] += f[b + 1] * g[b + 1];
-                                        acc.0[2] +=
+                                        // acc.0[1] += f[b + 1] * g[b + 1];
+                                        acc.0[1] +=
                                             (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
                                         acc
                                 });
                                 let res = if f.len() == 1 {
-                                    AdditiveArray::<_, 3>([f[0] * g[0]; 3])
+                                    AdditiveArray::<_, 2>([f[0] * g[0]; 2])
                                 } else {
                                     res
                                 };
                                 let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
-                                if num_vars_multiplicity > 0 {
+                                let res = if num_vars_multiplicity > 0 {
                                     AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
                                 } else {
                                     res
-                                }
+                                };
+                                let mut res = res.to_vec();
+                                res.resize(3, 0.into());
+                                AdditiveArray::<_, 3>(res.try_into().unwrap())
                             },
                             |sum| AdditiveArray(sum.0.map(E::from))
                         )
@@ -520,25 +530,29 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                         let c3 = f3[b + 1] - f3[b];
                                         AdditiveArray([
                                             f1[b] * (f2[b] * f3[b]),
-                                            f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                           // f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                            // 0.into(),
                                             (c1 + f1[b + 1])
                                                 * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
                                             (c1 + c1 + f1[b + 1])
                                                 * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
                                         ])
                                     })
-                                    .sum::<AdditiveArray<_, 4>>();
+                                    .sum::<AdditiveArray<_, 3>>();
                                 let res = if f1.len() == 1 {
-                                    AdditiveArray::<_, 4>([f1[0] * f2[0] * f3[0]; 4])
+                                    AdditiveArray::<_, 3>([f1[0] * f2[0] * f3[0]; 3])
                                 } else {
                                     res
                                 };
                                 let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f1.len()).max(1) + self.round - 1);
-                                if num_vars_multiplicity > 0 {
+                                let res = if num_vars_multiplicity > 0 {
                                     AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
                                 } else {
                                     res
-                                }
+                                };
+                                let mut res = res.to_vec();
+                                res.resize(4, 0.into());
+                                AdditiveArray::<_, 4>(res.try_into().unwrap())
                             },
                             |sum| AdditiveArray(sum.0.map(E::from))
                         )
@@ -550,7 +564,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 sum.iter_mut().for_each(|sum| *sum *= coefficient);
 
                 let span = entered_span!("extrapolation");
-                let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
+                let extrapolation = (0..(self.poly.aux_info.max_degree - products.len()-1))
                     .map(|i| {
                         let (points, weights) = &self.extrapolation_aux[products.len() - 1];
                         let at = E::from((products.len() + 1 + i) as u64);

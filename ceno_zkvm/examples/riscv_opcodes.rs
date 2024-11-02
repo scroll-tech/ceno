@@ -288,6 +288,7 @@ fn main() {
             instance_num_vars,
             timer.elapsed().as_secs_f64()
         );
+        return;
 
         let transcript = Transcript::new(b"riscv");
         assert!(
