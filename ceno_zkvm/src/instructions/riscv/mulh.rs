@@ -51,7 +51,18 @@
 //! each, as Goldilocks field elements, but only the smaller (more negative) of
 //! these gives the correct product.
 //!
-//! As it happens, this can be remedied in each case by the following
+//! Examples of these ambiguous representations:
+//! - Unsigned/unsigned: for `rs1 = rs2 = 0`, the product should be represented
+//!   by `rd = low = 0`, but can also be represented by `rd = 2^32 - 1` and
+//!   `low = 1`, so that `rd*2^32 + low = 2^64 - 2^32 + 1` which is congruent
+//!   to 0 mod the Goldilocks prime.
+//! - Signed/unsigned: for `rs1 = -2^31` and `rs2 = 2^32 - 1`, the product
+//!   `-2^63 + 2^31` should be represented by `rd = -2^31` and `low = 2^31`,
+//!   but can also be represented by `rd = 2^31 - 1` and `low = 2^31 + 1`,
+//!   such that `rd*2^32 + low = 2^63 - 2^32 + 2^31 + 1`, which can be written
+//!   as `(-2^63 + 2^31) + (2^64 - 2^32 + 1)`.
+//!
+//! As it happens, this issue can be remedied in each case by the following
 //! mitigation: constrain the high limb `rd` to not be equal to its maximal
 //! value, which is `2^32 - 1` in the unsigned case, and `2^31 - 1` in the
 //! signed case.  Removing this possibility eliminates the entire high
