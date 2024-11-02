@@ -30,6 +30,7 @@ macro_rules! declare_program {
     };
 }
 
+/// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 7]);
 
@@ -46,37 +47,13 @@ impl<T> InsnRecord<T> {
         &self.0
     }
 
-    pub fn pc(&self) -> &T {
-        &self.0[0]
-    }
-
-    pub fn opcode(&self) -> &T {
-        &self.0[1]
-    }
-
-    pub fn rd_internal(&self) -> &T {
-        &self.0[2]
-    }
-
-    pub fn funct3_or_zero(&self) -> &T {
-        &self.0[3]
-    }
-
-    pub fn rs1_or_zero(&self) -> &T {
-        &self.0[4]
-    }
-
-    pub fn rs2_or_zero(&self) -> &T {
-        &self.0[5]
-    }
-
     /// Iterate through the fields, except immediate because it is complicated.
     fn without_imm(&self) -> &[T] {
         &self.0[0..6]
     }
 
     /// The internal view of the immediate. See `DecodedInstruction::imm_internal`.
-    pub fn imm_internal(&self) -> &T {
+    fn imm_internal(&self) -> &T {
         &self.0[6]
     }
 }
