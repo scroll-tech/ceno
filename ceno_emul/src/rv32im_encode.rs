@@ -49,7 +49,8 @@ const fn encode_i(kind: InsnKind, rs1: u32, rd: u32, imm: u32) -> u32 {
     let rd = rd & MASK_5_BITS;
     let func3 = kind.codes().func3;
     let opcode = kind.codes().opcode;
-    let imm = imm & MASK_12_BITS;
+    let shift_func = (matches!(kind, InsnKind::SRAI) as u32) << 10; // SRAI kind is encoded in imm.
+    let imm = imm & MASK_12_BITS | shift_func;
     imm << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode
 }
 
