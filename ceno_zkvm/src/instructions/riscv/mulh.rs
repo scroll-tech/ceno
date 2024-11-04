@@ -154,6 +154,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
+
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<MulhConfig<E>, ZKVMError> {
