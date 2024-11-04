@@ -875,7 +875,10 @@ Hints:
                         .collect_vec();
                     tracing::error!(
                         "{}: value {:x?} does not occur in {:?} table at row {}",
-                        lk_input_annotation, values, rom_type, row,
+                        lk_input_annotation,
+                        values,
+                        rom_type,
+                        row,
                     );
                 }
             }
