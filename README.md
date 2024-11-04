@@ -1,48 +1,38 @@
-# MVP
-step 1
-- non-uniform prover end to end
-  - no recursion
-  - no PCS
-  - with IOP
-  - with lookup
-  - with Frontend + VM
+# Ceno: Non-uniform, Segment and Parallel Risc-V Zero-knowledge Virtual Machine
 
-step 2
-- introduce PCS
+Please see [the slightly outdated paper](https://eprint.iacr.org/2024/387) for an introduction to Ceno.
 
-step 3
-- recursion and achieve uniformality
+🚧 This project is currently under construction and not suitable for use in production. 🚧
 
-# Building blocks
-- hash function
-<!---  - [ ] merkle tree hash: 2-1 or 3-1 with padding
-  - [ ] transcript: 3-1
-  - [ ] (optional) breakdown: 16-1
-  - [ ] plonky2 12-4 --->
-  - [ ] decision: start with 8-4 first
+If you are unfamiliar with the RISC-V instruction set, please have a look at the [RISC-V instruction set reference](https://github.com/jameslzhu/riscv-card/blob/master/riscv-card.pdf).
 
-- IOP
-  - lookup
-    - [ ] logup: spec @wenqing
-    - [ ] implement as an IOP module along with high degree gate
-  - high degree gates
-    - [ ] paper/spec @tianyi
-    - one on one tianyi/zhenfei
+## Local build requirements
 
-- PCS
+Ceno is built in Rust, so [installing the Rust toolchain](https://www.rust-lang.org/tools/install) is a pre-requisite, if you want to develop on your local machine.  We also use [cargo-make](https://sagiegurari.github.io/cargo-make/) to build Ceno. You can install cargo-make with the following command:
 
-- gates/subcircuits
-  - spec
-  - example by tianyi
+```sh
+cargo install cargo-make
+```
 
+You will also need to install the Risc-V target for Rust. You can do this with the following command:
 
-option 1
-- repeat sumcheck twice/three times
-option 2
-- use F_q^2/3 extension field, do not repeat
-- rule of thumb: n rounds, soundness ~ (64-n) bits
+```sh
+rustup target add riscv32im-unknown-none-elf
+```
 
+## Building Ceno and running tests
 
+To run the tests, you can use the following command:
 
+```sh
+cargo make tests
+```
 
- 
+Clippy and check work as usual:
+
+```sh
+cargo check
+cargo clippy
+```
+
+Alas, `cargo build` doesn't work. That's a known problem and we're working on it.  Please use `cargo make build` instead for now.

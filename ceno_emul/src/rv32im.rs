@@ -14,18 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
-use super::addr::{ByteAddr, RegIdx, Word, WordAddr, WORD_SIZE};
+use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 
 pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
-
-    // Handle a machine return
-    fn mret(&self) -> Result<bool>;
 
     // Handle a trap
     fn trap(&self, cause: TrapCause) -> Result<bool>;
@@ -88,7 +85,6 @@ pub struct Emulator {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
@@ -105,6 +101,7 @@ pub enum TrapCause {
 pub struct DecodedInstruction {
     insn: u32,
     top_bit: u32,
+    // The bit fields of the instruction encoding, regardless of the instruction format.
     func7: u32,
     rs2: u32,
     rs1: u32,
@@ -114,13 +111,26 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum InsnCategory {
+enum InsnCategory {
     Compute,
+    Branch,
     Load,
     Store,
     System,
     Invalid,
 }
+use InsnCategory::*;
+
+#[derive(Clone, Copy, Debug)]
+pub enum InsnFormat {
+    R,
+    I,
+    S,
+    B,
+    U,
+    J,
+}
+use InsnFormat::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, EnumIter)]
 #[allow(clippy::upper_case_acronyms)]
@@ -171,9 +181,10 @@ pub enum InsnKind {
     SB,
     SH,
     SW,
+    /// ECALL and EBREAK etc.
     EANY,
-    MRET,
 }
+use InsnKind::*;
 
 impl InsnKind {
     pub const fn codes(self) -> InsnCodes {
@@ -183,6 +194,7 @@ impl InsnKind {
 
 #[derive(Clone, Copy, Debug)]
 pub struct InsnCodes {
+    pub format: InsnFormat,
     pub kind: InsnKind,
     category: InsnCategory,
     pub opcode: u32,
@@ -191,6 +203,9 @@ pub struct InsnCodes {
 }
 
 impl DecodedInstruction {
+    /// A virtual register which absorbs the writes to x0.
+    pub const RD_NULL: u32 = 32;
+
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -204,28 +219,6 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn from_raw(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> Self {
-        // limit the range of inputs
-        let rs2 = rs2 & 0x1f; // 5bits mask
-        let rs1 = rs1 & 0x1f;
-        let rd = rd & 0x1f;
-        let func7 = kind.codes().func7;
-        let func3 = kind.codes().func3;
-        let opcode = kind.codes().opcode;
-        let insn = func7 << 25 | rs2 << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode;
-        Self {
-            insn,
-            top_bit: func7 | 0x80,
-            func7,
-            rs2,
-            rs1,
-            func3,
-            rd,
-            opcode,
-        }
-    }
-
     pub fn encoded(&self) -> u32 {
         self.insn
     }
@@ -234,51 +227,108 @@ impl DecodedInstruction {
         self.opcode
     }
 
-    pub fn rd(&self) -> u32 {
-        self.rd
+    /// The internal register destination. It is either the regular rd, or an internal RD_NULL if
+    /// the instruction does not write to a register or writes to x0.
+    pub fn rd_internal(&self) -> u32 {
+        match self.codes().format {
+            R | I | U | J if self.rd != 0 => self.rd,
+            _ => Self::RD_NULL,
+        }
     }
 
-    pub fn funct3(&self) -> u32 {
-        self.func3
+    /// Get the funct3 field, or zero if the instruction does not use funct3.
+    pub fn funct3_or_zero(&self) -> u32 {
+        match self.codes().format {
+            R | I | S | B => self.func3,
+            _ => 0,
+        }
     }
 
+    /// Get the rs1 field, regardless of the instruction format.
     pub fn rs1(&self) -> u32 {
         self.rs1
     }
 
+    /// Get the register source 1, or zero if the instruction does not use rs1.
+    pub fn rs1_or_zero(&self) -> u32 {
+        match self.codes().format {
+            R | I | S | B => self.rs1,
+            _ => 0,
+        }
+    }
+
+    /// Get the rs2 field, regardless of the instruction format.
     pub fn rs2(&self) -> u32 {
         self.rs2
     }
 
-    pub fn funct7(&self) -> u32 {
-        self.func7
+    /// Get the register source 2, or zero if the instruction does not use rs2.
+    pub fn rs2_or_zero(&self) -> u32 {
+        match self.codes().format {
+            R | S | B => self.rs2,
+            _ => 0,
+        }
     }
 
-    pub fn sign_bit(&self) -> u32 {
-        self.top_bit
+    /// The internal view of the immediate, for use in circuits.
+    pub fn imm_internal(&self) -> u32 {
+        match self.codes().format {
+            R => self.func7,
+            I => match self.codes().kind {
+                // decode the shift as a multiplication/division by 1 << immediate
+                SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
+                _ => self.imm_i(),
+            },
+            S => self.imm_s(),
+            B => self.imm_b(),
+            U => self.imm_u(),
+            J => self.imm_j(),
+        }
     }
 
-    pub fn kind(&self) -> (InsnCategory, InsnKind) {
-        let i = FastDecodeTable::get().lookup(self);
-        (i.category, i.kind)
+    /// The internal interpretation of the immediate sign, for use in circuits.
+    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
+    /// example:
+    /// imm = ux::MAX - 1 implies
+    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
+    /// imm_field = ux::MAX - 1 otherwise
+    /// see InsnRecord::imm_internal_field
+    pub fn imm_field_is_negative(&self) -> bool {
+        match self.codes() {
+            InsnCodes { format: R | U, .. } => false,
+            InsnCodes {
+                kind: SLLI | SRLI | SRAI | ADDI | SLTIU | ANDI | XORI | ORI,
+                ..
+            } => false,
+            _ => self.top_bit != 0,
+        }
     }
 
-    pub fn imm_b(&self) -> u32 {
+    pub fn codes(&self) -> InsnCodes {
+        FastDecodeTable::get().lookup(self)
+    }
+
+    fn imm_b(&self) -> u32 {
         (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
-    pub fn imm_i(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
+    fn imm_i(&self) -> u32 {
+        (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
-    pub fn imm_s(&self) -> u32 {
+    /// Shift amount field of SLLI, SRLI, SRAI.
+    fn imm_shamt(&self) -> u32 {
+        self.rs2
+    }
+
+    fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
-    pub fn imm_j(&self) -> u32 {
+    fn imm_j(&self) -> u32 {
         (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
             | (self.func3 << 12)
@@ -287,12 +337,40 @@ impl DecodedInstruction {
             | (self.rs2 & 0x1e)
     }
 
-    pub fn imm_u(&self) -> u32 {
+    fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
     }
 }
 
+#[cfg(test)]
+#[test]
+#[allow(clippy::identity_op)]
+fn test_decode_imm() {
+    for (i, expected) in [
+        // Example of I-type: ADDI.
+        // imm    | rs1     | funct3      | rd     | opcode
+        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
+        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
+        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
+        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
+        (
+            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
+            1 << 31,
+        ),
+        // Example of R-type with funct7: SUB.
+        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
+        (
+            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
+            0x20,
+        ),
+    ] {
+        let imm = DecodedInstruction::new(i).imm_internal();
+        assert_eq!(imm, expected);
+    }
+}
+
 const fn insn(
+    format: InsnFormat,
     kind: InsnKind,
     category: InsnCategory,
     opcode: u32,
@@ -300,6 +378,7 @@ const fn insn(
     func7: i32,
 ) -> InsnCodes {
     InsnCodes {
+        format,
         kind,
         category,
         opcode,
@@ -308,58 +387,57 @@ const fn insn(
     }
 }
 
-type InstructionTable = [InsnCodes; 48];
+type InstructionTable = [InsnCodes; 47];
 type FastInstructionTable = [u8; 1 << 10];
 
 const RV32IM_ISA: InstructionTable = [
-    insn(InsnKind::INVALID, InsnCategory::Invalid, 0x00, 0x0, 0x00),
-    insn(InsnKind::ADD, InsnCategory::Compute, 0x33, 0x0, 0x00),
-    insn(InsnKind::SUB, InsnCategory::Compute, 0x33, 0x0, 0x20),
-    insn(InsnKind::XOR, InsnCategory::Compute, 0x33, 0x4, 0x00),
-    insn(InsnKind::OR, InsnCategory::Compute, 0x33, 0x6, 0x00),
-    insn(InsnKind::AND, InsnCategory::Compute, 0x33, 0x7, 0x00),
-    insn(InsnKind::SLL, InsnCategory::Compute, 0x33, 0x1, 0x00),
-    insn(InsnKind::SRL, InsnCategory::Compute, 0x33, 0x5, 0x00),
-    insn(InsnKind::SRA, InsnCategory::Compute, 0x33, 0x5, 0x20),
-    insn(InsnKind::SLT, InsnCategory::Compute, 0x33, 0x2, 0x00),
-    insn(InsnKind::SLTU, InsnCategory::Compute, 0x33, 0x3, 0x00),
-    insn(InsnKind::ADDI, InsnCategory::Compute, 0x13, 0x0, -1),
-    insn(InsnKind::XORI, InsnCategory::Compute, 0x13, 0x4, -1),
-    insn(InsnKind::ORI, InsnCategory::Compute, 0x13, 0x6, -1),
-    insn(InsnKind::ANDI, InsnCategory::Compute, 0x13, 0x7, -1),
-    insn(InsnKind::SLLI, InsnCategory::Compute, 0x13, 0x1, 0x00),
-    insn(InsnKind::SRLI, InsnCategory::Compute, 0x13, 0x5, 0x00),
-    insn(InsnKind::SRAI, InsnCategory::Compute, 0x13, 0x5, 0x20),
-    insn(InsnKind::SLTI, InsnCategory::Compute, 0x13, 0x2, -1),
-    insn(InsnKind::SLTIU, InsnCategory::Compute, 0x13, 0x3, -1),
-    insn(InsnKind::BEQ, InsnCategory::Compute, 0x63, 0x0, -1),
-    insn(InsnKind::BNE, InsnCategory::Compute, 0x63, 0x1, -1),
-    insn(InsnKind::BLT, InsnCategory::Compute, 0x63, 0x4, -1),
-    insn(InsnKind::BGE, InsnCategory::Compute, 0x63, 0x5, -1),
-    insn(InsnKind::BLTU, InsnCategory::Compute, 0x63, 0x6, -1),
-    insn(InsnKind::BGEU, InsnCategory::Compute, 0x63, 0x7, -1),
-    insn(InsnKind::JAL, InsnCategory::Compute, 0x6f, -1, -1),
-    insn(InsnKind::JALR, InsnCategory::Compute, 0x67, 0x0, -1),
-    insn(InsnKind::LUI, InsnCategory::Compute, 0x37, -1, -1),
-    insn(InsnKind::AUIPC, InsnCategory::Compute, 0x17, -1, -1),
-    insn(InsnKind::MUL, InsnCategory::Compute, 0x33, 0x0, 0x01),
-    insn(InsnKind::MULH, InsnCategory::Compute, 0x33, 0x1, 0x01),
-    insn(InsnKind::MULHSU, InsnCategory::Compute, 0x33, 0x2, 0x01),
-    insn(InsnKind::MULHU, InsnCategory::Compute, 0x33, 0x3, 0x01),
-    insn(InsnKind::DIV, InsnCategory::Compute, 0x33, 0x4, 0x01),
-    insn(InsnKind::DIVU, InsnCategory::Compute, 0x33, 0x5, 0x01),
-    insn(InsnKind::REM, InsnCategory::Compute, 0x33, 0x6, 0x01),
-    insn(InsnKind::REMU, InsnCategory::Compute, 0x33, 0x7, 0x01),
-    insn(InsnKind::LB, InsnCategory::Load, 0x03, 0x0, -1),
-    insn(InsnKind::LH, InsnCategory::Load, 0x03, 0x1, -1),
-    insn(InsnKind::LW, InsnCategory::Load, 0x03, 0x2, -1),
-    insn(InsnKind::LBU, InsnCategory::Load, 0x03, 0x4, -1),
-    insn(InsnKind::LHU, InsnCategory::Load, 0x03, 0x5, -1),
-    insn(InsnKind::SB, InsnCategory::Store, 0x23, 0x0, -1),
-    insn(InsnKind::SH, InsnCategory::Store, 0x23, 0x1, -1),
-    insn(InsnKind::SW, InsnCategory::Store, 0x23, 0x2, -1),
-    insn(InsnKind::EANY, InsnCategory::System, 0x73, 0x0, 0x00),
-    insn(InsnKind::MRET, InsnCategory::System, 0x73, 0x0, 0x18),
+    insn(R, INVALID, Invalid, 0x00, 0x0, 0x00),
+    insn(R, ADD, Compute, 0x33, 0x0, 0x00),
+    insn(R, SUB, Compute, 0x33, 0x0, 0x20),
+    insn(R, XOR, Compute, 0x33, 0x4, 0x00),
+    insn(R, OR, Compute, 0x33, 0x6, 0x00),
+    insn(R, AND, Compute, 0x33, 0x7, 0x00),
+    insn(R, SLL, Compute, 0x33, 0x1, 0x00),
+    insn(R, SRL, Compute, 0x33, 0x5, 0x00),
+    insn(R, SRA, Compute, 0x33, 0x5, 0x20),
+    insn(R, SLT, Compute, 0x33, 0x2, 0x00),
+    insn(R, SLTU, Compute, 0x33, 0x3, 0x00),
+    insn(I, ADDI, Compute, 0x13, 0x0, -1),
+    insn(I, XORI, Compute, 0x13, 0x4, -1),
+    insn(I, ORI, Compute, 0x13, 0x6, -1),
+    insn(I, ANDI, Compute, 0x13, 0x7, -1),
+    insn(I, SLLI, Compute, 0x13, 0x1, 0x00),
+    insn(I, SRLI, Compute, 0x13, 0x5, 0x00),
+    insn(I, SRAI, Compute, 0x13, 0x5, 0x20),
+    insn(I, SLTI, Compute, 0x13, 0x2, -1),
+    insn(I, SLTIU, Compute, 0x13, 0x3, -1),
+    insn(B, BEQ, Branch, 0x63, 0x0, -1),
+    insn(B, BNE, Branch, 0x63, 0x1, -1),
+    insn(B, BLT, Branch, 0x63, 0x4, -1),
+    insn(B, BGE, Branch, 0x63, 0x5, -1),
+    insn(B, BLTU, Branch, 0x63, 0x6, -1),
+    insn(B, BGEU, Branch, 0x63, 0x7, -1),
+    insn(J, JAL, Compute, 0x6f, -1, -1),
+    insn(I, JALR, Compute, 0x67, 0x0, -1),
+    insn(U, LUI, Compute, 0x37, -1, -1),
+    insn(U, AUIPC, Compute, 0x17, -1, -1),
+    insn(R, MUL, Compute, 0x33, 0x0, 0x01),
+    insn(R, MULH, Compute, 0x33, 0x1, 0x01),
+    insn(R, MULHSU, Compute, 0x33, 0x2, 0x01),
+    insn(R, MULHU, Compute, 0x33, 0x3, 0x01),
+    insn(R, DIV, Compute, 0x33, 0x4, 0x01),
+    insn(R, DIVU, Compute, 0x33, 0x5, 0x01),
+    insn(R, REM, Compute, 0x33, 0x6, 0x01),
+    insn(R, REMU, Compute, 0x33, 0x7, 0x01),
+    insn(I, LB, Load, 0x03, 0x0, -1),
+    insn(I, LH, Load, 0x03, 0x1, -1),
+    insn(I, LW, Load, 0x03, 0x2, -1),
+    insn(I, LBU, Load, 0x03, 0x4, -1),
+    insn(I, LHU, Load, 0x03, 0x5, -1),
+    insn(S, SB, Store, 0x23, 0x0, -1),
+    insn(S, SH, Store, 0x23, 0x1, -1),
+    insn(S, SW, Store, 0x23, 0x2, -1),
+    insn(I, EANY, System, 0x73, 0x0, 0x00),
 ];
 
 #[cfg(test)]
@@ -467,9 +545,11 @@ impl Emulator {
         let decoded = DecodedInstruction::new(word);
         let insn = self.table.lookup(&decoded);
         ctx.on_insn_decoded(&decoded);
+        tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
+            InsnCategory::Branch => self.step_branch(ctx, insn.kind, &decoded)?,
             InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
             InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
             InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
@@ -491,15 +571,7 @@ impl Emulator {
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
-        let mut rd = decoded.rd;
         let imm_i = decoded.imm_i();
-        let mut br_cond = |cond| -> u32 {
-            rd = 0;
-            if cond {
-                new_pc = pc.wrapping_add(decoded.imm_b());
-            }
-            0
-        };
         let out = match kind {
             // Instructions that do not read rs1 nor rs2.
             JAL => {
@@ -567,12 +639,6 @@ impl Emulator {
                                     0
                                 }
                             }
-                            BEQ => br_cond(rs1 == rs2),
-                            BNE => br_cond(rs1 != rs2),
-                            BLT => br_cond((rs1 as i32) < (rs2 as i32)),
-                            BGE => br_cond((rs1 as i32) >= (rs2 as i32)),
-                            BLTU => br_cond(rs1 < rs2),
-                            BGEU => br_cond(rs1 >= rs2),
                             MUL => rs1.wrapping_mul(rs2),
                             MULH => {
                                 (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32)
@@ -618,7 +684,42 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
+        ctx.set_pc(new_pc);
+        Ok(true)
+    }
+
+    fn step_branch<M: EmuContext>(
+        &self,
+        ctx: &mut M,
+        kind: InsnKind,
+        decoded: &DecodedInstruction,
+    ) -> Result<bool> {
+        use InsnKind::*;
+
+        let pc = ctx.get_pc();
+        let rs1 = ctx.load_register(decoded.rs1 as RegIdx)?;
+        let rs2 = ctx.load_register(decoded.rs2 as RegIdx)?;
+
+        let taken = match kind {
+            BEQ => rs1 == rs2,
+            BNE => rs1 != rs2,
+            BLT => (rs1 as i32) < (rs2 as i32),
+            BGE => (rs1 as i32) >= (rs2 as i32),
+            BLTU => rs1 < rs2,
+            BGEU => rs1 >= rs2,
+            _ => unreachable!("Illegal branch instruction: {:?}", kind),
+        };
+
+        let new_pc = if taken {
+            pc.wrapping_add(decoded.imm_b())
+        } else {
+            pc + WORD_SIZE
+        };
+
+        if !new_pc.is_aligned() {
+            return ctx.trap(TrapCause::InstructionAddressMisaligned);
+        }
         ctx.set_pc(new_pc);
         Ok(true)
     }
@@ -670,7 +771,7 @@ impl Emulator {
             }
             _ => unreachable!(),
         };
-        ctx.store_register(decoded.rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
         ctx.set_pc(ctx.get_pc() + WORD_SIZE);
         Ok(true)
     }
@@ -686,6 +787,7 @@ impl Emulator {
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm_s()));
         let shift = 8 * (addr.0 & 3);
         if !ctx.check_data_store(addr) {
+            tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
             return ctx.trap(TrapCause::StoreAccessFault);
         }
         let mut data = ctx.peek_memory(addr.waddr());
@@ -728,7 +830,6 @@ impl Emulator {
                 1 => ctx.trap(TrapCause::Breakpoint),
                 _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
             },
-            InsnKind::MRET => ctx.mret(),
             _ => unreachable!(),
         }
     }

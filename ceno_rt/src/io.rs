@@ -23,6 +23,9 @@ impl IOWriter {
         }
     }
 
+    // TODO docs on why design mut_from_ref
+    // or justify this convention by citing from other place
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc<T>(&self, count: usize) -> &mut [T] {
         let byte_len = count * size_of::<T>();
         let word_len = byte_len.div_ceil(WORD_SIZE);

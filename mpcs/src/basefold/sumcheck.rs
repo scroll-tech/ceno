@@ -7,7 +7,7 @@ use rayon::prelude::{
 };
 
 pub fn sum_check_first_round_field_type<E: ExtensionField>(
-    eq: &mut Vec<E>,
+    eq: &mut [E],
     bh_values: &mut FieldType<E>,
 ) -> Vec<E> {
     // The input polynomials are in the form of evaluations. Instead of viewing
@@ -22,7 +22,7 @@ pub fn sum_check_first_round_field_type<E: ExtensionField>(
     //    p_i(&bh_values, &eq)
 }
 
-pub fn sum_check_first_round<E: ExtensionField>(eq: &mut Vec<E>, bh_values: &mut Vec<E>) -> Vec<E> {
+pub fn sum_check_first_round<E: ExtensionField>(eq: &mut [E], bh_values: &mut [E]) -> Vec<E> {
     // The input polynomials are in the form of evaluations. Instead of viewing
     // every one element as the evaluation of the polynomial at a single point,
     // we can view every two elements as partially evaluating the polynomial at
@@ -43,7 +43,7 @@ pub fn one_level_interp_hc_field_type<E: ExtensionField>(evals: &mut FieldType<E
     }
 }
 
-pub fn one_level_interp_hc<F: Field>(evals: &mut Vec<F>) {
+pub fn one_level_interp_hc<F: Field>(evals: &mut [F]) {
     if evals.len() == 1 {
         return;
     }

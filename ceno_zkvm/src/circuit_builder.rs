@@ -1,12 +1,15 @@
+use ceno_emul::Addr;
 use itertools::Itertools;
-use std::marker::PhantomData;
+use std::{collections::HashMap, marker::PhantomData};
 
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::IntoMLEs;
+use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
+    ROMType,
+    chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, WitIn},
+    expression::{Expression, Fixed, Instance, WitIn},
     structs::{ProvingKey, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -67,6 +70,32 @@ impl NameSpace {
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
+    pub table_len: usize,
+}
+
+// TODO encapsulate few information of table spec to SetTableAddrType value
+// once confirm syntax is friendly and parsed by recursive verifier
+#[derive(Clone, Debug)]
+pub enum SetTableAddrType {
+    FixedAddr,
+    DynamicAddr,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTableSpec {
+    pub addr_type: SetTableAddrType,
+    pub addr_witin_id: Option<usize>,
+    pub offset: Addr,
+    pub len: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTableExpression<E: ExtensionField> {
+    pub expr: Expression<E>,
+
+    // TODO make decision to have enum/struct
+    // for which option is more friendly to be processed by ConstrainSystem + recursive verifier
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
@@ -79,11 +108,19 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
+    pub instance_name_map: HashMap<Instance, String>,
+
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
 
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
+
+    /// init/final ram expression
+    pub r_table_expressions: Vec<SetTableExpression<E>>,
+    pub r_table_expressions_namespace_map: Vec<String>,
+    pub w_table_expressions: Vec<SetTableExpression<E>>,
+    pub w_table_expressions_namespace_map: Vec<String>,
 
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
@@ -106,6 +143,11 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
+    #[cfg(test)]
+    pub debug_map: HashMap<usize, Vec<Expression<E>>>,
+    #[cfg(test)]
+    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
+
     pub(crate) phantom: PhantomData<E>,
 }
 
@@ -117,10 +159,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
+            instance_name_map: HashMap::new(),
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
             w_expressions: vec![],
             w_expressions_namespace_map: vec![],
+            r_table_expressions: vec![],
+            r_table_expressions_namespace_map: vec![],
+            w_table_expressions: vec![],
+            w_table_expressions_namespace_map: vec![],
             lk_expressions: vec![],
             lk_expressions_namespace_map: vec![],
             lk_table_expressions: vec![],
@@ -133,31 +180,45 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
+            #[cfg(test)]
+            debug_map: HashMap::new(),
+            #[cfg(test)]
+            lk_expressions_items_map: vec![],
+
             phantom: std::marker::PhantomData,
         }
     }
 
-    pub fn key_gen(self, fixed_traces: Option<RowMajorMatrix<E::BaseField>>) -> ProvingKey<E> {
-        // TODO: commit to fixed_traces
-
+    pub fn key_gen<PCS: PolynomialCommitmentScheme<E>>(
+        self,
+        pp: &PCS::ProverParam,
+        fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
+    ) -> ProvingKey<E, PCS> {
         // transpose from row-major to column-major
-        let fixed_traces =
-            fixed_traces.map(|t| t.de_interleaving().into_mles().into_iter().collect_vec());
+        let fixed_traces = fixed_traces.map(|t| t.into_mles().into_iter().collect_vec());
+
+        let fixed_commit_wd = fixed_traces
+            .as_ref()
+            .map(|traces| PCS::batch_commit(pp, traces).unwrap());
+        let fixed_commit = fixed_commit_wd
+            .as_ref()
+            .map(|commit_wd| PCS::get_pure_commitment(commit_wd));
 
         ProvingKey {
             fixed_traces,
-            vk: VerifyingKey { cs: self },
+            fixed_commit_wd,
+            vk: VerifyingKey {
+                cs: self,
+                fixed_commit,
+            },
         }
     }
 
-    pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(
-        &mut self,
-        n: N,
-    ) -> Result<WitIn, ZKVMError> {
+    pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> WitIn {
         let wit_in = WitIn {
             id: {
                 let id = self.num_witin;
-                self.num_witin += 1;
+                self.num_witin = self.num_witin.strict_add(1);
                 id
             },
         };
@@ -165,7 +226,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);
 
-        Ok(wit_in)
+        wit_in
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(
@@ -181,28 +242,90 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(f)
     }
 
+    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+        idx: usize,
+    ) -> Result<Instance, ZKVMError> {
+        let i = Instance(idx);
+
+        let name = n().into();
+        self.instance_name_map.insert(i, name);
+
+        Ok(i)
+    }
+
+    pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
+        rlc_chip_record(
+            items,
+            self.chip_record_alpha.clone(),
+            self.chip_record_beta.clone(),
+        )
+    }
+
     pub fn lk_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(
+            std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
+                .chain(
+                    #[cfg(test)]
+                    items.clone(),
+                    #[cfg(not(test))]
+                    items,
+                )
+                .collect(),
+        );
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc lk_record degree ({})",
+            name_fn().into()
         );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
+        #[cfg(test)]
+        self.lk_expressions_items_map.push((rom_type, items));
         Ok(())
     }
 
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        table_len: usize,
         rlc_record: Expression<E>,
         multiplicity: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc lk_table_record degree ({})",
+            name_fn().into()
+        );
+        self.lk_table_expressions.push(LogupTableExpression {
+            values: rlc_record,
+            multiplicity,
+            table_len,
+        });
+        let path = self.ns.compute_path(name_fn().into());
+        self.lk_table_expressions_namespace_map.push(path);
+
+        Ok(())
+    }
+
+    pub fn r_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_spec: SetTableSpec,
+        rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
@@ -214,12 +337,38 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             "rlc record degree {} != 1",
             rlc_record.degree()
         );
-        self.lk_table_expressions.push(LogupTableExpression {
-            values: rlc_record,
-            multiplicity,
+        self.r_table_expressions.push(SetTableExpression {
+            expr: rlc_record,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
-        self.lk_table_expressions_namespace_map.push(path);
+        self.r_table_expressions_namespace_map.push(path);
+
+        Ok(())
+    }
+
+    pub fn w_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_spec: SetTableSpec,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        assert_eq!(
+            rlc_record.degree(),
+            1,
+            "rlc record degree {} != 1",
+            rlc_record.degree()
+        );
+        self.w_table_expressions.push(SetTableExpression {
+            expr: rlc_record,
+            table_spec,
+        });
+        let path = self.ns.compute_path(name_fn().into());
+        self.w_table_expressions_namespace_map.push(path);
 
         Ok(())
     }
@@ -232,8 +381,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc read_record degree ({})",
+            name_fn().into()
         );
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -249,8 +398,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(
             rlc_record.degree(),
             1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
+            "rlc write_record degree ({})",
+            name_fn().into()
         );
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -272,10 +421,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             let path = self.ns.compute_path(name_fn().into());
             self.assert_zero_expressions_namespace_map.push(path);
         } else {
-            assert!(
-                assert_zero_expr.is_monomial_form(),
-                "only support sumcheck in monomial form"
-            );
+            let assert_zero_expr = if assert_zero_expr.is_monomial_form() {
+                assert_zero_expr
+            } else {
+                let e = assert_zero_expr.to_monomial_form();
+                assert!(e.is_monomial_form(), "failed to put into monomial form");
+                e
+            };
             self.max_non_lc_degree = self.max_non_lc_degree.max(assert_zero_expr.degree());
             self.assert_zero_sumcheck_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
@@ -288,12 +440,28 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn namespace<NR: Into<String>, N: FnOnce() -> NR, T>(
         &mut self,
         name_fn: N,
-        cb: impl FnOnce(&mut ConstraintSystem<E>) -> Result<T, ZKVMError>,
-    ) -> Result<T, ZKVMError> {
+        cb: impl FnOnce(&mut ConstraintSystem<E>) -> T,
+    ) -> T {
         self.ns.push_namespace(name_fn().into());
         let t = cb(self);
         self.ns.pop_namespace();
         t
+    }
+}
+
+#[cfg(test)]
+impl<E: ExtensionField> ConstraintSystem<E> {
+    pub fn register_debug_expr<T: Into<usize>>(&mut self, debug_index: T, expr: Expression<E>) {
+        let key = debug_index.into();
+        self.debug_map.entry(key).or_default().push(expr);
+    }
+
+    pub fn get_debug_expr<T: Into<usize>>(&mut self, debug_index: T) -> &[Expression<E>] {
+        let key = debug_index.into();
+        match self.debug_map.get(&key) {
+            Some(v) => v,
+            _ => panic!("non-existent entry {}", key),
+        }
     }
 }
 

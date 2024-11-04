@@ -2,21 +2,11 @@ use std::collections::VecDeque;
 
 use ff_ext::ExtensionField;
 
-use crate::structs::{Cell, CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId};
+use crate::structs::{CellId, CellType, CircuitBuilder, ConstantType, GateType, LayerId};
 
 mod base_opt;
 mod derives;
 mod ext_opt;
-
-impl<Ext: ExtensionField> Cell<Ext> {
-    pub fn new() -> Self {
-        Self {
-            layer: None,
-            gates: vec![],
-            cell_type: None,
-        }
-    }
-}
 
 impl<Ext: ExtensionField> GateType<Ext> {
     pub(crate) fn add_const(constant: ConstantType<Ext>) -> Self {
@@ -49,15 +39,6 @@ impl<Ext: ExtensionField> GateType<Ext> {
 }
 
 impl<Ext: ExtensionField> CircuitBuilder<Ext> {
-    pub fn new() -> Self {
-        Self {
-            cells: vec![],
-            n_layers: None,
-            n_witness_in: 0,
-            n_witness_out: 0,
-        }
-    }
-
     /// Prepare the circuit. This is to assign the layers and challenge levels
     /// to the cells.
     pub fn configure(&mut self) {
@@ -138,20 +119,20 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
 mod tests {
     use ff::Field;
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
+    use itertools::enumerate;
 
     use crate::structs::CircuitBuilder;
 
     #[test]
     fn test_cb_empty_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, input_cells) = circuit_builder.create_witness_in(4);
         let zero_cells = circuit_builder.create_cells(2);
         let leaves = input_cells
             .iter()
             .chain(zero_cells.iter())
             .cloned()
-            .collect_vec();
+            .collect::<Vec<_>>();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
         circuit_builder.mul3(inners[1], leaves[3], leaves[4], leaves[5], Goldilocks::ONE);
@@ -160,15 +141,15 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 8);
-        let layers = vec![1, 1, 1, 1, 1, 1, 0, 0];
-        for cell_id in 0..8 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        let layers = [1, 1, 1, 1, 1, 1, 0, 0];
+        for (cell_id, layer) in enumerate(layers).take(8) {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 
     #[test]
     fn test_cb_const_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, input_cells) = circuit_builder.create_witness_in(4);
         let const_cells = circuit_builder.create_cells(2);
         circuit_builder.add_const(const_cells[0], Goldilocks::ONE);
@@ -178,7 +159,7 @@ mod tests {
             .iter()
             .chain(const_cells.iter())
             .cloned()
-            .collect_vec();
+            .collect::<Vec<_>>();
         let inners = circuit_builder.create_cells(2);
         circuit_builder.mul3(inners[0], leaves[0], leaves[1], leaves[2], Goldilocks::ONE);
         circuit_builder.mul3(inners[1], leaves[3], leaves[4], leaves[5], Goldilocks::ONE);
@@ -187,15 +168,15 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 8);
-        let layers = vec![1, 1, 1, 1, 1, 1, 0, 0];
-        for cell_id in 0..8 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        let layers = [1, 1, 1, 1, 1, 1, 0, 0];
+        for (cell_id, &layer) in layers.iter().enumerate().take(8) {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 
     #[test]
     fn test_assert_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
         let inners = circuit_builder.create_cells(2);
@@ -207,11 +188,11 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 6);
-        let layers = vec![1, 1, 1, 1, 0, 0];
-        for cell_id in 0..6 {
+        let layers = [1, 1, 1, 1, 0, 0];
+        for (cell_id, &layer) in layers.iter().enumerate().take(6) {
             assert_eq!(
                 circuit_builder.cells[cell_id].layer,
-                Some(layers[cell_id]),
+                Some(layer),
                 "cell_id: {}",
                 cell_id
             );
@@ -220,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_inner_output_cells() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, leaves) = circuit_builder.create_witness_in(4);
 
         let (_, inners) = circuit_builder.create_witness_out(2);
@@ -233,15 +214,15 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 7);
-        let layers = vec![2, 2, 2, 2, 1, 1, 0];
-        for cell_id in 0..7 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        let layers = [2, 2, 2, 2, 1, 1, 0];
+        for (cell_id, &layer) in layers.iter().enumerate().take(7) {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 
     #[test]
     fn test_force_input_layer() {
-        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new();
+        let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::default();
         let (_, leaves) = circuit_builder.create_witness_in(6);
 
         // Unused input elements should also be in the circuit.
@@ -259,9 +240,9 @@ mod tests {
         circuit_builder.configure();
 
         assert_eq!(circuit_builder.cells.len(), 16);
-        let layers = vec![2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0];
-        for cell_id in 0..0 {
-            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layers[cell_id]));
+        let layers = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0];
+        for (cell_id, &layer) in layers.iter().enumerate() {
+            assert_eq!(circuit_builder.cells[cell_id].layer, Some(layer));
         }
     }
 }

@@ -1,10 +1,10 @@
 use crate::util::{
     arithmetic::{
-        degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate2_weights,
-        interpolate_over_boolean_hypercube,
+        degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate_over_boolean_hypercube,
+        interpolate2_weights,
     },
     ext_to_usize, field_type_index_base, field_type_index_ext,
-    hash::{Digest, Hasher},
+    hash::Digest,
     log2_strict,
     merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
 };
@@ -12,7 +12,7 @@ use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use multilinear_extensions::mle::FieldType;
@@ -147,11 +147,10 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_rounds: usize,
     num_vars: usize,
     final_message: &[E],
-    roots: &Vec<Digest<E::BaseField>>,
+    roots: &[Digest<E::BaseField>],
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
     eval: &E,
-    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -182,7 +181,6 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         &final_codeword,
         roots,
         comm,
-        hasher,
     );
     end_timer!(queries_timer);
 
@@ -226,7 +224,6 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     coeffs: &[E],
     partial_eq: &[E],
     eval: &E,
-    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -260,7 +257,6 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         roots,
         comms,
         coeffs,
-        hasher,
     );
     end_timer!(queries_timer);
 
@@ -304,7 +300,6 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     comm: &BasefoldCommitment<E>,
     partial_eq: &[E],
     evals: &[E],
-    hasher: &Hasher<E::BaseField>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -338,7 +333,6 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
         &final_codeword,
         roots,
         comm,
-        hasher,
     );
     end_timer!(queries_timer);
 
@@ -633,19 +627,6 @@ where
             CodewordPointPair::Base(_, y) => E::from(*y),
         }
     }
-
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        match self.codepoints {
-            CodewordPointPair::Ext(x, y) => {
-                transcript.append_field_element_ext(&x);
-                transcript.append_field_element_ext(&y);
-            }
-            CodewordPointPair::Base(x, y) => {
-                transcript.append_field_element(&x);
-                transcript.append_field_element(&y);
-            }
-        };
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -661,31 +642,16 @@ impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.query.write_transcript(transcript);
-        self.merkle_path.write_transcript(transcript);
-    }
-
-    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
+    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         match self.query.codepoints {
             CodewordPointPair::Ext(left, right) => {
-                self.merkle_path.authenticate_leaves_root_ext(
-                    left,
-                    right,
-                    self.query.index,
-                    root,
-                    hasher,
-                );
+                self.merkle_path
+                    .authenticate_leaves_root_ext(left, right, self.query.index, root);
             }
             CodewordPointPair::Base(left, right) => {
-                self.merkle_path.authenticate_leaves_root_base(
-                    left,
-                    right,
-                    self.query.index,
-                    root,
-                    hasher,
-                );
+                self.merkle_path
+                    .authenticate_leaves_root_base(left, right, self.query.index, root);
             }
         }
         // end_timer!(timer);
@@ -825,19 +791,13 @@ where
         )
     }
 
-    fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.get_inner()
-            .iter()
-            .for_each(|q| q.write_transcript(transcript));
-    }
-
-    fn check_merkle_paths(&self, roots: &[Digest<E::BaseField>], hasher: &Hasher<E::BaseField>) {
+    fn check_merkle_paths(&self, roots: &[Digest<E::BaseField>]) {
         // let timer = start_timer!(|| "ListQuery::Check Merkle Path");
         self.get_inner()
             .iter()
             .zip(roots.iter())
             .for_each(|(q, root)| {
-                q.check_merkle_path(root, hasher);
+                q.check_merkle_path(root);
             });
         // end_timer!(timer);
     }
@@ -887,11 +847,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.oracle_query.write_transcript(transcript);
-        self.commitment_query.write_transcript(transcript);
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -903,27 +858,25 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         index: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
         // let timer = start_timer!(|| "Checking codeword single query");
-        self.oracle_query.check_merkle_paths(roots, hasher);
+        self.oracle_query.check_merkle_paths(roots);
         self.commitment_query
-            .check_merkle_path(&Digest(comm.root().0), hasher);
+            .check_merkle_path(&Digest(comm.root().0));
 
         let (mut curr_left, mut curr_right) = self.commitment_query.query.codepoints.as_ext();
 
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                 vp,
                 num_vars + Spec::get_rate_log() - i - 1,
                 left_index >> 1,
             );
 
-            let res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+            let res = interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {
@@ -994,12 +947,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.inner.iter().for_each(|(_, q)| {
-            q.write_transcript(transcript);
-        });
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1011,7 +958,6 @@ where
         final_codeword: &[E],
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
-        hasher: &Hasher<E::BaseField>,
     ) {
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
@@ -1025,7 +971,6 @@ where
                     roots,
                     comm,
                     *index,
-                    hasher,
                 );
             },
         );
@@ -1075,11 +1020,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.oracle_query.write_transcript(transcript);
-        self.commitments_query.write_transcript(transcript);
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1092,16 +1032,14 @@ where
         comms: &[&BasefoldCommitment<E>],
         coeffs: &[E],
         index: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
-        self.oracle_query.check_merkle_paths(roots, hasher);
+        self.oracle_query.check_merkle_paths(roots);
         self.commitments_query.check_merkle_paths(
             comms
                 .iter()
                 .map(|comm| comm.root())
                 .collect_vec()
                 .as_slice(),
-            hasher,
         );
         // end_timer!(commit_timer);
 
@@ -1111,7 +1049,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             // let round_timer = start_timer!(|| format!("BatchedSingleQueryResult::round {}", i));
             let matching_comms = comms
                 .iter()
@@ -1134,7 +1072,7 @@ where
             );
 
             let mut res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
 
@@ -1229,12 +1167,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.inner
-            .iter()
-            .for_each(|(_, q)| q.write_transcript(transcript));
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1247,7 +1179,6 @@ where
         roots: &[Digest<E::BaseField>],
         comms: &[&BasefoldCommitment<E>],
         coeffs: &[E],
-        hasher: &Hasher<E::BaseField>,
     ) {
         let timer = start_timer!(|| "BatchedQueriesResult::check");
         self.inner.par_iter().zip(indices.par_iter()).for_each(
@@ -1263,7 +1194,6 @@ where
                     comms,
                     coeffs,
                     *index,
-                    hasher,
                 );
             },
         );
@@ -1313,23 +1243,6 @@ where
             SimpleBatchLeavesPair::Base(x) => x.iter().map(|(_, x)| E::from(*x)).collect(),
         }
     }
-
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        match &self.leaves {
-            SimpleBatchLeavesPair::Ext(x) => {
-                x.iter().for_each(|(x, y)| {
-                    transcript.append_field_element_ext(x);
-                    transcript.append_field_element_ext(y);
-                });
-            }
-            SimpleBatchLeavesPair::Base(x) => {
-                x.iter().for_each(|(x, y)| {
-                    transcript.append_field_element(x);
-                    transcript.append_field_element(y);
-                });
-            }
-        };
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1345,12 +1258,7 @@ impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.query.write_transcript(transcript);
-        self.merkle_path.write_transcript(transcript);
-    }
-
-    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>, hasher: &Hasher<E::BaseField>) {
+    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
         match &self.query.leaves {
             SimpleBatchLeavesPair::Ext(inner) => {
@@ -1359,7 +1267,6 @@ where
                     inner.iter().map(|(_, x)| *x).collect(),
                     self.query.index,
                     root,
-                    hasher,
                 );
             }
             SimpleBatchLeavesPair::Base(inner) => {
@@ -1368,7 +1275,6 @@ where
                     inner.iter().map(|(_, x)| *x).collect(),
                     self.query.index,
                     root,
-                    hasher,
                 );
             }
         }
@@ -1419,11 +1325,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.oracle_query.write_transcript(transcript);
-        self.commitment_query.write_transcript(transcript);
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1436,11 +1337,10 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
         index: usize,
-        hasher: &Hasher<E::BaseField>,
     ) {
-        self.oracle_query.check_merkle_paths(roots, hasher);
+        self.oracle_query.check_merkle_paths(roots);
         self.commitment_query
-            .check_merkle_path(&Digest(comm.root().0), hasher);
+            .check_merkle_path(&Digest(comm.root().0));
 
         let (mut curr_left, mut curr_right) =
             self.commitment_query.query.leaves.batch(batch_coeffs);
@@ -1448,7 +1348,7 @@ where
         let mut right_index = index | 1;
         let mut left_index = right_index - 1;
 
-        for i in 0..num_rounds {
+        for (i, fold_challenge) in fold_challenges.iter().enumerate().take(num_rounds) {
             // let round_timer = start_timer!(|| format!("SingleQueryResult::round {}", i));
 
             let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
@@ -1457,8 +1357,7 @@ where
                 left_index >> 1,
             );
 
-            let res =
-                interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, fold_challenges[i]);
+            let res = interpolate2_weights([(x0, curr_left), (x1, curr_right)], w, *fold_challenge);
 
             let next_index = right_index >> 1;
             let next_oracle_value = if i < num_rounds - 1 {
@@ -1524,12 +1423,6 @@ where
         }
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
-        self.inner
-            .iter()
-            .for_each(|(_, q)| q.write_transcript(transcript));
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1542,7 +1435,6 @@ where
         final_codeword: &[E],
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
-        hasher: &Hasher<E::BaseField>,
     ) {
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
@@ -1557,7 +1449,6 @@ where
                     roots,
                     comm,
                     *index,
-                    hasher,
                 );
             },
         );

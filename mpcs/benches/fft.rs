@@ -8,7 +8,7 @@ use itertools::Itertools;
 use mpcs::{coset_fft, fft_root_table};
 
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use rand::{rngs::OsRng, SeedableRng};
+use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 type E = GoldilocksExt2;

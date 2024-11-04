@@ -16,15 +16,15 @@ impl<Ext: ExtensionField> From<Vec<CellId>> for ExtCellId<Ext> {
     fn from(cells: Vec<CellId>) -> Self {
         Self {
             cells,
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 }
 
-impl<Ext: ExtensionField> Into<Vec<CellId>> for ExtCellId<Ext> {
+impl<Ext: ExtensionField> From<ExtCellId<Ext>> for Vec<CellId> {
     /// converting an ext cell into a vector of CellIds
-    fn into(self) -> Vec<CellId> {
-        self.cells
+    fn from(val: ExtCellId<Ext>) -> Self {
+        val.cells
     }
 }
 
@@ -89,10 +89,9 @@ impl<Ext: ExtensionField> CircuitBuilder<Ext> {
         let cells = self.create_ext_cells(num);
         cells.iter().for_each(|ext_cell| {
             // first base field is the constant
-            self.mark_cells(
-                CellType::In(InType::Constant(constant)),
-                &[ext_cell.cells[0]],
-            );
+            self.mark_cells(CellType::In(InType::Constant(constant)), &[
+                ext_cell.cells[0]
+            ]);
             // the rest fields are 0s
             self.mark_cells(CellType::In(InType::Constant(0)), &ext_cell.cells[1..]);
         });

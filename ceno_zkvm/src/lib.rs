@@ -1,6 +1,7 @@
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
 #![feature(variant_count)]
+#![feature(strict_overflow_ops)]
 
 pub mod error;
 pub mod instructions;
@@ -10,7 +11,9 @@ pub use utils::u64vec;
 mod chip_handler;
 pub mod circuit_builder;
 pub mod expression;
+pub mod gadgets;
 mod keygen;
+pub mod state;
 pub mod structs;
 mod uint;
 mod utils;

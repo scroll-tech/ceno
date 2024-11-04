@@ -1,6 +1,6 @@
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use simple_frontend::structs::{ChallengeConst, LayerId};
 use std::collections::HashMap;
 use transcript::Transcript;
@@ -49,7 +49,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             let timer = start_timer!(|| format!("Verify layer {}", layer_id));
             verifier_state.layer_id = layer_id as LayerId;
 
-            let layer = &circuit.layers[layer_id as usize];
+            let layer = &circuit.layers[layer_id];
             for (step, step_proof) in izip!(layer.sumcheck_steps.iter(), &mut sumcheck_proofs_iter)
             {
                 match step {

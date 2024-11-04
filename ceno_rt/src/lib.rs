@@ -1,3 +1,4 @@
+#![feature(strict_overflow_ops)]
 #![no_std]
 
 use core::arch::{asm, global_asm};
@@ -21,6 +22,7 @@ mod panic_handler {
     }
 }
 
+#[allow(asm_sub_register)]
 pub fn halt(exit_code: u32) -> ! {
     unsafe {
         asm!(
@@ -58,15 +60,32 @@ _start:
     ",
 );
 
+#[macro_export]
+macro_rules! entry {
+    ($path:path) => {
+        // Type check the given path
+        const CENO_ENTRY: fn() = $path;
+
+        mod ceno_generated_main {
+            #[no_mangle]
+            extern "C" fn bespoke_entrypoint() {
+                super::CENO_ENTRY();
+            }
+        }
+    };
+}
+
 /// _start_rust is called by the assembly entry point and it calls the Rust main().
 #[no_mangle]
 unsafe extern "C" fn _start_rust() -> ! {
-    main();
+    allocator::init_heap();
+    {
+        extern "C" {
+            fn bespoke_entrypoint();
+        }
+        bespoke_entrypoint();
+    }
     halt(0)
-}
-
-extern "C" {
-    fn main();
 }
 
 extern "C" {

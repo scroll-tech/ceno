@@ -17,18 +17,20 @@
 use std::{fmt, ops};
 
 pub const WORD_SIZE: usize = 4;
+pub const PC_WORD_SIZE: usize = 4;
 pub const PC_STEP_SIZE: usize = 4;
 
 // Type aliases to clarify the code without wrapper types.
 pub type Word = u32;
+pub type SWord = i32;
 pub type Addr = u32;
 pub type Cycle = u64;
 pub type RegIdx = usize;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteAddr(pub u32);
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WordAddr(u32);
 
 impl From<ByteAddr> for WordAddr {
@@ -76,6 +78,10 @@ impl From<WordAddr> for u64 {
 impl ByteAddr {
     pub const fn waddr(self) -> WordAddr {
         WordAddr(self.0 / WORD_SIZE as u32)
+    }
+
+    pub const fn shift(self) -> u32 {
+        self.0 & 0x03
     }
 
     pub const fn is_aligned(&self) -> bool {

@@ -1,7 +1,9 @@
 use crate::{
+    Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
     sum_check::{
+        SumCheck as _, VirtualPolynomial,
         classic::{ClassicSumCheck, CoefficientsProver},
-        eq_xy_eval, SumCheck as _, VirtualPolynomial,
+        eq_xy_eval,
     },
     util::{
         add_polynomial_with_coeff,
@@ -10,14 +12,14 @@ use crate::{
         },
         expression::{Expression, Query, Rotation},
         ext_to_usize,
-        hash::{new_hasher, write_digest_to_transcript, Digest},
+        hash::{Digest, write_digest_to_transcript},
         log2_strict,
         merkle_tree::MerkleTree,
         multiply_poly,
         plonky2_util::reverse_index_bits_in_place_field_type,
         poly_index_ext, poly_iter_ext,
     },
-    validate_input, Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
+    validate_input,
 };
 use ark_std::{end_timer, start_timer};
 pub use encoding::{
@@ -27,10 +29,10 @@ pub use encoding::{
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
 use query_phase::{
-    batch_prover_query_phase, batch_verifier_query_phase, prover_query_phase,
-    simple_batch_prover_query_phase, simple_batch_verifier_query_phase, verifier_query_phase,
     BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-    SimpleBatchQueriesResultWithMerklePath,
+    SimpleBatchQueriesResultWithMerklePath, batch_prover_query_phase, batch_verifier_query_phase,
+    prover_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
+    verifier_query_phase,
 };
 use std::{borrow::BorrowMut, ops::Deref};
 pub use structure::BasefoldSpec;
@@ -38,14 +40,14 @@ use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
 use transcript::Transcript;
 
 use itertools::Itertools;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType},
     virtual_poly::build_eq_x_r_vec,
 };
 
-use rand_chacha::{rand_core::RngCore, ChaCha8Rng};
+use rand_chacha::{ChaCha8Rng, rand_core::RngCore};
 use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -65,6 +67,8 @@ mod commit_phase;
 use commit_phase::{batch_commit_phase, commit_phase, simple_batch_commit_phase};
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
+use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+
 mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
@@ -316,14 +320,13 @@ where
         };
 
         // 2. Compute and store all the layers of the Merkle tree
-        let hasher = new_hasher::<E::BaseField>();
 
         // 1. Encode the polynomials. Simultaneously get:
         //  (1) The evaluations over the hypercube (just a clone of the input)
         //  (2) The encoding of the coefficient vector (need an interpolation)
         let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
             PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_leaves(codeword);
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -336,7 +339,7 @@ where
                 })
             }
             PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone(), &hasher);
+                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone());
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -398,8 +401,6 @@ where
         end_timer!(encode_timer);
 
         // build merkle tree from leaves
-        let hasher = new_hasher::<E::BaseField>();
-
         let ret = match evals_codewords[0] {
             PolyEvalsCodeword::Normal(_) => {
                 let (bh_evals, codewords) = evals_codewords
@@ -414,7 +415,7 @@ where
                         }
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords, &hasher);
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
                 Self::CommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -434,7 +435,7 @@ where
                         }
                     })
                     .collect::<Vec<_>>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone(), &hasher);
+                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
                 Self::CommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -474,7 +475,6 @@ where
         _eval: &E, // Opening does not need eval, except for sanity check
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::open");
 
         // The encoded polynomial should at least have the number of
@@ -504,7 +504,6 @@ where
             transcript,
             poly.num_vars,
             poly.num_vars - Spec::get_basecode_msg_size_log(),
-            &hasher,
         );
 
         // 2. Query phase. ---------------------------------------
@@ -525,12 +524,6 @@ where
         let query_timer = start_timer!(|| "Basefold::open::build_query_result");
         let queries_with_merkle_path =
             QueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
-        end_timer!(query_timer);
-
-        // 2.3 Write the entire thing to the transcript. Note that these
-        //     are the dominant factor of the BaseFold proof size.
-        let query_timer = start_timer!(|| "Basefold::open::write_queries");
-        queries_with_merkle_path.write_transcript(transcript);
         end_timer!(query_timer);
 
         end_timer!(timer);
@@ -562,7 +555,6 @@ where
         evals: &[Evaluation<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
@@ -738,7 +730,6 @@ where
             num_vars,
             num_vars - Spec::get_basecode_msg_size_log(),
             coeffs.as_slice(),
-            &hasher,
         );
 
         let query_timer = start_timer!(|| "Basefold::batch_open query phase");
@@ -758,10 +749,6 @@ where
                 &trees,
                 comms,
             );
-        end_timer!(query_timer);
-
-        let query_timer = start_timer!(|| "Basefold::batch_open write query result");
-        query_result_with_merkle_path.write_transcript(transcript);
         end_timer!(query_timer);
         end_timer!(timer);
 
@@ -784,15 +771,14 @@ where
     /// 3. The point is already a random point generated by a sum-check.
     fn simple_batch_open(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         comm: &Self::CommitmentWithData,
         point: &[E],
         evals: &[E],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let hasher = new_hasher::<E::BaseField>();
         let timer = start_timer!(|| "Basefold::batch_open");
-        let num_vars = polys[0].num_vars;
+        let num_vars = polys[0].num_vars();
 
         if comm.is_trivial::<Spec>() {
             return Ok(Self::Proof::trivial(comm.polynomials_bh_evals.clone()));
@@ -800,7 +786,7 @@ where
 
         polys
             .iter()
-            .for_each(|poly| assert_eq!(poly.num_vars, num_vars));
+            .for_each(|poly| assert_eq!(poly.num_vars(), num_vars));
         assert!(num_vars >= Spec::get_basecode_msg_size_log());
         assert_eq!(comm.num_polys, polys.len());
         assert_eq!(comm.num_polys, evals.len());
@@ -840,7 +826,6 @@ where
             transcript,
             num_vars,
             num_vars - Spec::get_basecode_msg_size_log(),
-            &hasher,
         );
 
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
@@ -854,10 +839,6 @@ where
 
         let queries_with_merkle_path =
             SimpleBatchQueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
-        end_timer!(query_timer);
-
-        let query_timer = start_timer!(|| "Basefold::open::write_queries");
-        queries_with_merkle_path.write_transcript(transcript);
         end_timer!(query_timer);
 
         end_timer!(timer);
@@ -883,11 +864,10 @@ where
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
-        let hasher = new_hasher::<E::BaseField>();
 
         if proof.is_trivial() {
             let trivial_proof = &proof.trivial_proof;
-            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), &hasher);
+            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone());
             if comm.root() == merkle_tree.root() {
                 return Ok(());
             } else {
@@ -945,17 +925,16 @@ where
         verifier_query_phase::<E, Spec>(
             queries.as_slice(),
             &vp.encoding_params,
-            &query_result_with_merkle_path,
-            &sumcheck_messages,
+            query_result_with_merkle_path,
+            sumcheck_messages,
             &fold_challenges,
             num_rounds,
             num_vars,
-            &final_message,
-            &roots,
+            final_message,
+            roots,
             comm,
             eq.as_slice(),
             eval,
-            &hasher,
         );
         end_timer!(timer);
 
@@ -973,7 +952,6 @@ where
         let timer = start_timer!(|| "Basefold::batch_verify");
         // 	let key = "RAYON_NUM_THREADS";
         // 	env::set_var(key, "32");
-        let hasher = new_hasher::<E::BaseField>();
         let comms = comms.iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
@@ -1074,18 +1052,17 @@ where
         batch_verifier_query_phase::<E, Spec>(
             queries.as_slice(),
             &vp.encoding_params,
-            &query_result_with_merkle_path,
-            &sumcheck_messages,
+            query_result_with_merkle_path,
+            sumcheck_messages,
             &fold_challenges,
             num_rounds,
             num_vars,
-            &final_message,
-            &roots,
+            final_message,
+            roots,
             &comms,
             &coeffs,
             eq.as_slice(),
             &new_target_sum,
-            &hasher,
         );
         end_timer!(timer);
         Ok(())
@@ -1104,11 +1081,10 @@ where
         if let Some(num_polys) = comm.num_polys {
             assert_eq!(num_polys, batch_size);
         }
-        let hasher = new_hasher::<E::BaseField>();
 
         if proof.is_trivial() {
             let trivial_proof = &proof.trivial_proof;
-            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), &hasher);
+            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone());
             if comm.root() == merkle_tree.root() {
                 return Ok(());
             } else {
@@ -1176,18 +1152,17 @@ where
         simple_batch_verifier_query_phase::<E, Spec>(
             queries.as_slice(),
             &vp.encoding_params,
-            &query_result_with_merkle_path,
-            &sumcheck_messages,
+            query_result_with_merkle_path,
+            sumcheck_messages,
             &fold_challenges,
             &eq_xt,
             num_rounds,
             num_vars,
-            &final_message,
-            &roots,
+            final_message,
+            roots,
             comm,
             eq.as_slice(),
             evals,
-            &hasher,
         );
         end_timer!(timer);
 
@@ -1215,7 +1190,7 @@ mod test {
     use goldilocks::GoldilocksExt2;
     use rand_chacha::ChaCha8Rng;
 
-    use super::{structure::BasefoldBasecodeParams, BasefoldRSParams};
+    use super::{BasefoldRSParams, structure::BasefoldBasecodeParams};
 
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
     type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;

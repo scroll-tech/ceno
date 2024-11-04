@@ -3,16 +3,17 @@ use std::time::{Duration, Instant};
 use ark_std::test_rng;
 use ceno_zkvm::{
     self,
-    instructions::{riscv::arith::AddInstruction, Instruction},
+    instructions::{Instruction, riscv::arith::AddInstruction},
     scheme::prover::ZKVMProver,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
-use const_env::from_env;
 use criterion::*;
 
+use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
+use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
 use transcript::Transcript;
 
@@ -35,42 +36,20 @@ cfg_if::cfg_if! {
 criterion_main!(op_add);
 
 const NUM_SAMPLES: usize = 10;
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
-
-pub fn is_power_of_2(x: usize) -> bool {
-    (x != 0) && ((x & (x - 1)) == 0)
-}
 
 fn bench_add(c: &mut Criterion) {
-    let max_threads = {
-        if !is_power_of_2(RAYON_NUM_THREADS) {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            {
-                use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
-                let max_thread_id = 1 << ceil_log2(RAYON_NUM_THREADS);
-                create_local_pool_once(1 << ceil_log2(RAYON_NUM_THREADS), true);
-                max_thread_id
-            }
-        } else {
-            RAYON_NUM_THREADS
-        }
-    };
+    type Pcs = BasefoldDefault<E>;
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let _ = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
 
+    let param = Pcs::setup(1 << MAX_NUM_VARIABLES).unwrap();
+    let (pp, vp) = Pcs::trim(&param, 1 << MAX_NUM_VARIABLES).unwrap();
+
     let pk = zkvm_cs
         .clone()
-        .key_gen(zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
     let circuit_pk = pk
@@ -81,7 +60,6 @@ fn bench_add(c: &mut Criterion) {
     let num_witin = circuit_pk.get_cs().num_witin;
 
     let prover = ZKVMProver::new(pk);
-    let mut transcript = Transcript::new(b"riscv");
 
     for instance_num_vars in 20..22 {
         // expand more input size once runtime is acceptable
@@ -94,31 +72,41 @@ fn bench_add(c: &mut Criterion) {
             |b| {
                 b.iter_with_setup(
                     || {
-                        let mut rng = test_rng();
-                        let real_challenges = [E::random(&mut rng), E::random(&mut rng)];
-                        (rng, real_challenges)
-                    },
-                    |(mut rng, real_challenges)| {
                         // generate mock witness
+                        let mut rng = test_rng();
                         let num_instances = 1 << instance_num_vars;
-                        let wits_in = (0..num_witin as usize)
+                        (0..num_witin as usize)
                             .map(|_| {
                                 (0..num_instances)
                                     .map(|_| Goldilocks::random(&mut rng))
                                     .collect::<Vec<Goldilocks>>()
                                     .into_mle()
-                                    .into()
                             })
-                            .collect_vec();
+                            .collect_vec()
+                    },
+                    |wits_in| {
                         let timer = Instant::now();
+                        let num_instances = 1 << instance_num_vars;
+                        let mut transcript = Transcript::new(b"riscv");
+                        let commit =
+                            Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
+                                .unwrap();
+                        let challenges = [
+                            transcript.read_challenge().elements,
+                            transcript.read_challenge().elements,
+                        ];
+
                         let _ = prover
                             .create_opcode_proof(
+                                "ADD",
+                                &prover.pk.pp,
                                 &circuit_pk,
-                                wits_in,
+                                wits_in.into_iter().map(|mle| mle.into()).collect_vec(),
+                                commit,
+                                &[],
                                 num_instances,
-                                max_threads,
                                 &mut transcript,
-                                &real_challenges,
+                                &challenges,
                             )
                             .expect("create_proof failed");
                         println!(

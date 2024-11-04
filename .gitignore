@@ -1,6 +1,7 @@
-/target
+target
 .vscode
 *.log
 log.txt
 logs/
 table_cache_dev_*
+.DS_Store

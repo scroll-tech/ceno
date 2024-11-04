@@ -4,14 +4,14 @@ use criterion::*;
 use ff::Field;
 use goldilocks::GoldilocksExt2;
 
-use itertools::{chain, Itertools};
+use itertools::{Itertools, chain};
 use mpcs::{
-    util::plonky2_util::log2_ceil, Basefold, BasefoldBasecodeParams, Evaluation,
-    PolynomialCommitmentScheme,
+    Basefold, BasefoldBasecodeParams, Evaluation, PolynomialCommitmentScheme,
+    util::plonky2_util::log2_ceil,
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-use rand::{rngs::OsRng, SeedableRng};
+use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
@@ -170,7 +170,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let values: Vec<E> = evals
                 .iter()
                 .map(Evaluation::value)
-                .map(|x| *x)
+                .copied()
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
@@ -212,7 +212,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let values: Vec<E> = evals
                 .iter()
                 .map(Evaluation::value)
-                .map(|x| *x)
+                .copied()
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
 
@@ -294,8 +294,20 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
 
             transcript.append_field_element_exts(&evals);
             let transcript_for_bench = transcript.clone();
-            let proof = Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
-                .unwrap();
+            let polys = polys
+                .clone()
+                .into_iter()
+                .map(|x| x.into())
+                .collect::<Vec<_>>();
+            let proof = Pcs::simple_batch_open(
+                &pp,
+                polys.as_slice(),
+                &comm,
+                &point,
+                &evals,
+                &mut transcript,
+            )
+            .unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
@@ -305,7 +317,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
                         |mut transcript| {
                             Pcs::simple_batch_open(
                                 &pp,
-                                &polys,
+                                polys.as_slice(),
                                 &comm,
                                 &point,
                                 &evals,

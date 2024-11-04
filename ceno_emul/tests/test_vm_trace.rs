@@ -1,18 +1,30 @@
+#![allow(clippy::unusual_byte_groupings)]
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use ceno_emul::{
-    ByteAddr, Cycle, EmuContext, InsnKind, StepRecord, Tracer, VMState, WordAddr, CENO_PLATFORM,
+    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Program, StepRecord, Tracer, VMState, WORD_SIZE,
+    WordAddr,
 };
 
 #[test]
 fn test_vm_trace() -> Result<()> {
-    let mut ctx = VMState::new(CENO_PLATFORM);
-
-    let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
-    for (i, &inst) in PROGRAM_FIBONACCI_20.iter().enumerate() {
-        ctx.init_memory(pc_start + i as u32, inst);
-    }
+    let program = Program::new(
+        CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.pc_base(),
+        PROGRAM_FIBONACCI_20.to_vec(),
+        PROGRAM_FIBONACCI_20
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    CENO_PLATFORM.pc_base() + (WORD_SIZE * insn_idx) as u32,
+                    insn,
+                )
+            })
+            .collect(),
+    );
+    let mut ctx = VMState::new(CENO_PLATFORM, program);
 
     let steps = run(&mut ctx)?;
 
@@ -21,7 +33,7 @@ fn test_vm_trace() -> Result<()> {
     assert_eq!(ctx.peek_register(2), x2);
     assert_eq!(ctx.peek_register(3), x3);
 
-    let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().kind().1).collect();
+    let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().codes().kind).collect();
     assert_eq!(ops, expected_ops_fibonacci_20());
 
     assert_eq!(
@@ -34,14 +46,20 @@ fn test_vm_trace() -> Result<()> {
 
 #[test]
 fn test_empty_program() -> Result<()> {
-    let mut ctx = VMState::new(CENO_PLATFORM);
+    let empty_program = Program::new(
+        CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.pc_base(),
+        vec![],
+        BTreeMap::new(),
+    );
+    let mut ctx = VMState::new(CENO_PLATFORM, empty_program);
     let res = run(&mut ctx);
     assert!(matches!(res, Err(e) if e.to_string().contains("IllegalInstruction(0)")));
     Ok(())
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    state.iter_until_success().collect()
+    state.iter_until_halt().collect()
 }
 
 /// Example in RISC-V bytecode and assembly.

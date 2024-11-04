@@ -1,9 +1,9 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, EmuContext, StepRecord, VMState, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, StepRecord, VMState};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_mini");
+    let program_elf = ceno_examples::ceno_rt_mini;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
     Ok(())
@@ -11,17 +11,19 @@ fn test_ceno_rt_mini() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_panic() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_panic");
+    let program_elf = ceno_examples::ceno_rt_panic;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
-    let res = run(&mut state);
-
-    assert!(matches!(res, Err(e) if e.to_string().contains("EcallError")));
+    let steps = run(&mut state)?;
+    let last = steps.last().unwrap();
+    assert_eq!(last.insn().codes().kind, InsnKind::EANY);
+    assert_eq!(last.rs1().unwrap().value, CENO_PLATFORM.ecall_halt());
+    assert_eq!(last.rs2().unwrap().value, 1); // panic / halt(1)
     Ok(())
 }
 
 #[test]
 fn test_ceno_rt_mem() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_mem");
+    let program_elf = ceno_examples::ceno_rt_mem;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
@@ -32,7 +34,7 @@ fn test_ceno_rt_mem() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_alloc() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_alloc");
+    let program_elf = ceno_examples::ceno_rt_alloc;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
@@ -57,7 +59,7 @@ fn test_ceno_rt_alloc() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_io() -> Result<()> {
-    let program_elf = include_bytes!("./data/ceno_rt_io");
+    let program_elf = ceno_examples::ceno_rt_io;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
@@ -71,7 +73,9 @@ fn test_ceno_rt_io() -> Result<()> {
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    state.iter_until_success().collect()
+    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    eprintln!("Emulator ran for {} steps.", steps.len());
+    Ok(steps)
 }
 
 const WORD_SIZE: usize = 4;

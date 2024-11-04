@@ -7,26 +7,26 @@ use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, MultilinearExtension},
-    op_mle, op_mle_3,
+    op_mle, op_mle_product_3, op_mle3_range,
     util::largest_even_below,
     virtual_poly_v2::VirtualPolynomialV2,
 };
 use rayon::{
+    Scope,
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
-    Scope,
 };
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
 #[cfg(feature = "non_pow2_rayon_thread")]
-use crate::local_thread_pool::{create_local_pool_once, LOCAL_THREAD_POOL};
+use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
 
 use crate::{
     entered_span, exit_span,
     structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
     util::{
-        barycentric_weights, ceil_log2, extrapolate, merge_sumcheck_polys_v2, AdditiveArray,
-        AdditiveVec,
+        AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
+        merge_sumcheck_polys_v2,
     },
 };
 
@@ -43,6 +43,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
+        assert!(max_thread_id.is_power_of_two());
 
         let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
         assert!(
@@ -58,13 +59,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverStateV2 {
-                    poly: polys[0].clone(),
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverStateV2 {
+                poly: polys[0].clone(),
+                ..Default::default()
+            });
         }
         let start = start_timer!(|| "sum check prove");
 
@@ -510,7 +508,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                             &self.poly.flattened_ml_extensions[products[1]],
                             &self.poly.flattened_ml_extensions[products[2]],
                         );
-                        op_mle_3!(
+                        op_mle_product_3!(
                             |f1, f2, f3| {
                                 let res = (0..largest_even_below(f1.len()))
                                     .step_by(2)
@@ -610,13 +608,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverStateV2 {
-                    poly,
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverStateV2 {
+                poly,
+                ..Default::default()
+            });
         }
         let start = start_timer!(|| "sum check prove");
 
@@ -869,7 +864,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                                 &self.poly.flattened_ml_extensions[products[1]],
                                 &self.poly.flattened_ml_extensions[products[2]],
                             );
-                            op_mle_3!(
+                            op_mle_product_3!(
                                 |f1, f2, f3| {
                                     let res = (0..largest_even_below(f1.len()))
                                     .step_by(2)

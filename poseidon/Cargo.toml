@@ -1,0 +1,21 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "poseidon"
+version.workspace = true
+
+[dependencies]
+criterion.workspace = true
+ff.workspace = true
+goldilocks.workspace = true
+serde.workspace = true
+unroll = "0.1"
+
+[dev-dependencies]
+ark-std.workspace = true
+plonky2.workspace = true
+rand.workspace = true
+
+[[bench]]
+harness = false
+name = "hashing"

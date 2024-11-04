@@ -22,11 +22,11 @@ pub struct VirtualPolynomials<'a, E: ExtensionField> {
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
-    pub fn new(num_threads: usize, num_variables: usize) -> Self {
+    pub fn new(num_threads: usize, max_num_variables: usize) -> Self {
         VirtualPolynomials {
             num_threads,
             polys: (0..num_threads)
-                .map(|_| VirtualPolynomialV2::new(num_variables - ceil_log2(num_threads)))
+                .map(|_| VirtualPolynomialV2::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
             thread_based_mles_storage: HashMap::new(),
         }
@@ -192,8 +192,8 @@ mod tests {
     fn test_add_mle_list_by_expr() {
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
-        let y = cb.create_witin(|| "y").unwrap();
+        let x = cb.create_witin(|| "x");
+        let y = cb.create_witin(|| "y");
 
         let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
             .map(|_| vec![Goldilocks::from(1)].into_mle().into())
@@ -202,8 +202,7 @@ mod tests {
         let mut virtual_polys = VirtualPolynomials::new(1, 0);
 
         // 3xy + 2y
-        let expr: Expression<E> =
-            Expression::from(3) * x.expr() * y.expr() + Expression::from(2) * y.expr();
+        let expr: Expression<E> = 3 * x.expr() * y.expr() + 2 * y.expr();
 
         let distrinct_zerocheck_terms_set = virtual_polys.add_mle_list_by_expr(
             None,
@@ -216,7 +215,7 @@ mod tests {
         assert!(virtual_polys.degree() == 2);
 
         // 3x^3
-        let expr: Expression<E> = Expression::from(3) * x.expr() * x.expr() * x.expr();
+        let expr: Expression<E> = 3 * x.expr() * x.expr() * x.expr();
         let distrinct_zerocheck_terms_set = virtual_polys.add_mle_list_by_expr(
             None,
             wits_in.iter().collect_vec(),

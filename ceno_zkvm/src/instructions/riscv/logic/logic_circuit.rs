@@ -8,13 +8,14 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::{constants::UInt8, r_insn::RInstructionConfig},
         Instruction,
+        riscv::{constants::UInt8, r_insn::RInstructionConfig},
     },
     tables::OpsTable,
+    utils::split_to_u8,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, StepRecord, Word, WORD_SIZE};
+use ceno_emul::{InsnKind, StepRecord};
 
 /// This trait defines a logic instruction, connecting an instruction type to a lookup table.
 pub trait LogicOp {
@@ -71,7 +72,7 @@ pub struct LogicConfig<E: ExtensionField> {
 
     rs1_read: UInt8<E>,
     rs2_read: UInt8<E>,
-    rd_written: UInt8<E>,
+    pub(crate) rd_written: UInt8<E>,
 }
 
 impl<E: ExtensionField> LogicConfig<E> {
@@ -86,9 +87,9 @@ impl<E: ExtensionField> LogicConfig<E> {
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
             insn_kind,
-            &rs1_read,
-            &rs2_read,
-            &rd_written,
+            rs1_read.register_expr(),
+            rs2_read.register_expr(),
+            rd_written.register_expr(),
         )?;
 
         Ok(Self {
@@ -108,24 +109,15 @@ impl<E: ExtensionField> LogicConfig<E> {
         self.r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        let rs1_read = Self::u8_limbs(step.rs1().unwrap().value);
-        self.rs1_read.assign_limbs(instance, rs1_read);
+        let rs1_read = split_to_u8(step.rs1().unwrap().value);
+        self.rs1_read.assign_limbs(instance, &rs1_read);
 
-        let rs2_read = Self::u8_limbs(step.rs2().unwrap().value);
-        self.rs2_read.assign_limbs(instance, rs2_read);
+        let rs2_read = split_to_u8(step.rs2().unwrap().value);
+        self.rs2_read.assign_limbs(instance, &rs2_read);
 
-        let rd_written = Self::u8_limbs(step.rd().unwrap().value.after);
-        self.rd_written.assign_limbs(instance, rd_written);
+        let rd_written = split_to_u8(step.rd().unwrap().value.after);
+        self.rd_written.assign_limbs(instance, &rd_written);
 
         Ok(())
-    }
-
-    /// Decompose a word into byte field elements in little-endian order.
-    fn u8_limbs(v: Word) -> Vec<E::BaseField> {
-        let mut limbs = Vec::with_capacity(WORD_SIZE);
-        for i in 0..WORD_SIZE {
-            limbs.push(E::BaseField::from(((v >> (i * 8)) & 0xff) as u64));
-        }
-        limbs
     }
 }
