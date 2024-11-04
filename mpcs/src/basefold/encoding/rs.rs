@@ -271,7 +271,7 @@ where
     }
 
     fn trim(
-        pp: Self::PublicParameters,
+        mut pp: Self::PublicParameters,
         max_message_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
         if pp.fft_root_table.len() < max_message_size_log + Spec::get_rate_log() {
@@ -281,7 +281,6 @@ where
                 max_message_size_log,
             )));
         }
-        let mut pp = pp;
         if max_message_size_log < Spec::get_basecode_msg_size_log() {
             // Message smaller than this size will not be encoded in BaseFold.
             // So just give trivial parameters.
