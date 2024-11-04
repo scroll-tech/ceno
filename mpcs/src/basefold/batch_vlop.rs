@@ -303,7 +303,8 @@ where
 }
 
 pub(crate) struct BatchVLOPQueryCheckStrategy;
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> QueryCheckStrategy<E, Spec> for BatchVLOPQueryCheckStrategy
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> QueryCheckStrategy<E, Spec>
+    for BatchVLOPQueryCheckStrategy
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
