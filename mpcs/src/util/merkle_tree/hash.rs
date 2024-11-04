@@ -34,14 +34,14 @@ where
     }
 
     fn hash_field_type(field_type: &FieldType<E>) -> Self::Digest {
-        Self::hash_iter(field_type_iter_base(&field_type))
+        Self::hash_iter(field_type_iter_base(field_type))
     }
 
     fn hash_field_type_subvector(
         field_type: &FieldType<E>,
         range: impl IntoIterator<Item = usize>,
     ) -> Self::Digest {
-        Self::hash_iter(field_type_iter_range_base(&field_type, range))
+        Self::hash_iter(field_type_iter_range_base(field_type, range))
     }
 
     fn hash_two_digests(a: &Self::Digest, b: &Self::Digest) -> Self::Digest;

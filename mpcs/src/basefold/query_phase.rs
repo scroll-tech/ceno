@@ -488,9 +488,7 @@ where
             .inner
             .iter()
             .enumerate()
-            .filter_map(|(index, pair)| {
-                (pair.codeword_size_log() == codeword_size_log).then(|| (index, pair.inner.clone()))
-            })
+            .filter(|&(index, pair)| (pair.codeword_size_log() == codeword_size_log)).map(|(index, pair)| (index, pair.inner.clone()))
             .collect()
     }
 
