@@ -61,7 +61,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             insn_kind.codes().opcode.into(),
-            0.into(),
+            None,
             insn_kind.codes().func3.into(),
             rs1.id.expr(),
             rs2.id.expr(),
@@ -100,7 +100,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         set_val!(
             instance,
             self.imm,
-            InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn())
+            InsnRecord::imm_internal_field::<E::BaseField>(&step.insn())
         );
 
         // Fetch the instruction.

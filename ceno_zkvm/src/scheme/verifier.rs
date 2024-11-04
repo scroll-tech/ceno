@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ark_std::iterable::Iterable;
+use ceno_emul::WORD_SIZE;
 use ff_ext::ExtensionField;
 
 use itertools::{Itertools, interleave, izip};
@@ -14,14 +15,19 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
+    circuit_builder::SetTableAddrType,
     error::ZKVMError,
+    expression::Instance,
     instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{eq_eval_less_or_equal_than, get_challenge_pows, next_pow2_instance_padding},
+    utils::{
+        eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows,
+        next_pow2_instance_padding,
+    },
 };
 
 use super::{
@@ -46,7 +52,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
-        let pi = &vm_proof.pv;
 
         // require ecall/halt proof to exist
         {
@@ -63,9 +68,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // including public input to transcript
-        pi.iter().for_each(|v| transcript.append_field_element(v));
+        let pi_evals = &vm_proof.pi_evals;
 
+        // TODO fix soundness: construct raw public input by ourself and trustless from proof
+        // including raw public input to transcript
+        vm_proof
+            .raw_pi
+            .iter()
+            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+
+        // verify constant poly(s) evaluation result match
+        // we can evaluate at this moment because constant always evaluate to same value
+        // non-constant poly(s) will be verified in respective (table) proof accordingly
+        izip!(&vm_proof.raw_pi, pi_evals)
+            .enumerate()
+            .try_for_each(|(i, (raw, eval))| {
+                if raw.len() == 1 && E::from(raw[0]) != *eval {
+                    Err(ZKVMError::VerifyError(format!(
+                        "pub input on index {i} mismatch  {raw:?} != {eval:?}"
+                    )))
+                } else {
+                    Ok(())
+                }
+            })?;
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {
             if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
@@ -108,7 +133,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &opcode_proof,
-                pi,
+                pi_evals,
                 transcript,
                 NUM_FANIN,
                 &point_eval,
@@ -147,7 +172,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &table_proof,
-                &vm_proof.pv,
+                &vm_proof.raw_pi,
+                &vm_proof.pi_evals,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
@@ -179,7 +205,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let initial_global_state = eval_by_expr_with_instance(
             &[],
             &[],
-            pi,
+            pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
         );
@@ -187,7 +213,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let finalize_global_state = eval_by_expr_with_instance(
             &[],
             &[],
-            pi,
+            pi_evals,
             &challenges,
             &self.vk.finalize_global_state_expr,
         );
@@ -208,7 +234,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E, PCS>,
-        pi: &[E::BaseField],
+        pi: &[E],
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -457,7 +483,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E, PCS>,
-        pi: &[E::BaseField],
+        raw_pi: &[Vec<E::BaseField>],
+        pi: &[E],
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -468,34 +495,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.r_table_expressions
                 .iter()
                 .zip_eq(cs.w_table_expressions.iter())
-                .all(|(r, w)| r.table_len == w.table_len)
+                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
         let is_skip_same_point_sumcheck = cs
             .r_table_expressions
             .iter()
             .chain(cs.w_table_expressions.iter())
-            .map(|rw| rw.table_len)
+            .map(|rw| rw.table_spec.len)
             .chain(cs.lk_table_expressions.iter().map(|lk| lk.table_len))
             .all_equal();
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        // TODO probably move expected_max_rounds to verifier key
-        let expected_rounds = cs
-            // w_table_expression round match with r_table_expression so check any of them sufficient
-            .r_table_expressions
-            .iter()
-            .flat_map(|r| {
-                let num_vars = ceil_log2(r.table_len);
+        let expected_rounds = izip!(
+            // w_table_expression round match with r_table_expression so it fine to check either of them
+            &cs.r_table_expressions,
+            &proof.rw_hints_num_vars
+        )
+        .flat_map(|(r, hint_num_vars)| match r.table_spec.addr_type {
+            // fixed address: get number of round from vk
+            SetTableAddrType::FixedAddr => {
+                let num_vars = ceil_log2(r.table_spec.len);
                 [num_vars, num_vars]
-            })
-            .chain(
-                cs.lk_table_expressions
-                    .iter()
-                    .map(|l| ceil_log2(l.table_len)),
-            )
-            .collect_vec();
+            }
+            // dynamic: respect prover hint
+            SetTableAddrType::DynamicAddr => {
+                // check number of vars doesn't exceed max len defined in vk
+                // this is important to prevent address overlapping
+                assert!((1 << hint_num_vars) <= r.table_spec.len);
+                [*hint_num_vars, *hint_num_vars]
+            }
+        })
+        .chain(
+            cs.lk_table_expressions
+                .iter()
+                .map(|l| ceil_log2(l.table_len)),
+        )
+        .collect_vec();
         let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
         let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
             TowerVerify::verify(
@@ -638,7 +675,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &cs.r_table_expressions, // r
             &cs.w_table_expressions, // w
         )
-        .map(|rw| &rw.values)
+        .map(|rw| &rw.expr)
         .chain(
             cs.lk_table_expressions
                 .iter()
@@ -659,15 +696,62 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
-        PCS::simple_batch_verify(
-            vp,
-            circuit_vk.fixed_commit.as_ref().unwrap(),
-            &input_opening_point,
-            &proof.fixed_in_evals,
-            &proof.fixed_opening_proof,
-            transcript,
-        )
-        .map_err(ZKVMError::PCSError)?;
+        // verify dynamic address evaluation succinctly
+        // TODO we can also skip their mpcs proof
+        for r_table in cs.r_table_expressions.iter() {
+            match r_table.table_spec.addr_type {
+                SetTableAddrType::FixedAddr => (),
+                SetTableAddrType::DynamicAddr => {
+                    let offset = r_table.table_spec.offset;
+                    let expected_eval = eval_wellform_address_vec(
+                        offset as u64,
+                        WORD_SIZE as u64,
+                        &input_opening_point,
+                    );
+                    if expected_eval
+                        != proof.wits_in_evals[r_table.table_spec.addr_witin_id.unwrap()]
+                    {
+                        return Err(ZKVMError::VerifyError(
+                            "dynamic addr evaluate != expected_evals".into(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // assume public io is tiny vector, so we evaluate it directly without PCS
+        for &Instance(idx) in cs.instance_name_map.keys() {
+            let poly = raw_pi[idx].to_vec().into_mle();
+            let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
+            let eval = pi[idx];
+            if expected_eval != eval {
+                return Err(ZKVMError::VerifyError(format!(
+                    "pub input on index {idx} mismatch  {expected_eval:?} != {eval:?}"
+                )));
+            }
+            tracing::debug!(
+                "[table {name}] verified public inputs on index {idx} with point {input_opening_point:?}",
+            );
+        }
+
+        // do optional check of fixed_commitment openings by vk
+        if circuit_vk.fixed_commit.is_some() {
+            let Some(fixed_opening_proof) = &proof.fixed_opening_proof else {
+                return Err(ZKVMError::VerifyError(
+                    "fixed openning proof shoudn't be none".into(),
+                ));
+            };
+            PCS::simple_batch_verify(
+                vp,
+                circuit_vk.fixed_commit.as_ref().unwrap(),
+                &input_opening_point,
+                &proof.fixed_in_evals,
+                fixed_opening_proof,
+                transcript,
+            )
+            .map_err(ZKVMError::PCSError)?;
+        }
+
         tracing::debug!(
             "[table {}] verified opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
             name,
