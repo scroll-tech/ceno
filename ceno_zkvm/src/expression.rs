@@ -8,6 +8,7 @@ use std::{
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
+use ceno_emul::InsnKind;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -831,7 +832,7 @@ macro_rules! impl_from_unsigned {
         )*
     };
 }
-impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType);
+impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
 
 // Implement From trait for u128 separately since it requires explicit reduction
 impl<F: SmallField, E: ExtensionField<BaseField = F>> From<u128> for Expression<E> {
