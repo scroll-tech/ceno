@@ -206,8 +206,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_value = step.memory_op().unwrap().value.before;
         let memory_read = Value::new(memory_value, lk_multiplicity);
         // imm is signed 12-bit value
-        let imm: i64 = InsnRecord::imm_internal(&step.insn());
-        let unaligned_addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add(imm as u32));
+        let imm = InsnRecord::imm_internal(&step.insn());
+        let unaligned_addr =
+            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
         let shift = unaligned_addr.shift();
         let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];
         let target_limb = memory_read.as_u16_limbs()[addr_low_bits[1] as usize];

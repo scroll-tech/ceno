@@ -59,25 +59,19 @@ impl<F: SmallField> InsnRecord<F> {
             (insn.rd_internal() as u64).into(),
             (insn.rs1_or_zero() as u64).into(),
             (insn.rs2_or_zero() as u64).into(),
-            Self::imm_internal_field(insn),
+            i64_to_base(InsnRecord::imm_internal(insn)),
         ])
-    }
-
-    /// Interpret the immediate as unsigned or signed depending on the instruction.
-    /// Convert negative values from two's complement to field.
-    pub fn imm_internal_field(insn: &DecodedInstruction) -> F {
-        i64_to_base(InsnRecord::imm_internal(insn))
     }
 }
 
 impl InsnRecord<()> {
     /// The internal view of the immediate in the program table.
-    /// This is encoded in way that is efficient for circuits, depending on the instruction.
+    /// This is encoded in a way that is efficient for circuits, depending on the instruction.
     ///
-    /// Three conversions are legal:
-    /// - `as u32`: unsigned view.
-    /// - `as i32`: two's complement signed view.
-    /// - `i64_to_base(imm)`: the field element going into the table.
+    /// These conversions are legal:
+    /// - `as u32` and `as i32` as usual.
+    /// - `i64_to_base(imm)` gives the field element going into the program table.
+    /// - `as u64` in unsigned cases.
     pub fn imm_internal(insn: &DecodedInstruction) -> i64 {
         let imm: u32 = insn.immediate();
         match insn.codes() {

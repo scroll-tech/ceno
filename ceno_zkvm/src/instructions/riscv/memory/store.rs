@@ -143,10 +143,10 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let memory_op = step.memory_op().unwrap();
-        let imm: i64 = InsnRecord::imm_internal(&step.insn());
+        let imm = InsnRecord::imm_internal(&step.insn());
         let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
-        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add(imm as u32));
+        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
