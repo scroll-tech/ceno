@@ -4,9 +4,9 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::{
-    constants::{UInt, UINT_LIMBS},
-    r_insn::RInstructionConfig,
     RIVInstruction,
+    constants::{UINT_LIMBS, UInt},
+    r_insn::RInstructionConfig,
 };
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsLtConfig,
@@ -21,7 +21,7 @@ pub struct ArithConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     rd_written: UInt<E>,
 
     is_lt: IsLtConfig,
@@ -35,6 +35,7 @@ impl RIVInstruction for SLTUOp {
 }
 pub type SltuInstruction<E> = ArithInstruction<E, SLTUOp>;
 
+// TODO combine with SLT
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
 
@@ -56,7 +57,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rs2_read.value(),
             UINT_LIMBS,
         )?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -104,17 +105,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord, Word, CENO_PLATFORM};
+    use ceno_emul::{Change, StepRecord, Word, encode_rv32};
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
     use rand::Rng;
 
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_SLTU, MOCK_PROGRAM},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     fn verify(name: &'static str, rs1: Word, rs2: Word, rd: Word) {
@@ -131,21 +130,20 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let idx = (MOCK_PC_SLTU.0 - CENO_PLATFORM.pc_start()) / 4;
-        let (raw_witin, _) = SltuInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_SLTU,
-                MOCK_PROGRAM[idx as usize],
-                rs1,
-                rs2,
-                Change::new(0, rd),
-                0,
-            )],
-        )
-        .unwrap();
+        let insn_code = encode_rv32(InsnKind::SLTU, 2, 3, 4, 0);
+        let (raw_witin, lkm) =
+            SltuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    rs1,
+                    rs2,
+                    Change::new(0, rd),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
@@ -155,16 +153,7 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &mut cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 
     #[test]
@@ -181,10 +170,12 @@ mod test {
 
     #[test]
     fn test_sltu_random() {
+        // TODO(Matthias): use property pased testing.
+        // Like eg https://docs.rs/proptest/latest/proptest/
         let mut rng = rand::thread_rng();
         let a: u32 = rng.gen();
         let b: u32 = rng.gen();
         verify("random 1", a, b, (a < b) as u32);
-        verify("random 2", b, a, !(a < b) as u32);
+        verify("random 2", b, a, (a >= b) as u32);
     }
 }

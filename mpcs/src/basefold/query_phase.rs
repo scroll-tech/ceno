@@ -1,7 +1,7 @@
 use crate::util::{
     arithmetic::{
-        degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate2_weights,
-        interpolate_over_boolean_hypercube,
+        degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate_over_boolean_hypercube,
+        interpolate2_weights,
     },
     ext_to_usize,
     hash::Digest,
@@ -11,7 +11,7 @@ use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::marker::PhantomData;
 use transcript::Transcript;
 

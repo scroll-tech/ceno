@@ -4,11 +4,11 @@ use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    witness::LkMultiplicity, Value,
+    Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
+    witness::LkMultiplicity,
 };
 
-use super::{constants::UInt, i_insn::IInstructionConfig, RIVInstruction};
+use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
 
 pub struct AddiInstruction<E>(PhantomData<E>);
 
@@ -35,7 +35,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new_unchecked(|| "imm", circuit_builder)?;
+        let imm = UInt::new(|| "imm", circuit_builder)?;
         let rd_written = rs1_read.add(|| "rs1_read + imm", circuit_builder, &imm, true)?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
@@ -44,6 +44,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             &imm.value(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
+            false,
         )?;
 
         Ok(InstructionConfig {
@@ -61,7 +62,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+        let imm = Value::new(step.insn().imm_internal(), lk_multiplicity);
 
         let result = rs1_read.add(&imm, lk_multiplicity, true);
 
@@ -80,15 +81,13 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
-        scheme::mock_prover::{MockProver, MOCK_PC_ADDI, MOCK_PC_ADDI_SUB, MOCK_PROGRAM},
+        instructions::{Instruction, riscv::test_utils::imm_i},
+        scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     use super::AddiInstruction;
@@ -108,13 +107,14 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddiInstruction::<GoldilocksExt2>::assign_instances(
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(3));
+        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_ADDI,
-                MOCK_PROGRAM[13],
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                insn_code,
                 1000,
                 Change::new(0, 1003),
                 0,
@@ -122,16 +122,7 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            None,
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 
     #[test]
@@ -149,13 +140,14 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, _) = AddiInstruction::<GoldilocksExt2>::assign_instances(
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(-3));
+        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             vec![StepRecord::new_i_instruction(
                 3,
-                MOCK_PC_ADDI_SUB,
-                MOCK_PROGRAM[14],
+                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
+                insn_code,
                 1000,
                 Change::new(0, 997),
                 0,
@@ -163,15 +155,6 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            Some([1.into(), 10000.into()]),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

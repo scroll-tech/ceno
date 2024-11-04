@@ -26,6 +26,7 @@ fn test_sumcheck<E: ExtensionField>(
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
     let poly_info = poly.aux_info.clone();
+    #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
 
     let mut transcript = Transcript::new(b"test");
@@ -52,6 +53,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
     let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.num_variables);
+    #[allow(deprecated)]
     let mut prover_state = IOPProverState::prover_init_parallel(poly.clone());
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;
@@ -145,7 +147,7 @@ fn test_extract_sum_helper<E: ExtensionField>() {
     let mut rng = test_rng();
     let mut transcript = Transcript::<E>::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
-
+    #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly, &mut transcript);
     assert_eq!(proof.extract_sum(), asserted_sum);
 }

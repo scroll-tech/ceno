@@ -10,7 +10,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind::EANY, StepRecord, Tracer, CENO_PLATFORM, PC_STEP_SIZE};
+use ceno_emul::{CENO_PLATFORM, InsnKind::EANY, PC_STEP_SIZE, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
@@ -28,33 +28,33 @@ impl EcallInstructionConfig {
         syscall_ret_value: Option<RegisterExpr<E>>,
         next_pc: Option<Expression<E>>,
     ) -> Result<Self, ZKVMError> {
-        let pc = cb.create_witin(|| "pc")?;
-        let ts = cb.create_witin(|| "cur_ts")?;
+        let pc = cb.create_witin(|| "pc");
+        let ts = cb.create_witin(|| "cur_ts");
 
         cb.state_in(pc.expr(), ts.expr())?;
         cb.state_out(
-            next_pc.map_or(pc.expr() + PC_STEP_SIZE.into(), |next_pc| next_pc),
-            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize).into(),
+            next_pc.map_or(pc.expr() + PC_STEP_SIZE, |next_pc| next_pc),
+            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize),
         )?;
 
         cb.lk_fetch(&InsnRecord::new(
             pc.expr(),
             (EANY.codes().opcode as usize).into(),
-            0.into(),
+            None,
             (EANY.codes().func3 as usize).into(),
             0.into(),
             0.into(),
             0.into(), // imm = 0
         ))?;
 
-        let prev_x5_ts = cb.create_witin(|| "prev_x5_ts")?;
+        let prev_x5_ts = cb.create_witin(|| "prev_x5_ts");
 
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(
             || "write x5",
             E::BaseField::from(CENO_PLATFORM.reg_ecall() as u64),
             prev_x5_ts.expr(),
-            ts.expr() + (Tracer::SUBCYCLE_RS1 as usize).into(),
+            ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),
             syscall_ret_value.map_or(syscall_id, |v| v),
         )?;

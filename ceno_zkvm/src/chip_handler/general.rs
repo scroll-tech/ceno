@@ -1,22 +1,23 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
-    instructions::riscv::constants::EXIT_CODE_IDX,
+    instructions::riscv::constants::{
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
+        UINT_LIMBS,
+    },
     structs::ROMType,
     tables::InsnRecord,
 };
-
-use super::utils::rlc_chip_record;
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
         Self { cs }
     }
 
-    pub fn create_witin<NR, N>(&mut self, name_fn: N) -> Result<WitIn, ZKVMError>
+    pub fn create_witin<NR, N>(&mut self, name_fn: N) -> WitIn
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
@@ -32,7 +33,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_fixed(name_fn)
     }
 
-    pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
+    pub fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], ZKVMError> {
         Ok([
             self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
             self.cs
@@ -40,21 +41,43 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         ])
     }
 
+    pub fn query_init_pc(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "init_pc", INIT_PC_IDX)
+    }
+
+    pub fn query_init_cycle(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "init_cycle", INIT_CYCLE_IDX)
+    }
+
+    pub fn query_end_pc(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "end_pc", END_PC_IDX)
+    }
+
+    pub fn query_end_cycle(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
+    }
+
+    pub fn query_public_io(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "public_io", PUBLIC_IO_IDX)
+    }
+
     pub fn lk_record<NR, N>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        items: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.lk_record(name_fn, rlc_record)
+        self.cs.lk_record(name_fn, rom_type, items)
     }
 
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        table_len: usize,
         rlc_record: Expression<E>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
@@ -62,18 +85,39 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.lk_table_record(name_fn, rlc_record, multiplicity)
+        self.cs
+            .lk_table_record(name_fn, table_len, rlc_record, multiplicity)
+    }
+
+    pub fn r_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_spec: SetTableSpec,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.r_table_record(name_fn, table_spec, rlc_record)
+    }
+
+    pub fn w_table_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        table_spec: SetTableSpec,
+        rlc_record: Expression<E>,
+    ) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.w_table_record(name_fn, table_spec, rlc_record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
     pub fn lk_fetch(&mut self, record: &InsnRecord<Expression<E>>) -> Result<(), ZKVMError> {
-        let rlc_record = {
-            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
-            fields.extend_from_slice(record.as_slice());
-            self.rlc_chip_record(fields)
-        };
-
-        self.cs.lk_record(|| "fetch", rlc_record)
+        self.lk_record(|| "fetch", ROMType::Instruction, record.as_slice().to_vec())
     }
 
     pub fn read_record<NR, N>(
@@ -101,11 +145,45 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
-        rlc_chip_record(
-            records,
-            self.cs.chip_record_alpha.clone(),
-            self.cs.chip_record_beta.clone(),
-        )
+        self.cs.rlc_chip_record(records)
+    }
+
+    pub fn create_u8<NR, N>(&mut self, name_fn: N) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR + Clone,
+    {
+        let byte = self.cs.create_witin(name_fn.clone());
+        self.assert_ux::<_, _, 8>(name_fn, byte.expr())?;
+
+        Ok(byte)
+    }
+
+    pub fn create_u16<NR, N>(&mut self, name_fn: N) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR + Clone,
+    {
+        let limb = self.cs.create_witin(name_fn.clone());
+        self.assert_ux::<_, _, 16>(name_fn, limb.expr())?;
+
+        Ok(limb)
+    }
+
+    /// Create a new WitIn constrained to be equal to input expression.
+    pub fn flatten_expr<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR + Clone,
+    {
+        let wit = self.cs.create_witin(name_fn.clone());
+        self.require_equal(name_fn, wit.expr(), expr)?;
+
+        Ok(wit)
     }
 
     pub fn require_zero<NR, N>(
@@ -126,8 +204,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn require_equal<NR, N>(
         &mut self,
         name_fn: N,
-        target: Expression<E>,
-        rlc_record: Expression<E>,
+        a: Expression<E>,
+        b: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
@@ -135,7 +213,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.namespace(
             || "require_equal",
-            |cb| cb.cs.require_zero(name_fn, target - rlc_record),
+            |cb| {
+                cb.cs
+                    .require_zero(name_fn, a.to_monomial_form() - b.to_monomial_form())
+            },
         )
     }
 
@@ -144,10 +225,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "require_one",
-            |cb| cb.cs.require_zero(name_fn, Expression::from(1) - expr),
-        )
+        self.namespace(|| "require_one", |cb| cb.cs.require_zero(name_fn, 1 - expr))
     }
 
     pub fn condition_require_equal<NR, N>(
@@ -173,6 +251,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn select(
+        &mut self,
+        cond: &Expression<E>,
+        when_true: &Expression<E>,
+        when_false: &Expression<E>,
+    ) -> Expression<E> {
+        cond * when_true + (1 - cond) * when_false
+    }
+
     pub(crate) fn assert_ux<NR, N, const C: usize>(
         &mut self,
         name_fn: N,
@@ -184,6 +271,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         match C {
             16 => self.assert_u16(name_fn, expr),
+            14 => self.assert_u14(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
             c => panic!("Unsupported bit range {c}"),
@@ -197,15 +285,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.namespace(
             || "assert_u5",
-            |cb| {
-                let items: Vec<Expression<E>> = vec![
-                    Expression::Constant(E::BaseField::from(ROMType::U5 as u64)),
-                    expr,
-                ];
-                let rlc_record = cb.rlc_chip_record(items);
-                cb.cs.lk_record(name_fn, rlc_record)
-            },
+            |cb| cb.lk_record(name_fn, ROMType::U5, vec![expr]),
         )
+    }
+
+    fn assert_u14<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.lk_record(name_fn, ROMType::U14, vec![expr])?;
+        Ok(())
     }
 
     fn assert_u16<NR, N>(&mut self, name_fn: N, expr: Expression<E>) -> Result<(), ZKVMError>
@@ -213,12 +303,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        let items: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from(ROMType::U16 as u64)),
-            expr,
-        ];
-        let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(name_fn, rlc_record)?;
+        self.lk_record(name_fn, ROMType::U16, vec![expr])?;
         Ok(())
     }
 
@@ -243,9 +328,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        let items: Vec<Expression<E>> = vec![(ROMType::U8 as usize).into(), expr];
-        let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(name_fn, rlc_record)?;
+        self.lk_record(name_fn, ROMType::U8, vec![expr])?;
         Ok(())
     }
 
@@ -260,10 +343,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.namespace(
             || "assert_bit",
-            |cb| {
-                cb.cs
-                    .require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
-            },
+            |cb| cb.cs.require_zero(name_fn, &expr * (1 - &expr)),
         )
     }
 
@@ -275,9 +355,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         b: Expression<E>,
         c: Expression<E>,
     ) -> Result<(), ZKVMError> {
-        let items: Vec<Expression<E>> = vec![(rom_type as usize).into(), a, b, c];
-        let rlc_record = self.rlc_chip_record(items);
-        self.lk_record(|| format!("lookup_{:?}", rom_type), rlc_record)
+        self.lk_record(|| format!("lookup_{:?}", rom_type), rom_type, vec![a, b, c])
     }
 
     /// Assert `a & b = c` and that `a, b, c` are all bytes.
@@ -330,17 +408,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         lhs: Expression<E>,
         rhs: Expression<E>,
     ) -> Result<(WitIn, WitIn), ZKVMError> {
-        let is_eq = self.create_witin(|| "is_eq")?;
-        let diff_inverse = self.create_witin(|| "diff_inverse")?;
+        let is_eq = self.create_witin(|| "is_eq");
+        let diff_inverse = self.create_witin(|| "diff_inverse");
 
+        self.require_zero(|| "is equal", is_eq.expr() * &lhs - is_eq.expr() * &rhs)?;
         self.require_zero(
             || "is equal",
-            is_eq.expr().clone() * lhs.clone() - is_eq.expr() * rhs.clone(),
-        )?;
-        self.require_zero(
-            || "is equal",
-            Expression::from(1) - is_eq.expr().clone() - diff_inverse.expr() * lhs
-                + diff_inverse.expr() * rhs,
+            1 - is_eq.expr() - diff_inverse.expr() * lhs + diff_inverse.expr() * rhs,
         )?;
 
         Ok((is_eq, diff_inverse))

@@ -10,46 +10,41 @@ use crate::{
     tables::TableCircuit,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{DecodedInstruction, Word, CENO_PLATFORM, PC_STEP_SIZE, WORD_SIZE};
+use ceno_emul::{DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
+#[macro_export]
+macro_rules! declare_program {
+    ($program:ident, $($instr:expr),* $(,)?) => {
+
+        {
+            let mut _i = 0;
+            $(
+                $program[_i] = $instr;
+                _i += 1;
+            )*
+        }
+    };
+}
+
+/// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 7]);
 
 impl<T> InsnRecord<T> {
-    pub fn new(pc: T, opcode: T, rd: T, funct3: T, rs1: T, rs2: T, imm_or_funct7: T) -> Self {
-        InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_or_funct7])
+    pub fn new(pc: T, opcode: T, rd: Option<T>, funct3: T, rs1: T, rs2: T, imm_internal: T) -> Self
+    where
+        T: From<u32>,
+    {
+        let rd = rd.unwrap_or_else(|| T::from(DecodedInstruction::RD_NULL));
+        InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_internal])
     }
 
     pub fn as_slice(&self) -> &[T] {
         &self.0
-    }
-
-    pub fn pc(&self) -> &T {
-        &self.0[0]
-    }
-
-    pub fn opcode(&self) -> &T {
-        &self.0[1]
-    }
-
-    pub fn rd_or_zero(&self) -> &T {
-        &self.0[2]
-    }
-
-    pub fn funct3_or_zero(&self) -> &T {
-        &self.0[3]
-    }
-
-    pub fn rs1_or_zero(&self) -> &T {
-        &self.0[4]
-    }
-
-    pub fn rs2_or_zero(&self) -> &T {
-        &self.0[5]
     }
 
     /// Iterate through the fields, except immediate because it is complicated.
@@ -57,33 +52,32 @@ impl<T> InsnRecord<T> {
         &self.0[0..6]
     }
 
-    /// The complete immediate value, for instruction types I/S/B/U/J.
-    /// Otherwise, the field funct7 of R-Type instructions.
-    pub fn imm_or_funct7(&self) -> &T {
+    /// The internal view of the immediate. See `DecodedInstruction::imm_internal`.
+    fn imm_internal(&self) -> &T {
         &self.0[6]
     }
 }
 
 impl InsnRecord<u32> {
     fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
-        InsnRecord::new(
+        InsnRecord([
             pc,
             insn.opcode(),
-            insn.rd_or_zero(),
+            insn.rd_internal(),
             insn.funct3_or_zero(),
             insn.rs1_or_zero(),
             insn.rs2_or_zero(),
-            insn.imm_or_funct7(),
-        )
+            insn.imm_internal(),
+        ])
     }
 
     /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
     /// Convert negative values from two's complement to field.
-    pub fn imm_or_funct7_field<F: SmallField>(insn: &DecodedInstruction) -> F {
-        if insn.imm_is_negative() {
-            -F::from(-(insn.imm_or_funct7() as i32) as u64)
+    pub fn imm_internal_field<F: SmallField>(insn: &DecodedInstruction) -> F {
+        if insn.imm_field_is_negative() {
+            -F::from(-(insn.imm_internal() as i32) as u64)
         } else {
-            F::from(insn.imm_or_funct7() as u64)
+            F::from(insn.imm_internal() as u64)
         }
     }
 }
@@ -97,12 +91,14 @@ pub struct ProgramTableConfig {
     mlt: WitIn,
 }
 
-pub struct ProgramTableCircuit<E>(PhantomData<E>);
+pub struct ProgramTableCircuit<E, const PROGRAM_SIZE: usize>(PhantomData<E>);
 
-impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
+impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
+    for ProgramTableCircuit<E, PROGRAM_SIZE>
+{
     type TableConfig = ProgramTableConfig;
-    type FixedInput = [u32];
-    type WitnessInput = usize;
+    type FixedInput = Program;
+    type WitnessInput = Program;
 
     fn name() -> String {
         "PROGRAM".into()
@@ -116,10 +112,10 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             cb.create_fixed(|| "funct3")?,
             cb.create_fixed(|| "rs1")?,
             cb.create_fixed(|| "rs2")?,
-            cb.create_fixed(|| "imm_or_funct7")?,
+            cb.create_fixed(|| "imm_internal")?,
         ]);
 
-        let mlt = cb.create_witin(|| "mlt")?;
+        let mlt = cb.create_witin(|| "mlt");
 
         let record_exprs = {
             let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
@@ -127,7 +123,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             cb.rlc_chip_record(fields)
         };
 
-        cb.lk_table_record(|| "prog table", record_exprs, mlt.expr())?;
+        cb.lk_table_record(|| "prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
 
         Ok(ProgramTableConfig { record, mlt })
     }
@@ -135,11 +131,10 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     fn generate_fixed_traces(
         config: &ProgramTableConfig,
         num_fixed: usize,
-        program: &[Word],
+        program: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
-        // TODO: get bytecode of the program.
-        let num_instructions = program.len();
-        let pc_start = CENO_PLATFORM.pc_start();
+        let num_instructions = program.instructions.len();
+        let pc_base = program.base_address;
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 
@@ -148,8 +143,8 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
-                let pc = pc_start + (i * PC_STEP_SIZE) as u32;
-                let insn = DecodedInstruction::new(program[i]);
+                let pc = pc_base + (i * PC_STEP_SIZE) as u32;
+                let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
 
                 // Copy all the fields except immediate.
@@ -164,11 +159,12 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
                 set_fixed_val!(
                     row,
-                    config.record.imm_or_funct7(),
-                    InsnRecord::imm_or_funct7_field(&insn)
+                    config.record.imm_internal(),
+                    InsnRecord::imm_internal_field(&insn)
                 );
             });
 
+        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
 
@@ -176,13 +172,13 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         config: &Self::TableConfig,
         num_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
-        num_instructions: &usize,
+        program: &Program,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
-        let mut prog_mlt = vec![0_usize; *num_instructions];
+        let mut prog_mlt = vec![0_usize; program.instructions.len()];
         for (pc, mlt) in multiplicity {
-            let i = (*pc as usize - CENO_PLATFORM.pc_start() as usize) / WORD_SIZE;
+            let i = (*pc as usize - program.base_address as usize) / WORD_SIZE;
             prog_mlt[i] = *mlt;
         }
 

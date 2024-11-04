@@ -30,3 +30,21 @@ pub fn create_uninit_vec<T: Sized>(len: usize) -> Vec<MaybeUninit<T>> {
 pub fn largest_even_below(n: usize) -> usize {
     if n % 2 == 0 { n } else { n.saturating_sub(1) }
 }
+
+fn prev_power_of_two(n: usize) -> usize {
+    (n + 1).next_power_of_two() / 2
+}
+
+/// Largest power of two that fits the available rayon threads
+pub fn max_usable_threads() -> usize {
+    if cfg!(test) {
+        1
+    } else {
+        let n = rayon::current_num_threads();
+        let threads = prev_power_of_two(n);
+        if n != threads {
+            tracing::warn!("thread size {n} is not power of 2, using {threads} threads instead.");
+        }
+        threads
+    }
+}

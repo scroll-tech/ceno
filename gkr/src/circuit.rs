@@ -22,7 +22,7 @@ where
 {
     fn eval(&self, out_eq_vec: &[E], challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>) -> E {
         self.iter().fold(E::ZERO, |acc, gate| {
-            acc + out_eq_vec[gate.idx_out] * (&gate.scalar.eval(challenges))
+            acc + out_eq_vec[gate.idx_out] * gate.scalar.eval(challenges)
         })
     }
     fn eval_subset_eq(&self, out_eq_vec: &[E], in_eq_vec: &[E]) -> E {
@@ -42,14 +42,6 @@ where
         in_eq_vec: &[E],
         challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
     ) -> E;
-    // TODO(Matthias, by 2024-11-01): review whether we need this function after all.
-    #[allow(dead_code)]
-    fn fix_out_variables(
-        &self,
-        in_size: usize,
-        out_eq_vec: &[E],
-        challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
-    ) -> Vec<E>;
 }
 
 impl<E> EvaluateGate1In<E> for &[Gate1In<ConstantType<E>>]
@@ -65,20 +57,8 @@ where
         self.iter().fold(E::ZERO, |acc, gate| {
             acc + out_eq_vec[gate.idx_out]
                 * in_eq_vec[gate.idx_in[0]]
-                * (&gate.scalar.eval(challenges))
+                * gate.scalar.eval(challenges)
         })
-    }
-    fn fix_out_variables(
-        &self,
-        in_size: usize,
-        out_eq_vec: &[E],
-        challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>,
-    ) -> Vec<E> {
-        let mut ans = vec![E::ZERO; in_size];
-        for gate in self.iter() {
-            ans[gate.idx_in[0]] += out_eq_vec[gate.idx_out] * (&gate.scalar.eval(challenges));
-        }
-        ans
     }
 }
 
@@ -110,7 +90,7 @@ where
             acc + out_eq_vec[gate.idx_out]
                 * in1_eq_vec[gate.idx_in[0]]
                 * in2_eq_vec[gate.idx_in[1]]
-                * (&gate.scalar.eval(&challenges))
+                * gate.scalar.eval(challenges)
         })
     }
 }
@@ -146,7 +126,7 @@ where
                 * in1_eq_vec[gate.idx_in[0]]
                 * in2_eq_vec[gate.idx_in[1]]
                 * in3_eq_vec[gate.idx_in[2]]
-                * (&gate.scalar.eval(challenges))
+                * gate.scalar.eval(challenges)
         })
     }
 }
@@ -159,8 +139,8 @@ impl<E: ExtensionField> EvaluateConstant<E> for ConstantType<E> {
     #[inline(always)]
     fn eval(&self, challenges: &HashMap<ChallengeConst, Vec<E::BaseField>>) -> E::BaseField {
         match self {
-            ConstantType::Challenge(c, j) => challenges[&c][*j],
-            ConstantType::ChallengeScaled(c, j, scalar) => *scalar * challenges[&c][*j],
+            ConstantType::Challenge(c, j) => challenges[c][*j],
+            ConstantType::ChallengeScaled(c, j, scalar) => *scalar * challenges[c][*j],
             ConstantType::Field(c) => *c,
         }
     }

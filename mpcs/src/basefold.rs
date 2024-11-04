@@ -1,4 +1,5 @@
 use crate::{
+    Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
     sum_check::{
         classic::{ClassicSumCheck, Coefficients, CoefficientsProver, SumcheckProof},
         eq_xy_eval,
@@ -6,12 +7,11 @@ use crate::{
     util::{
         arithmetic::{inner_product_three, interpolate_field_type_over_boolean_hypercube},
         ext_to_usize,
-        hash::{write_digest_to_transcript, Digest},
+        hash::{Digest, write_digest_to_transcript},
         log2_strict,
         merkle_tree::MerkleTree,
         plonky2_util::reverse_index_bits_in_place_field_type,
     },
-    Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
 };
 use ark_std::{end_timer, start_timer};
 use basic::BasicBasefoldStrategy;
@@ -24,12 +24,12 @@ pub use encoding::{
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use query_phase::{prover_query_phase, verifier_query_phase, QueryCheckStrategy};
+use query_phase::{QueryCheckStrategy, prover_query_phase, verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::BasefoldSpec;
 use transcript::Transcript;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
 
@@ -49,7 +49,7 @@ pub use structure::{
     BasefoldVerifierParams,
 };
 mod commit_phase;
-use commit_phase::{commit_phase, CommitPhaseStrategy};
+use commit_phase::{CommitPhaseStrategy, commit_phase};
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
@@ -775,7 +775,7 @@ mod test {
     };
     use goldilocks::GoldilocksExt2;
 
-    use super::{structure::BasefoldBasecodeParams, BasefoldRSParams};
+    use super::{BasefoldRSParams, structure::BasefoldBasecodeParams};
 
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
     type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;

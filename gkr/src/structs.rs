@@ -90,6 +90,7 @@ pub struct IOPVerifierState<E: ExtensionField> {
     pub(crate) eq_x2_rx2: Vec<E>,
 }
 
+#[allow(clippy::too_long_first_doc_paragraph)]
 /// Phase 1 is a sumcheck protocol merging the subset evaluations from the
 /// layers closer to the circuit output to an evaluation to the output of the
 /// current layer.

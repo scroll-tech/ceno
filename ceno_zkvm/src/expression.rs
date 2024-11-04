@@ -5,7 +5,7 @@ use std::{
     fmt::Display,
     iter::Sum,
     mem::MaybeUninit,
-    ops::{Add, Deref, Mul, Neg, Sub},
+    ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
 use ff::Field;
@@ -18,7 +18,7 @@ use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    structs::{ChallengeId, WitnessId},
+    structs::{ChallengeId, RAMType, WitnessId},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,9 +315,54 @@ impl<E: ExtensionField> Add for Expression<E> {
     }
 }
 
+macro_rules! binop_assign_instances {
+    ($op_assign: ident, $fun_assign: ident, $op: ident, $fun: ident) => {
+        impl<E: ExtensionField, Rhs> $op_assign<Rhs> for Expression<E>
+        where
+            Expression<E>: $op<Rhs, Output = Expression<E>>,
+        {
+            fn $fun_assign(&mut self, rhs: Rhs) {
+                // TODO: consider in-place?
+                *self = self.clone().$fun(rhs);
+            }
+        }
+    };
+}
+
+binop_assign_instances!(AddAssign, add_assign, Add, add);
+binop_assign_instances!(SubAssign, sub_assign, Sub, sub);
+binop_assign_instances!(MulAssign, mul_assign, Mul, mul);
+
+impl<E: ExtensionField> Shl<usize> for Expression<E> {
+    type Output = Expression<E>;
+    fn shl(self, rhs: usize) -> Expression<E> {
+        self * (1_usize << rhs)
+    }
+}
+
+impl<E: ExtensionField> Shl<usize> for &Expression<E> {
+    type Output = Expression<E>;
+    fn shl(self, rhs: usize) -> Expression<E> {
+        self.clone() << rhs
+    }
+}
+
+impl<E: ExtensionField> Shl<usize> for &mut Expression<E> {
+    type Output = Expression<E>;
+    fn shl(self, rhs: usize) -> Expression<E> {
+        self.clone() << rhs
+    }
+}
+
+impl<E: ExtensionField> ShlAssign<usize> for Expression<E> {
+    fn shl_assign(&mut self, rhs: usize) {
+        *self = self.clone() << rhs;
+    }
+}
+
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
-        iter.fold(Expression::Constant(E::BaseField::ZERO), |acc, x| acc + x)
+        iter.fold(Expression::ZERO, |acc, x| acc + x)
     }
 }
 
@@ -441,6 +486,116 @@ impl<E: ExtensionField> Sub for Expression<E> {
         }
     }
 }
+
+/// Instances for binary operations that mix Expression and &Expression
+macro_rules! ref_binop_instances {
+    ($op: ident, $fun: ident) => {
+        impl<E: ExtensionField> $op<&Expression<E>> for Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
+                self.$fun(rhs.clone())
+            }
+        }
+
+        impl<E: ExtensionField> $op<Expression<E>> for &Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<&Expression<E>> for &Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs.clone())
+            }
+        }
+
+        // for mutable references
+        impl<E: ExtensionField> $op<&mut Expression<E>> for Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &mut Expression<E>) -> Expression<E> {
+                self.$fun(rhs.clone())
+            }
+        }
+
+        impl<E: ExtensionField> $op<Expression<E>> for &mut Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<&mut Expression<E>> for &mut Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &mut Expression<E>) -> Expression<E> {
+                self.clone().$fun(rhs.clone())
+            }
+        }
+    };
+}
+ref_binop_instances!(Add, add);
+ref_binop_instances!(Sub, sub);
+ref_binop_instances!(Mul, mul);
+
+macro_rules! mixed_binop_instances {
+    ($op: ident, $fun: ident, ($($t:ty),*)) => {
+        $(impl<E: ExtensionField> $op<Expression<E>> for $t {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: Expression<E>) -> Expression<E> {
+                Expression::<E>::from(self).$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<$t> for Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: $t) -> Expression<E> {
+                self.$fun(Expression::<E>::from(rhs))
+            }
+        }
+
+        impl<E: ExtensionField> $op<&Expression<E>> for $t {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: &Expression<E>) -> Expression<E> {
+                Expression::<E>::from(self).$fun(rhs)
+            }
+        }
+
+        impl<E: ExtensionField> $op<$t> for &Expression<E> {
+            type Output = Expression<E>;
+
+            fn $fun(self, rhs: $t) -> Expression<E> {
+                self.$fun(Expression::<E>::from(rhs))
+            }
+        }
+    )*
+    };
+}
+
+mixed_binop_instances!(
+    Add,
+    add,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
+mixed_binop_instances!(
+    Sub,
+    sub,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
+mixed_binop_instances!(
+    Mul,
+    mul,
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+);
 
 impl<E: ExtensionField> Mul for Expression<E> {
     type Output = Expression<E>;
@@ -585,7 +740,7 @@ impl WitIn {
             || "from_expr",
             |cb| {
                 let name = name().into();
-                let wit = cb.create_witin(|| name.clone())?;
+                let wit = cb.create_witin(|| name.clone());
                 if !debug {
                     cb.require_zero(|| name.clone(), wit.expr() - input)?;
                 }
@@ -601,22 +756,6 @@ impl WitIn {
     ) {
         instance[self.id as usize] = MaybeUninit::new(value);
     }
-}
-
-#[macro_export]
-/// this is to avoid non-monomial expression
-macro_rules! create_witin_from_expr {
-    // Handle the case for a single expression
-    ($name:expr, $builder:expr, $debug:expr, $e:expr) => {
-        WitIn::from_expr($name, $builder, $e, $debug)
-    };
-    // Recursively handle multiple expressions and create a flat tuple with error handling
-    ($name:expr, $builder:expr, $debug:expr, $e:expr, $($rest:expr),+) => {
-        {
-            // Return a Result tuple, handling errors
-            Ok::<_, ZKVMError>((WitIn::from_expr($name, $builder, $e, $debug)?, $(WitIn::from_expr($name, $builder, $rest)?),*))
-        }
-    };
 }
 
 pub trait ToExpr<E: ExtensionField> {
@@ -638,6 +777,20 @@ impl<E: ExtensionField> ToExpr<E> for &WitIn {
     }
 }
 
+impl<E: ExtensionField> ToExpr<E> for Fixed {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::Fixed(*self)
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &Fixed {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::Fixed(**self)
+    }
+}
+
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
@@ -652,6 +805,20 @@ impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     }
 }
 
+macro_rules! impl_from_via_ToExpr {
+    ($($t:ty),*) => {
+        $(
+            impl<E: ExtensionField> From<$t> for Expression<E> {
+                fn from(value: $t) -> Self {
+                    value.expr()
+                }
+            }
+        )*
+    };
+}
+impl_from_via_ToExpr!(WitIn, Fixed, Instance);
+impl_from_via_ToExpr!(&WitIn, &Fixed, &Instance);
+
 // Implement From trait for unsigned types of at most 64 bits
 macro_rules! impl_from_unsigned {
     ($($t:ty),*) => {
@@ -664,7 +831,7 @@ macro_rules! impl_from_unsigned {
         )*
     };
 }
-impl_from_unsigned!(u8, u16, u32, u64, usize);
+impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType);
 
 // Implement From trait for u128 separately since it requires explicit reduction
 impl<F: SmallField, E: ExtensionField<BaseField = F>> From<u128> for Expression<E> {
@@ -703,11 +870,13 @@ pub mod fmt {
     pub fn expr<E: ExtensionField>(
         expression: &Expression<E>,
         wtns: &mut Vec<WitnessId>,
-        add_prn_sum: bool,
+        add_parens_sum: bool,
     ) -> String {
         match expression {
             Expression::WitIn(wit_in) => {
-                wtns.push(*wit_in);
+                if !wtns.contains(wit_in) {
+                    wtns.push(*wit_in);
+                }
                 format!("WitIn({})", wit_in)
             }
             Expression::Challenge(id, pow, scaler, offset) => {
@@ -728,12 +897,18 @@ pub mod fmt {
                     s
                 }
             }
-            Expression::Constant(constant) => base_field::<E>(constant, true).to_string(),
+            Expression::Constant(constant) => {
+                base_field::<E::BaseField>(constant, true).to_string()
+            }
             Expression::Fixed(fixed) => format!("{:?}", fixed),
             Expression::Instance(i) => format!("{:?}", i),
             Expression::Sum(left, right) => {
                 let s = format!("{} + {}", expr(left, wtns, false), expr(right, wtns, false));
-                if add_prn_sum { format!("({})", s) } else { s }
+                if add_parens_sum {
+                    format!("({})", s)
+                } else {
+                    s
+                }
             }
             Expression::Product(left, right) => {
                 format!("{} * {}", expr(left, wtns, true), expr(right, wtns, true))
@@ -745,7 +920,11 @@ pub mod fmt {
                     expr(x, wtns, true),
                     expr(b, wtns, false)
                 );
-                if add_prn_sum { format!("({})", s) } else { s }
+                if add_parens_sum {
+                    format!("({})", s)
+                } else {
+                    s
+                }
             }
         }
     }
@@ -757,7 +936,7 @@ pub mod fmt {
         let data = field
             .as_bases()
             .iter()
-            .map(|b| base_field::<E>(b, false))
+            .map(|b| base_field::<E::BaseField>(b, false))
             .collect::<Vec<String>>();
         let only_one_limb = field.as_bases()[1..].iter().all(|&x| x == 0.into());
 
@@ -768,29 +947,26 @@ pub mod fmt {
         }
     }
 
-    pub fn base_field<E: ExtensionField>(base_field: &E::BaseField, add_prn: bool) -> String {
+    pub fn base_field<F: SmallField>(base_field: &F, add_parens: bool) -> String {
         let value = base_field.to_canonical_u64();
 
-        if value > E::BaseField::MODULUS_U64 - u16::MAX as u64 {
+        if value > F::MODULUS_U64 - u16::MAX as u64 {
             // beautiful format for negative number > -65536
-            prn(format!("-{}", E::BaseField::MODULUS_U64 - value), add_prn)
+            parens(format!("-{}", F::MODULUS_U64 - value), add_parens)
         } else if value < u16::MAX as u64 {
             format!("{value}")
         } else {
             // hex
-            if value > E::BaseField::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
-                prn(
-                    format!("-{:#x}", E::BaseField::MODULUS_U64 - value),
-                    add_prn,
-                )
+            if value > F::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
+                parens(format!("-{:#x}", F::MODULUS_U64 - value), add_parens)
             } else {
                 format!("{value:#x}")
             }
         }
     }
 
-    pub fn prn(s: String, add_prn: bool) -> String {
-        if add_prn { format!("({})", s) } else { s }
+    pub fn parens(s: String, add_parens: bool) -> String {
+        if add_parens { format!("({})", s) } else { s }
     }
 
     #[cfg(test)]
@@ -801,18 +977,17 @@ pub mod fmt {
         wits_in_name: &[String],
     ) -> String {
         use itertools::Itertools;
+        use multilinear_extensions::mle::FieldType;
 
         wtns.iter()
             .sorted()
             .map(|wt_id| {
                 let wit = &wits_in[*wt_id as usize];
                 let name = &wits_in_name[*wt_id as usize];
-                let value_fmt = if let Some(e) = wit.get_ext_field_vec_optn() {
-                    field(&e[inst_id])
-                } else if let Some(bf) = wit.get_base_field_vec_optn() {
-                    base_field::<E>(&bf[inst_id], true)
-                } else {
-                    "Unknown".to_string()
+                let value_fmt = match wit.evaluations() {
+                    FieldType::Base(vec) => base_field::<E::BaseField>(&vec[inst_id], true),
+                    FieldType::Ext(vec) => field(&vec[inst_id]),
+                    FieldType::Unreachable => unreachable!(),
                 };
                 format!("  WitIn({wt_id})={value_fmt} {name:?}")
             })
@@ -826,7 +1001,7 @@ mod tests {
 
     use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
 
-    use super::{fmt, Expression, ToExpr};
+    use super::{Expression, ToExpr, fmt};
     use ff::Field;
 
     #[test]
@@ -834,12 +1009,11 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
+        let x = cb.create_witin(|| "x");
 
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> =
-            Into::<Expression<E>>::into(3usize) * x.expr() + Into::<Expression<E>>::into(2usize);
+        let expr: Expression<E> = 3 * x.expr() + 2;
         // c^3 + 1
         let c = Expression::Challenge(0, 3, 1.into(), 1.into());
         // res
@@ -855,7 +1029,7 @@ mod tests {
 
         // constant * witin
         // 3 * x
-        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr();
+        let expr: Expression<E> = 3 * x.expr();
         assert_eq!(
             expr,
             Expression::ScaledSum(
@@ -900,40 +1074,35 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
-        let y = cb.create_witin(|| "y").unwrap();
-        let z = cb.create_witin(|| "z").unwrap();
+        let x = cb.create_witin(|| "x");
+        let y = cb.create_witin(|| "y");
+        let z = cb.create_witin(|| "z");
         // scaledsum * challenge
         // 3 * x + 2
-        let expr: Expression<E> =
-            Into::<Expression<E>>::into(3usize) * x.expr() + Into::<Expression<E>>::into(2usize);
+        let expr: Expression<E> = 3 * x.expr() + 2;
         assert!(expr.is_monomial_form());
 
         // 2 product term
-        let expr: Expression<E> = Into::<Expression<E>>::into(3usize) * x.expr() * y.expr()
-            + Into::<Expression<E>>::into(2usize) * x.expr();
+        let expr: Expression<E> = 3 * x.expr() * y.expr() + 2 * x.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
-                - Into::<Expression<E>>::into(6usize) * z.expr();
+            Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into()) * x.expr() * y.expr()
+                - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2.into(), 3.into()) * x.expr() * y.expr()
-                - Into::<Expression<E>>::into(6usize) * z.expr();
+            Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into()) * x.expr() * y.expr()
+                - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2 * x + 3) * 3 + 6 * 8
-        let expr: Expression<E> = (Into::<Expression<E>>::into(2usize) * x.expr()
-            + Into::<Expression<E>>::into(3usize))
-            * Into::<Expression<E>>::into(3usize)
-            + Into::<Expression<E>>::into(6usize) * Into::<Expression<E>>::into(8usize);
+        let expr: Expression<E> = (2 * x.expr() + 3) * 3 + 6 * 8;
         assert!(expr.is_monomial_form());
     }
 
@@ -942,12 +1111,11 @@ mod tests {
         type E = GoldilocksExt2;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x").unwrap();
-        let y = cb.create_witin(|| "y").unwrap();
+        let x = cb.create_witin(|| "x");
+        let y = cb.create_witin(|| "y");
         // scaledsum * challenge
         // (x + 1) * (y + 1)
-        let expr: Expression<E> = (Into::<Expression<E>>::into(1usize) + x.expr())
-            * (Into::<Expression<E>>::into(2usize) + y.expr());
+        let expr: Expression<E> = (1 + x.expr()) * (2 + y.expr());
         assert!(!expr.is_monomial_form());
     }
 

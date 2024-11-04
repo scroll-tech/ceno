@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
+    CENO_PLATFORM, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::DecodedInstruction,
-    CENO_PLATFORM, PC_STEP_SIZE,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -56,7 +56,7 @@ impl StepRecord {
     pub fn new_r_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Word,
         rs2_read: Word,
         rd: Change<Word>,
@@ -70,6 +70,7 @@ impl StepRecord {
             Some(rs1_read),
             Some(rs2_read),
             Some(rd),
+            None,
             prev_cycle,
         )
     }
@@ -77,7 +78,7 @@ impl StepRecord {
     pub fn new_b_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Word,
         rs2_read: Word,
         prev_cycle: Cycle,
@@ -89,16 +90,38 @@ impl StepRecord {
             Some(rs1_read),
             Some(rs2_read),
             None,
+            None,
             prev_cycle,
         )
     }
 
     pub fn new_i_instruction(
         cycle: Cycle,
-        pc: ByteAddr,
-        insn_code: Word,
+        pc: Change<ByteAddr>,
+        insn_code: u32,
         rs1_read: Word,
         rd: Change<Word>,
+        prev_cycle: Cycle,
+    ) -> StepRecord {
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            Some(rs1_read),
+            None,
+            Some(rd),
+            None,
+            prev_cycle,
+        )
+    }
+
+    pub fn new_im_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_code: u32,
+        rs1_read: Word,
+        rd: Change<Word>,
+        mem_op: ReadOp,
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
@@ -109,6 +132,14 @@ impl StepRecord {
             Some(rs1_read),
             None,
             Some(rd),
+            Some(WriteOp {
+                addr: mem_op.addr,
+                value: Change {
+                    before: mem_op.value,
+                    after: mem_op.value,
+                },
+                previous_cycle: mem_op.previous_cycle,
+            }),
             prev_cycle,
         )
     }
@@ -116,31 +147,55 @@ impl StepRecord {
     pub fn new_u_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: Word,
+        insn_code: u32,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
     }
 
     pub fn new_j_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: Word,
+        insn_code: u32,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), prev_cycle)
+        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
     }
 
+    pub fn new_s_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        insn_code: u32,
+        rs1_read: Word,
+        rs2_read: Word,
+        memory_op: WriteOp,
+        prev_cycle: Cycle,
+    ) -> StepRecord {
+        let pc = Change::new(pc, pc + PC_STEP_SIZE);
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            Some(rs1_read),
+            Some(rs2_read),
+            None,
+            Some(memory_op),
+            prev_cycle,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn new_insn(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: Word,
+        insn_code: u32,
         rs1_read: Option<Word>,
         rs2_read: Option<Word>,
         rd: Option<Change<Word>>,
+        memory_op: Option<WriteOp>,
         previous_cycle: Cycle,
     ) -> StepRecord {
         let insn = DecodedInstruction::new(insn_code);
@@ -159,11 +214,13 @@ impl StepRecord {
                 previous_cycle,
             }),
             rd: rd.map(|rd| WriteOp {
-                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
+                addr: CENO_PLATFORM
+                    .register_vma(insn.rd_internal() as RegIdx)
+                    .into(),
                 value: rd,
                 previous_cycle,
             }),
-            memory_op: None,
+            memory_op,
         }
     }
 
@@ -239,23 +296,14 @@ impl Tracer {
     /// Return the completed step and advance to the next cycle.
     pub fn advance(&mut self) -> StepRecord {
         let next_cycle = self.record.cycle + Self::SUBCYCLES_PER_INSN;
-        mem::replace(
-            &mut self.record,
-            StepRecord {
-                cycle: next_cycle,
-                ..StepRecord::default()
-            },
-        )
+        mem::replace(&mut self.record, StepRecord {
+            cycle: next_cycle,
+            ..StepRecord::default()
+        })
     }
 
     pub fn store_pc(&mut self, pc: ByteAddr) {
         self.record.pc.after = pc;
-    }
-
-    pub fn halt(&mut self, pc: ByteAddr) {
-        let pc_addr = CENO_PLATFORM.pc_vma().into();
-        self.record.pc.after = pc;
-        self.track_access(pc_addr, Self::SUBCYCLES_PER_INSN);
     }
 
     pub fn fetch(&mut self, pc: WordAddr, value: Word) {
@@ -327,6 +375,11 @@ impl Tracer {
     /// Return all the addresses that were accessed and the cycle when they were last accessed.
     pub fn final_accesses(&self) -> &HashMap<WordAddr, Cycle> {
         &self.latest_accesses
+    }
+
+    /// Return the cycle of the pending instruction (after the last completed step).
+    pub fn cycle(&self) -> Cycle {
+        self.record.cycle
     }
 }
 

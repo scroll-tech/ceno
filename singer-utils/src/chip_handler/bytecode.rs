@@ -1,10 +1,9 @@
 use crate::{
-    chip_handler::{util::cell_to_mixed, ChipHandler},
+    chip_handler::{ChipHandler, util::cell_to_mixed},
     constants::OpcodeType,
     structs::ROMType,
 };
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use simple_frontend::structs::{CellId, CircuitBuilder, MixedCell};
 
 pub struct BytecodeChip {}
@@ -24,11 +23,11 @@ impl BytecodeChip {
         ]
         .concat();
 
-        chip_handler.rom_handler.read_mixed(
-            circuit_builder,
-            &key,
-            &[MixedCell::Constant(Ext::BaseField::from(opcode as u64))],
-        );
+        chip_handler
+            .rom_handler
+            .read_mixed(circuit_builder, &key, &[MixedCell::Constant(
+                Ext::BaseField::from(opcode as u64),
+            )]);
     }
 
     pub fn bytecode_with_pc_byte<Ext: ExtensionField>(

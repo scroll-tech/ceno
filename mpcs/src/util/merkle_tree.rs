@@ -10,9 +10,9 @@ use rayon::{
 };
 
 use crate::util::{
-    field_type_index_base, field_type_index_ext,
-    hash::{hash_field_type_subvector, hash_two_digests, Digest},
-    log2_strict, Deserialize, DeserializeOwned, Serialize,
+    Deserialize, DeserializeOwned, Serialize, field_type_index_base, field_type_index_ext,
+    hash::{Digest, hash_field_type_subvector, hash_two_digests},
+    log2_strict,
 };
 use transcript::Transcript;
 
@@ -628,15 +628,12 @@ mod tests {
             Goldilocks::from(3),
             Goldilocks::from(4),
         ]));
-        assert_eq!(
-            group.as_ext(),
-            vec![
-                GoldilocksExt2::from(1),
-                GoldilocksExt2::from(2),
-                GoldilocksExt2::from(3),
-                GoldilocksExt2::from(4),
-            ]
-        );
+        assert_eq!(group.as_ext(), vec![
+            GoldilocksExt2::from(1),
+            GoldilocksExt2::from(2),
+            GoldilocksExt2::from(3),
+            GoldilocksExt2::from(4),
+        ]);
     }
 
     #[test]
@@ -655,10 +652,9 @@ mod tests {
         assert_eq!(merkle_tree.leaf_group_num(), 4);
         assert_eq!(merkle_tree.leaf_group_size(), 2);
         for i in 0..leaves.len() {
-            assert_eq!(
-                merkle_tree.get_leaf_as_base(i),
-                vec![field_type_index_base(&leaves, i)]
-            );
+            assert_eq!(merkle_tree.get_leaf_as_base(i), vec![
+                field_type_index_base(&leaves, i)
+            ]);
         }
         for i in 0..(leaves.len() >> 1) {
             let path = merkle_tree.merkle_path_without_leaf_sibling_or_root(i << 1);
@@ -706,13 +702,10 @@ mod tests {
         assert_eq!(merkle_tree.leaf_group_num(), 4);
         assert_eq!(merkle_tree.leaf_group_size(), 2);
         for i in 0..leaves.len() {
-            assert_eq!(
-                merkle_tree.get_leaf_as_base(i),
-                vec![
-                    field_type_index_base(&leaves[0], i),
-                    field_type_index_base(&leaves[1], i)
-                ]
-            );
+            assert_eq!(merkle_tree.get_leaf_as_base(i), vec![
+                field_type_index_base(&leaves[0], i),
+                field_type_index_base(&leaves[1], i)
+            ]);
         }
         for i in 0..(leaves.len() >> 1) {
             let path = merkle_tree.merkle_path_without_leaf_sibling_or_root(i << 1);

@@ -5,15 +5,15 @@ use paste::paste;
 use simple_frontend::structs::{CircuitBuilder, MixedCell};
 use singer_utils::{
     chip_handler::{
-        bytecode::BytecodeChip, global_state::GlobalStateChip, ram_handler::RAMHandler,
-        range::RangeChip, rom_handler::ROMHandler, stack::StackChip, ChipHandler,
+        ChipHandler, bytecode::BytecodeChip, global_state::GlobalStateChip, range::RangeChip,
+        stack::StackChip,
     },
     constants::OpcodeType,
     register_witness,
     structs::{PCUInt, StackUInt, TSUInt},
     uint::constants::AddSubConstants,
 };
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::error::ZKVMError;
 
@@ -52,10 +52,10 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
     const OPCODE: OpcodeType = OpcodeType::ADD;
     const NAME: &'static str = "ADD";
     fn construct_circuit(challenges: ChipChallenges) -> Result<InstCircuit<E>, ZKVMError> {
-        let mut circuit_builder = CircuitBuilder::new();
+        let mut circuit_builder = CircuitBuilder::default();
         let (phase0_wire_id, phase0) = circuit_builder.create_witness_in(Self::phase0_size());
 
-        let mut chip_handler = ChipHandler::new(challenges.clone());
+        let mut chip_handler = ChipHandler::new(challenges);
 
         // State update
         let pc = PCUInt::try_from(&phase0[Self::phase0_pc()])?;
@@ -70,7 +70,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &mut circuit_builder,
             pc.values(),
             stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top,
             clk,
         );
@@ -90,7 +90,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &mut circuit_builder,
             next_pc.values(),
             next_stack_ts.values(),
-            &memory_ts,
+            memory_ts,
             stack_top_expr.sub(E::BaseField::from(1)),
             clk_expr.add(E::BaseField::ONE),
         );
@@ -147,7 +147,7 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
             &mut chip_handler,
             &mut circuit_builder,
             stack_top_expr.sub(E::BaseField::from(2)),
-            &old_stack_ts1.values(),
+            old_stack_ts1.values(),
             addend_1.values(),
         );
 
@@ -186,26 +186,33 @@ impl<E: ExtensionField> Instruction<E> for AddInstruction {
 
 #[cfg(test)]
 mod test {
+    #[cfg(not(debug_assertions))]
+    use crate::{
+        CircuitWiresIn, SingerGraphBuilder, SingerParams, instructions::InstructionGraph,
+        instructions::SingerCircuitBuilder, scheme::GKRGraphProverState,
+    };
+    #[cfg(not(debug_assertions))]
     use ark_std::test_rng;
+    #[cfg(not(debug_assertions))]
     use ff::Field;
+    #[cfg(not(debug_assertions))]
     use ff_ext::ExtensionField;
+    #[cfg(not(debug_assertions))]
+    use transcript::Transcript;
+
     use goldilocks::{Goldilocks, GoldilocksExt2};
-    use itertools::Itertools;
     use singer_utils::{
         constants::RANGE_CHIP_BIT_WIDTH,
         structs::{StackUInt, TSUInt},
     };
-    use std::{collections::BTreeMap, time::Instant};
-    use transcript::Transcript;
+    use std::collections::BTreeMap;
+    #[cfg(not(debug_assertions))]
+    use std::time::Instant;
 
     use crate::{
-        instructions::{
-            AddInstruction, ChipChallenges, Instruction, InstructionGraph, SingerCircuitBuilder,
-        },
-        scheme::GKRGraphProverState,
+        instructions::{AddInstruction, ChipChallenges, Instruction},
         test::{get_uint_params, test_opcode_circuit_v2},
         utils::u64vec,
-        CircuitWiresIn, SingerGraphBuilder, SingerParams,
     };
 
     #[test]
@@ -228,83 +235,65 @@ mod test {
         println!("{:?}", inst_circuit);
 
         let mut phase0_values_map = BTreeMap::<&'static str, Vec<Goldilocks>>::new();
-        phase0_values_map.insert(
-            AddInstruction::phase0_pc_str(),
-            vec![Goldilocks::from(1u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_stack_ts_str(),
-            vec![Goldilocks::from(3u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_memory_ts_str(),
-            vec![Goldilocks::from(1u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_stack_top_str(),
-            vec![Goldilocks::from(100u64)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_clk_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_pc_str(), vec![Goldilocks::from(
+            1u64,
+        )]);
+        phase0_values_map.insert(AddInstruction::phase0_stack_ts_str(), vec![
+            Goldilocks::from(3u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_memory_ts_str(), vec![
+            Goldilocks::from(1u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_stack_top_str(), vec![
+            Goldilocks::from(100u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_clk_str(), vec![Goldilocks::from(
+            1u64,
+        )]);
         phase0_values_map.insert(
             AddInstruction::phase0_pc_add_str(),
             vec![], // carry is 0, may test carry using larger values in PCUInt
         );
-        phase0_values_map.insert(
-            AddInstruction::phase0_stack_ts_add_str(),
-            vec![
-                Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(48/16) = 3 cells are
-                                         * range values, stack_ts + 1 = 4 */
-                Goldilocks::from(0u64),
-                Goldilocks::from(0u64),
-                // no place for carry
-            ],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts0_str(),
-            vec![Goldilocks::from(2u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_stack_ts_add_str(), vec![
+            Goldilocks::from(4u64), /* first TSUInt::N_RANGE_CELLS = 1*(48/16) = 3 cells are
+                                     * range values, stack_ts + 1 = 4 */
+            Goldilocks::from(0u64),
+            Goldilocks::from(0u64),
+            // no place for carry
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts0_str(), vec![
+            Goldilocks::from(2u64),
+        ]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 1;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts_lt0_str(),
-            vec![
-                Goldilocks::from(range_values[0]),
-                Goldilocks::from(range_values[1]),
-                Goldilocks::from(range_values[2]),
-                Goldilocks::from(1u64),
-            ],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts1_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts_lt0_str(), vec![
+            Goldilocks::from(range_values[0]),
+            Goldilocks::from(range_values[1]),
+            Goldilocks::from(range_values[2]),
+            Goldilocks::from(1u64),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts1_str(), vec![
+            Goldilocks::from(1u64),
+        ]);
         let m: u64 = (1 << get_uint_params::<TSUInt>().1) - 2;
         let range_values = u64vec::<{ TSUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m);
-        phase0_values_map.insert(
-            AddInstruction::phase0_old_stack_ts_lt1_str(),
-            vec![
-                Goldilocks::from(range_values[0]),
-                Goldilocks::from(range_values[1]),
-                Goldilocks::from(range_values[2]),
-                Goldilocks::from(1u64),
-            ],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_old_stack_ts_lt1_str(), vec![
+            Goldilocks::from(range_values[0]),
+            Goldilocks::from(range_values[1]),
+            Goldilocks::from(range_values[2]),
+            Goldilocks::from(1u64),
+        ]);
         let m: u64 = (1 << get_uint_params::<StackUInt>().1) - 1;
-        phase0_values_map.insert(
-            AddInstruction::phase0_addend_0_str(),
-            vec![Goldilocks::from(m)],
-        );
-        phase0_values_map.insert(
-            AddInstruction::phase0_addend_1_str(),
-            vec![Goldilocks::from(1u64)],
-        );
+        phase0_values_map.insert(AddInstruction::phase0_addend_0_str(), vec![
+            Goldilocks::from(m),
+        ]);
+        phase0_values_map.insert(AddInstruction::phase0_addend_1_str(), vec![
+            Goldilocks::from(1u64),
+        ]);
         let range_values = u64vec::<{ StackUInt::N_RANGE_CELLS }, RANGE_CHIP_BIT_WIDTH>(m + 1);
         let mut wit_phase0_instruction_add: Vec<Goldilocks> = vec![];
-        for i in 0..16 {
-            wit_phase0_instruction_add.push(Goldilocks::from(range_values[i]))
+        for &value in &range_values[..16] {
+            wit_phase0_instruction_add.push(Goldilocks::from(value))
         }
         wit_phase0_instruction_add.push(Goldilocks::from(1u64)); // carry is [1, 0, ...]
         phase0_values_map.insert(
@@ -332,7 +321,7 @@ mod test {
         let chip_challenges = ChipChallenges::default();
         let circuit_builder =
             SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
-        let mut singer_builder = SingerGraphBuilder::<E>::new();
+        let mut singer_builder = SingerGraphBuilder::<E>::default();
 
         let mut rng = test_rng();
         let size = AddInstruction::phase0_size();
@@ -341,9 +330,9 @@ mod test {
                 .map(|_| {
                     (0..size)
                         .map(|_| E::BaseField::random(&mut rng))
-                        .collect_vec()
+                        .collect::<Vec<_>>()
                 })
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into(),
         ];
 
@@ -373,10 +362,10 @@ mod test {
         let point = vec![E::random(&mut rng), E::random(&mut rng)];
         let target_evals = graph.target_evals(&wit, &point);
 
-        let mut prover_transcript = &mut Transcript::new(b"Singer");
+        let prover_transcript = &mut Transcript::new(b"Singer");
 
         let timer = Instant::now();
-        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, &mut prover_transcript, 1)
+        let _ = GKRGraphProverState::prove(&graph, &wit, &target_evals, prover_transcript, 1)
             .expect("prove failed");
         println!(
             "AddInstruction::prove, instance_num_vars = {}, time = {}",
@@ -387,7 +376,6 @@ mod test {
 
     #[test]
     #[cfg(not(debug_assertions))]
-
     fn bench_add_instruction() {
         bench_add_instruction_helper::<GoldilocksExt2>(10);
     }
