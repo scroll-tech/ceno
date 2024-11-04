@@ -31,14 +31,16 @@ pub struct ShiftConfig<E: ExtensionField> {
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
-#[allow(dead_code)]
+#[cfg(test)]
 struct SllOp;
+#[cfg(test)]
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 struct SrlOp;
+#[cfg(test)]
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
 }
@@ -54,7 +56,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5")?;
+        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5");
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
         let mut pow2_rs2_low5 = UInt::new_unchecked(|| "pow2_rs2_low5", circuit_builder)?;
         // rs2 = rs2_high | rs2_low5
@@ -193,8 +195,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 mod tests {
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         Value,
@@ -294,17 +294,6 @@ mod tests {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

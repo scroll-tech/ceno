@@ -32,7 +32,7 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{get_challenge_pows, next_pow2_instance_padding, proper_num_threads},
+    utils::{get_challenge_pows, next_pow2_instance_padding, optimal_sumcheck_threads},
     virtual_polys::VirtualPolynomials,
 };
 
@@ -52,7 +52,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         &self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues<u32>,
-        max_threads: usize,
         mut transcript: Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let mut vm_proof = ZKVMProof::empty(pi);
@@ -135,7 +134,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     wits_commit,
                     pi,
                     num_instances,
-                    max_threads,
                     transcript,
                     &challenges,
                 )?;
@@ -155,7 +153,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     witness.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
                     pi,
-                    max_threads,
                     transcript,
                     &challenges,
                 )?;
@@ -186,7 +183,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         wits_commit: PCS::CommitmentWithData,
         pi: &[E::BaseField],
         num_instances: usize,
-        max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
@@ -320,7 +316,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let lk_q2_out_eval = lk_wit_layers[0][3].get_ext_field_vec()[0];
         assert!(record_r_out_evals.len() == NUM_FANIN && record_w_out_evals.len() == NUM_FANIN);
         let (rt_tower, tower_proof) = TowerProver::create_proof(
-            max_threads,
             vec![
                 TowerProverSpec {
                     witness: r_wit_layers,
@@ -363,7 +358,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             rt_tower[..log2_num_instances].to_vec(),
         );
 
-        let num_threads = proper_num_threads(log2_num_instances, max_threads);
+        let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let alpha_pow = get_challenge_pows(
             MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
             transcript,
@@ -624,7 +619,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
         pi: &[E::BaseField],
-        max_threads: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMTableProof<E, PCS>, ZKVMError> {
@@ -843,7 +837,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect_vec();
 
         let (rt_tower, tower_proof) = TowerProver::create_proof(
-            max_threads,
             // pattern [r1, w1, r2, w2, ...] same pair are chain together
             r_wit_layers
                 .into_iter()
@@ -884,7 +877,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 // If all table length are the same, we can skip this sumcheck
                 let span = entered_span!("sumcheck::opening_same_point");
                 // NOTE: max concurrency will be dominated by smallest table since it will blo
-                let num_threads = proper_num_threads(min_log2_num_instance, max_threads);
+                let num_threads = optimal_sumcheck_threads(min_log2_num_instance);
                 let alpha_pow = get_challenge_pows(
                     cs.r_table_expressions.len()
                         + cs.w_table_expressions.len()
@@ -1074,7 +1067,6 @@ impl<E: ExtensionField> TowerProofs<E> {
 /// Tower Prover
 impl TowerProver {
     pub fn create_proof<'a, E: ExtensionField>(
-        max_threads: usize,
         prod_specs: Vec<TowerProverSpec<'a, E>>,
         logup_specs: Vec<TowerProverSpec<'a, E>>,
         num_fanin: usize,
@@ -1109,7 +1101,7 @@ impl TowerProver {
         let (next_rt, _) =
             (1..=max_round_index).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
                 // in first few round we just run on single thread
-                let num_threads = proper_num_threads(out_rt.len(), max_threads);
+                let num_threads = optimal_sumcheck_threads(out_rt.len());
 
                 let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
                 let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, out_rt.len());

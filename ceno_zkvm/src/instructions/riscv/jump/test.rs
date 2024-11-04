@@ -1,25 +1,17 @@
 use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLEs;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    instructions::Instruction,
+    instructions::{
+        Instruction,
+        riscv::test_utils::{imm_j, imm_u},
+    },
     scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
 
 use super::{AuipcInstruction, JalInstruction, JalrInstruction, LuiInstruction};
 
-fn imm_j(imm: i32) -> u32 {
-    // imm is 21 bits in J-type
-    const IMM_MAX: i32 = 2i32.pow(21);
-    if imm.is_negative() {
-        (IMM_MAX + imm) as u32
-    } else {
-        imm as u32
-    }
-}
 #[test]
 fn test_opcode_jal() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -51,18 +43,7 @@ fn test_opcode_jal() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -99,24 +80,9 @@ fn test_opcode_jalr() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
-fn imm_u(imm: u32) -> u32 {
-    // valid imm is imm[12:31] in U-type
-    imm << 12
-}
 #[test]
 fn test_opcode_lui() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -147,18 +113,7 @@ fn test_opcode_lui() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -191,16 +146,5 @@ fn test_opcode_auipc() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }

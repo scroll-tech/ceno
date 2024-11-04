@@ -16,6 +16,8 @@ pub mod logic_imm;
 pub mod mulh;
 pub mod shift;
 pub mod shift_imm;
+pub mod slt;
+pub mod slti;
 pub mod sltu;
 
 mod b_insn;
@@ -32,6 +34,8 @@ mod memory;
 mod s_insn;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_utils;
 
 pub trait RIVInstruction {
     const INST_KIND: InsnKind;

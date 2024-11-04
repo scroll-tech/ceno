@@ -4,7 +4,7 @@ use crate::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, LtuTableCircuit, MemFinalRecord, MemInitRecord, MemTableCircuit,
-        RegTableCircuit, TableCircuit, U16TableCircuit,
+        RegTableCircuit, TableCircuit, U14TableCircuit, U16TableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind, StepRecord};
@@ -29,6 +29,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub and_config: <AndTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
 
@@ -49,6 +50,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
+        let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
         let and_config = cs.register_table_circuit::<AndTableCircuit<E>>();
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
 
@@ -64,6 +66,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             lui_config,
             lw_config,
             u16_range_config,
+            u14_range_config,
             and_config,
             ltu_config,
 
@@ -87,6 +90,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<LwInstruction<E>>(cs);
 
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, self.u16_range_config.clone(), &());
+        fixed.register_table_circuit::<U14TableCircuit<E>>(cs, self.u14_range_config.clone(), &());
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, self.and_config.clone(), &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, self.ltu_config.clone(), &());
 
@@ -147,6 +151,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         mem_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
+        witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
         witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_config, &())?;
         witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
 

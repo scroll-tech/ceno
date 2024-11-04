@@ -4,7 +4,6 @@
 use std::array;
 
 use ark_std::test_rng;
-use const_env::from_env;
 use criterion::*;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -14,6 +13,7 @@ use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     op_mle,
+    util::max_usable_threads,
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2 as VirtualPolynomial},
 };
 use transcript::Transcript;
@@ -41,10 +41,10 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
 }
 
 fn prepare_input<'a, E: ExtensionField>(
-    max_thread_id: usize,
     nv: usize,
 ) -> (E, VirtualPolynomial<'a, E>, Vec<VirtualPolynomial<'a, E>>) {
     let mut rng = test_rng();
+    let max_thread_id = max_usable_threads();
     let size_log2 = ceil_log2(max_thread_id);
     let fs: [ArcMultilinearExtension<'a, E>; NUM_DEGREE] = array::from_fn(|_| {
         let mle: ArcMultilinearExtension<'a, E> =
@@ -100,9 +100,6 @@ fn prepare_input<'a, E: ExtensionField>(
     (asserted_sum, virtual_poly_v1, virtual_poly_v2)
 }
 
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
-
 fn sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
@@ -119,7 +116,7 @@ fn sumcheck_fn(c: &mut Criterion) {
                     || {
                         let prover_transcript = Transcript::<E>::new(b"test");
                         let (asserted_sum, virtual_poly, virtual_poly_splitted) =
-                            { prepare_input(RAYON_NUM_THREADS, nv) };
+                            { prepare_input(nv) };
                         (
                             prover_transcript,
                             asserted_sum,
@@ -150,6 +147,7 @@ fn sumcheck_fn(c: &mut Criterion) {
 fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
+    let threads = max_usable_threads();
     for nv in NV.into_iter() {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("devirgo_nv_{}", nv));
@@ -163,7 +161,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                     || {
                         let prover_transcript = Transcript::<E>::new(b"test");
                         let (asserted_sum, virtual_poly, virtual_poly_splitted) =
-                            { prepare_input(RAYON_NUM_THREADS, nv) };
+                            { prepare_input(nv) };
                         (
                             prover_transcript,
                             asserted_sum,
@@ -178,7 +176,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         virtual_poly_splitted,
                     )| {
                         let (_sumcheck_proof_v2, _) = IOPProverState::<E>::prove_batch_polys(
-                            RAYON_NUM_THREADS,
+                            threads,
                             virtual_poly_splitted,
                             &mut prover_transcript,
                         );

@@ -8,12 +8,11 @@ use ceno_zkvm::{
     tables::{MemFinalRecord, ProgramTableCircuit, initial_memory, initial_registers},
 };
 use clap::Parser;
-use const_env::from_env;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext,
+    CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
-    StepRecord, Tracer, VMState, WordAddr, encode_rv32,
+    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -26,9 +25,6 @@ use mpcs::{Basefold, BasefoldRSPoseidonParams, PolynomialCommitmentScheme};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
-
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
 
 const PROGRAM_SIZE: usize = 512;
 // For now, we assume registers
@@ -79,27 +75,21 @@ fn main() {
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
 
-    let max_threads = {
-        if !RAYON_NUM_THREADS.is_power_of_two() {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            {
-                use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
-                let max_thread_id = 1 << ceil_log2(RAYON_NUM_THREADS);
-                create_local_pool_once(1 << ceil_log2(RAYON_NUM_THREADS), true);
-                max_thread_id
-            }
-        } else {
-            RAYON_NUM_THREADS
-        }
-    };
-
+    let program = Program::new(
+        CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.pc_base(),
+        PROGRAM_CODE.to_vec(),
+        PROGRAM_CODE
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    (insn_idx * PC_WORD_SIZE) as u32 + CENO_PLATFORM.pc_base(),
+                    insn,
+                )
+            })
+            .collect(),
+    );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
         .with(
@@ -132,7 +122,7 @@ fn main() {
         zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
             &zkvm_cs,
             prog_config.clone(),
-            &PROGRAM_CODE,
+            &program,
         );
 
         let reg_init = initial_registers();
@@ -150,12 +140,8 @@ fn main() {
         let prover = ZKVMProver::new(pk);
         let verifier = ZKVMVerifier::new(vk);
 
-        let mut vm = VMState::new(CENO_PLATFORM);
-        let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
+        let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
-        for (i, inst) in PROGRAM_CODE.iter().enumerate() {
-            vm.init_memory(pc_start + i, *inst);
-        }
         for record in &mem_init {
             vm.init_memory(record.addr.into(), record.value);
         }
@@ -225,18 +211,14 @@ fn main() {
 
         // assign program circuit
         zkvm_witness
-            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
-                &zkvm_cs,
-                &prog_config,
-                &PROGRAM_CODE.len(),
-            )
+            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
 
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
         let mut zkvm_proof = prover
-            .create_proof(zkvm_witness, pi, max_threads, transcript)
+            .create_proof(zkvm_witness, pi, transcript)
             .expect("create_proof failed");
 
         println!(

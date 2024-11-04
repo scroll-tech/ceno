@@ -133,7 +133,6 @@ pub struct LkMultiplicity {
     multiplicity: Arc<ThreadLocal<RefCell<[HashMap<u64, usize>; mem::variant_count::<ROMType>()]>>>,
 }
 
-#[allow(dead_code)]
 impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
