@@ -164,6 +164,47 @@ pub fn step<C: EmuContext>(&mut self, ctx: &mut C) -> Result<()> {
 }
 ```
 
-On the face of it, `step` has all the necessary complications to support self-modifying code.  If it doesn't, then that's because somewhere else they piled on some further complications on top that prevent that.  Instead of a simpler design like SP1's that avoids the possibility in the first place.
+On the face of it, `step` has all the necessary complications to support self-modifying code.  If it doesn't actually support it, then that's because somewhere else they piled on some further complications on top that prevent it; instead of a simpler design like SP1's that avoids the possibility in the first place.
 
 (As an extra bonus, they have about half a dozen places there where they need to deal with potentially invalid instructions.)
+
+Before I close out, two more 'interesting' design choices of Risc0.
+
+First, Risc0 commits to a hash digest of the ELF for their proofs, not something like our `InsnRecord` or SP1's `Instruction`.  That means they need to proof their decoding.  (Both Ceno and SP1 avoid that.) Please have a look at their `risc0_zkvm::compute_image_id`, if you want to verify that.
+
+```rust
+/// Compute and return the ImageID of the specified ELF binary.
+#[cfg(not(target_os = "zkvm"))]
+pub fn compute_image_id(elf: &[u8]) -> anyhow::Result<risc0_zkp::core::digest::Digest> {
+    use risc0_zkvm_platform::{memory::GUEST_MAX_MEM, PAGE_SIZE};
+
+    let program = Program::load_elf(elf, GUEST_MAX_MEM as u32)?;
+    let image = MemoryImage::new(&program, PAGE_SIZE as u32)?;
+    Ok(image.compute_id())
+}
+```
+
+Second, here's the type of `Program::load_elf` used above:
+
+```rust
+pub fn load_elf(input: &[u8], max_mem: u32) -> Result<Program>`
+```
+
+And here's the definition of `Program`:
+
+```rust
+/// A RISC Zero program
+pub struct Program {
+    /// The entrypoint of the program
+    pub entry: u32,
+
+    /// The initial memory image
+    pub image: BTreeMap<u32, u32>,
+}
+```
+
+Their `Program` forgets all about the different sections of the ELF.  Which ones are supposed to be read-only, which one are supposed to be (non-) executable, etc.  I don't know for sure whether their prover supports self-modifying code, but it certainly supports jumping into data sections.  They have no way to prevent that. (To spell out the consequences: a sufficiently underhanded guest program author can bury some malicious code in the constants of the program, and then arrange for some other vulnerable part of the program to jump into that code.  An audit of the (Rust) source code of the guest won't reveal the malicious code, at most it reveals the [stack smashing](http://www.phrack.org/issues/49/14.html#article) vulnerability, but almost any piece of unsafe Rust code could hide that.  
+
+Alternatively, carelessness can look like underhandedness. Thus, a clever attacker could find an existing program that might already spell out malicious code in its data section completely by accident.)
+
+Enough background for now.  I'll reply to your specific points in a second comment later.
