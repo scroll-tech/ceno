@@ -82,6 +82,7 @@ use std::{fmt::Display, marker::PhantomData};
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -156,6 +157,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<MulhConfig<E>, ZKVMError> {
+        // The soundness analysis for these constraints is only valid for
+        // 32-bit registers represented over the Goldilocks field, so verify
+        // these parameters
+        assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
+        assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
+
+        // 0. Registers and instruction lookup
+
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
