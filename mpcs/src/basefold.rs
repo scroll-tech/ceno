@@ -131,6 +131,7 @@ where
 
     fn check_sizes(verifier_inputs: &Self::VerifierInputs<'_>);
 
+    #[allow(clippy::type_complexity)]
     fn prepare_sumcheck_target_and_point_batching_coeffs(
         vp: &BasefoldVerifierParams<E, Spec>,
         verifier_inputs: &Self::VerifierInputs<'_>,

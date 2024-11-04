@@ -504,7 +504,6 @@ fn validate_input<E: ExtensionField>(
     polys: &[ArcMultilinearExtension<E>],
     points: &[&[E]],
 ) -> Result<(), Error> {
-    let polys = polys;
     let points = points.iter().collect_vec();
     for poly in polys.iter() {
         if param_num_vars < poly.num_vars() {

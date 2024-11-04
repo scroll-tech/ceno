@@ -51,6 +51,7 @@ where
     ) -> E;
 }
 
+#[allow(clippy::type_complexity)]
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, CPS: CommitPhaseStrategy<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,

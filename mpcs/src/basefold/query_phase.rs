@@ -186,6 +186,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<QCS: QueryCheckStrategy<E, Spec>>(
         &self,
         indices: &[usize],
@@ -488,7 +489,7 @@ where
             .inner
             .iter()
             .enumerate()
-            .filter(|&(index, pair)| (pair.codeword_size_log() == codeword_size_log))
+            .filter(|&(_, pair)| (pair.codeword_size_log() == codeword_size_log))
             .map(|(index, pair)| (index, pair.inner.clone()))
             .collect()
     }
@@ -535,6 +536,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<QCS: QueryCheckStrategy<E, Spec>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,

@@ -205,7 +205,7 @@ pub fn field_type_iter_range_base<'a, E: ExtensionField>(
     }
 }
 
-pub fn multiply_poly<E: ExtensionField>(poly: &mut Vec<E>, scalar: &E) {
+pub fn multiply_poly<E: ExtensionField>(poly: &mut [E], scalar: &E) {
     for coeff in poly.iter_mut() {
         *coeff *= scalar;
     }

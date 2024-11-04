@@ -388,7 +388,7 @@ pub mod test_util {
             .collect_vec()
     }
 
-    pub fn vecs_as_slices<T>(values: &Vec<Vec<T>>) -> Vec<&[T]> {
+    pub fn vecs_as_slices<T>(values: &[Vec<T>]) -> Vec<&[T]> {
         values.iter().map(|vec| vec.as_slice()).collect::<Vec<_>>()
     }
 
