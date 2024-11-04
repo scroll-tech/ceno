@@ -49,7 +49,9 @@ const fn encode_i(kind: InsnKind, rs1: u32, rd: u32, imm: u32) -> u32 {
     let rd = rd & MASK_5_BITS;
     let func3 = kind.codes().func3;
     let opcode = kind.codes().opcode;
-    let imm = imm & MASK_12_BITS;
+    // SRLI/SRAI use a specialization of the I-type format with the shift type in imm[10].
+    let is_arithmetic_right_shift = (matches!(kind, InsnKind::SRAI) as u32) << 10;
+    let imm = imm & MASK_12_BITS | is_arithmetic_right_shift;
     imm << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode
 }
 
