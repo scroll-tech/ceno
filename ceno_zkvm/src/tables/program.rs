@@ -65,15 +65,17 @@ impl<F: SmallField> InsnRecord<F> {
     /// Interpret the immediate as unsigned or signed depending on the instruction.
     /// Convert negative values from two's complement to field.
     pub fn imm_internal_field(insn: &DecodedInstruction) -> F {
-        let imm = Self::imm_internal(insn);
-        if Self::imm_field_is_negative(insn) {
+        let imm = InsnRecord::imm_internal(insn);
+        if InsnRecord::imm_field_is_negative(insn) {
             -F::from(-(imm as i32) as u64)
         } else {
             F::from(imm as u64)
         }
     }
+}
 
-    /// The internal view of the immediate, for use in circuits.
+impl InsnRecord<()> {
+    /// The internal view of the immediate in the program table, for use in circuits.
     pub fn imm_internal(insn: &DecodedInstruction) -> u32 {
         let codes = insn.codes();
         match codes.format {
@@ -210,8 +212,6 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 #[test]
 #[allow(clippy::identity_op)]
 fn test_decode_imm() {
-    use goldilocks::Goldilocks as F;
-
     for (i, expected) in [
         // Example of I-type: ADDI.
         // imm    | rs1     | funct3      | rd     | opcode
@@ -227,7 +227,7 @@ fn test_decode_imm() {
         // funct7     | rs2    | rs1     | funct3      | rd     | opcode
         (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
     ] {
-        let imm = InsnRecord::<F>::imm_internal(&DecodedInstruction::new(i));
+        let imm = InsnRecord::imm_internal(&DecodedInstruction::new(i));
         assert_eq!(imm, expected);
     }
 }

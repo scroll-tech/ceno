@@ -149,7 +149,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             step.rs1()
                 .unwrap()
                 .value
-                .wrapping_add(step.insn().immediate()),
+                .wrapping_add(InsnRecord::imm_internal(&step.insn())),
         );
         config
             .s_insn

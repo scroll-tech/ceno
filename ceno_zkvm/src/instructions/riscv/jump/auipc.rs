@@ -75,7 +75,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         let pc: u32 = step.pc().before.0;
-        let imm: u32 = step.insn().immediate();
+        let imm: u32 = InsnRecord::imm_internal(&step.insn());
         let (sum, overflow) = pc.overflowing_add(imm);
 
         let imm_field: E::BaseField = InsnRecord::imm_internal_field(&step.insn());

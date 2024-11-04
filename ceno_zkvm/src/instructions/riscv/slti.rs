@@ -105,7 +105,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             .rs1_read
             .assign_value(instance, Value::new_unchecked(rs1));
 
-        let imm = step.insn().immediate();
+        let imm = InsnRecord::imm_internal(&step.insn());
         let imm_field: E::BaseField = InsnRecord::imm_internal_field(&step.insn());
         set_val!(instance, config.imm, imm_field);
 

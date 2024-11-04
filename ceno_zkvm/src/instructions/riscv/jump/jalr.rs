@@ -116,7 +116,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let insn = step.insn();
 
         let rs1 = step.rs1().unwrap().value;
-        let imm: i32 = insn.immediate() as i32;
+        let imm: i32 = InsnRecord::imm_internal(&insn) as i32;
         let rd = step.rd().unwrap().value.after;
 
         let (sum, overflowing) = rs1.overflowing_add_signed(imm);

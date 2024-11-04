@@ -210,7 +210,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             step.rs1()
                 .unwrap()
                 .value
-                .wrapping_add(step.insn().immediate()),
+                .wrapping_add(InsnRecord::imm_internal(&step.insn())),
         );
         let shift = unaligned_addr.shift();
         let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];

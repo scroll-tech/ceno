@@ -13,7 +13,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{DecodedInstruction, InsnKind, StepRecord};
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -145,7 +145,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+        let imm = InsnRecord::imm_internal(&step.insn());
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
 
@@ -180,12 +180,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
         Ok(())
     }
-}
-
-/// Decode the immediate into the format of this circuit.
-/// The shift is implemented as a multiplication/division by 1 << immediate.
-pub fn process_imm(insn: &DecodedInstruction) -> u32 {
-    1 << (insn.immediate() & 0x1F)
 }
 
 #[cfg(test)]
