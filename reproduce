@@ -1,0 +1,6 @@
+#!/opt/homebrew/bin/bash
+set -euxo pipefail
+
+RAYON_NUM_THREADS=8 \
+RUST_LOG=debug \
+cargo run --release --example fibonacci_elf -- --nocapture
