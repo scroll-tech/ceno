@@ -266,10 +266,6 @@ impl DecodedInstruction {
         FastDecodeTable::get().lookup(self)
     }
 
-    pub fn immediate_msb(&self) -> u32 {
-        self.top_bit
-    }
-
     pub fn immediate(&self) -> u32 {
         match self.codes().format {
             R => 0,
