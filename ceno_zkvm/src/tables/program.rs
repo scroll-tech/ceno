@@ -177,11 +177,12 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 let pc = pc_base + (i * PC_STEP_SIZE) as u32;
                 let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
+
                 tracing::debug!(
                     "program: pc={:x}, insn={:x?},imm={:x?}",
                     pc,
                     values.without_imm(),
-                    InsnRecord::imm_or_funct7_field(&insn)
+                    InsnRecord::imm_or_funct7_field::<E::BaseField>(&insn)
                 );
 
                 // Copy all the fields except immediate.
