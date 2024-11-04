@@ -197,9 +197,9 @@ pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
     category: InsnCategory,
-    pub opcode: u32,
-    pub func3: u32,
-    pub func7: u32,
+    pub(crate) opcode: u32,
+    pub(crate) func3: u32,
+    pub(crate) func7: u32,
 }
 
 impl DecodedInstruction {
@@ -236,14 +236,6 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.func3,
-            _ => 0,
-        }
-    }
-
     /// Get the rs1 field, regardless of the instruction format.
     pub fn rs1(&self) -> u32 {
         self.rs1
@@ -273,7 +265,7 @@ impl DecodedInstruction {
     /// The internal view of the immediate, for use in circuits.
     pub fn imm_internal(&self) -> u32 {
         match self.codes().format {
-            R => self.func7,
+            R => 0,
             I => match self.codes().kind {
                 // decode the shift as a multiplication/division by 1 << immediate
                 SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
@@ -359,10 +351,7 @@ fn test_decode_imm() {
         ),
         // Example of R-type with funct7: SUB.
         // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-        (
-            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
-            0x20,
-        ),
+        (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
     ] {
         let imm = DecodedInstruction::new(i).imm_internal();
         assert_eq!(imm, expected);

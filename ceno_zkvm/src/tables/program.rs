@@ -32,15 +32,15 @@ macro_rules! declare_program {
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
-pub struct InsnRecord<T>([T; 7]);
+pub struct InsnRecord<T>([T; 6]);
 
 impl<T> InsnRecord<T> {
-    pub fn new(pc: T, opcode: T, rd: Option<T>, funct3: T, rs1: T, rs2: T, imm_internal: T) -> Self
+    pub fn new(pc: T, kind: T, rd: Option<T>, rs1: T, rs2: T, imm_internal: T) -> Self
     where
         T: From<u32>,
     {
         let rd = rd.unwrap_or_else(|| T::from(DecodedInstruction::RD_NULL));
-        InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_internal])
+        InsnRecord([pc, kind, rd, rs1, rs2, imm_internal])
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -49,12 +49,12 @@ impl<T> InsnRecord<T> {
 
     /// Iterate through the fields, except immediate because it is complicated.
     fn without_imm(&self) -> &[T] {
-        &self.0[0..6]
+        &self.0[0..5]
     }
 
     /// The internal view of the immediate. See `DecodedInstruction::imm_internal`.
     fn imm_internal(&self) -> &T {
-        &self.0[6]
+        &self.0[5]
     }
 }
 
@@ -62,9 +62,8 @@ impl InsnRecord<u32> {
     fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
         InsnRecord([
             pc,
-            insn.opcode(),
+            insn.codes().kind as u32,
             insn.rd_internal(),
-            insn.funct3_or_zero(),
             insn.rs1_or_zero(),
             insn.rs2_or_zero(),
             insn.imm_internal(),
@@ -107,9 +106,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
         let record = InsnRecord([
             cb.create_fixed(|| "pc")?,
-            cb.create_fixed(|| "opcode")?,
+            cb.create_fixed(|| "kind")?,
             cb.create_fixed(|| "rd")?,
-            cb.create_fixed(|| "funct3")?,
             cb.create_fixed(|| "rs1")?,
             cb.create_fixed(|| "rs2")?,
             cb.create_fixed(|| "imm_internal")?,
