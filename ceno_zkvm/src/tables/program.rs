@@ -35,15 +35,15 @@ macro_rules! declare_program {
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
-pub struct InsnRecord<T>([T; 7]);
+pub struct InsnRecord<T>([T; 6]);
 
 impl<T> InsnRecord<T> {
-    pub fn new(pc: T, opcode: T, rd: Option<T>, funct3: T, rs1: T, rs2: T, imm_internal: T) -> Self
+    pub fn new(pc: T, kind: T, rd: Option<T>, rs1: T, rs2: T, imm_internal: T) -> Self
     where
         T: From<u32>,
     {
         let rd = rd.unwrap_or_else(|| T::from(DecodedInstruction::RD_NULL));
-        InsnRecord([pc, opcode, rd, funct3, rs1, rs2, imm_internal])
+        InsnRecord([pc, kind, rd, rs1, rs2, imm_internal])
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -55,9 +55,8 @@ impl<F: SmallField> InsnRecord<F> {
     fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
         InsnRecord([
             (pc as u64).into(),
-            (insn.opcode() as u64).into(),
+            (insn.codes().kind as u64).into(),
             (insn.rd_internal() as u64).into(),
-            (insn.funct3_or_zero() as u64).into(),
             (insn.rs1_or_zero() as u64).into(),
             (insn.rs2_or_zero() as u64).into(),
             Self::imm_internal_field(insn),
@@ -79,8 +78,8 @@ impl<F: SmallField> InsnRecord<F> {
     fn process_imm(insn: &DecodedInstruction) -> u32 {
         let codes = insn.codes();
         match codes.format {
-            R => codes.func7,
-            I if matches!(codes.kind, SLLI | SRLI | SRAI) => shift_imm::process_imm(insn),
+            R => 0,
+            _ if matches!(codes.kind, SLLI | SRLI | SRAI) => shift_imm::process_imm(insn),
             _ => insn.immediate(),
         }
     }
@@ -128,9 +127,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
         let record = InsnRecord([
             cb.create_fixed(|| "pc")?,
-            cb.create_fixed(|| "opcode")?,
+            cb.create_fixed(|| "kind")?,
             cb.create_fixed(|| "rd")?,
-            cb.create_fixed(|| "funct3")?,
             cb.create_fixed(|| "rs1")?,
             cb.create_fixed(|| "rs2")?,
             cb.create_fixed(|| "imm_internal")?,
@@ -224,10 +222,7 @@ fn test_decode_imm() {
         ),
         // Example of R-type with funct7: SUB.
         // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-        (
-            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
-            0x20,
-        ),
+        (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
     ] {
         let imm = InsnRecord::<F>::process_imm(&DecodedInstruction::new(i));
         assert_eq!(imm, expected);

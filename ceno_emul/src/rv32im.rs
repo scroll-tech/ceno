@@ -197,9 +197,9 @@ pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
     category: InsnCategory,
-    pub opcode: u32,
-    pub func3: u32,
-    pub func7: u32,
+    pub(crate) opcode: u32,
+    pub(crate) func3: u32,
+    pub(crate) func7: u32,
 }
 
 impl DecodedInstruction {
@@ -233,14 +233,6 @@ impl DecodedInstruction {
         match self.codes().format {
             R | I | U | J if self.rd != 0 => self.rd,
             _ => Self::RD_NULL,
-        }
-    }
-
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.func3,
-            _ => 0,
         }
     }
 
