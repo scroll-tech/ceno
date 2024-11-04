@@ -88,7 +88,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             _ => unreachable!("Unsupported instruction kind"),
         };
 
-        let r_insn = RInstructionConfig::<E>::construct_circuit(
+        let r_insn = RInstructionConfig::construct_circuit(
             circuit_builder,
             I::INST_KIND,
             rs1_read.register_expr(),

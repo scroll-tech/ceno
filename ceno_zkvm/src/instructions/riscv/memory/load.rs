@@ -30,7 +30,7 @@ pub struct LoadConfig<E: ExtensionField> {
     memory_read: UInt<E>,
     target_limb: Option<WitIn>,
     target_limb_bytes: Option<Vec<WitIn>>,
-    signed_extend_config: Option<SignedExtendConfig>,
+    signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
@@ -205,12 +205,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_value = step.memory_op().unwrap().value.before;
         let memory_read = Value::new(memory_value, lk_multiplicity);
         // imm is signed 12-bit value
-        let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
+        let imm: E::BaseField = InsnRecord::imm_internal_field(&step.insn());
         let unaligned_addr = ByteAddr::from(
             step.rs1()
                 .unwrap()
                 .value
-                .wrapping_add(step.insn().imm_or_funct7()),
+                .wrapping_add(step.insn().imm_internal()),
         );
         let shift = unaligned_addr.shift();
         let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];
@@ -249,7 +249,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             _ => 0,
         };
         if let Some(signed_ext_config) = config.signed_extend_config.as_ref() {
-            signed_ext_config.assign_instance::<E>(instance, lk_multiplicity, val)?;
+            signed_ext_config.assign_instance(instance, lk_multiplicity, val)?;
         }
 
         Ok(())

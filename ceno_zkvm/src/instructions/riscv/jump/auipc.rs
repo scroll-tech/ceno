@@ -74,7 +74,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         let pc: u32 = step.pc().before.0;
-        let imm: u32 = step.insn().imm_or_funct7();
+        let imm: u32 = step.insn().imm_internal();
         let (sum, overflow) = pc.overflowing_add(imm);
 
         set_val!(instance, config.imm, imm as u64);

@@ -1,3 +1,4 @@
+use ceno_emul::Addr;
 use itertools::Itertools;
 use std::{collections::HashMap, marker::PhantomData};
 
@@ -72,10 +73,29 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub table_len: usize,
 }
 
+// TODO encapsulate few information of table spec to SetTableAddrType value
+// once confirm syntax is friendly and parsed by recursive verifier
+#[derive(Clone, Debug)]
+pub enum SetTableAddrType {
+    FixedAddr,
+    DynamicAddr,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTableSpec {
+    pub addr_type: SetTableAddrType,
+    pub addr_witin_id: Option<usize>,
+    pub offset: Addr,
+    pub len: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
-    pub values: Expression<E>,
-    pub table_len: usize,
+    pub expr: Expression<E>,
+
+    // TODO make decision to have enum/struct
+    // for which option is more friendly to be processed by ConstrainSystem + recursive verifier
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
@@ -304,7 +324,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
@@ -318,8 +338,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             rlc_record.degree()
         );
         self.r_table_expressions.push(SetTableExpression {
-            values: rlc_record,
-            table_len,
+            expr: rlc_record,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.r_table_expressions_namespace_map.push(path);
@@ -330,7 +350,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
@@ -344,8 +364,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             rlc_record.degree()
         );
         self.w_table_expressions.push(SetTableExpression {
-            values: rlc_record,
-            table_len,
+            expr: rlc_record,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.w_table_expressions_namespace_map.push(path);

@@ -57,7 +57,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         UInt8::<E>::logic_assign::<I::OpsTable>(
             lkm,
             step.rs1().unwrap().value.into(),
-            step.insn().imm_or_funct7().into(),
+            step.insn().imm_internal().into(),
         );
 
         config.assign_instance(instance, lkm, step)
@@ -112,7 +112,7 @@ impl<E: ExtensionField> LogicConfig<E> {
         let rs1_read = split_to_u8(step.rs1().unwrap().value);
         self.rs1_read.assign_limbs(instance, &rs1_read);
 
-        let imm = split_to_u8::<u16>(step.insn().imm_or_funct7());
+        let imm = split_to_u8::<u16>(step.insn().imm_internal());
         self.imm.assign_limbs(instance, &imm);
 
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
@@ -143,22 +143,30 @@ mod test {
 
     use super::LogicOp;
 
+    /// An arbitrary test value.
+    const TEST: u32 = 0xabed_5eff;
+    /// An example of a sign-extended negative immediate value.
+    const NEG: u32 = 0xffff_ff55;
+
     #[test]
     fn test_opcode_andi() {
         verify::<AndiOp>("basic", 0x0000_0011, 3, 0x0000_0011 & 3);
         verify::<AndiOp>("zero result", 0x0000_0100, 3, 0x0000_0100 & 3);
+        verify::<AndiOp>("negative imm", TEST, NEG, TEST & NEG);
     }
 
     #[test]
     fn test_opcode_ori() {
         verify::<OriOp>("basic", 0x0000_0011, 3, 0x0000_0011 | 3);
         verify::<OriOp>("basic2", 0x0000_0100, 3, 0x0000_0100 | 3);
+        verify::<OriOp>("negative imm", TEST, NEG, TEST | NEG);
     }
 
     #[test]
     fn test_opcode_xori() {
         verify::<XoriOp>("basic", 0x0000_0011, 3, 0x0000_0011 ^ 3);
         verify::<XoriOp>("non-overlap", 0x0000_0100, 3, 0x0000_0100 ^ 3);
+        verify::<XoriOp>("negative imm", TEST, NEG, TEST ^ NEG);
     }
 
     fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_written: u32) {

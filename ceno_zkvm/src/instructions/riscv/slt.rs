@@ -20,7 +20,7 @@ pub struct SltConfig<E: ExtensionField> {
     #[cfg_attr(not(test), allow(dead_code))]
     rd_written: UInt<E>,
 
-    signed_lt: SignedLtConfig,
+    signed_lt: SignedLtConfig<E>,
 }
 
 pub struct SltInstruction<E>(PhantomData<E>);
@@ -79,7 +79,7 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
             .assign_limbs(instance, rs2_read.as_u16_limbs());
         config
             .signed_lt
-            .assign_instance::<E>(instance, lkm, rs1 as SWord, rs2 as SWord)?;
+            .assign_instance(instance, lkm, rs1 as SWord, rs2 as SWord)?;
 
         Ok(())
     }

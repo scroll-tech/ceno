@@ -54,7 +54,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 bytes
                     .iter()
                     .enumerate()
-                    .map(|(idx, byte)| (1 << (idx * 8)) * byte.expr())
+                    .map(|(idx, byte)| byte.expr() << (idx * 8))
                     .sum(),
             )?;
 
@@ -80,7 +80,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
                 cb.assert_ux::<_, _, 8>(
                     || "rs2_limb[0].le_bytes[1]",
-                    u8_base_inv.expr() * (rs2_limbs[0].clone() - rs2_limb_bytes[0].expr()),
+                    u8_base_inv.expr() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
@@ -89,7 +89,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
                     low_bits[0].clone(),
                     expected_limb_change.expr(),
-                    (1 << 8) * (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()),
+                    (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()) << 8,
                     rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr(),
                 )?;
 
@@ -99,7 +99,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
                     low_bits[1].clone(),
                     expected_change.expr(),
-                    (1 << 16) * expected_limb_change.expr(),
+                    expected_limb_change.expr() << 16,
                     expected_limb_change.expr(),
                 )?;
 
@@ -125,8 +125,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     // degree 2 expression
                     low_bits[1].clone(),
                     expected_change.expr(),
-                    (1 << 16) * (rs2_limbs[0].clone() - prev_limbs[1].clone()),
-                    rs2_limbs[0].clone() - prev_limbs[0].clone(),
+                    (&rs2_limbs[0] - &prev_limbs[1]) << 16,
+                    &rs2_limbs[0] - &prev_limbs[0],
                 )?;
 
                 Ok(MemWordChange {
