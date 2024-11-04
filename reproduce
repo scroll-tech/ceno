@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/bash
+#!/usr/bin/env bash
 set -euxo pipefail
 
 RAYON_NUM_THREADS=8 \
