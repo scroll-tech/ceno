@@ -4,7 +4,6 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
-    instructions::riscv::shift_imm,
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
@@ -63,10 +62,10 @@ impl<F: SmallField> InsnRecord<F> {
         ])
     }
 
-    /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
+    /// Interpret the immediate as unsigned or signed depending on the instruction.
     /// Convert negative values from two's complement to field.
     pub fn imm_internal_field(insn: &DecodedInstruction) -> F {
-        let imm = Self::process_imm(insn);
+        let imm = Self::imm_internal(insn);
         if Self::imm_field_is_negative(insn) {
             -F::from(-(imm as i32) as u64)
         } else {
@@ -75,11 +74,15 @@ impl<F: SmallField> InsnRecord<F> {
     }
 
     /// The internal view of the immediate, for use in circuits.
-    fn process_imm(insn: &DecodedInstruction) -> u32 {
+    pub fn imm_internal(insn: &DecodedInstruction) -> u32 {
         let codes = insn.codes();
         match codes.format {
             R => 0,
-            _ if matches!(codes.kind, SLLI | SRLI | SRAI) => shift_imm::process_imm(insn),
+            _ if matches!(codes.kind, SLLI | SRLI | SRAI) => {
+                // Decode the immediate for ShiftImmInstruction.
+                // The shift is implemented as a multiplication/division by 1 << immediate.
+                1 << (insn.immediate() & 0x1F)
+            }
             _ => insn.immediate(),
         }
     }
@@ -224,7 +227,7 @@ fn test_decode_imm() {
         // funct7     | rs2    | rs1     | funct3      | rd     | opcode
         (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
     ] {
-        let imm = InsnRecord::<F>::process_imm(&DecodedInstruction::new(i));
+        let imm = InsnRecord::<F>::imm_internal(&DecodedInstruction::new(i));
         assert_eq!(imm, expected);
     }
 }

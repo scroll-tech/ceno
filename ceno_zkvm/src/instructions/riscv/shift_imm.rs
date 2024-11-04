@@ -10,6 +10,7 @@ use crate::{
         riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
     set_val,
+    tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use ceno_emul::{DecodedInstruction, InsnKind, StepRecord};
@@ -144,7 +145,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let imm = process_imm(&step.insn());
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
 
