@@ -478,7 +478,8 @@ pub mod test_util {
                     .collect_vec();
                 let values: Vec<E> = evals
                     .iter()
-                    .map(Evaluation::value).copied()
+                    .map(Evaluation::value)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
@@ -515,7 +516,8 @@ pub mod test_util {
 
                 let values: Vec<E> = evals
                     .iter()
-                    .map(Evaluation::value).copied()
+                    .map(Evaluation::value)
+                    .copied()
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 

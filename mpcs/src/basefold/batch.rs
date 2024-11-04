@@ -2,9 +2,9 @@ use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{Error, util::merkle_tree::MerkleTree};
+use crate::{util::merkle_tree::MerkleTree, Error};
 
 use super::{
     Basefold, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec, PolyEvalsCodeword,
