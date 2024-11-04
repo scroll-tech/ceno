@@ -117,7 +117,7 @@ where
     }
 
     fn trim(
-        pp: Self::PublicParameters,
+        mut pp: Self::PublicParameters,
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
         if pp.table.len() < Spec::get_rate_log() + max_msg_size_log {
@@ -127,7 +127,6 @@ where
                 max_msg_size_log,
             )));
         }
-        let mut pp = pp;
         pp.table_w_weights
             .truncate(Spec::get_rate_log() + max_msg_size_log);
         pp.table.truncate(Spec::get_rate_log() + max_msg_size_log);
