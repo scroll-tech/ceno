@@ -143,22 +143,30 @@ mod test {
 
     use super::LogicOp;
 
+    /// An arbitrary test value.
+    const TEST: u32 = 0xabed_5eff;
+    /// An example of a sign-extended negative immediate value.
+    const NEG: u32 = 0xffff_ff55;
+
     #[test]
     fn test_opcode_andi() {
         verify::<AndiOp>("basic", 0x0000_0011, 3, 0x0000_0011 & 3);
         verify::<AndiOp>("zero result", 0x0000_0100, 3, 0x0000_0100 & 3);
+        verify::<AndiOp>("negative imm", TEST, NEG, TEST & NEG);
     }
 
     #[test]
     fn test_opcode_ori() {
         verify::<OriOp>("basic", 0x0000_0011, 3, 0x0000_0011 | 3);
         verify::<OriOp>("basic2", 0x0000_0100, 3, 0x0000_0100 | 3);
+        verify::<OriOp>("negative imm", TEST, NEG, TEST | NEG);
     }
 
     #[test]
     fn test_opcode_xori() {
         verify::<XoriOp>("basic", 0x0000_0011, 3, 0x0000_0011 ^ 3);
         verify::<XoriOp>("non-overlap", 0x0000_0100, 3, 0x0000_0100 ^ 3);
+        verify::<XoriOp>("negative imm", TEST, NEG, TEST ^ NEG);
     }
 
     fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_written: u32) {
