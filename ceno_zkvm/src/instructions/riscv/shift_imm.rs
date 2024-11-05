@@ -10,6 +10,7 @@ use crate::{
         riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
     set_val,
+    tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
@@ -144,16 +145,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let imm = step.insn().imm_internal();
+        // imm_internal is a precomputed 2**shift.
+        let imm = InsnRecord::imm_internal(&step.insn()) as u64;
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
 
-        set_val!(instance, config.imm, imm as u64);
+        set_val!(instance, config.imm, imm);
         config.rs1_read.assign_value(instance, rs1_read.clone());
         config.rd_written.assign_value(instance, rd_written);
 
         let outflow = match I::INST_KIND {
-            InsnKind::SLLI => (rs1_read.as_u64() * imm as u64) >> UInt::<E>::TOTAL_BITS,
+            InsnKind::SLLI => (rs1_read.as_u64() * imm) >> UInt::<E>::TOTAL_BITS,
             InsnKind::SRAI | InsnKind::SRLI => {
                 if I::INST_KIND == InsnKind::SRAI {
                     config.is_lt_config.as_ref().unwrap().assign_instance(
@@ -163,7 +165,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     )?;
                 }
 
-                rs1_read.as_u64() & (imm as u64 - 1)
+                rs1_read.as_u64() & (imm - 1)
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
@@ -171,7 +173,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         set_val!(instance, config.outflow, outflow);
         config
             .assert_lt_config
-            .assign_instance(instance, lk_multiplicity, outflow, imm as u64)?;
+            .assign_instance(instance, lk_multiplicity, outflow, imm)?;
 
         config
             .i_insn
