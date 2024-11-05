@@ -3,7 +3,7 @@ mod monomial;
 use std::{
     cmp::max,
     fmt::Display,
-    iter::Sum,
+    iter::{Product, Sum},
     mem::MaybeUninit,
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
@@ -22,7 +22,7 @@ use crate::{
     structs::{ChallengeId, RAMType, WitnessId},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
@@ -365,6 +365,12 @@ impl<E: ExtensionField> ShlAssign<usize> for Expression<E> {
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
         iter.fold(Expression::ZERO, |acc, x| acc + x)
+    }
+}
+
+impl<E: ExtensionField> Product for Expression<E> {
+    fn product<I: Iterator<Item = Expression<E>>>(iter: I) -> Self {
+        iter.fold(Expression::ONE, |acc, x| acc * x)
     }
 }
 
@@ -721,7 +727,7 @@ pub struct WitIn {
     pub id: WitnessId,
 }
 
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Fixed(pub usize);
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
