@@ -115,7 +115,6 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type Commitment: Clone + Debug + Default + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
     type Proof: Clone + Debug + Serialize + DeserializeOwned;
-    type Rng: RngCore + Clone;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error>;
 
@@ -374,7 +373,6 @@ pub mod test_util {
         num_vars_start: usize,
         num_vars_end: usize,
     ) where
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
         Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
@@ -434,7 +432,6 @@ pub mod test_util {
         num_vars_end: usize,
     ) where
         E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
         Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
