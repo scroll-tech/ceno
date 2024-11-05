@@ -4,16 +4,16 @@ use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        riscv::{constants::UInt, u_insn::UInstructionConfig},
         Instruction,
+        riscv::{constants::UInt, u_insn::UInstructionConfig},
     },
     set_val,
     witness::LkMultiplicity,
-    Value,
 };
 
 pub struct AuipcConfig<E: ExtensionField> {
@@ -36,7 +36,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<AuipcConfig<E>, ZKVMError> {
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let u_insn = UInstructionConfig::construct_circuit(
@@ -46,7 +46,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             rd_written.register_expr(),
         )?;
 
-        let overflow_bit = circuit_builder.create_witin(|| "overflow_bit")?;
+        let overflow_bit = circuit_builder.create_witin(|| "overflow_bit");
         circuit_builder.assert_bit(|| "is_bit", overflow_bit.expr())?;
 
         // assert: imm + pc = rd_written + overflow_bit * 2^32
@@ -56,7 +56,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         circuit_builder.require_equal(
             || "imm+pc = rd_written+2^32*overflow",
             imm.expr() + u_insn.vm_state.pc.expr(),
-            rd_written.value() + overflow_bit.expr() * (1u64 << 32).into(),
+            rd_written.value() + overflow_bit.expr() * (1u64 << 32),
         )?;
 
         Ok(AuipcConfig {
@@ -74,7 +74,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         let pc: u32 = step.pc().before.0;
-        let imm: u32 = step.insn().imm_or_funct7();
+        let imm: u32 = step.insn().imm_internal();
         let (sum, overflow) = pc.overflowing_add(imm);
 
         set_val!(instance, config.imm, imm as u64);

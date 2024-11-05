@@ -39,7 +39,7 @@ impl<E: ExtensionField> Expression<E> {
                 for a in a {
                     for b in &b {
                         res.push(Term {
-                            coeff: a.coeff.clone() * b.coeff.clone(),
+                            coeff: &a.coeff * &b.coeff,
                             vars: a.vars.iter().chain(b.vars.iter()).cloned().collect(),
                         });
                     }
@@ -54,7 +54,7 @@ impl<E: ExtensionField> Expression<E> {
                 for x in x {
                     for a in &a {
                         res.push(Term {
-                            coeff: x.coeff.clone() * a.coeff.clone(),
+                            coeff: &x.coeff * &a.coeff,
                             vars: x.vars.iter().chain(a.vars.iter()).cloned().collect(),
                         });
                     }
@@ -136,11 +136,6 @@ impl<E: ExtensionField> PartialOrd for Expression<E> {
     }
 }
 
-#[allow(dead_code)]
-fn cmp_field<F: SmallField>(a: &F, b: &F) -> Ordering {
-    a.to_canonical_u64().cmp(&b.to_canonical_u64())
-}
-
 fn cmp_ext<E: ExtensionField>(a: &E, b: &E) -> Ordering {
     let a = a.as_bases().iter().map(|f| f.to_canonical_u64());
     let b = b.as_bases().iter().map(|f| f.to_canonical_u64());
@@ -154,7 +149,7 @@ mod tests {
     use super::*;
     use ff::Field;
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
-    use rand_chacha::{rand_core::SeedableRng, ChaChaRng};
+    use rand_chacha::{ChaChaRng, rand_core::SeedableRng};
 
     #[test]
     fn test_to_monomial_form() {
@@ -192,7 +187,7 @@ mod tests {
             assert!(monomials.is_monomial_form());
 
             // Check that the two forms are equivalent (Schwartz-Zippel test).
-            let factored = eval(&factored);
+            let factored = eval(factored);
             let monomials = eval(&monomials);
             assert_eq!(monomials, factored);
         }

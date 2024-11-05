@@ -1,17 +1,12 @@
-use ceno_emul::{ByteAddr, Change, StepRecord, Word, PC_STEP_SIZE};
+use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLEs;
 
 use super::*;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    instructions::Instruction,
-    scheme::mock_prover::{
-        MockProver, MOCK_PC_BEQ, MOCK_PC_BGE, MOCK_PC_BGEU, MOCK_PC_BLT, MOCK_PC_BLTU, MOCK_PC_BNE,
-        MOCK_PROGRAM,
-    },
+    instructions::{Instruction, riscv::test_utils::imm_b},
+    scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
 
 const A: Word = 0xbead1010;
@@ -37,31 +32,22 @@ fn impl_opcode_beq(equal: bool) {
         .unwrap()
         .unwrap();
 
+    let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, imm_b(8));
     let pc_offset = if equal { 8 } else { PC_STEP_SIZE };
-    let (raw_witin, _lkm) = BeqInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_b_instruction(
-            3,
-            Change::new(MOCK_PC_BEQ, MOCK_PC_BEQ + pc_offset),
-            MOCK_PROGRAM[6],
-            A,
-            if equal { A } else { B },
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        BeqInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_b_instruction(
+                3,
+                Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
+                insn_code,
+                A,
+                if equal { A } else { B },
+                0,
+            ),
+        ])
+        .unwrap();
 
-    MockProver::assert_satisfied(
-        &mut cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        None,
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -84,31 +70,22 @@ fn impl_opcode_bne(equal: bool) {
         .unwrap()
         .unwrap();
 
+    let insn_code = encode_rv32(InsnKind::BNE, 2, 3, 0, imm_b(8));
     let pc_offset = if equal { PC_STEP_SIZE } else { 8 };
-    let (raw_witin, _lkm) = BneInstruction::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_b_instruction(
-            3,
-            Change::new(MOCK_PC_BNE, MOCK_PC_BNE + pc_offset),
-            MOCK_PROGRAM[7],
-            A,
-            if equal { A } else { B },
-            0,
-        )],
-    )
-    .unwrap();
+    let (raw_witin, lkm) =
+        BneInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_b_instruction(
+                3,
+                Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
+                insn_code,
+                A,
+                if equal { A } else { B },
+                0,
+            ),
+        ])
+        .unwrap();
 
-    MockProver::assert_satisfied(
-        &mut cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        None,
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -129,35 +106,27 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     let config = BltuInstruction::construct_circuit(&mut circuit_builder)?;
 
     let pc_after = if taken {
-        ByteAddr(MOCK_PC_BLTU.0 - 8)
+        ByteAddr(MOCK_PC_START.0 - 8)
     } else {
-        MOCK_PC_BLTU + PC_STEP_SIZE
+        MOCK_PC_START + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) = BltuInstruction::assign_instances(
-        &config,
-        circuit_builder.cs.num_witin as usize,
-        vec![StepRecord::new_b_instruction(
-            12,
-            Change::new(MOCK_PC_BLTU, pc_after),
-            MOCK_PROGRAM[15],
-            a as Word,
-            b as Word,
-            10,
-        )],
-    )
-    .unwrap();
+    let insn_code = encode_rv32(InsnKind::BLTU, 2, 3, 0, imm_b(-8));
+    println!("{:#b}", insn_code);
+    let (raw_witin, lkm) =
+        BltuInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+            StepRecord::new_b_instruction(
+                12,
+                Change::new(MOCK_PC_START, pc_after),
+                insn_code,
+                a as Word,
+                b as Word,
+                10,
+            ),
+        ])
+        .unwrap();
 
-    MockProver::assert_satisfied(
-        &mut circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        None,
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }
 
@@ -179,35 +148,26 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     let config = BgeuInstruction::construct_circuit(&mut circuit_builder)?;
 
     let pc_after = if taken {
-        ByteAddr(MOCK_PC_BGEU.0 - 8)
+        ByteAddr(MOCK_PC_START.0 - 8)
     } else {
-        MOCK_PC_BGEU + PC_STEP_SIZE
+        MOCK_PC_START + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) = BgeuInstruction::assign_instances(
-        &config,
-        circuit_builder.cs.num_witin as usize,
-        vec![StepRecord::new_b_instruction(
-            12,
-            Change::new(MOCK_PC_BGEU, pc_after),
-            MOCK_PROGRAM[16],
-            a as Word,
-            b as Word,
-            10,
-        )],
-    )
-    .unwrap();
+    let insn_code = encode_rv32(InsnKind::BGEU, 2, 3, 0, imm_b(-8));
+    let (raw_witin, lkm) =
+        BgeuInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+            StepRecord::new_b_instruction(
+                12,
+                Change::new(MOCK_PC_START, pc_after),
+                insn_code,
+                a as Word,
+                b as Word,
+                10,
+            ),
+        ])
+        .unwrap();
 
-    MockProver::assert_satisfied(
-        &mut circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        None,
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }
 
@@ -230,35 +190,26 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
     let config = BltInstruction::construct_circuit(&mut circuit_builder)?;
 
     let pc_after = if taken {
-        ByteAddr(MOCK_PC_BLT.0 - 8)
+        ByteAddr(MOCK_PC_START.0 - 8)
     } else {
-        MOCK_PC_BLT + PC_STEP_SIZE
+        MOCK_PC_START + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) = BltInstruction::assign_instances(
-        &config,
-        circuit_builder.cs.num_witin as usize,
-        vec![StepRecord::new_b_instruction(
-            12,
-            Change::new(MOCK_PC_BLT, pc_after),
-            MOCK_PROGRAM[8],
-            a as Word,
-            b as Word,
-            10,
-        )],
-    )
-    .unwrap();
+    let insn_code = encode_rv32(InsnKind::BLT, 2, 3, 0, imm_b(-8));
+    let (raw_witin, lkm) =
+        BltInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+            StepRecord::new_b_instruction(
+                12,
+                Change::new(MOCK_PC_START, pc_after),
+                insn_code,
+                a as Word,
+                b as Word,
+                10,
+            ),
+        ])
+        .unwrap();
 
-    MockProver::assert_satisfied(
-        &mut circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        None,
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }
 
@@ -281,34 +232,25 @@ fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
     let config = BgeInstruction::construct_circuit(&mut circuit_builder)?;
 
     let pc_after = if taken {
-        ByteAddr(MOCK_PC_BGE.0 - 8)
+        ByteAddr(MOCK_PC_START.0 - 8)
     } else {
-        MOCK_PC_BGE + PC_STEP_SIZE
+        MOCK_PC_START + PC_STEP_SIZE
     };
 
-    let (raw_witin, _) = BgeInstruction::assign_instances(
-        &config,
-        circuit_builder.cs.num_witin as usize,
-        vec![StepRecord::new_b_instruction(
-            12,
-            Change::new(MOCK_PC_BGE, pc_after),
-            MOCK_PROGRAM[17],
-            a as Word,
-            b as Word,
-            10,
-        )],
-    )
-    .unwrap();
+    let insn_code = encode_rv32(InsnKind::BGE, 2, 3, 0, imm_b(-8));
+    let (raw_witin, lkm) =
+        BgeInstruction::assign_instances(&config, circuit_builder.cs.num_witin as usize, vec![
+            StepRecord::new_b_instruction(
+                12,
+                Change::new(MOCK_PC_START, pc_after),
+                insn_code,
+                a as Word,
+                b as Word,
+                10,
+            ),
+        ])
+        .unwrap();
 
-    MockProver::assert_satisfied(
-        &mut circuit_builder,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec(),
-        None,
-    );
+    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], None, Some(lkm));
     Ok(())
 }

@@ -15,7 +15,7 @@ const NUM_VARS_START: usize = 20;
 const NUM_VARS_END: usize = 20;
 
 fn bench_eval_hc(c: &mut Criterion) {
-    let mut group = c.benchmark_group(format!("eval_hc"));
+    let mut group = c.benchmark_group("eval_hc".to_string());
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
@@ -36,7 +36,7 @@ fn bench_eval_hc(c: &mut Criterion) {
 }
 
 fn bench_interp_hc(c: &mut Criterion) {
-    let mut group = c.benchmark_group(format!("interp_hc"));
+    let mut group = c.benchmark_group("interp_hc".to_string());
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {

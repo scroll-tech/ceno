@@ -1,31 +1,37 @@
 use std::marker::PhantomData;
 
 use ark_std::iterable::Iterable;
+use ceno_emul::WORD_SIZE;
 use ff_ext::ExtensionField;
 
-use itertools::{izip, Itertools};
+use itertools::{Itertools, interleave, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::{build_eq_x_r_vec_sequential, eq_eval, VPAuxInfo},
+    virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::Transcript;
 
 use crate::{
+    circuit_builder::SetTableAddrType,
     error::ZKVMError,
-    instructions::{riscv::ecall::HaltInstruction, Instruction},
+    expression::Instance,
+    instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{eq_eval_less_or_equal_than, get_challenge_pows, next_pow2_instance_padding},
+    utils::{
+        eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows,
+        next_pow2_instance_padding,
+    },
 };
 
 use super::{
-    constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof,
+    ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
 };
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -46,7 +52,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
-        let pi = &vm_proof.pv;
 
         // require ecall/halt proof to exist
         {
@@ -63,9 +68,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // including public input to transcript
-        pi.iter().for_each(|v| transcript.append_field_element(v));
+        let pi_evals = &vm_proof.pi_evals;
 
+        // TODO fix soundness: construct raw public input by ourself and trustless from proof
+        // including raw public input to transcript
+        vm_proof
+            .raw_pi
+            .iter()
+            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+
+        // verify constant poly(s) evaluation result match
+        // we can evaluate at this moment because constant always evaluate to same value
+        // non-constant poly(s) will be verified in respective (table) proof accordingly
+        izip!(&vm_proof.raw_pi, pi_evals)
+            .enumerate()
+            .try_for_each(|(i, (raw, eval))| {
+                if raw.len() == 1 && E::from(raw[0]) != *eval {
+                    Err(ZKVMError::VerifyError(format!(
+                        "pub input on index {i} mismatch  {raw:?} != {eval:?}"
+                    )))
+                } else {
+                    Ok(())
+                }
+            })?;
         // write fixed commitment to transcript
         for (_, vk) in self.vk.circuit_vks.iter() {
             if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
@@ -108,7 +133,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &opcode_proof,
-                pi,
+                pi_evals,
                 transcript,
                 NUM_FANIN,
                 &point_eval,
@@ -147,7 +172,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &self.vk.vp,
                 circuit_vk,
                 &table_proof,
-                &vm_proof.pv,
+                &vm_proof.raw_pi,
+                &vm_proof.pi_evals,
                 transcript,
                 NUM_FANIN_LOGUP,
                 &point_eval,
@@ -155,17 +181,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             )?;
             tracing::info!("verified proof for table {}", name);
 
-            logup_sum -= table_proof.lk_p1_out_eval * table_proof.lk_q1_out_eval.invert().unwrap();
-            logup_sum -= table_proof.lk_p2_out_eval * table_proof.lk_q2_out_eval.invert().unwrap();
+            logup_sum = table_proof
+                .lk_out_evals
+                .iter()
+                .fold(logup_sum, |acc, [p1, p2, q1, q2]| {
+                    acc - *p1 * q1.invert().unwrap() - *p2 * q2.invert().unwrap()
+                });
+
+            prod_w *= table_proof.w_out_evals.iter().flatten().product::<E>();
+            prod_r *= table_proof.r_out_evals.iter().flatten().product::<E>();
         }
         logup_sum -=
             E::from(dummy_table_item_multiplicity as u64) * dummy_table_item.invert().unwrap();
-
-        // check rw_set equality across all proofs
-        // TODO: enable this when we have cpu init/finalize and mem init/finalize
-        // if prod_r != prod_w {
-        //     return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
-        // }
 
         // check logup relation across all proofs
         if logup_sum != E::ZERO {
@@ -173,6 +200,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 "logup_sum({:?}) != 0",
                 logup_sum
             )));
+        }
+
+        let initial_global_state = eval_by_expr_with_instance(
+            &[],
+            &[],
+            pi_evals,
+            &challenges,
+            &self.vk.initial_global_state_expr,
+        );
+        prod_w *= initial_global_state;
+        let finalize_global_state = eval_by_expr_with_instance(
+            &[],
+            &[],
+            pi_evals,
+            &challenges,
+            &self.vk.finalize_global_state_expr,
+        );
+        prod_r *= finalize_global_state;
+        // check rw_set equality across all proofs
+        if prod_r != prod_w {
+            return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
         }
 
         Ok(true)
@@ -186,7 +234,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E, PCS>,
-        pi: &[E::BaseField],
+        pi: &[E],
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -406,8 +454,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if cs.assert_zero_expressions.iter().any(|expr| {
             eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
         }) {
-            // TODO add me back
-            // return Err(ZKVMError::VerifyError("zero expression != 0"));
+            return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
 
         tracing::debug!(
@@ -436,141 +483,282 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMTableProof<E, PCS>,
-        pi: &[E::BaseField],
+        raw_pi: &[Vec<E::BaseField>],
+        pi: &[E],
         transcript: &mut Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2],
     ) -> Result<Point<E>, ZKVMError> {
         let cs = circuit_vk.get_cs();
-        let lk_counts_per_instance = cs.lk_table_expressions.len();
-        let log2_lk_count = ceil_log2(lk_counts_per_instance);
-
-        let num_instances = proof.num_instances;
-        let log2_num_instances = ceil_log2(num_instances);
+        debug_assert!(
+            cs.r_table_expressions
+                .iter()
+                .zip_eq(cs.w_table_expressions.iter())
+                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
+        );
+        let is_skip_same_point_sumcheck = cs
+            .r_table_expressions
+            .iter()
+            .chain(cs.w_table_expressions.iter())
+            .map(|rw| rw.table_spec.len)
+            .chain(cs.lk_table_expressions.iter().map(|lk| lk.table_len))
+            .all_equal();
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        let expected_max_round = log2_num_instances + log2_lk_count;
-        let (_, _, logup_p_evals, logup_q_evals) = TowerVerify::verify(
-            vec![],
-            vec![vec![
-                proof.lk_p1_out_eval,
-                proof.lk_p2_out_eval,
-                proof.lk_q1_out_eval,
-                proof.lk_q2_out_eval,
-            ]],
-            tower_proofs,
-            vec![expected_max_round],
-            num_logup_fanin,
-            transcript,
-        )?;
-        assert!(logup_q_evals.len() == 1, "[lk_q_record]");
-        assert!(logup_p_evals.len() == 1, "[lk_p_record]");
-        assert_eq!(logup_p_evals[0].point, logup_q_evals[0].point);
-
-        // verify selector layer sumcheck
-        let rt_lk: Vec<E> = logup_p_evals[0].point.to_vec();
-
-        // 2 for denominator and numerator
-        let alpha_pow = get_challenge_pows(2, transcript);
-        let mut alpha_pow_iter = alpha_pow.iter();
-        let (alpha_lk_d, alpha_lk_n) = (
-            alpha_pow_iter.next().unwrap(),
-            alpha_pow_iter.next().unwrap(),
-        );
-        // alpha_lk * (out_lk_q - one) + alpha_lk_n * out_lk_p
-        let claim_sum =
-            *alpha_lk_d * (logup_q_evals[0].eval - E::ONE) + *alpha_lk_n * logup_p_evals[0].eval;
-        let sel_subclaim = IOPVerifierState::verify(
-            claim_sum,
-            &IOPProof {
-                point: vec![], // final claimed point will be derived from sumcheck protocol
-                proofs: proof.sel_sumcheck_proofs.clone(),
-            },
-            &VPAuxInfo {
-                max_degree: SEL_DEGREE.max(cs.max_non_lc_degree),
-                num_variables: log2_num_instances,
-                phantom: PhantomData,
-            },
-            transcript,
-        );
-        let (input_opening_point, expected_evaluation) = (
-            sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
-            sel_subclaim.expected_evaluation,
-        );
-        let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
-
-        let sel_lk = eq_eval_less_or_equal_than(
-            num_instances - 1,
-            &rt_lk[log2_lk_count..],
-            &input_opening_point,
-        );
-
-        let computed_evals = [
-            // lookup denominator
-            *alpha_lk_d
-                * sel_lk
-                * ((0..lk_counts_per_instance)
-                    .map(|i| proof.lk_d_in_evals[i] * eq_lk[i])
-                    .sum::<E>()
-                    + (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE)),
-            *alpha_lk_n
-                * sel_lk
-                * ((0..lk_counts_per_instance)
-                    .map(|i| proof.lk_n_in_evals[i] * eq_lk[i])
-                    .sum::<E>()),
-        ]
-        .iter()
-        .sum::<E>();
-        if computed_evals != expected_evaluation {
-            return Err(ZKVMError::VerifyError(
-                "sel evaluation verify failed".into(),
-            ));
-        }
-        // verify records (degree = 1) statement, thus no sumcheck
-        if cs
-            .lk_table_expressions
-            .iter()
-            .map(|lk| &lk.values)
-            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.multiplicity))
-            .zip_eq(
-                proof.lk_d_in_evals[..lk_counts_per_instance]
+        let expected_rounds = izip!(
+            // w_table_expression round match with r_table_expression so it fine to check either of them
+            &cs.r_table_expressions,
+            &proof.rw_hints_num_vars
+        )
+        .flat_map(|(r, hint_num_vars)| match r.table_spec.addr_type {
+            // fixed address: get number of round from vk
+            SetTableAddrType::FixedAddr => {
+                let num_vars = ceil_log2(r.table_spec.len);
+                [num_vars, num_vars]
+            }
+            // dynamic: respect prover hint
+            SetTableAddrType::DynamicAddr => {
+                // check number of vars doesn't exceed max len defined in vk
+                // this is important to prevent address overlapping
+                assert!((1 << hint_num_vars) <= r.table_spec.len);
+                [*hint_num_vars, *hint_num_vars]
+            }
+        })
+        .chain(
+            cs.lk_table_expressions
+                .iter()
+                .map(|l| ceil_log2(l.table_len)),
+        )
+        .collect_vec();
+        let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
+        let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
+            TowerVerify::verify(
+                proof
+                    .r_out_evals
                     .iter()
-                    .chain(proof.lk_n_in_evals[..lk_counts_per_instance].iter()),
+                    .zip(proof.w_out_evals.iter())
+                    .flat_map(|(r_evals, w_evals)| [r_evals.to_vec(), w_evals.to_vec()])
+                    .collect_vec(),
+                proof
+                    .lk_out_evals
+                    .iter()
+                    .map(|eval| eval.to_vec())
+                    .collect_vec(),
+                tower_proofs,
+                expected_rounds,
+                num_logup_fanin,
+                transcript,
+            )?;
+        assert_eq!(
+            logup_q_point_and_eval.len(),
+            cs.lk_table_expressions.len(),
+            "[lk_q_record] mismatch length"
+        );
+        assert_eq!(
+            logup_p_point_and_eval.len(),
+            cs.lk_table_expressions.len(),
+            "[lk_p_record] mismatch length"
+        );
+        assert_eq!(
+            prod_point_and_eval.len(),
+            cs.r_table_expressions.len() + cs.w_table_expressions.len(),
+            "[prod_record] mismatch length"
+        );
+
+        let (input_opening_point, in_evals) = if is_skip_same_point_sumcheck {
+            (
+                rt_tower,
+                prod_point_and_eval
+                    .into_iter()
+                    .chain(
+                        logup_p_point_and_eval
+                            .into_iter()
+                            .zip_eq(logup_q_point_and_eval)
+                            .flat_map(|(p_point_and_eval, q_point_and_eval)| {
+                                [p_point_and_eval, q_point_and_eval]
+                            }),
+                    )
+                    .map(|point_and_eval| point_and_eval.eval)
+                    .collect_vec(),
             )
-            .any(|(expr, expected_evals)| {
-                eval_by_expr_with_instance(
-                    &proof.fixed_in_evals,
-                    &proof.wits_in_evals,
-                    pi,
-                    challenges,
-                    expr,
-                ) != *expected_evals
-            })
-        {
+        } else {
+            assert!(proof.same_r_sumcheck_proofs.is_some());
+
+            // verify opening same point layer sumcheck
+            let alpha_pow = get_challenge_pows(
+                cs.r_table_expressions.len()
+                    + cs.w_table_expressions.len()
+                    + cs.lk_table_expressions.len() * 2, // 2 for lk numerator and denominator
+                transcript,
+            );
+
+            //  \sum_i alpha_{i} * (out_r_eval{i})
+            //  + \sum_i alpha_{i} * (out_w_eval{i})
+            //  + \sum_i alpha_{i} * (out_lk_n{i})
+            //  + \sum_i alpha_{i} * (out_lk_d{i})
+            let claim_sum = prod_point_and_eval
+                .iter()
+                .zip(alpha_pow.iter())
+                .map(|(point_and_eval, alpha)| *alpha * point_and_eval.eval)
+                .sum::<E>()
+                + interleave(&logup_p_point_and_eval, &logup_q_point_and_eval)
+                    .zip_eq(alpha_pow.iter().skip(prod_point_and_eval.len()))
+                    .map(|(point_n_eval, alpha)| *alpha * point_n_eval.eval)
+                    .sum::<E>();
+            let sel_subclaim = IOPVerifierState::verify(
+                claim_sum,
+                &IOPProof {
+                    point: vec![], // final claimed point will be derived from sumcheck protocol
+                    proofs: proof.same_r_sumcheck_proofs.clone().unwrap(),
+                },
+                &VPAuxInfo {
+                    max_degree: SEL_DEGREE,
+                    num_variables: expected_max_rounds,
+                    phantom: PhantomData,
+                },
+                transcript,
+            );
+            let (input_opening_point, expected_evaluation) = (
+                sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
+                sel_subclaim.expected_evaluation,
+            );
+
+            let computed_evals = [
+                // r, w
+                prod_point_and_eval
+                    .into_iter()
+                    .zip_eq(proof.rw_in_evals.iter())
+                    .zip(alpha_pow.iter())
+                    .map(|((point_and_eval, in_eval), alpha)| {
+                        let eq = eq_eval(
+                            &point_and_eval.point,
+                            &input_opening_point[0..point_and_eval.point.len()],
+                        );
+                        // TODO times multiplication factor
+                        *alpha * eq * in_eval
+                    })
+                    .sum::<E>(),
+                interleave(logup_p_point_and_eval, logup_q_point_and_eval)
+                    .zip_eq(proof.lk_in_evals.iter())
+                    .zip_eq(
+                        alpha_pow
+                            .iter()
+                            .skip(cs.r_table_expressions.len() + cs.w_table_expressions.len()),
+                    )
+                    .map(|((point_and_eval, in_eval), alpha)| {
+                        let eq = eq_eval(
+                            &point_and_eval.point,
+                            &input_opening_point[0..point_and_eval.point.len()],
+                        );
+                        // TODO times multiplication factor
+                        *alpha * eq * in_eval
+                    })
+                    .sum::<E>(),
+            ]
+            .iter()
+            .sum::<E>();
+            if computed_evals != expected_evaluation {
+                return Err(ZKVMError::VerifyError(
+                    "sel evaluation verify failed".into(),
+                ));
+            }
+            (
+                input_opening_point,
+                [proof.rw_in_evals.to_vec(), proof.lk_in_evals.to_vec()].concat(),
+            )
+        };
+        // verify records (degree = 1) statement, thus no sumcheck
+        if interleave(
+            &cs.r_table_expressions, // r
+            &cs.w_table_expressions, // w
+        )
+        .map(|rw| &rw.expr)
+        .chain(
+            cs.lk_table_expressions
+                .iter()
+                .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
+        )
+        .zip_eq(in_evals)
+        .any(|(expr, expected_evals)| {
+            eval_by_expr_with_instance(
+                &proof.fixed_in_evals,
+                &proof.wits_in_evals,
+                pi,
+                challenges,
+                expr,
+            ) != expected_evals
+        }) {
             return Err(ZKVMError::VerifyError(
                 "record evaluate != expected_evals".into(),
             ));
         }
 
-        PCS::simple_batch_verify(
-            vp,
-            circuit_vk.fixed_commit.as_ref().unwrap(),
-            &input_opening_point,
-            &proof.fixed_in_evals,
-            &proof.fixed_opening_proof,
-            transcript,
-        )
-        .map_err(ZKVMError::PCSError)?;
+        // verify dynamic address evaluation succinctly
+        // TODO we can also skip their mpcs proof
+        for r_table in cs.r_table_expressions.iter() {
+            match r_table.table_spec.addr_type {
+                SetTableAddrType::FixedAddr => (),
+                SetTableAddrType::DynamicAddr => {
+                    let offset = r_table.table_spec.offset;
+                    let expected_eval = eval_wellform_address_vec(
+                        offset as u64,
+                        WORD_SIZE as u64,
+                        &input_opening_point,
+                    );
+                    if expected_eval
+                        != proof.wits_in_evals[r_table.table_spec.addr_witin_id.unwrap()]
+                    {
+                        return Err(ZKVMError::VerifyError(
+                            "dynamic addr evaluate != expected_evals".into(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // assume public io is tiny vector, so we evaluate it directly without PCS
+        for &Instance(idx) in cs.instance_name_map.keys() {
+            let poly = raw_pi[idx].to_vec().into_mle();
+            let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
+            let eval = pi[idx];
+            if expected_eval != eval {
+                return Err(ZKVMError::VerifyError(format!(
+                    "pub input on index {idx} mismatch  {expected_eval:?} != {eval:?}"
+                )));
+            }
+            tracing::debug!(
+                "[table {name}] verified public inputs on index {idx} with point {input_opening_point:?}",
+            );
+        }
+
+        // do optional check of fixed_commitment openings by vk
+        if circuit_vk.fixed_commit.is_some() {
+            let Some(fixed_opening_proof) = &proof.fixed_opening_proof else {
+                return Err(ZKVMError::VerifyError(
+                    "fixed openning proof shoudn't be none".into(),
+                ));
+            };
+            PCS::simple_batch_verify(
+                vp,
+                circuit_vk.fixed_commit.as_ref().unwrap(),
+                &input_opening_point,
+                &proof.fixed_in_evals,
+                fixed_opening_proof,
+                transcript,
+            )
+            .map_err(ZKVMError::PCSError)?;
+        }
+
         tracing::debug!(
             "[table {}] verified opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
             name,
             proof.fixed_in_evals.len(),
             input_opening_point,
             proof.fixed_in_evals,
-            circuit_vk.fixed_commit.as_ref().unwrap(),
+            circuit_vk.fixed_commit,
         );
 
         PCS::simple_batch_verify(
@@ -612,7 +800,7 @@ impl TowerVerify {
         prod_out_evals: Vec<Vec<E>>,
         logup_out_evals: Vec<Vec<E>>,
         tower_proofs: &TowerProofs<E>,
-        expected_rounds: Vec<usize>,
+        num_variables: Vec<usize>,
         num_fanin: usize,
         transcript: &mut Transcript<E>,
     ) -> TowerVerifyResult<E> {
@@ -630,7 +818,7 @@ impl TowerVerify {
         assert!(logup_out_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
         }));
-        assert_eq!(expected_rounds.len(), num_prod_spec + num_logup_spec);
+        assert_eq!(num_variables.len(), num_prod_spec + num_logup_spec);
 
         let alpha_pows = get_challenge_pows(
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
@@ -660,9 +848,9 @@ impl TowerVerify {
         let mut logup_spec_p_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
         let mut logup_spec_q_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
 
-        let expected_max_round = expected_rounds.iter().max().unwrap();
+        let max_num_variables = num_variables.iter().max().unwrap();
 
-        let (next_rt, _) = (0..(expected_max_round-1)).try_fold(
+        let (next_rt, _) = (0..(max_num_variables-1)).try_fold(
             (
                 PointAndEval {
                     point: initial_rt,
@@ -685,13 +873,13 @@ impl TowerVerify {
                     },
                     transcript,
                 );
-                tracing::debug!("verified tower proof at layer {}/{}", round + 1, expected_max_round-1);
+                tracing::debug!("verified tower proof at layer {}/{}", round + 1, max_num_variables-1);
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
-                    .zip(expected_rounds.iter())
+                    .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         eq_eval(out_rt, &rt)
                             * alpha
@@ -702,7 +890,7 @@ impl TowerVerify {
                     .sum::<E>()
                     + (0..num_logup_spec)
                         .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
-                        .zip_eq(expected_rounds[num_prod_spec..].iter())
+                        .zip_eq(num_variables[num_prod_spec..].iter())
                         .map(|((spec_index, alpha), max_round)| {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
                             eq_eval(out_rt, &rt) * if round < *max_round-1 {
@@ -738,7 +926,7 @@ impl TowerVerify {
                 let next_round = round + 1;
                 let next_prod_spec_evals = (0..num_prod_spec)
                     .zip(next_alpha_pows.iter())
-                    .zip(expected_rounds.iter())
+                    .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         if round < max_round -1 {
                             // merged evaluation
@@ -762,7 +950,7 @@ impl TowerVerify {
                     .sum::<E>();
                 let next_logup_spec_evals = (0..num_logup_spec)
                     .zip_eq(next_alpha_pows[num_prod_spec..].chunks(2))
-                    .zip_eq(expected_rounds[num_prod_spec..].iter())
+                    .zip_eq(num_variables[num_prod_spec..].iter())
                     .map(|((spec_index, alpha), max_round)| {
                         if round < max_round -1 {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);

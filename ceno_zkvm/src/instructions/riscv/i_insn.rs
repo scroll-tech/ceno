@@ -31,9 +31,10 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         imm: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         rd_written: RegisterExpr<E>,
+        branching: bool,
     ) -> Result<Self, ZKVMError> {
         // State in and out
-        let vm_state = StateInOut::construct_circuit(circuit_builder, false)?;
+        let vm_state = StateInOut::construct_circuit(circuit_builder, branching)?;
 
         // Registers
         let rs1 = ReadRS1::construct_circuit(circuit_builder, rs1_read, vm_state.ts)?;
@@ -44,9 +45,8 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         // Fetch the instruction.
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
-            insn_kind.codes().opcode.into(),
-            rd.id.expr(),
-            insn_kind.codes().func3.into(),
+            insn_kind.into(),
+            Some(rd.id.expr()),
             rs1.id.expr(),
             0.into(),
             imm.clone(),

@@ -4,10 +4,9 @@
 use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
-use const_env::from_env;
 use criterion::*;
 
-use ff_ext::{ff::Field, ExtensionField};
+use ff_ext::{ExtensionField, ff::Field};
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 
@@ -30,38 +29,18 @@ cfg_if::cfg_if! {
 criterion_main!(op_add);
 
 const NUM_SAMPLES: usize = 10;
-#[from_env]
-const RAYON_NUM_THREADS: usize = 8;
 
+use multilinear_extensions::util::max_usable_threads;
 use singer::{
-    instructions::{add::AddInstruction, Instruction, InstructionGraph, SingerCircuitBuilder},
-    scheme::GKRGraphProverState,
     CircuitWiresIn, SingerGraphBuilder, SingerParams,
+    instructions::{Instruction, InstructionGraph, SingerCircuitBuilder, add::AddInstruction},
+    scheme::GKRGraphProverState,
 };
 use singer_utils::structs::ChipChallenges;
 use transcript::Transcript;
 
 fn bench_add(c: &mut Criterion) {
-    let max_thread_id = {
-        if !RAYON_NUM_THREADS.is_power_of_two() {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "add --features non_pow2_rayon_thread to enable unsafe feature which support non pow of 2 rayon thread pool"
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            {
-                use sumcheck::{local_thread_pool::create_local_pool_once, util::ceil_log2};
-                let max_thread_id = 1 << ceil_log2(RAYON_NUM_THREADS);
-                create_local_pool_once(1 << ceil_log2(RAYON_NUM_THREADS), true);
-                max_thread_id
-            }
-        } else {
-            RAYON_NUM_THREADS
-        }
-    };
+    let max_thread_id = max_usable_threads();
     let chip_challenges = ChipChallenges::default();
     let circuit_builder =
         SingerCircuitBuilder::<E>::new(chip_challenges).expect("circuit builder failed");
@@ -78,7 +57,7 @@ fn bench_add(c: &mut Criterion) {
                 b.iter_with_setup(
                     || {
                         let mut rng = test_rng();
-                        let singer_builder = SingerGraphBuilder::<E>::new();
+                        let singer_builder = SingerGraphBuilder::<E>::default();
                         let real_challenges = vec![E::random(&mut rng), E::random(&mut rng)];
                                 (rng, singer_builder, real_challenges)
                     },
@@ -123,14 +102,14 @@ fn bench_add(c: &mut Criterion) {
                         let point = vec![E::random(&mut rng), E::random(&mut rng)];
                         let target_evals = graph.target_evals(&wit, &point);
 
-                        let mut prover_transcript = &mut Transcript::new(b"Singer");
+                        let prover_transcript = &mut Transcript::new(b"Singer");
 
                         let timer = Instant::now();
                         let _ = GKRGraphProverState::prove(
                             &graph,
                             &wit,
                             &target_evals,
-                            &mut prover_transcript,
+                            prover_transcript,
                             (1 << instance_num_vars).min(max_thread_id),
                         )
                         .expect("prove failed");

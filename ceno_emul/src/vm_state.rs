@@ -2,50 +2,66 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
+    Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
     tracer::{Change, StepRecord, Tracer},
-    Program,
 };
-use anyhow::{anyhow, Result};
-use std::iter::from_fn;
+use anyhow::{Result, anyhow};
+use std::{iter::from_fn, ops::Deref, sync::Arc};
 
 /// An implementation of the machine state and of the side-effects of operations.
 pub struct VMState {
+    program: Arc<Program>,
     platform: Platform,
     pc: Word,
     /// Map a word-address (addr/4) to a word.
     memory: HashMap<WordAddr, Word>,
-    registers: [Word; 32],
+    registers: [Word; VMState::REG_COUNT],
     // Termination.
     halted: bool,
     tracer: Tracer,
 }
 
 impl VMState {
-    pub fn new(platform: Platform) -> Self {
-        let pc = platform.pc_start();
-        Self {
-            platform,
+    /// The number of registers that the VM uses.
+    /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
+    pub const REG_COUNT: usize = 32 + 1;
+
+    pub fn new(platform: Platform, program: Program) -> Self {
+        let pc = program.entry;
+        let program = Arc::new(program);
+
+        let mut vm = Self {
             pc,
+            platform,
+            program: program.clone(),
             memory: HashMap::new(),
-            registers: [0; 32],
+            registers: [0; VMState::REG_COUNT],
             halted: false,
             tracer: Tracer::new(),
+        };
+
+        // init memory from program.image
+        for (&addr, &value) in program.image.iter() {
+            vm.init_memory(ByteAddr(addr).waddr(), value);
         }
+
+        vm
     }
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
-        let mut state = Self::new(platform);
-        let program = Program::load_elf(elf, u32::MAX).unwrap();
-        for (addr, word) in program.image.iter() {
-            let addr = ByteAddr(*addr).waddr();
-            state.init_memory(addr, *word);
+        let program = Program::load_elf(elf, u32::MAX)?;
+        let state = Self::new(platform, program);
+
+        if state.program.base_address != state.platform.rom_start() {
+            return Err(anyhow!(
+                "Invalid base_address {:x}",
+                state.program.base_address
+            ));
         }
-        if program.entry != state.platform.pc_start() {
-            return Err(anyhow!("Invalid entrypoint {:x}", program.entry));
-        }
+
         Ok(state)
     }
 
@@ -57,7 +73,11 @@ impl VMState {
         &self.tracer
     }
 
-    /// Set a word in memory without side-effects.
+    pub fn program(&self) -> &Program {
+        self.program.deref()
+    }
+
+    /// Set a word in memory without side effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
         self.memory.insert(addr, value);
     }
@@ -86,6 +106,11 @@ impl VMState {
     pub fn init_register_unsafe(&mut self, idx: RegIdx, value: Word) {
         self.registers[idx] = value;
     }
+
+    fn halt(&mut self) {
+        self.set_pc(0.into());
+        self.halted = true;
+    }
 }
 
 impl EmuContext for VMState {
@@ -96,18 +121,11 @@ impl EmuContext for VMState {
             let exit_code = self.load_register(self.platform.reg_arg0())?;
             tracing::debug!("halt with exit_code={}", exit_code);
 
-            self.halt(ByteAddr(0));
+            self.halt();
             Ok(true)
         } else {
             self.trap(TrapCause::EcallError)
         }
-    }
-
-    // No traps are implemented so MRET is not legal.
-    fn mret(&self) -> Result<bool> {
-        #[allow(clippy::unusual_byte_groupings)]
-        let mret = 0b001100000010_00000_000_00000_1110011;
-        self.trap(TrapCause::IllegalInstruction(mret))
     }
 
     fn trap(&self, cause: TrapCause) -> Result<bool> {
@@ -124,12 +142,6 @@ impl EmuContext for VMState {
 
     fn set_pc(&mut self, after: ByteAddr) {
         self.pc = after.0;
-    }
-
-    fn halt(&mut self, pc: ByteAddr) {
-        self.pc = pc.0;
-        self.halted = true;
-        self.tracer.halt(ByteAddr(pc.0));
     }
 
     /// Load a register and record this operation.

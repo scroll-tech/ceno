@@ -2,15 +2,16 @@ use std::marker::PhantomData;
 
 use super::{EncodingProverParameters, EncodingScheme};
 use crate::{
+    Error,
     util::{field_type_index_mul_base, log2_strict, plonky2_util::reverse_bits},
-    vec_mut, Error,
+    vec_mut,
 };
 use ark_std::{end_timer, start_timer};
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
 
@@ -192,8 +193,17 @@ pub fn coset_fft<E: ExtensionField>(
 pub struct RSCodeDefaultSpec {}
 
 impl RSCodeSpec for RSCodeDefaultSpec {
+    // According to Theorem 1 of paper <BaseFold in the List Decoding Regime>
+    // (https://eprint.iacr.org/2024/1571), the soundness error is bounded by
+    // $O(1/|F|) + (\sqrt{\rho}+\epsilon)^s$
+    // where $s$ is the query complexity and $\epsilon$ is a small value
+    // that can be ignored. So the number of queries can be estimated by
+    // $$
+    // \frac{2\lambda}{-\log\rho}
+    // $$
+    // If we take $\lambda=100$ and $\rho=1/2$, then the number of queries is $200$.
     fn get_number_queries() -> usize {
-        972
+        200
     }
 
     fn get_rate_log() -> usize {

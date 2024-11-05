@@ -53,7 +53,8 @@ pub trait Instruction<E: ExtensionField> {
             steps.len().div_ceil(nthreads)
         } else {
             steps.len()
-        };
+        }
+        .max(1);
         let lk_multiplicity = LkMultiplicity::default();
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin);
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);

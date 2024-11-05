@@ -3,11 +3,11 @@ use std::{fmt::Display, mem::MaybeUninit};
 use ff_ext::ExtensionField;
 
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    instructions::riscv::constants::{UInt, UINT_LIMBS},
+    instructions::riscv::constants::{UINT_LIMBS, UInt},
     witness::LkMultiplicity,
-    Value,
 };
 
 use super::AssertLTConfig;
