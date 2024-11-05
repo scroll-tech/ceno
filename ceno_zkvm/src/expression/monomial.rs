@@ -1,11 +1,13 @@
 use ff_ext::ExtensionField;
+use itertools::{Itertools, chain, iproduct};
 
 use super::Expression;
 use Expression::*;
+use std::iter::Sum;
 
 impl<E: ExtensionField> Expression<E> {
     pub(super) fn to_monomial_form_inner(&self) -> Self {
-        Self::sum_terms(Self::combine(self.distribute()))
+        Self::combine(self.distribute()).into_iter().sum()
     }
 
     fn distribute(&self) -> Vec<Term<E>> {
@@ -24,64 +26,47 @@ impl<E: ExtensionField> Expression<E> {
                 }]
             }
 
-            Sum(a, b) => {
-                let mut res = a.distribute();
-                res.extend(b.distribute());
-                res
-            }
+            Sum(a, b) => chain!(a.distribute(), b.distribute()).collect(),
 
-            Product(a, b) => {
-                let a = a.distribute();
-                let b = b.distribute();
-                let mut res = vec![];
-                for a in a {
-                    for b in &b {
-                        res.push(Term {
-                            coeff: &a.coeff * &b.coeff,
-                            vars: a.vars.iter().chain(b.vars.iter()).cloned().collect(),
-                        });
-                    }
-                }
-                res
-            }
+            Product(a, b) => iproduct!(a.distribute(), b.distribute())
+                .map(|(a, b)| Term {
+                    coeff: &a.coeff * &b.coeff,
+                    vars: chain!(&a.vars, &b.vars).cloned().collect(),
+                })
+                .collect(),
 
-            ScaledSum(x, a, b) => {
-                let x = x.distribute();
-                let a = a.distribute();
-                let mut res = b.distribute();
-                for x in x {
-                    for a in &a {
-                        res.push(Term {
-                            coeff: &x.coeff * &a.coeff,
-                            vars: x.vars.iter().chain(a.vars.iter()).cloned().collect(),
-                        });
-                    }
-                }
-                res
-            }
+            ScaledSum(x, a, b) => chain!(
+                b.distribute(),
+                iproduct!(x.distribute(), a.distribute()).map(|(x, a)| Term {
+                    coeff: &x.coeff * &a.coeff,
+                    vars: chain!(&x.vars, &a.vars).cloned().collect(),
+                })
+            )
+            .collect(),
         }
     }
 
-    fn combine(terms: Vec<Term<E>>) -> Vec<Term<E>> {
-        let mut res: Vec<Term<E>> = vec![];
-        for mut term in terms {
-            term.vars.sort();
-
-            if let Some(res_term) = res.iter_mut().find(|res_term| res_term.vars == term.vars) {
-                res_term.coeff = res_term.coeff.clone() + term.coeff.clone();
-            } else {
-                res.push(term);
-            }
+    fn combine(mut terms: Vec<Term<E>>) -> Vec<Term<E>> {
+        for Term { vars, .. } in &mut terms {
+            vars.sort();
         }
-        res
-    }
-
-    fn sum_terms(terms: Vec<Term<E>>) -> Self {
         terms
             .into_iter()
-            .map(|term| term.vars.into_iter().fold(term.coeff, |a, b| a * b))
-            .reduce(|a, b| a + b)
-            .unwrap_or(Expression::ZERO)
+            .map(|Term { coeff, vars }| (vars, coeff))
+            .into_group_map()
+            .into_iter()
+            .map(|(vars, coeffs)| Term {
+                coeff: coeffs.into_iter().sum(),
+                vars,
+            })
+            .collect()
+    }
+}
+
+impl<E: ExtensionField> Sum<Term<E>> for Expression<E> {
+    fn sum<I: Iterator<Item = Term<E>>>(iter: I) -> Self {
+        iter.map(|term| term.coeff * term.vars.into_iter().product::<Expression<_>>())
+            .sum()
     }
 }
 

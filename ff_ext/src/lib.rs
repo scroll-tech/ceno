@@ -22,6 +22,7 @@ pub trait ExtensionField:
     + for<'a> SubAssign<&'a Self::BaseField>
     + for<'a> MulAssign<&'a Self::BaseField>
     + Ord
+    + std::hash::Hash
 {
     const DEGREE: usize;
 
