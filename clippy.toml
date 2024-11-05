@@ -7,5 +7,4 @@ allowed-duplicate-crates = [
   "regex-automata",
   "regex-syntax",
   "itertools",
-  "halo2curves",
 ]
