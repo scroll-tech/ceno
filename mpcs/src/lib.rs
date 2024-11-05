@@ -514,7 +514,8 @@ pub mod test_util {
                 let mut transcript = Transcript::new(b"BaseFold");
                 let polys = gen_rand_polys(|i| num_vars - (i >> 1), batch_size, base);
 
-                let comms = commit_polys_individually::<E, Pcs>(&pp, &polys, &mut transcript);
+                let comms =
+                    commit_polys_individually::<E, Pcs>(&pp, polys.as_slice(), &mut transcript);
 
                 let points =
                     get_points_from_challenge(|i| num_vars - i, num_points, &mut transcript);
@@ -604,7 +605,8 @@ pub mod test_util {
             let (comm, evals, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
                 let polys = gen_rand_polys(|_| num_vars, batch_size, base);
-                let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                let comm =
+                    Pcs::batch_commit_and_write(&pp, polys.as_slice(), &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
@@ -660,7 +662,8 @@ pub mod test_util {
                     .map(|i| {
                         let polys = gen_rand_polys(|_| num_vars - i, batch_size_inner, base);
                         let comm =
-                            Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                            Pcs::batch_commit_and_write(&pp, polys.as_slice(), &mut transcript)
+                                .unwrap();
                         (polys, comm)
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
