@@ -567,7 +567,7 @@ where
         if cfg!(feature = "sanity-check") {
             evals.iter().for_each(|eval| {
                 assert_eq!(
-                    &polys[eval.poly()].evaluate(points[eval.point()]),
+                    &polys[eval.poly()].evaluate(&points[eval.point()]),
                     eval.value(),
                 )
             })
