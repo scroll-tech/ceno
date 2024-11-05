@@ -9,7 +9,6 @@ readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
-
 [dependencies]
 aes = "0.8"
 ark-std.workspace = true
