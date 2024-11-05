@@ -1,5 +1,4 @@
 use ff_ext::ExtensionField;
-use rand::RngCore;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::Transcript;
@@ -114,7 +113,6 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type Commitment: Clone + Debug + Default + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
     type Proof: Clone + Debug + Serialize + DeserializeOwned;
-    type Rng: RngCore + Clone;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error>;
 
