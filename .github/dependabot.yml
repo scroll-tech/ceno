@@ -4,3 +4,7 @@ updates:
     directories: ["/", "/examples"]
     schedule:
       interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "riscv-testdata/create_testdata"
+    schedule:
+      interval: "weekly"
