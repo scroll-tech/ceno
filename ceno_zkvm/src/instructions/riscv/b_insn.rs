@@ -10,6 +10,7 @@ use crate::{
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -99,7 +100,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         set_val!(
             instance,
             self.imm,
-            InsnRecord::imm_internal_field::<E::BaseField>(&step.insn())
+            i64_to_base::<E::BaseField>(InsnRecord::imm_internal(&step.insn()))
         );
 
         // Fetch the instruction.

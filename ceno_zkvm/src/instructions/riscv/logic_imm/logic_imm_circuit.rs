@@ -11,7 +11,7 @@ use crate::{
         Instruction,
         riscv::{constants::UInt8, i_insn::IInstructionConfig},
     },
-    tables::OpsTable,
+    tables::{InsnRecord, OpsTable},
     utils::split_to_u8,
     witness::LkMultiplicity,
 };
@@ -57,7 +57,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         UInt8::<E>::logic_assign::<I::OpsTable>(
             lkm,
             step.rs1().unwrap().value.into(),
-            step.insn().imm_internal().into(),
+            InsnRecord::imm_internal(&step.insn()) as u64,
         );
 
         config.assign_instance(instance, lkm, step)
@@ -112,7 +112,7 @@ impl<E: ExtensionField> LogicConfig<E> {
         let rs1_read = split_to_u8(step.rs1().unwrap().value);
         self.rs1_read.assign_limbs(instance, &rs1_read);
 
-        let imm = split_to_u8::<u16>(step.insn().imm_internal());
+        let imm = split_to_u8::<u16>(InsnRecord::imm_internal(&step.insn()) as u32);
         self.imm.assign_limbs(instance, &imm);
 
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
