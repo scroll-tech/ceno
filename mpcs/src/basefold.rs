@@ -47,7 +47,6 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
 };
 
-use rand_chacha::ChaCha8Rng;
 use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -278,7 +277,6 @@ where
     type Commitment = BasefoldCommitment<E>;
     type CommitmentChunk = Digest<E::BaseField>;
     type Proof = BasefoldProof<E>;
-    type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error> {
         let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size));

@@ -1,7 +1,6 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use rand::RngCore;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::Transcript;
@@ -376,6 +375,7 @@ pub mod test_util {
         num_vars_end: usize,
     ) where
         Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
             // Setup
@@ -435,6 +435,7 @@ pub mod test_util {
     ) where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let batch_size = 2;
@@ -550,7 +551,7 @@ pub mod test_util {
         batch_size: usize,
     ) where
         E: ExtensionField,
-        Pcs: PolynomialCommitmentScheme<E, Rng = ChaCha8Rng>,
+        Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let rng = ChaCha8Rng::from_seed([0u8; 32]);
