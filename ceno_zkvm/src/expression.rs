@@ -18,7 +18,7 @@ use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    structs::{ChallengeId, WitnessId},
+    structs::{ChallengeId, RAMType, WitnessId},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -336,7 +336,7 @@ binop_assign_instances!(MulAssign, mul_assign, Mul, mul);
 impl<E: ExtensionField> Shl<usize> for Expression<E> {
     type Output = Expression<E>;
     fn shl(self, rhs: usize) -> Expression<E> {
-        self * (1 << rhs)
+        self * (1_usize << rhs)
     }
 }
 
@@ -831,7 +831,7 @@ macro_rules! impl_from_unsigned {
         )*
     };
 }
-impl_from_unsigned!(u8, u16, u32, u64, usize);
+impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType);
 
 // Implement From trait for u128 separately since it requires explicit reduction
 impl<F: SmallField, E: ExtensionField<BaseField = F>> From<u128> for Expression<E> {
