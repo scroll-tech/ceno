@@ -313,8 +313,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         name_fn: N,
         cb: impl FnOnce(&mut CircuitBuilder<E>) -> T,
     ) -> T {
-        self.cs
-            .namespace(name_fn, |cs| cb(&mut CircuitBuilder::new(cs)))
+        self.cs.namespace(name_fn, |cs| {
+            let mut inner_circuit_builder = CircuitBuilder::new(cs);
+            cb(&mut inner_circuit_builder)
+        })
     }
 
     pub(crate) fn assert_byte<NR, N>(
