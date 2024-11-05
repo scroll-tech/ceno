@@ -262,10 +262,6 @@ impl DecodedInstruction {
         }
     }
 
-    pub fn codes(&self) -> InsnCodes {
-        FastDecodeTable::get().lookup(self)
-    }
-
     pub fn immediate(&self) -> u32 {
         match self.codes().format {
             R => 0,
@@ -275,6 +271,10 @@ impl DecodedInstruction {
             U => self.imm_u(),
             J => self.imm_j(),
         }
+    }
+
+    pub fn codes(&self) -> InsnCodes {
+        FastDecodeTable::get().lookup(self)
     }
 
     fn imm_b(&self) -> u32 {
