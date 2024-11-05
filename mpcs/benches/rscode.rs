@@ -18,7 +18,7 @@ use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 type E = GoldilocksExt2;
 
 const NUM_SAMPLES: usize = 10;

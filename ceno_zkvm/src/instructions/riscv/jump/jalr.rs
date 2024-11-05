@@ -14,6 +14,7 @@ use crate::{
     },
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
@@ -116,10 +117,10 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let insn = step.insn();
 
         let rs1 = step.rs1().unwrap().value;
-        let imm: i32 = insn.imm_internal() as i32;
+        let imm = InsnRecord::imm_internal(&insn);
         let rd = step.rd().unwrap().value.after;
 
-        let (sum, overflowing) = rs1.overflowing_add_signed(imm);
+        let (sum, overflowing) = rs1.overflowing_add_signed(imm as i32);
 
         config
             .rs1_read
@@ -128,8 +129,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             .rd_written
             .assign_value(instance, Value::new(rd, lk_multiplicity));
 
-        let imm_field = InsnRecord::imm_internal_field::<E::BaseField>(&insn);
-        set_val!(instance, config.imm, imm_field);
+        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
 
         config
             .next_pc_addr
