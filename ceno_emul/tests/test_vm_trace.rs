@@ -33,7 +33,7 @@ fn test_vm_trace() -> Result<()> {
     assert_eq!(ctx.peek_register(2), x2);
     assert_eq!(ctx.peek_register(3), x3);
 
-    let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().kind().1).collect();
+    let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().codes().kind).collect();
     assert_eq!(ops, expected_ops_fibonacci_20());
 
     assert_eq!(

@@ -223,7 +223,7 @@ impl<E: ExtensionField> WriteRD<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rd() as u64);
+        set_val!(instance, self.id, step.insn().rd_internal() as u64);
         set_val!(instance, self.prev_ts, step.rd().unwrap().previous_cycle);
 
         // Register state
@@ -381,13 +381,13 @@ impl<E: ExtensionField> MemAddr<E> {
 
     /// Represent the address aligned to 2 bytes.
     pub fn expr_align2(&self) -> AddressExpr<E> {
-        self.addr.address_expr() - self.low_bit_exprs()[0].clone()
+        self.addr.address_expr() - &self.low_bit_exprs()[0]
     }
 
     /// Represent the address aligned to 4 bytes.
     pub fn expr_align4(&self) -> AddressExpr<E> {
         let low_bits = self.low_bit_exprs();
-        self.addr.address_expr() - low_bits[1].clone() * 2 - low_bits[0].clone()
+        self.addr.address_expr() - &low_bits[1] * 2 - &low_bits[0]
     }
 
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
@@ -417,7 +417,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Express the value of the low bits.
         let low_sum: Expression<E> = (n_zeros..Self::N_LOW_BITS)
             .zip_eq(low_bits.iter())
-            .map(|(pos, bit)| bit.expr() * (1 << pos))
+            .map(|(pos, bit)| bit.expr() << pos)
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
@@ -425,7 +425,7 @@ impl<E: ExtensionField> MemAddr<E> {
             .invert()
             .unwrap()
             .expr();
-        let mid_u14 = (limbs[0].clone() - low_sum) * shift_right;
+        let mid_u14 = (&limbs[0] - low_sum) * shift_right;
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 
         // Range check the high limb.
@@ -537,8 +537,8 @@ mod test {
 
         if is_ok {
             cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;
-            cb.require_equal(|| "", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
-            cb.require_equal(|| "", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
+            cb.require_equal(|| "", mem_addr.expr_align2(), (addr & !1).into())?;
+            cb.require_equal(|| "", mem_addr.expr_align4(), (addr & !3).into())?;
         }
         MockProver::assert_with_expected_errors(
             &cb,
