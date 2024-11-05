@@ -9,7 +9,7 @@ use crate::{
 };
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
@@ -283,9 +283,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     /// Iterate opcode circuits, then table circuits, sorted by name.
     pub fn into_iter_sorted(self) -> impl Iterator<Item = (String, RowMajorMatrix<E::BaseField>)> {
-        self.witnesses_opcodes
-            .into_iter()
-            .chain(self.witnesses_tables)
+        chain(self.witnesses_opcodes, self.witnesses_tables)
     }
 }
 
