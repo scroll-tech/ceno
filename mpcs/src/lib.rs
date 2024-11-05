@@ -359,12 +359,9 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
 
 #[cfg(test)]
 pub mod test_util {
-    use crate::Evaluation;
-    use itertools::chain;
-
-    use crate::PolynomialCommitmentScheme;
+    use crate::{Evaluation, PolynomialCommitmentScheme};
     use ff_ext::ExtensionField;
-    use itertools::Itertools;
+    use itertools::{Itertools, chain};
     use multilinear_extensions::{
         mle::{DenseMultilinearExtension, MultilinearExtension},
         virtual_poly_v2::ArcMultilinearExtension,
