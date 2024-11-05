@@ -24,7 +24,7 @@ cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 ff = "0.13"
-goldilocks = { git = "https://github.com/hero78119/Goldilocks" }
+goldilocks = { git = "https://github.com/scroll-tech/ceno-Goldilocks" }
 itertools = "0.13"
 paste = "1"
 plonky2 = "0.2"
