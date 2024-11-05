@@ -34,8 +34,6 @@ transcript = { path = "../transcript" }
 plonky2 = "0.2.2"
 
 [dev-dependencies]
-simple-frontend = { path = "../simple-frontend" }
-gkr = { path = "../gkr" }
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
