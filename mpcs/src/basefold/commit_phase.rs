@@ -229,7 +229,7 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
 >(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     level: usize,
-    values: &Vec<E>,
+    values: &[E],
     additional_values: impl Fn(usize) -> E + Sync,
     challenge: E,
 ) -> Vec<E> {

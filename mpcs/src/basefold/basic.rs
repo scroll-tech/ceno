@@ -1,18 +1,18 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::{
+    Error,
     basefold::CommitPhaseInput,
     util::{field_type_iter_ext, merkle_tree::MerkleTree},
-    Error,
 };
 
 use super::{
-    commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
     BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
-    BasefoldStrategy, BasefoldVerifierParams,
+    BasefoldStrategy, BasefoldVerifierParams, commit_phase::CommitPhaseStrategy,
+    query_phase::QueryCheckStrategy, structure::BasefoldProof,
 };
 
 pub(crate) struct ProverInputs<'a, E: ExtensionField>
@@ -111,9 +111,9 @@ where
         let comm = verifier_inputs.comm;
 
         if comm.root() == merkle_tree.root() {
-            return Ok(());
+            Ok(())
         } else {
-            return Err(Error::MerkleRootMismatch);
+            Err(Error::MerkleRootMismatch)
         }
     }
 

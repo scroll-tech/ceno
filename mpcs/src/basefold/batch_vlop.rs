@@ -5,18 +5,18 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec, virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::{
-    util::{arithmetic::inner_product, field_type_index_ext, log2_strict},
     Error,
+    util::{arithmetic::inner_product, field_type_index_ext, log2_strict},
 };
 
 use super::{
-    commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
     BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
-    BasefoldStrategy, BasefoldVerifierParams, CommitPhaseInput,
+    BasefoldStrategy, BasefoldVerifierParams, CommitPhaseInput, commit_phase::CommitPhaseStrategy,
+    query_phase::QueryCheckStrategy, structure::BasefoldProof,
 };
 
 pub(crate) struct ProverInputs<'a, E: ExtensionField>

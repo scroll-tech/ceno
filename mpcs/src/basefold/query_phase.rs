@@ -178,6 +178,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>, QCS: QueryCheckStrategy<E>>(
         &self,
         indices: &[usize],
@@ -476,9 +477,8 @@ where
             .inner
             .iter()
             .enumerate()
-            .filter_map(|(index, pair)| {
-                (pair.codeword_size_log() == codeword_size_log).then(|| (index, pair.inner.clone()))
-            })
+            .filter(|&(_, pair)| (pair.codeword_size_log() == codeword_size_log))
+            .map(|(index, pair)| (index, pair.inner.clone()))
             .collect()
     }
 
@@ -524,6 +524,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>, QCS: QueryCheckStrategy<E>>(
         &self,
         vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,

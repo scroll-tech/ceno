@@ -3,19 +3,19 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec, virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::{
+    Error,
     basefold::CommitPhaseInput,
     util::{arithmetic::inner_product, field_type_index_ext, merkle_tree::MerkleTree},
-    Error,
 };
 
 use super::{
-    commit_phase::CommitPhaseStrategy, query_phase::QueryCheckStrategy, structure::BasefoldProof,
     BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
-    BasefoldStrategy, BasefoldVerifierParams,
+    BasefoldStrategy, BasefoldVerifierParams, commit_phase::CommitPhaseStrategy,
+    query_phase::QueryCheckStrategy, structure::BasefoldProof,
 };
 
 pub(crate) struct ProverInputs<'a, E: ExtensionField>
@@ -140,9 +140,9 @@ where
         let trivial_proof = &proof.trivial_proof;
         let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone(), 2);
         if comm.root() == merkle_tree.root() {
-            return Ok(());
+            Ok(())
         } else {
-            return Err(Error::MerkleRootMismatch);
+            Err(Error::MerkleRootMismatch)
         }
     }
 

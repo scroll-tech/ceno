@@ -7,12 +7,13 @@ use multilinear_extensions::{
     virtual_poly_v2::ArcMultilinearExtension,
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::{
+    Error, Evaluation,
     basefold::CommitPhaseInput,
-    sum_check::{eq_xy_eval, SumCheck as _, VirtualPolynomial},
+    sum_check::{SumCheck as _, VirtualPolynomial, eq_xy_eval},
     util::{
         add_polynomial_with_coeff,
         arithmetic::inner_product,
@@ -20,13 +21,12 @@ use crate::{
         field_type_index_ext, field_type_to_ext_vec, log2_strict, multiply_poly, poly_index_ext,
         poly_iter_ext,
     },
-    Error, Evaluation,
 };
 
 use super::{
-    commit_phase::CommitPhaseStrategy, inner_product_three, query_phase::QueryCheckStrategy,
-    structure::BasefoldProof, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams,
-    BasefoldSpec, BasefoldStrategy, BasefoldVerifierParams, SumCheck,
+    BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
+    BasefoldStrategy, BasefoldVerifierParams, SumCheck, commit_phase::CommitPhaseStrategy,
+    inner_product_three, query_phase::QueryCheckStrategy, structure::BasefoldProof,
 };
 
 pub(crate) struct ProverInputs<'a, E: ExtensionField>

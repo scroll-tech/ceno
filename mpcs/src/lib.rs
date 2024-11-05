@@ -434,11 +434,11 @@ pub mod test_util {
     ) -> Vec<Pcs::CommitmentWithData> {
         polys
             .iter()
-            .map(|poly| Pcs::commit_and_write(&pp, &poly, transcript).unwrap())
+            .map(|poly| Pcs::commit_and_write(pp, poly, transcript).unwrap())
             .collect_vec()
     }
 
-    pub fn vecs_as_slices<'a, T>(values: &'a Vec<Vec<T>>) -> Vec<&'a [T]> {
+    pub fn vecs_as_slices<T>(values: &[Vec<T>]) -> Vec<&[T]> {
         values.iter().map(|vec| vec.as_slice()).collect::<Vec<_>>()
     }
 
@@ -686,7 +686,7 @@ pub mod test_util {
                 let mut transcript = Transcript::new(b"BaseFold");
                 comms
                     .iter()
-                    .for_each(|comm| Pcs::write_commitment(&comm, &mut transcript).unwrap());
+                    .for_each(|comm| Pcs::write_commitment(comm, &mut transcript).unwrap());
 
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 evals.iter().for_each(|evals| {

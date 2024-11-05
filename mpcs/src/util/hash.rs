@@ -21,14 +21,14 @@ pub fn write_digest_to_transcript<E: ExtensionField>(
 }
 
 pub fn hash_field_type<E: ExtensionField>(field_type: &FieldType<E>) -> Digest<E::BaseField> {
-    PoseidonHash::hash_or_noop_iter(field_type_iter_base(&field_type))
+    PoseidonHash::hash_or_noop_iter(field_type_iter_base(field_type))
 }
 
 pub fn hash_field_type_subvector<E: ExtensionField>(
     field_type: &FieldType<E>,
     range: impl IntoIterator<Item = usize>,
 ) -> Digest<E::BaseField> {
-    PoseidonHash::hash_or_noop_iter(field_type_iter_range_base(&field_type, range))
+    PoseidonHash::hash_or_noop_iter(field_type_iter_range_base(field_type, range))
 }
 
 pub fn hash_two_digests<F: SmallField + Poseidon>(a: &Digest<F>, b: &Digest<F>) -> Digest<F> {

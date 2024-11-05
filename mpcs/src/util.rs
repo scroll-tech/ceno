@@ -161,7 +161,7 @@ pub fn field_type_iter_ext<E: ExtensionField>(
     evaluations: &FieldType<E>,
 ) -> impl Iterator<Item = E> + '_ {
     match evaluations {
-        FieldType::Ext(coeffs) => Either::Left(coeffs.iter().map(|x| *x)),
+        FieldType::Ext(coeffs) => Either::Left(coeffs.iter().copied()),
         FieldType::Base(coeffs) => Either::Right(coeffs.iter().map(|x| (*x).into())),
         _ => unreachable!(),
     }
@@ -177,7 +177,7 @@ pub fn field_type_to_ext_vec<E: ExtensionField>(evaluations: &FieldType<E>) -> V
 
 pub fn field_type_as_ext<E: ExtensionField>(values: &FieldType<E>) -> &Vec<E> {
     match values {
-        FieldType::Ext(coeffs) => &coeffs,
+        FieldType::Ext(coeffs) => coeffs,
         FieldType::Base(_) => panic!("Expected base field"),
         _ => unreachable!(),
     }
@@ -206,7 +206,7 @@ pub fn field_type_iter_range_base<'a, E: ExtensionField>(
     }
 }
 
-pub fn multiply_poly<E: ExtensionField>(poly: &mut Vec<E>, scalar: &E) {
+pub fn multiply_poly<E: ExtensionField>(poly: &mut [E], scalar: &E) {
     for coeff in poly.iter_mut() {
         *coeff *= scalar;
     }
@@ -220,7 +220,7 @@ pub fn resize_num_vars<E: ExtensionField>(poly: &mut Vec<E>, num_vars: usize) {
         return;
     }
     poly.resize(1 << num_vars, E::ZERO);
-    (log2_strict(poly.len())..1 << num_vars).for_each(|i| poly[i] = poly[i & (poly.len()) - 1])
+    (log2_strict(poly.len())..1 << num_vars).for_each(|i| poly[i] = poly[i & ((poly.len()) - 1)])
 }
 
 pub fn add_polynomial_with_coeff<E: ExtensionField>(

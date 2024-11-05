@@ -133,7 +133,7 @@ where
     }
 
     pub fn root_ref(&self) -> &Digest<E::BaseField> {
-        &self.inner.root_ref()
+        self.inner.root_ref()
     }
 
     pub fn height(&self) -> usize {
@@ -337,7 +337,7 @@ where
     }
 
     fn hash_part(&self, start: usize, end: usize) -> Digest<<E as ExtensionField>::BaseField> {
-        PoseidonHash::hash_or_noop_iter((start..end).into_iter().flat_map(|i| self[i].as_bases()))
+        PoseidonHash::hash_or_noop_iter((start..end).flat_map(|i| self[i].as_bases()))
     }
 
     fn get_leaves_pair_at(leaves: &[&Self], index: usize) -> BatchLeavesPair<E> {
@@ -433,6 +433,10 @@ where
             FieldType::Base(leaves) => leaves.len(),
             _ => unreachable!(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn as_ext(&self) -> Vec<E> {
@@ -571,10 +575,10 @@ where
     pub fn left(&self) -> FieldType<E> {
         match self {
             BatchLeavesPair::Ext(x) => {
-                FieldType::Ext(x.iter().map(|(x, _)| x.clone()).collect::<Vec<_>>())
+                FieldType::Ext(x.iter().map(|(x, _)| *x).collect::<Vec<_>>())
             }
             BatchLeavesPair::Base(x) => {
-                FieldType::Base(x.iter().map(|(x, _)| x.clone()).collect::<Vec<_>>())
+                FieldType::Base(x.iter().map(|(x, _)| *x).collect::<Vec<_>>())
             }
         }
     }
@@ -582,10 +586,10 @@ where
     pub fn right(&self) -> FieldType<E> {
         match self {
             BatchLeavesPair::Ext(x) => {
-                FieldType::Ext(x.iter().map(|(_, y)| y.clone()).collect::<Vec<_>>())
+                FieldType::Ext(x.iter().map(|(_, y)| *y).collect::<Vec<_>>())
             }
             BatchLeavesPair::Base(x) => {
-                FieldType::Base(x.iter().map(|(_, y)| y.clone()).collect::<Vec<_>>())
+                FieldType::Base(x.iter().map(|(_, y)| *y).collect::<Vec<_>>())
             }
         }
     }
