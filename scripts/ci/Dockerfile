@@ -25,7 +25,7 @@ RUN chown -R docker ~docker && cd /home/docker/actions-runner/bin/ \
 COPY start.sh start.sh
 RUN chmod +x start.sh
 
-# ./config.sh & ./run.sh are not allowed to be run as root
+# GitHub action runner scripts (config.sh and run.sh) are not allowed to be run as root
 USER docker
 
 ENTRYPOINT ["./start.sh"]
