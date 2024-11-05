@@ -122,12 +122,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("SLTU/{name}"),
-                |cb| {
-                    let config = SltuInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
+                SltuInstruction::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::SLTU, 2, 3, 4, 0);
