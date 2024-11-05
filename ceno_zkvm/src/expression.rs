@@ -3,7 +3,7 @@ mod monomial;
 use std::{
     cmp::max,
     fmt::Display,
-    iter::Sum,
+    iter::{Product, Sum},
     mem::MaybeUninit,
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
@@ -22,24 +22,25 @@ use crate::{
     structs::{ChallengeId, RAMType, WitnessId},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
-    /// Fixed
+    /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values
     Instance(Instance),
     /// Constant poly
     Constant(E::BaseField),
-    /// This is the sum of two expression
+    /// This is the sum of two expressions
     Sum(Box<Expression<E>>, Box<Expression<E>>),
-    /// This is the product of two polynomials
+    /// This is the product of two expressions
     Product(Box<Expression<E>>, Box<Expression<E>>),
-    /// This is x, a, b expr to represent ax + b polynomial
-    /// and x is one of wit / fixed / instance, a and b are either constant or challenge
+    /// ScaledSum(x, a, b) represents a * x + b
+    /// where x is one of wit / fixed / instance, a and b are either constants or challenges
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
-    Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
+    /// Challenge(challenge_id, power, scalar, offset)
+    Challenge(ChallengeId, usize, E, E),
 }
 
 /// this is used as finite state machine state
@@ -364,6 +365,12 @@ impl<E: ExtensionField> ShlAssign<usize> for Expression<E> {
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
         iter.fold(Expression::ZERO, |acc, x| acc + x)
+    }
+}
+
+impl<E: ExtensionField> Product for Expression<E> {
+    fn product<I: Iterator<Item = Expression<E>>>(iter: I) -> Self {
+        iter.fold(Expression::ONE, |acc, x| acc * x)
     }
 }
 
@@ -720,7 +727,7 @@ pub struct WitIn {
     pub id: WitnessId,
 }
 
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Fixed(pub usize);
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]

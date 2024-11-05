@@ -14,7 +14,7 @@ use clap::Parser;
 
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext,
-    InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
+    InsnKind::{ADD, BLTU, EANY, LUI, LW},
     PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
@@ -52,8 +52,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
         encode_rv32(ADD, 2, 3, 3, 0),              // add x3, x2, x3
         encode_rv32(BLTU, 0, 3, 0, -8_i32 as u32), // bltu x0, x3, -8
         // End.
-        encode_rv32(JAL, 0, 0, 1, 4), // jal x1, 4
-        ECALL_HALT,                   // ecall halt
+        ECALL_HALT, // ecall halt
     );
     program
 };

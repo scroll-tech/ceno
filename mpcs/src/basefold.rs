@@ -34,7 +34,6 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
 };
 
-use rand_chacha::ChaCha8Rng;
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelRefIterator, ParallelIterator},
@@ -518,6 +517,66 @@ where
     }
 }
 
+/// Implement the Polynomial Commitment Scheme present in the BaseFold paper
+/// https://eprint.iacr.org/2023/1705
+///
+/// Here is a high-level explanation of the BaseFold PCS.
+///
+/// BaseFold is the mixture of FRI and Sum-Check for proving the sum-check
+/// statement
+/// y = \sum_{b\in H} f(b) eq(b, r)
+/// where
+/// (1) f is the committed multilinear polynomial with n variables
+/// (2) H is the n-dimensional hypercube
+/// (3) r is the evaluation point (where the polynomial commitment is opened)
+/// (4) y is the evaluation result (the opening result)
+///
+/// To prove this statement, the parties execute the normal sum-check,
+/// which reduces the sum-check statement to a evaluation statement of f
+/// at random point \alpha sampled during sum-check. Unlike normal sum-check,
+/// where this final evaluation statement is delegated to a PCS, in BaseFold
+/// this evaluation result is provided by FRI. This is possible because in
+/// FRI, the repeated folding of the originally committed codeword is
+/// effectively applying the even-odd folding to the message, which is
+/// equivalent to applying the evaluating algorithm of multilinear polynomials.
+///
+/// The commit algorithm is the same as FRI, i.e., encode the polynomial
+/// with RS code (or more generally, with a _foldable code_), and commit
+/// to the codeword with Merkle tree. The key point is that the encoded
+/// message is the coefficient vector (instead of the evaluations over the
+/// hypercube), because the FRI folding is working on the coefficients.
+///
+/// The opening and verification protocol is, similar to FRI, divided into
+/// two parts:
+/// (1) the committing phase (not to confused with commit algorithm of PCS)
+/// (2) the query phase
+///
+/// The committing phase proceed by interleavingly execute FRI committing phase
+/// and the sum-check protocol. More precisely, in each round, the parties
+/// execute:
+/// (a) The prover sends the partially summed polynomial (sum-check).
+/// (b) The verifier samples a challenge (sum-check and FRI).
+/// (c) The prover substitutes one variable of the current polynomial
+///     at the challenge (sum-check).
+/// (d) The prover folds the codeword by the challenge and sends the
+///     Merkle root of the folded codeword (FRI).
+///
+/// At the end of the committing phase:
+/// (a) The prover sends the final codeword in the clear (in practice, it
+///     suffices to send the message and let the verifier encode it locally
+///     to save the proof size).
+/// (b) The verifier interprets this last FRI message as a multilinear
+///     polynomial, sums it over the hypercube, and compares the sum with
+///     the current claimed sum of the sum-check protocol.
+///
+/// Now the sum-check part of the protocol is finished. The query phase
+/// proceed exactly the same as FRI: for each query
+/// (a) The verifier samples an index i in the codeword.
+/// (b) The prover opens the codeword at i and i XOR 1, and the sequence of
+///     folded codewords at the folded positions, i.e., for round k, the
+///     positions are (i >> k) and (i >> k) XOR 1.
+/// (c) The verifier checks that the folding has been correctly computed
+///     at these positions.
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> PolynomialCommitmentScheme<E> for Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
@@ -530,7 +589,6 @@ where
     type Commitment = BasefoldCommitment<E, Spec>;
     type CommitmentChunk = <Spec::Hasher as Hasher<E>>::Digest;
     type Proof = BasefoldProof<E, Spec>;
-    type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error> {
         let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size));
