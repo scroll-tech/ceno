@@ -693,48 +693,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
-name = "gkr"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "cfg-if",
- "criterion",
- "crossbeam-channel",
- "ff",
- "ff_ext",
- "goldilocks",
- "itertools 0.13.0",
- "multilinear_extensions",
- "pprof",
- "rayon",
- "serde",
- "serde_json",
- "simple-frontend",
- "sumcheck",
- "tiny-keccak",
- "tracing",
- "tracing-flame",
- "tracing-subscriber",
- "transcript",
-]
-
-[[package]]
-name = "gkr-graph"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "ff",
- "ff_ext",
- "gkr",
- "goldilocks",
- "itertools 0.13.0",
- "multilinear_extensions",
- "simple-frontend",
- "sumcheck",
- "transcript",
-]
-
-[[package]]
 name = "glob"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1652,64 +1610,6 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "simple-frontend"
-version = "0.1.0"
-dependencies = [
- "ff",
- "ff_ext",
- "goldilocks",
- "itertools 0.13.0",
- "serde",
-]
-
-[[package]]
-name = "singer"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "cfg-if",
- "criterion",
- "ff",
- "ff_ext",
- "gkr",
- "gkr-graph",
- "goldilocks",
- "itertools 0.13.0",
- "multilinear_extensions",
- "paste",
- "pprof",
- "rayon",
- "serde",
- "simple-frontend",
- "singer-utils",
- "strum",
- "strum_macros",
- "tracing",
- "tracing-flame",
- "tracing-subscriber",
- "transcript",
-]
-
-[[package]]
-name = "singer-utils"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "ff",
- "ff_ext",
- "gkr",
- "gkr-graph",
- "goldilocks",
- "itertools 0.13.0",
- "multilinear_extensions",
- "simple-frontend",
- "strum",
- "strum_macros",
- "sumcheck",
- "transcript",
-]
 
 [[package]]
 name = "smallvec"
