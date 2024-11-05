@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+
+dir="$(git rev-parse --show-toplevel)/riscv-testdata"
+docker buildx build \
+    --file "${dir}/create-testdata/Dockerfile" \
+    --output "${dir}/testdata" \
+    .
