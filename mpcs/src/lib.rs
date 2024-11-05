@@ -336,9 +336,30 @@ fn validate_input<E: ExtensionField>(
                 poly.num_vars,
             ));
         }
-    #[cfg(test)]
+    }
+    for point in points.iter() {
+        if param_num_vars < point.len() {
+            return Err(err_too_many_variates(function, param_num_vars, point.len()));
+        }
+    }
+    Ok(())
+}
+
+fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
+    Error::InvalidPcsParam(if function == "trim" {
+        format!(
+            "Too many variates to {function} (param supports variates up to {upto} but got {got})"
+        )
+    } else {
+        format!(
+            "Too many variates of poly to {function} (param supports variates up to {upto} but got {got})"
+        )
+    })
+}
+
+#[cfg(test)]
+pub mod test_util {
     use crate::Evaluation;
-    #[cfg(test)]
     use itertools::chain;
 
     use crate::PolynomialCommitmentScheme;
@@ -359,9 +380,7 @@ fn validate_input<E: ExtensionField>(
         let param = Pcs::setup(poly_size).unwrap();
         Pcs::trim(&param, poly_size).unwrap()
     }
-    for point in points.iter() {
-        if param_num_vars < point.len() {
-            return Err(err_too_many_variates(function, param_num_vars, point.len()));
+
     pub fn gen_rand_poly<E: ExtensionField>(
         num_vars: usize,
         base: bool,
@@ -377,20 +396,7 @@ fn validate_input<E: ExtensionField>(
             )
         }
     }
-    Ok(())
-}
 
-fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
-    Error::InvalidPcsParam(if function == "trim" {
-        format!(
-            "Too many variates to {function} (param supports variates up to {upto} but got {got})"
-        )
-    } else {
-        format!(
-            "Too many variates of poly to {function} (param supports variates up to {upto} but got {got})"
-        )
-    })
-}
     pub fn gen_rand_polys<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
         batch_size: usize,
@@ -401,8 +407,6 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
             .collect_vec()
     }
 
-#[cfg(test)]
-pub mod test_util {
     pub fn get_point_from_challenge<E: ExtensionField>(
         num_vars: usize,
         transcript: &mut Transcript<E>,
@@ -411,14 +415,6 @@ pub mod test_util {
             .map(|_| transcript.get_and_append_challenge(b"Point").elements)
             .collect()
     }
-
-    use crate::{Evaluation, PolynomialCommitmentScheme};
-    use ff_ext::ExtensionField;
-    use itertools::{Itertools, chain};
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use rand::{prelude::*, rngs::OsRng};
-    use rand_chacha::ChaCha8Rng;
-    use transcript::Transcript;
     pub fn get_points_from_challenge<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
         num_points: usize,
@@ -461,7 +457,6 @@ pub mod test_util {
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let eval = poly.evaluate(point.as_slice());
-                let poly = ArcMultilinearExtension::from(poly);
                 transcript.append_field_element_ext(&eval);
 
                 (
@@ -485,8 +480,7 @@ pub mod test_util {
         }
     }
 
-    #[cfg(test)]
-    pub fn run_batch_vlmp_commit_open_verify<E, Pcs>(
+    pub fn run_batch_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
         num_vars_end: usize,
@@ -533,20 +527,8 @@ pub mod test_util {
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
-                let polys = polys
-                    .iter()
-                    .map(|poly| ArcMultilinearExtension::from(poly.clone()))
-                    .collect_vec();
-
-                let proof = Pcs::batch_open_vlmp(
-                    &pp,
-                    &polys,
-                    &comms,
-                    &vecs_as_slices(&points),
-                    &evals,
-                    &mut transcript,
-                )
-                .unwrap();
+                let proof =
+                    Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
                 (comms, evals, proof, transcript.read_challenge())
             };
             // Batch verify
@@ -571,15 +553,7 @@ pub mod test_util {
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
-                Pcs::batch_verify_vlmp(
-                    &vp,
-                    &comms,
-                    &vecs_as_slices(&points),
-                    &evals,
-                    &proof,
-                    &mut transcript,
-                )
-                .unwrap();
+                Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
             }
@@ -631,30 +605,6 @@ pub mod test_util {
 
                 Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript)
                     .unwrap();
-
-                let v_challenge = transcript.read_challenge();
-                assert_eq!(challenge, v_challenge);
-            }
-        }
-    }
-
-                    .collect_vec();
-
-                    &pp,
-                    &point,
-                    &mut transcript,
-                )
-                .unwrap();
-                (
-                    evals,
-                    proof,
-                    transcript.read_challenge(),
-                )
-            };
-            // Batch verify
-                let mut transcript = Transcript::new(b"BaseFold");
-
-
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
