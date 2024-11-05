@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Addr, Cycle, Word};
+use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
     witness::RowMajorMatrix,
 };
 
-use super::ram_impl::RamTableConfig;
+use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileTableConfig, PubIOTableConfig};
 
 #[derive(Clone, Debug)]
 pub struct MemInitRecord {
@@ -17,18 +17,33 @@ pub struct MemInitRecord {
 }
 
 pub struct MemFinalRecord {
+    pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
 }
 
-/// Impl trait as parameter to RamTableCircuit.
-pub trait RamTable {
+/// - **Non-Volatile**: The initial values can be set to any arbitrary value.
+///
+/// **Special Note**:
+/// Setting `WRITABLE = false` does not strictly enforce immutability in this protocol.
+/// it only guarantees that the initial and final values remain invariant,
+/// allowing for temporary modifications within the lifecycle.
+pub trait NonVolatileTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
+    const WRITABLE: bool;
+    const OFFSET_ADDR: Addr;
+    const END_ADDR: Addr;
 
-    fn len() -> usize;
+    fn name() -> &'static str;
 
-    fn addr(entry_index: usize) -> Addr;
+    fn len() -> usize {
+        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+    }
+
+    fn addr(entry_index: usize) -> Addr {
+        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+    }
 
     fn init_state() -> Vec<MemInitRecord> {
         (0..Self::len())
@@ -40,17 +55,18 @@ pub trait RamTable {
     }
 }
 
-pub struct RamTableCircuit<E, R>(PhantomData<(E, R)>);
+/// non-volatile indicates initial value is configurable
+pub struct NonVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
-    for RamTableCircuit<E, RAM>
+impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
+    for NonVolatileRamCircuit<E, NVRAM>
 {
-    type TableConfig = RamTableConfig<RAM>;
+    type TableConfig = NonVolatileTableConfig<NVRAM>;
     type FixedInput = [MemInitRecord];
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}", RAM::RAM_TYPE)
+        format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
@@ -65,9 +81,8 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
         num_fixed: usize,
         init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
-        let mut table = config.gen_init_state(num_fixed, init_v);
-        Self::padding_zero(&mut table, num_fixed).expect("padding error");
-        table
+        // assume returned table is well-formed include padding
+        config.gen_init_state(num_fixed, init_v)
     }
 
     fn assign_instances(
@@ -76,8 +91,107 @@ impl<E: ExtensionField, RAM: RamTable + Send + Sync + Clone> TableCircuit<E>
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        let mut table = config.assign_instances(num_witin, final_v)?;
-        Self::padding_zero(&mut table, num_witin)?;
-        Ok(table)
+        // assume returned table is well-formed include padding
+        config.assign_instances(num_witin, final_v)
+    }
+}
+
+pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
+
+impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
+    for PubIORamCircuit<E, NVRAM>
+{
+    type TableConfig = PubIOTableConfig<NVRAM>;
+    type FixedInput = ();
+    type WitnessInput = [MemFinalRecord];
+
+    fn name() -> String {
+        format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
+    }
+
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
+        cb.namespace(
+            || Self::name(),
+            |cb| Self::TableConfig::construct_circuit(cb),
+        )
+    }
+
+    fn generate_fixed_traces(
+        config: &Self::TableConfig,
+        num_fixed: usize,
+        _init_v: &Self::FixedInput,
+    ) -> RowMajorMatrix<E::BaseField> {
+        // assume returned table is well-formed include padding
+        config.gen_init_state(num_fixed)
+    }
+
+    fn assign_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        final_v: &Self::WitnessInput,
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        // assume returned table is well-formed include padding
+        config.assign_instances(num_witin, final_v)
+    }
+}
+
+/// - **Dynamic**: The address space is bounded within a specific range,
+///   though the range itself may be dynamically determined per proof.
+/// - **Volatile**: The initial values are set to `0`
+pub trait DynVolatileRamTable {
+    const RAM_TYPE: RAMType;
+    const V_LIMBS: usize;
+
+    const OFFSET_ADDR: Addr;
+    const END_ADDR: Addr;
+
+    fn name() -> &'static str;
+
+    fn max_len() -> usize {
+        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+    }
+
+    fn addr(entry_index: usize) -> Addr {
+        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+    }
+}
+
+pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
+
+impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableCircuit<E>
+    for DynVolatileRamCircuit<E, DVRAM>
+{
+    type TableConfig = DynVolatileRamTableConfig<DVRAM>;
+    type FixedInput = ();
+    type WitnessInput = [MemFinalRecord];
+
+    fn name() -> String {
+        format!("RAM_{:?}", DVRAM::RAM_TYPE)
+    }
+
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
+        cb.namespace(
+            || Self::name(),
+            |cb| Self::TableConfig::construct_circuit(cb),
+        )
+    }
+
+    fn generate_fixed_traces(
+        _config: &Self::TableConfig,
+        _num_fixed: usize,
+        _init_v: &Self::FixedInput,
+    ) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::<E::BaseField>::new(0, 0)
+    }
+
+    fn assign_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        final_v: &Self::WitnessInput,
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        // assume returned table is well-formed include padding
+        config.assign_instances(num_witin, final_v)
     }
 }

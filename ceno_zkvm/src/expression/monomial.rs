@@ -30,7 +30,7 @@ impl<E: ExtensionField> Expression<E> {
 
             Product(a, b) => iproduct!(a.distribute(), b.distribute())
                 .map(|(a, b)| Term {
-                    coeff: a.coeff.clone() * b.coeff.clone(),
+                    coeff: &a.coeff * &b.coeff,
                     vars: chain!(&a.vars, &b.vars).cloned().collect(),
                 })
                 .collect(),
@@ -38,7 +38,7 @@ impl<E: ExtensionField> Expression<E> {
             ScaledSum(x, a, b) => chain!(
                 b.distribute(),
                 iproduct!(x.distribute(), a.distribute()).map(|(x, a)| Term {
-                    coeff: x.coeff.clone() * a.coeff.clone(),
+                    coeff: &x.coeff * &a.coeff,
                     vars: chain!(&x.vars, &a.vars).cloned().collect(),
                 })
             )

@@ -12,6 +12,7 @@ use crate::{
     },
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind, StepRecord};
@@ -38,8 +39,7 @@ impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
 
-// this is actually used in test
-#[allow(dead_code)]
+#[cfg(test)]
 pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
 
 pub struct SHOp;
@@ -48,8 +48,7 @@ impl RIVInstruction for SHOp {
     const INST_KIND: InsnKind = InsnKind::SH;
 }
 
-// this is actually used in test
-#[allow(dead_code)]
+#[cfg(test)]
 pub type ShInstruction<E> = StoreInstruction<E, SHOp, 1>;
 
 pub struct SBOp;
@@ -58,8 +57,7 @@ impl RIVInstruction for SBOp {
     const INST_KIND: InsnKind = InsnKind::SB;
 }
 
-// this is actually used in test
-#[allow(dead_code)]
+#[cfg(test)]
 pub type SbInstruction<E> = StoreInstruction<E, SBOp, 0>;
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
@@ -77,7 +75,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
-        let imm = circuit_builder.create_witin(|| "imm")?; // signed 12-bit value
+        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
 
         let memory_addr = match I::INST_KIND {
             InsnKind::SW => MemAddr::construct_align4(circuit_builder),
@@ -145,21 +143,16 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let memory_op = step.memory_op().unwrap();
-        let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
+        let imm = InsnRecord::imm_internal(&step.insn());
         let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
-        let addr = ByteAddr::from(
-            step.rs1()
-                .unwrap()
-                .value
-                .wrapping_add(step.insn().imm_or_funct7()),
-        );
+        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
-        set_val!(instance, config.imm, imm);
+        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
         config
             .prev_memory_value
             .assign_value(instance, prev_mem_value);

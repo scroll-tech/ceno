@@ -17,10 +17,10 @@ pub struct SltConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     rd_written: UInt<E>,
 
-    signed_lt: SignedLtConfig,
+    signed_lt: SignedLtConfig<E>,
 }
 
 pub struct SltInstruction<E>(PhantomData<E>);
@@ -39,7 +39,7 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
         let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
 
         let lt = SignedLtConfig::construct_circuit(cb, || "rs1 < rs2", &rs1_read, &rs2_read)?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()])?;
+        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
@@ -79,7 +79,7 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
             .assign_limbs(instance, rs2_read.as_u16_limbs());
         config
             .signed_lt
-            .assign_instance::<E>(instance, lkm, rs1 as SWord, rs2 as SWord)?;
+            .assign_instance(instance, lkm, rs1 as SWord, rs2 as SWord)?;
 
         Ok(())
     }
@@ -90,8 +90,6 @@ mod test {
     use ceno_emul::{Change, StepRecord, Word, encode_rv32};
     use goldilocks::GoldilocksExt2;
 
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
     use rand::Rng;
 
     use super::*;
@@ -137,18 +135,7 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 
     #[test]

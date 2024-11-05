@@ -37,14 +37,14 @@ impl<E: ExtensionField> StateInOut<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         branching: bool,
     ) -> Result<Self, ZKVMError> {
-        let pc = circuit_builder.create_witin(|| "pc")?;
+        let pc = circuit_builder.create_witin(|| "pc");
         let (next_pc_opt, next_pc_expr) = if branching {
-            let next_pc = circuit_builder.create_witin(|| "next_pc")?;
+            let next_pc = circuit_builder.create_witin(|| "next_pc");
             (Some(next_pc), next_pc.expr())
         } else {
             (None, pc.expr() + PC_STEP_SIZE)
         };
-        let ts = circuit_builder.create_witin(|| "ts")?;
+        let ts = circuit_builder.create_witin(|| "ts");
         let next_ts = ts.expr() + Tracer::SUBCYCLES_PER_INSN;
         circuit_builder.state_in(pc.expr(), ts.expr())?;
         circuit_builder.state_out(next_pc_expr, next_ts)?;
@@ -87,8 +87,8 @@ impl<E: ExtensionField> ReadRS1<E> {
         rs1_read: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rs1_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts")?;
+        let id = circuit_builder.create_witin(|| "rs1_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts");
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs1",
             id,
@@ -142,8 +142,8 @@ impl<E: ExtensionField> ReadRS2<E> {
         rs2_read: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rs2_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts")?;
+        let id = circuit_builder.create_witin(|| "rs2_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts");
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs2",
             id,
@@ -197,8 +197,8 @@ impl<E: ExtensionField> WriteRD<E> {
         rd_written: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let id = circuit_builder.create_witin(|| "rd_id")?;
-        let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts")?;
+        let id = circuit_builder.create_witin(|| "rd_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts");
         let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
         let (_, lt_cfg) = circuit_builder.register_write(
             || "write_rd",
@@ -223,7 +223,7 @@ impl<E: ExtensionField> WriteRD<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rd() as u64);
+        set_val!(instance, self.id, step.insn().rd_internal() as u64);
         set_val!(instance, self.prev_ts, step.rd().unwrap().previous_cycle);
 
         // Register state
@@ -258,7 +258,7 @@ impl<E: ExtensionField> ReadMEM<E> {
         mem_read: Expression<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts");
         let (_, lt_cfg) = circuit_builder.memory_read(
             || "read_memory",
             &mem_addr,
@@ -313,7 +313,7 @@ impl WriteMEM {
         new_value: MemoryExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
-        let prev_ts = circuit_builder.create_witin(|| "prev_ts")?;
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts");
 
         let (_, lt_cfg) = circuit_builder.memory_write(
             || "write_memory",
@@ -381,13 +381,13 @@ impl<E: ExtensionField> MemAddr<E> {
 
     /// Represent the address aligned to 2 bytes.
     pub fn expr_align2(&self) -> AddressExpr<E> {
-        self.addr.address_expr() - self.low_bit_exprs()[0].clone()
+        self.addr.address_expr() - &self.low_bit_exprs()[0]
     }
 
     /// Represent the address aligned to 4 bytes.
     pub fn expr_align4(&self) -> AddressExpr<E> {
         let low_bits = self.low_bit_exprs();
-        self.addr.address_expr() - low_bits[1].clone() * 2 - low_bits[0].clone()
+        self.addr.address_expr() - &low_bits[1] * 2 - &low_bits[0]
     }
 
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
@@ -408,7 +408,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Witness and constrain the non-zero low bits.
         let low_bits = (n_zeros..Self::N_LOW_BITS)
             .map(|i| {
-                let bit = cb.create_witin(|| format!("addr_bit_{}", i))?;
+                let bit = cb.create_witin(|| format!("addr_bit_{}", i));
                 cb.assert_bit(|| format!("addr_bit_{}", i), bit.expr())?;
                 Ok(bit)
             })
@@ -417,7 +417,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Express the value of the low bits.
         let low_sum: Expression<E> = (n_zeros..Self::N_LOW_BITS)
             .zip_eq(low_bits.iter())
-            .map(|(pos, bit)| bit.expr() * (1 << pos))
+            .map(|(pos, bit)| bit.expr() << pos)
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
@@ -425,7 +425,7 @@ impl<E: ExtensionField> MemAddr<E> {
             .invert()
             .unwrap()
             .expr();
-        let mid_u14 = (limbs[0].clone() - low_sum) * shift_right;
+        let mid_u14 = (&limbs[0] - low_sum) * shift_right;
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 
         // Range check the high limb.
@@ -537,8 +537,8 @@ mod test {
 
         if is_ok {
             cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;
-            cb.require_equal(|| "", mem_addr.expr_align2(), (addr >> 1 << 1).into())?;
-            cb.require_equal(|| "", mem_addr.expr_align4(), (addr >> 2 << 2).into())?;
+            cb.require_equal(|| "", mem_addr.expr_align2(), (addr & !1).into())?;
+            cb.require_equal(|| "", mem_addr.expr_align4(), (addr & !3).into())?;
         }
         MockProver::assert_with_expected_errors(
             &cb,
