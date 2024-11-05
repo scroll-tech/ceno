@@ -9,7 +9,6 @@ readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
-
 [dependencies]
 ark-std.workspace = true
 ff.workspace = true
