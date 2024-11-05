@@ -311,9 +311,12 @@ pub fn ext_try_into_base<E: ExtensionField>(x: &E) -> Result<E::BaseField, Error
 
 #[cfg(any(test, feature = "benchmark"))]
 pub mod test {
+    #[cfg(test)]
     use crate::util::{base_to_usize, u32_to_field};
     use ff::Field;
+    #[cfg(test)]
     type E = goldilocks::GoldilocksExt2;
+    #[cfg(test)]
     type F = goldilocks::Goldilocks;
     use rand::{
         CryptoRng, RngCore, SeedableRng,

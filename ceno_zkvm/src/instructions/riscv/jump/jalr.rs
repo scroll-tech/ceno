@@ -7,13 +7,14 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::{Expression, ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr},
     },
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
@@ -23,7 +24,7 @@ pub struct JalrConfig<E: ExtensionField> {
     pub rs1_read: UInt<E>,
     pub imm: WitIn,
     pub next_pc_addr: MemAddr<E>,
-    pub overflow: WitIn,
+    pub overflow: Option<(WitIn, WitIn)>,
     pub rd_written: UInt<E>,
 }
 
@@ -63,17 +64,25 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         //  3. next_pc = next_pc_addr aligned to even value (round down)
 
         let next_pc_addr = MemAddr::<E>::construct_unaligned(circuit_builder)?;
-        let overflow = circuit_builder.create_witin(|| "overflow");
+
+        let (overflow_expr, overflow) = if cfg!(feature = "forbid_overflow") {
+            (Expression::ZERO, None)
+        } else {
+            let overflow = circuit_builder.create_witin(|| "overflow");
+            let tmp = circuit_builder.create_witin(|| "overflow1");
+            circuit_builder.require_zero(|| "overflow_0_or_pm1", overflow.expr() * tmp.expr())?;
+            circuit_builder.require_equal(
+                || "overflow_tmp",
+                tmp.expr(),
+                (1 - overflow.expr()) * (1 + overflow.expr()),
+            )?;
+            (overflow.expr(), Some((overflow, tmp)))
+        };
 
         circuit_builder.require_equal(
             || "rs1+imm = next_pc_unrounded + overflow*2^32",
             rs1_read.value() + imm.expr(),
-            next_pc_addr.expr_unaligned() + overflow.expr() * (1u64 << 32),
-        )?;
-
-        circuit_builder.require_zero(
-            || "overflow_0_or_pm1",
-            overflow.expr() * (overflow.expr() - 1) * (overflow.expr() + 1),
+            next_pc_addr.expr_unaligned() + overflow_expr * (1u64 << 32),
         )?;
 
         circuit_builder.require_equal(
@@ -108,10 +117,10 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let insn = step.insn();
 
         let rs1 = step.rs1().unwrap().value;
-        let imm: i32 = insn.imm_or_funct7() as i32;
+        let imm = InsnRecord::imm_internal(&insn);
         let rd = step.rd().unwrap().value.after;
 
-        let (sum, overflowing) = rs1.overflowing_add_signed(imm);
+        let (sum, overflowing) = rs1.overflowing_add_signed(imm as i32);
 
         config
             .rs1_read
@@ -120,18 +129,23 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             .rd_written
             .assign_value(instance, Value::new(rd, lk_multiplicity));
 
-        let imm_field = InsnRecord::imm_or_funct7_field::<E::BaseField>(&insn);
-        set_val!(instance, config.imm, imm_field);
+        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
 
         config
             .next_pc_addr
             .assign_instance(instance, lk_multiplicity, sum)?;
-        let overflow: E::BaseField = match (overflowing, imm < 0) {
-            (false, _) => E::BaseField::ZERO,
-            (true, false) => E::BaseField::ONE,
-            (true, true) => -E::BaseField::ONE,
-        };
-        set_val!(instance, config.overflow, overflow);
+
+        if let Some((overflow_cfg, tmp_cfg)) = &config.overflow {
+            let (overflow, tmp) = match (overflowing, imm < 0) {
+                (false, _) => (E::BaseField::ZERO, E::BaseField::ONE),
+                (true, false) => (E::BaseField::ONE, E::BaseField::ZERO),
+                (true, true) => (-E::BaseField::ONE, E::BaseField::ZERO),
+            };
+            set_val!(instance, overflow_cfg, overflow);
+            set_val!(instance, tmp_cfg, tmp);
+        } else {
+            assert!(!overflowing, "overflow not allowed in JALR");
+        }
 
         config
             .i_insn
