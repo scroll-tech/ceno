@@ -1,11 +1,12 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     instructions::riscv::constants::{
-        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
+        UINT_LIMBS,
     },
     structs::ROMType,
     tables::InsnRecord,
@@ -32,7 +33,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_fixed(name_fn)
     }
 
-    pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
+    pub fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], ZKVMError> {
         Ok([
             self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
             self.cs
@@ -54,6 +55,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn query_end_cycle(&mut self) -> Result<Instance, ZKVMError> {
         self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
+    }
+
+    pub fn query_public_io(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance(|| "public_io", PUBLIC_IO_IDX)
     }
 
     pub fn lk_record<NR, N>(
@@ -87,27 +92,27 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.r_table_record(name_fn, table_len, rlc_record)
+        self.cs.r_table_record(name_fn, table_spec, rlc_record)
     }
 
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rlc_record: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.w_table_record(name_fn, table_len, rlc_record)
+        self.cs.w_table_record(name_fn, table_spec, rlc_record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
@@ -165,6 +170,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(limb)
     }
 
+    /// Create a new WitIn constrained to be equal to input expression.
+    pub fn flatten_expr<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR + Clone,
+    {
+        let wit = self.cs.create_witin(name_fn.clone());
+        self.require_equal(name_fn, wit.expr(), expr)?;
+
+        Ok(wit)
+    }
+
     pub fn require_zero<NR, N>(
         &mut self,
         name_fn: N,
@@ -204,10 +225,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "require_one",
-            |cb| cb.cs.require_zero(name_fn, Expression::from(1) - expr),
-        )
+        self.namespace(|| "require_one", |cb| cb.cs.require_zero(name_fn, 1 - expr))
     }
 
     pub fn condition_require_equal<NR, N>(
@@ -239,7 +257,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         when_true: &Expression<E>,
         when_false: &Expression<E>,
     ) -> Expression<E> {
-        cond.clone() * when_true.clone() + (1 - cond.clone()) * when_false.clone()
+        cond * when_true + (1 - cond) * when_false
     }
 
     pub(crate) fn assert_ux<NR, N, const C: usize>(
@@ -325,10 +343,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.namespace(
             || "assert_bit",
-            |cb| {
-                cb.cs
-                    .require_zero(name_fn, expr.clone() * (Expression::ONE - expr))
-            },
+            |cb| cb.cs.require_zero(name_fn, &expr * (1 - &expr)),
         )
     }
 
@@ -396,14 +411,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         let is_eq = self.create_witin(|| "is_eq");
         let diff_inverse = self.create_witin(|| "diff_inverse");
 
+        self.require_zero(|| "is equal", is_eq.expr() * &lhs - is_eq.expr() * &rhs)?;
         self.require_zero(
             || "is equal",
-            is_eq.expr().clone() * lhs.clone() - is_eq.expr() * rhs.clone(),
-        )?;
-        self.require_zero(
-            || "is equal",
-            Expression::from(1) - is_eq.expr().clone() - diff_inverse.expr() * lhs
-                + diff_inverse.expr() * rhs,
+            1 - is_eq.expr() - diff_inverse.expr() * lhs + diff_inverse.expr() * rhs,
         )?;
 
         Ok((is_eq, diff_inverse))

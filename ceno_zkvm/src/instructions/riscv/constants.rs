@@ -9,6 +9,7 @@ pub const INIT_PC_IDX: usize = 2;
 pub const INIT_CYCLE_IDX: usize = 3;
 pub const END_PC_IDX: usize = 4;
 pub const END_CYCLE_IDX: usize = 5;
+pub const PUBLIC_IO_IDX: usize = 6;
 
 pub const LIMB_BITS: usize = 16;
 pub const LIMB_MASK: u32 = 0xFFFF;
