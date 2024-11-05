@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use poseidon::poseidon_hash::PoseidonHash;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 pub use poseidon::digest::Digest;

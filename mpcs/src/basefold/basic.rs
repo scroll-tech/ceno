@@ -65,8 +65,14 @@ where
 {
     type CommitPhaseStrategy = BasicCommitPhaseStrategy;
     type QueryCheckStrategy = BasicQueryCheckStrategy;
-    type ProverInputs<'a> = ProverInputs<'a, E, Spec> where Spec: 'a;
-    type VerifierInputs<'a> = VerifierInputs<'a, E, Spec> where Spec: 'a;
+    type ProverInputs<'a>
+        = ProverInputs<'a, E, Spec>
+    where
+        Spec: 'a;
+    type VerifierInputs<'a>
+        = VerifierInputs<'a, E, Spec>
+    where
+        Spec: 'a;
 
     fn trivial_proof(prover_inputs: &Self::ProverInputs<'_>) -> Option<BasefoldProof<E, Spec>> {
         let comm = prover_inputs.comm;

@@ -70,8 +70,14 @@ where
 {
     type CommitPhaseStrategy = BatchVLOPCommitPhaseStrategy;
     type QueryCheckStrategy = BatchVLOPQueryCheckStrategy;
-    type ProverInputs<'a> = ProverInputs<'a, E, Spec> where Spec: 'a;
-    type VerifierInputs<'a> = VerifierInputs<'a, E, Spec> where Spec: 'a;
+    type ProverInputs<'a>
+        = ProverInputs<'a, E, Spec>
+    where
+        Spec: 'a;
+    type VerifierInputs<'a>
+        = VerifierInputs<'a, E, Spec>
+    where
+        Spec: 'a;
 
     #[allow(unused)]
     fn trivial_proof(prover_inputs: &ProverInputs<'_, E, Spec>) -> Option<BasefoldProof<E, Spec>> {
