@@ -91,17 +91,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         for (circuit_name, witness) in witnesses.witnesses {
             let commit_dur = std::time::Instant::now();
             let num_instances = witness.num_instances();
-            let witness = witness.into_mles();
-            commitments.insert(
-                circuit_name.clone(),
-                PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
-                    .map_err(ZKVMError::PCSError)?,
-            );
-            tracing::info!(
-                "commit to {} traces took {:?}",
-                circuit_name,
-                commit_dur.elapsed()
-            );
+            let witness = match num_instances {
+                0 => vec![],
+                _ => {
+                    let witness = witness.into_mles();
+                    commitments.insert(
+                        circuit_name.clone(),
+                        PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
+                            .map_err(ZKVMError::PCSError)?,
+                    );
+                    tracing::info!(
+                        "commit to {} traces took {:?}",
+                        circuit_name,
+                        commit_dur.elapsed()
+                    );
+                    witness
+                }
+            };
             wits.insert(circuit_name, (witness, num_instances));
         }
 
@@ -122,6 +128,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let (witness, num_instances) = wits
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
+            if witness.is_empty() {
+                continue;
+            }
             let wits_commit = commitments.remove(circuit_name).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
