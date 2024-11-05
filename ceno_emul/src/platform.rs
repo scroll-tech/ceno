@@ -5,38 +5,66 @@ use crate::addr::{Addr, RegIdx};
 /// - the layout of virtual memory,
 /// - special addresses, such as the initial PC,
 /// - codes of environment calls.
-pub struct Platform;
+#[derive(Copy, Clone)]
+pub struct Platform {
+    pub rom_start: Addr,
+    pub rom_end: Addr,
+    pub ram_start: Addr,
+    pub ram_end: Addr,
+}
 
-pub const CENO_PLATFORM: Platform = Platform;
+pub const CENO_PLATFORM: Platform = Platform {
+    rom_start: 0x2000_0000,
+    rom_end: 0x3000_0000 - 1,
+    ram_start: 0x8000_0000,
+    ram_end: 0xFFFF_FFFF,
+};
 
 impl Platform {
     // Virtual memory layout.
 
     pub const fn rom_start(&self) -> Addr {
-        0x2000_0000
+        self.rom_start
     }
 
     pub const fn rom_end(&self) -> Addr {
-        0x3000_0000 - 1
+        self.rom_end
     }
 
     pub fn is_rom(&self, addr: Addr) -> bool {
         (self.rom_start()..=self.rom_end()).contains(&addr)
     }
 
+    // TODO figure out proper region for program_data
+    pub const fn program_data_start(&self) -> Addr {
+        0x3000_0000
+    }
+
+    pub const fn program_data_end(&self) -> Addr {
+        0x3000_1000 - 1
+    }
+
+    // TODO figure out a proper region for public io
+    pub const fn public_io_start(&self) -> Addr {
+        0x3000_1000
+    }
+
+    pub const fn public_io_end(&self) -> Addr {
+        0x3000_2000 - 1
+    }
+
     pub const fn ram_start(&self) -> Addr {
-        let ram_start = 0x8000_0000;
         if cfg!(feature = "forbid_overflow") {
             // -1<<11 == 0x800 is the smallest negative 'immediate'
             // offset we can have in memory instructions.
             // So if we stay away from it, we are safe.
-            assert!(ram_start >= 0x800);
+            assert!(self.ram_start >= 0x800);
         }
-        ram_start
+        self.ram_start
     }
 
     pub const fn ram_end(&self) -> Addr {
-        0xFFFF_FFFF
+        self.ram_end
             - if cfg!(feature = "forbid_overflow") {
                 // (1<<11) - 1 == 0x7ff is the largest positive 'immediate'
                 // offset we can have in memory instructions.
@@ -51,6 +79,14 @@ impl Platform {
         (self.ram_start()..=self.ram_end()).contains(&addr)
     }
 
+    pub fn is_pub_io(&self, addr: Addr) -> bool {
+        (self.public_io_start()..=self.public_io_end()).contains(&addr)
+    }
+
+    pub fn is_program_data(&self, addr: Addr) -> bool {
+        (self.program_data_start()..=self.program_data_end()).contains(&addr)
+    }
+
     /// Virtual address of a register.
     pub const fn register_vma(&self, index: RegIdx) -> Addr {
         // Register VMAs are aligned, cannot be confused with indices, and readable in hex.
@@ -62,21 +98,16 @@ impl Platform {
         (vma >> 8) as RegIdx
     }
 
-    /// Virtual address of the program counter.
-    pub const fn pc_vma(&self) -> Addr {
-        self.register_vma(32)
-    }
-
     // Startup.
 
-    pub const fn pc_start(&self) -> Addr {
+    pub const fn pc_base(&self) -> Addr {
         self.rom_start()
     }
 
     // Permissions.
 
     pub fn can_read(&self, addr: Addr) -> bool {
-        self.is_rom(addr) || self.is_ram(addr)
+        self.is_rom(addr) || self.is_ram(addr) || self.is_pub_io(addr) || self.is_program_data(addr)
     }
 
     pub fn can_write(&self, addr: Addr) -> bool {
@@ -118,18 +149,19 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::VMState;
 
     #[test]
     fn test_no_overlap() {
         let p = CENO_PLATFORM;
-        assert!(p.can_execute(p.pc_start()));
+        assert!(p.can_execute(p.pc_base()));
         // ROM and RAM do not overlap.
         assert!(!p.is_rom(p.ram_start()));
         assert!(!p.is_rom(p.ram_end()));
         assert!(!p.is_ram(p.rom_start()));
         assert!(!p.is_ram(p.rom_end()));
         // Registers do not overlap with ROM or RAM.
-        for reg in [p.pc_vma(), p.register_vma(0), p.register_vma(31)] {
+        for reg in [p.register_vma(0), p.register_vma(VMState::REG_COUNT - 1)] {
             assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));
         }

@@ -20,21 +20,47 @@ use alloc::collections::BTreeMap;
 
 use crate::addr::WORD_SIZE;
 use anyhow::{Context, Result, anyhow, bail};
-use elf::{ElfBytes, endian::LittleEndian, file::Class};
+use elf::{
+    ElfBytes,
+    abi::{PF_R, PF_W, PF_X},
+    endian::LittleEndian,
+    file::Class,
+};
 
 /// A RISC Zero program
+#[derive(Clone, Debug)]
 pub struct Program {
     /// The entrypoint of the program
     pub entry: u32,
-
+    /// This is the lowest address of the program's executable code
+    pub base_address: u32,
+    /// The instructions of the program
+    pub instructions: Vec<u32>,
     /// The initial memory image
     pub image: BTreeMap<u32, u32>,
 }
 
 impl Program {
+    /// Create program
+    pub fn new(
+        entry: u32,
+        base_address: u32,
+        instructions: Vec<u32>,
+        image: BTreeMap<u32, u32>,
+    ) -> Program {
+        Self {
+            entry,
+            base_address,
+            instructions,
+            image,
+        }
+    }
     /// Initialize a RISC Zero Program from an appropriate ELF file
     pub fn load_elf(input: &[u8], max_mem: u32) -> Result<Program> {
+        let mut instructions: Vec<u32> = Vec::new();
         let mut image: BTreeMap<u32, u32> = BTreeMap::new();
+        let mut base_address = None;
+
         let elf = ElfBytes::<LittleEndian>::minimal_parse(input)
             .map_err(|err| anyhow!("Elf parse error: {err}"))?;
         if elf.ehdr.class != Class::ELF32 {
@@ -58,7 +84,18 @@ impl Program {
         if segments.len() > 256 {
             bail!("Too many program headers");
         }
-        for segment in segments.iter().filter(|x| x.p_type == elf::abi::PT_LOAD) {
+        for (idx, segment) in segments
+            .iter()
+            .filter(|x| x.p_type == elf::abi::PT_LOAD)
+            .enumerate()
+        {
+            tracing::debug!(
+                "loadable segement {}: PF_R={}, PF_W={}, PF_X={}",
+                idx,
+                segment.p_flags & PF_R != 0,
+                segment.p_flags & PF_W != 0,
+                segment.p_flags & PF_X != 0,
+            );
             let file_size: u32 = segment
                 .p_filesz
                 .try_into()
@@ -77,6 +114,13 @@ impl Program {
                 .p_vaddr
                 .try_into()
                 .map_err(|err| anyhow!("vaddr is larger than 32 bits. {err}"))?;
+            if (segment.p_flags & PF_X) != 0 {
+                if base_address.is_none() {
+                    base_address = Some(vaddr);
+                } else {
+                    return Err(anyhow!("only support one executable segment"));
+                }
+            }
             if vaddr % WORD_SIZE as u32 != 0 {
                 bail!("vaddr {vaddr:08x} is unaligned");
             }
@@ -104,9 +148,25 @@ impl Program {
                         word |= (*byte as u32) << (j * 8);
                     }
                     image.insert(addr, word);
+                    if (segment.p_flags & PF_X) != 0 {
+                        instructions.push(word);
+                    }
                 }
             }
         }
-        Ok(Program { entry, image })
+
+        if base_address.is_none() {
+            return Err(anyhow!("does not have executable segment"));
+        }
+        let base_address = base_address.unwrap();
+        assert!(entry >= base_address);
+        assert!((entry - base_address) as usize <= instructions.len() * WORD_SIZE);
+
+        Ok(Program {
+            entry,
+            base_address,
+            image,
+            instructions,
+        })
     }
 }

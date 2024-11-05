@@ -1,9 +1,9 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM,
+    CENO_PLATFORM,
     InsnKind::{ADD, EANY},
-    StepRecord, VMState,
+    PC_WORD_SIZE, Program, StepRecord, VMState,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -17,7 +17,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     declare_program,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
@@ -50,12 +50,9 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        let reg_id = cb.create_witin(|| "reg_id")?;
+        let reg_id = cb.create_witin(|| "reg_id");
         (0..RW).try_for_each(|_| {
-            let record = cb.rlc_chip_record(vec![
-                Expression::<E>::Constant(E::BaseField::ONE),
-                reg_id.expr(),
-            ]);
+            let record = cb.rlc_chip_record(vec![1.into(), reg_id.expr()]);
             cb.read_record(|| "read", record.clone())?;
             cb.write_record(|| "write", record)?;
             Result::<(), ZKVMError>::Ok(())
@@ -141,7 +138,6 @@ fn test_rw_lk_expression_combination() {
                 commit,
                 &[],
                 num_instances,
-                1,
                 &mut transcript,
                 &prover_challenges,
             )
@@ -203,6 +199,23 @@ fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
 
+    // set up program
+    let program = Program::new(
+        CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.pc_base(),
+        PROGRAM_CODE.to_vec(),
+        PROGRAM_CODE
+            .iter()
+            .enumerate()
+            .map(|(insn_idx, &insn)| {
+                (
+                    (insn_idx * PC_WORD_SIZE) as u32 + CENO_PLATFORM.pc_base(),
+                    insn,
+                )
+            })
+            .collect(),
+    );
+
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
@@ -219,14 +232,14 @@ fn test_single_add_instance_e2e() {
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,
-        u16_range_config.clone(),
+        &u16_range_config,
         &(),
     );
 
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
         &zkvm_cs,
-        prog_config.clone(),
-        &PROGRAM_CODE,
+        &prog_config,
+        &program,
     );
 
     let pk = zkvm_cs
@@ -236,11 +249,7 @@ fn test_single_add_instance_e2e() {
     let vk = pk.get_vk();
 
     // single instance
-    let mut vm = VMState::new(CENO_PLATFORM);
-    let pc_start = ByteAddr(CENO_PLATFORM.pc_start()).waddr();
-    for (i, insn) in PROGRAM_CODE.iter().enumerate() {
-        vm.init_memory(pc_start + i, *insn);
-    }
+    let mut vm = VMState::new(CENO_PLATFORM, program.clone());
     let all_records = vm
         .iter_until_halt()
         .collect::<Result<Vec<StepRecord>, _>>()
@@ -250,7 +259,7 @@ fn test_single_add_instance_e2e() {
     let mut add_records = vec![];
     let mut halt_records = vec![];
     all_records.into_iter().for_each(|record| {
-        let kind = record.insn().kind().1;
+        let kind = record.insn().codes().kind;
         match kind {
             ADD => add_records.push(record),
             EANY => {
@@ -283,14 +292,14 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
             &zkvm_cs,
             &prog_config,
-            &PROGRAM_CODE.len(),
+            &program,
         )
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, 1, transcript)
+        .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
     let transcript = Transcript::new(b"riscv");
