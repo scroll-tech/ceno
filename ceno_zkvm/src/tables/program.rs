@@ -8,9 +8,12 @@ use crate::{
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
+    utils::i64_to_base,
     witness::RowMajorMatrix,
 };
-use ceno_emul::{DecodedInstruction, PC_STEP_SIZE, Program, WORD_SIZE};
+use ceno_emul::{
+    DecodedInstruction, InsnCodes, InsnFormat::*, InsnKind::*, PC_STEP_SIZE, Program, WORD_SIZE,
+};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -46,37 +49,48 @@ impl<T> InsnRecord<T> {
     pub fn as_slice(&self) -> &[T] {
         &self.0
     }
+}
 
-    /// Iterate through the fields, except immediate because it is complicated.
-    fn without_imm(&self) -> &[T] {
-        &self.0[0..5]
-    }
-
-    /// The internal view of the immediate. See `DecodedInstruction::imm_internal`.
-    fn imm_internal(&self) -> &T {
-        &self.0[5]
+impl<F: SmallField> InsnRecord<F> {
+    fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
+        InsnRecord([
+            (pc as u64).into(),
+            (insn.codes().kind as u64).into(),
+            (insn.rd_internal() as u64).into(),
+            (insn.rs1_or_zero() as u64).into(),
+            (insn.rs2_or_zero() as u64).into(),
+            i64_to_base(InsnRecord::imm_internal(insn)),
+        ])
     }
 }
 
-impl InsnRecord<u32> {
-    fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
-        InsnRecord([
-            pc,
-            insn.codes().kind as u32,
-            insn.rd_internal(),
-            insn.rs1_or_zero(),
-            insn.rs2_or_zero(),
-            insn.imm_internal(),
-        ])
-    }
-
-    /// Interpret the immediate or funct7 as unsigned or signed depending on the instruction.
-    /// Convert negative values from two's complement to field.
-    pub fn imm_internal_field<F: SmallField>(insn: &DecodedInstruction) -> F {
-        if insn.imm_field_is_negative() {
-            -F::from(-(insn.imm_internal() as i32) as u64)
-        } else {
-            F::from(insn.imm_internal() as u64)
+impl InsnRecord<()> {
+    /// The internal view of the immediate in the program table.
+    /// This is encoded in a way that is efficient for circuits, depending on the instruction.
+    ///
+    /// These conversions are legal:
+    /// - `as u32` and `as i32` as usual.
+    /// - `i64_to_base(imm)` gives the field element going into the program table.
+    /// - `as u64` in unsigned cases.
+    pub fn imm_internal(insn: &DecodedInstruction) -> i64 {
+        let imm: u32 = insn.immediate();
+        match insn.codes() {
+            // Prepare the immediate for ShiftImmInstruction.
+            // The shift is implemented as a multiplication/division by 1 << immediate.
+            InsnCodes {
+                kind: SLLI | SRLI | SRAI,
+                ..
+            } => 1 << (imm & 0x1F),
+            // Unsigned view.
+            // For example, u32::MAX is `u32::MAX mod p` in the finite field.
+            InsnCodes { format: R | U, .. }
+            | InsnCodes {
+                kind: ADDI | SLTIU | ANDI | XORI | ORI,
+                ..
+            } => imm as u64 as i64,
+            // Signed view.
+            // For example, u32::MAX is `-1 mod p` in the finite field.
+            _ => imm as i32 as i64,
         }
     }
 }
@@ -145,21 +159,10 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
 
-                // Copy all the fields except immediate.
-                for (col, val) in config
-                    .record
-                    .without_imm()
-                    .iter()
-                    .zip_eq(values.without_imm())
-                {
-                    set_fixed_val!(row, *col, E::BaseField::from(*val as u64));
+                // Copy all the fields.
+                for (col, val) in config.record.as_slice().iter().zip_eq(values.as_slice()) {
+                    set_fixed_val!(row, *col, *val);
                 }
-
-                set_fixed_val!(
-                    row,
-                    config.record.imm_internal(),
-                    InsnRecord::imm_internal_field(&insn)
-                );
             });
 
         Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
@@ -190,5 +193,29 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             });
 
         Ok(witness)
+    }
+}
+
+#[cfg(test)]
+#[test]
+#[allow(clippy::identity_op)]
+fn test_decode_imm() {
+    for (i, expected) in [
+        // Example of I-type: ADDI.
+        // imm    | rs1     | funct3      | rd     | opcode
+        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
+        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
+        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
+        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
+        (
+            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
+            1 << 31,
+        ),
+        // Example of R-type with funct7: SUB.
+        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
+        (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
+    ] {
+        let imm = InsnRecord::imm_internal(&DecodedInstruction::new(i));
+        assert_eq!(imm, expected);
     }
 }

@@ -12,6 +12,7 @@ use crate::{
     },
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind, StepRecord};
@@ -142,21 +143,16 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let memory_op = step.memory_op().unwrap();
-        let imm: E::BaseField = InsnRecord::imm_internal_field(&step.insn());
+        let imm = InsnRecord::imm_internal(&step.insn());
         let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
-        let addr = ByteAddr::from(
-            step.rs1()
-                .unwrap()
-                .value
-                .wrapping_add(step.insn().imm_internal()),
-        );
+        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
-        set_val!(instance, config.imm, imm);
+        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
         config
             .prev_memory_value
             .assign_value(instance, prev_mem_value);
