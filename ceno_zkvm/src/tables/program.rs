@@ -8,6 +8,7 @@ use crate::{
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
+    utils::i64_to_base,
     witness::RowMajorMatrix,
 };
 use ceno_emul::{
@@ -58,51 +59,38 @@ impl<F: SmallField> InsnRecord<F> {
             (insn.rd_internal() as u64).into(),
             (insn.rs1_or_zero() as u64).into(),
             (insn.rs2_or_zero() as u64).into(),
-            Self::imm_internal_field(insn),
+            i64_to_base(InsnRecord::imm_internal(insn)),
         ])
-    }
-
-    /// Interpret the immediate as unsigned or signed depending on the instruction.
-    /// Convert negative values from two's complement to field.
-    pub fn imm_internal_field(insn: &DecodedInstruction) -> F {
-        let imm = InsnRecord::imm_internal(insn);
-        if InsnRecord::imm_field_is_negative(insn) {
-            -F::from(-(imm as i32) as u64)
-        } else {
-            F::from(imm as u64)
-        }
     }
 }
 
 impl InsnRecord<()> {
-    /// The internal view of the immediate in the program table, for use in circuits.
-    pub fn imm_internal(insn: &DecodedInstruction) -> u32 {
-        let codes = insn.codes();
-        match codes.format {
-            R => 0,
-            _ if matches!(codes.kind, SLLI | SRLI | SRAI) => {
-                // Decode the immediate for ShiftImmInstruction.
-                // The shift is implemented as a multiplication/division by 1 << immediate.
-                1 << (insn.immediate() & 0x1F)
-            }
-            _ => insn.immediate(),
-        }
-    }
-
-    /// The internal interpretation of the immediate sign, for use in circuits.
-    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
-    /// example:
-    /// imm = ux::MAX - 1 implies
-    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
-    /// imm_field = ux::MAX - 1 otherwise
-    fn imm_field_is_negative(insn: &DecodedInstruction) -> bool {
+    /// The internal view of the immediate in the program table.
+    /// This is encoded in a way that is efficient for circuits, depending on the instruction.
+    ///
+    /// These conversions are legal:
+    /// - `as u32` and `as i32` as usual.
+    /// - `i64_to_base(imm)` gives the field element going into the program table.
+    /// - `as u64` in unsigned cases.
+    pub fn imm_internal(insn: &DecodedInstruction) -> i64 {
+        let imm: u32 = insn.immediate();
         match insn.codes() {
-            InsnCodes { format: R | U, .. } => false,
+            // Prepare the immediate for ShiftImmInstruction.
+            // The shift is implemented as a multiplication/division by 1 << immediate.
             InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI | SLTIU | ANDI | XORI | ORI,
+                kind: SLLI | SRLI | SRAI,
                 ..
-            } => false,
-            _ => insn.immediate_msb() != 0,
+            } => 1 << (imm & 0x1F),
+            // Unsigned view.
+            // For example, u32::MAX is `u32::MAX mod p` in the finite field.
+            InsnCodes { format: R | U, .. }
+            | InsnCodes {
+                kind: ADDI | SLTIU | ANDI | XORI | ORI,
+                ..
+            } => imm as u64 as i64,
+            // Signed view.
+            // For example, u32::MAX is `-1 mod p` in the finite field.
+            _ => imm as i32 as i64,
         }
     }
 }
