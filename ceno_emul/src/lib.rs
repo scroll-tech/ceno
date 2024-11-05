@@ -1,3 +1,4 @@
+#![deny(clippy::cargo)]
 mod addr;
 pub use addr::*;
 

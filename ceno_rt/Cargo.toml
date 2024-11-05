@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "Ceno runtime library"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "ceno_rt"
+readme = "README.md"
+repository.workspace = true
 version.workspace = true
 
 [dependencies]

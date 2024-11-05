@@ -1,3 +1,4 @@
+#![deny(clippy::cargo)]
 #![feature(strict_overflow_ops)]
 #![no_std]
 

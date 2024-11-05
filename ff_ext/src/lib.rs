@@ -1,3 +1,4 @@
+#![deny(clippy::cargo)]
 pub use ff;
 use ff::FromUniformBytes;
 use goldilocks::SmallField;

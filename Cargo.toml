@@ -14,8 +14,12 @@ members = [
 resolver = "2"
 
 [workspace.package]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
 edition = "2021"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [workspace.dependencies]

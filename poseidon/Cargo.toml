@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "Poseidon hash function"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "poseidon"
+readme.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]

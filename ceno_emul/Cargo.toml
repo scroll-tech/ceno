@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "A Risc-V emulator for Ceno"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "ceno_emul"
+readme.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]
