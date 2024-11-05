@@ -259,6 +259,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "base64",
+ "bumpalo",
  "ceno_emul",
  "cfg-if",
  "clap",

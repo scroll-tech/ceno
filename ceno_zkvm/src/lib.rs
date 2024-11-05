@@ -10,6 +10,7 @@ pub mod tables;
 pub use utils::u64vec;
 mod chip_handler;
 pub mod circuit_builder;
+pub mod expr;
 pub mod expression;
 pub mod gadgets;
 mod keygen;
