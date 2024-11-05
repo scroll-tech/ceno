@@ -18,7 +18,7 @@ use constants::BYTE_BIT_WIDTH;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{enumerate, Itertools};
+use itertools::{Itertools, enumerate};
 use std::{
     borrow::Cow,
     mem::{self, MaybeUninit},
@@ -60,11 +60,8 @@ impl<'a, E: ExtensionField> IntoIterator for &'a UintLimb<E> {
 }
 
 impl<E: ExtensionField> UintLimb<E> {
-    pub fn iter_fnord(&self) -> impl Iterator<Item = &WitIn> {
-        match self {
-            UintLimb::WitIn(vec) => vec.iter(),
-            _ => unimplemented!(),
-        }
+    pub fn iter(&self) -> impl Iterator<Item = &WitIn> {
+        self.into_iter()
     }
 }
 
@@ -310,9 +307,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
-        let combined_limbs = (&x
-            .limbs)
-            .into_iter()
+        let combined_limbs = x
+            .limbs
+            .iter()
             .collect_vec()
             .chunks(k)
             .map(|chunk| {
@@ -342,7 +339,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         };
         let split_limbs = x
             .limbs
-            .iter_fnord()
+            .iter()
             .flat_map(|large_limb| {
                 let limbs = (0..k)
                     .map(|_| {
@@ -564,7 +561,7 @@ impl<E: ExtensionField> UInt<E> {
         &self,
         cb: &mut CircuitBuilder<E>,
     ) -> Result<SignedExtendConfig<E>, ZKVMError> {
-        SignedExtendConfig::<E>::construct_limb(cb, (&self.limbs).into_iter().last().unwrap().expr())
+        SignedExtendConfig::<E>::construct_limb(cb, self.limbs.iter().last().unwrap().expr())
     }
 }
 
