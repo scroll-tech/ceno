@@ -16,10 +16,13 @@ use crate::util::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use num_integer::Integer;
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
-use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
+use multilinear_extensions::{
+    mle::FieldType, util::max_usable_threads, virtual_poly::build_eq_x_r_vec,
+};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
 use rayon::prelude::{
@@ -366,8 +369,12 @@ where
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
     let mut running_oracle = comm.batch_codewords(batch_coeffs);
     end_timer!(batch_codewords_timer);
+    let nthreads = max_usable_threads();
+    let per_thread_size = (1 << num_vars).div_ceil(&nthreads);
+
     let mut running_evals = (0..(1 << num_vars))
         .into_par_iter()
+        .with_min_len(per_thread_size)
         .map(|i| {
             comm.polynomials_bh_evals
                 .iter()
