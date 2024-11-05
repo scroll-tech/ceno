@@ -36,7 +36,7 @@ pub enum Expression<E: ExtensionField> {
     Sum(Box<Expression<E>>, Box<Expression<E>>),
     /// This is the product of two expressions
     Product(Box<Expression<E>>, Box<Expression<E>>),
-    /// ScaledSum(x, a, b) to represent a * x + b
+    /// ScaledSum(x, a, b) represents a * x + b
     /// where x is one of wit / fixed / instance, a and b are either constants or challenges
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
     /// Challenge(challenge_id, power, scalar, offset)
