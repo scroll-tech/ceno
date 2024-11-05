@@ -26,20 +26,21 @@ use crate::{
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
-    /// Fixed
+    /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values
     Instance(Instance),
     /// Constant poly
     Constant(E::BaseField),
-    /// This is the sum of two expression
+    /// This is the sum of two expressions
     Sum(Box<Expression<E>>, Box<Expression<E>>),
-    /// This is the product of two polynomials
+    /// This is the product of two expressions
     Product(Box<Expression<E>>, Box<Expression<E>>),
-    /// This is x, a, b expr to represent ax + b polynomial
-    /// and x is one of wit / fixed / instance, a and b are either constant or challenge
+    /// ScaledSum(x, a, b) represents a * x + b
+    /// where x is one of wit / fixed / instance, a and b are either constants or challenges
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
-    Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
+    /// Challenge(challenge_id, power, scalar, offset)
+    Challenge(ChallengeId, usize, E, E),
 }
 
 /// this is used as finite state machine state
