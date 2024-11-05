@@ -489,7 +489,7 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
-            let batch_size = 4;
+            let batch_size = 2;
             let num_points = batch_size >> 1;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
