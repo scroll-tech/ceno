@@ -8,7 +8,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
     expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::{AssertLTConfig, SignedExtendConfig},
+    instructions::riscv::constants::UInt,
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
@@ -114,7 +115,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 limbs: UintLimb::WitIn(
                     (0..Self::NUM_LIMBS)
                         .map(|i| {
-                            let w = cb.create_witin(|| format!("limb_{i}"))?;
+                            let w = cb.create_witin(|| format!("limb_{i}"));
                             if is_check {
                                 cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
                             }
@@ -186,15 +187,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         assert_eq!(expr_limbs.len(), Self::NUM_LIMBS);
         let limbs = (0..Self::NUM_LIMBS)
             .map(|i| {
-                let w = circuit_builder.create_witin(|| "wit for limb").unwrap();
+                let w = circuit_builder.create_witin(|| "wit for limb");
                 circuit_builder
                     .assert_ux::<_, _, C>(|| "range check", w.expr())
                     .unwrap();
                 circuit_builder
-                    .require_zero(
-                        || "create_witin_from_expr",
-                        w.expr() - expr_limbs[i].clone(),
-                    )
+                    .require_zero(|| "create_witin_from_expr", w.expr() - &expr_limbs[i])
                     .unwrap();
                 w
             })
@@ -309,7 +307,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
             shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8)));
+            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
         let combined_limbs = x
@@ -321,12 +319,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 chunk
                     .iter()
                     .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift.clone() * limb.expr())
+                    .map(|(limb, shift)| shift * limb.expr())
                     .reduce(|a, b| a + b)
                     .unwrap()
             })
             .collect_vec();
-        UIntLimbs::<M, C, E>::from_exprs_unchecked(combined_limbs)
+        Ok(UIntLimbs::<M, C, E>::from_exprs_unchecked(combined_limbs))
     }
 
     pub fn to_u8_limbs(
@@ -339,7 +337,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
             shift_pows.push(Expression::Constant(E::BaseField::ONE));
-            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap().clone() * (1 << 8)));
+            (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
         let split_limbs = x
@@ -348,7 +346,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .flat_map(|large_limb| {
                 let limbs = (0..k)
                     .map(|_| {
-                        let w = circuit_builder.create_witin(|| "").unwrap();
+                        let w = circuit_builder.create_witin(|| "");
                         circuit_builder.assert_byte(|| "", w.expr()).unwrap();
                         w.expr()
                     })
@@ -356,7 +354,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 let combined_limb = limbs
                     .iter()
                     .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift.clone() * limb.clone())
+                    .map(|(limb, shift)| shift * limb)
                     .reduce(|a, b| a + b)
                     .unwrap();
 
@@ -369,8 +367,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         UIntLimbs::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
     }
 
-    pub fn from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Result<Self, ZKVMError> {
-        let n = Self {
+    pub fn from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Self {
+        Self {
             limbs: UintLimb::Expression(
                 expr_limbs
                     .into_iter()
@@ -380,8 +378,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             ),
             carries: None,
             carries_auxiliary_lt_config: None,
-        };
-        Ok(n)
+        }
     }
 
     /// If current limbs are Expression, this function will create witIn and replace the limbs
@@ -395,7 +392,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 self.limbs = UintLimb::WitIn(
                     (0..Self::NUM_LIMBS)
                         .map(|i| {
-                            let w = cb.create_witin(|| format!("limb_{i}"))?;
+                            let w = cb.create_witin(|| format!("limb_{i}"));
                             cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
                             Ok(w)
                         })
@@ -425,7 +422,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 self.carries = Some(
                     (0..carries_len)
                         .map(|i| {
-                            let c = cb.create_witin(|| format!("carry_{i}"))?;
+                            let c = cb.create_witin(|| format!("carry_{i}"));
                             Ok(c)
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
@@ -531,11 +528,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// Get an Expression<E> from the limbs, unsafe if Uint value exceeds field limit
     pub fn value(&self) -> Expression<E> {
-        let base = Expression::from(1 << C);
         self.expr()
             .into_iter()
             .rev()
-            .reduce(|sum, limb| sum * base.clone() + limb)
+            .reduce(|sum, limb| (sum << C) + limb)
             .unwrap()
     }
 
@@ -547,9 +543,28 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let mut self_lo = self.expr();
         let self_hi = self_lo.split_off(self_lo.len() / 2);
         Ok((
-            UIntLimbs::from_exprs_unchecked(self_lo)?,
-            UIntLimbs::from_exprs_unchecked(self_hi)?,
+            UIntLimbs::from_exprs_unchecked(self_lo),
+            UIntLimbs::from_exprs_unchecked(self_hi),
         ))
+    }
+
+    pub fn to_field_expr(&self, is_neg: Expression<E>) -> Expression<E> {
+        // Convert two's complement representation into field arithmetic.
+        // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
+        self.value() - is_neg * (1_u64 << 32)
+    }
+}
+
+impl<E: ExtensionField> UInt<E> {
+    /// Determine whether a UInt is negative (as 2s complement)
+    ///
+    /// Also called Most Significant Bit extraction, when
+    /// interpreted as an unsigned int.
+    pub fn is_negative(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<SignedExtendConfig<E>, ZKVMError> {
+        SignedExtendConfig::<E>::construct_limb(cb, self.limbs.iter().last().unwrap().expr())
     }
 }
 
@@ -623,7 +638,7 @@ impl<E: ExtensionField> UIntLimbs<32, 8, E> {
         let u16_limbs = u8_limbs
             .chunks(2)
             .map(|chunk| {
-                let (a, b) = (chunk[0].clone(), chunk[1].clone());
+                let (a, b) = (&chunk[0], &chunk[1]);
                 a + b * 256
             })
             .collect_vec();
@@ -654,8 +669,8 @@ impl ValueMul {
     }
 }
 
+#[derive(Clone)]
 pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
-    #[allow(dead_code)]
     val: T,
     pub limbs: Cow<'a, [u16]>,
 }
@@ -690,7 +705,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
             val: limbs
                 .iter()
                 .rev()
-                .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
+                .fold(0u32, |acc, &v| (acc << 16) + v as u32)
                 .into(),
             limbs: Cow::Owned(limbs),
         }
@@ -701,7 +716,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
             val: limbs
                 .iter()
                 .rev()
-                .fold(0u32, |acc, &v| acc * (1 << 16) + v as u32)
+                .fold(0u32, |acc, &v| (acc << 16) + v as u32)
                 .into(),
             limbs: Cow::Borrowed(limbs),
         }
