@@ -25,7 +25,6 @@ use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -76,7 +75,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     let program = Program::new(
         CENO_PLATFORM.pc_base(),

@@ -47,7 +47,7 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
 };
 
-use rand_chacha::{ChaCha8Rng, rand_core::RngCore};
+use rand_chacha::ChaCha8Rng;
 use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -80,7 +80,7 @@ enum PolyEvalsCodeword<E: ExtensionField> {
     TooBig(usize),
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -266,8 +266,7 @@ where
 ///     positions are (i >> k) and (i >> k) XOR 1.
 /// (c) The verifier checks that the folding has been correctly computed
 ///     at these positions.
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug>
-    PolynomialCommitmentScheme<E> for Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> PolynomialCommitmentScheme<E> for Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -568,7 +567,7 @@ where
         if cfg!(feature = "sanity-check") {
             evals.iter().for_each(|eval| {
                 assert_eq!(
-                    &polys[eval.poly()].evaluate(&points[eval.point()]),
+                    &polys[eval.poly()].evaluate(points[eval.point()]),
                     eval.value(),
                 )
             })
@@ -1170,8 +1169,7 @@ where
     }
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug> NoninteractivePCS<E>
-    for Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -1188,12 +1186,11 @@ mod test {
         },
     };
     use goldilocks::GoldilocksExt2;
-    use rand_chacha::ChaCha8Rng;
 
     use super::{BasefoldRSParams, structure::BasefoldBasecodeParams};
 
-    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
-    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
+    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
 
     #[test]
     fn commit_open_verify_goldilocks_basecode_base() {
