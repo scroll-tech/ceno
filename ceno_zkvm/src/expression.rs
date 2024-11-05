@@ -8,6 +8,7 @@ use std::{
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
+use ceno_emul::InsnKind;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -25,20 +26,21 @@ use crate::{
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
-    /// Fixed
+    /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values
     Instance(Instance),
     /// Constant poly
     Constant(E::BaseField),
-    /// This is the sum of two expression
+    /// This is the sum of two expressions
     Sum(Box<Expression<E>>, Box<Expression<E>>),
-    /// This is the product of two polynomials
+    /// This is the product of two expressions
     Product(Box<Expression<E>>, Box<Expression<E>>),
-    /// This is x, a, b expr to represent ax + b polynomial
-    /// and x is one of wit / fixed / instance, a and b are either constant or challenge
+    /// ScaledSum(x, a, b) represents a * x + b
+    /// where x is one of wit / fixed / instance, a and b are either constants or challenges
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
-    Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
+    /// Challenge(challenge_id, power, scalar, offset)
+    Challenge(ChallengeId, usize, E, E),
 }
 
 /// this is used as finite state machine state
@@ -831,7 +833,7 @@ macro_rules! impl_from_unsigned {
         )*
     };
 }
-impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType);
+impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
 
 // Implement From trait for u128 separately since it requires explicit reduction
 impl<F: SmallField, E: ExtensionField<BaseField = F>> From<u128> for Expression<E> {
