@@ -365,10 +365,9 @@ pub mod test_util {
     use crate::PolynomialCommitmentScheme;
     use ff_ext::ExtensionField;
     use itertools::Itertools;
-    use multilinear_extensions::mle::DenseMultilinearExtension;
-    #[cfg(test)]
     use multilinear_extensions::{
-        mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+        mle::{DenseMultilinearExtension, MultilinearExtension},
+        virtual_poly_v2::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
     use transcript::Transcript;
