@@ -17,6 +17,7 @@ use crate::{
     set_val,
     tables::InsnRecord,
     uint::Value,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -105,9 +106,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             .rs1_read
             .assign_value(instance, Value::new_unchecked(rs1));
 
-        let imm = step.insn().imm_internal();
-        let imm_field = InsnRecord::imm_internal_field::<E::BaseField>(&step.insn());
-        set_val!(instance, config.imm, imm_field);
+        let imm = InsnRecord::imm_internal(&step.insn());
+        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
 
         match I::INST_KIND {
             InsnKind::SLTIU => {
