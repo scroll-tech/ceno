@@ -3,14 +3,14 @@ use std::time::Duration;
 use criterion::*;
 use goldilocks::GoldilocksExt2;
 
-use itertools::{chain, Itertools};
+use itertools::{Itertools, chain};
 use mpcs::{
+    Basefold, BasefoldBasecodeParams, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
     test_util::{
         commit_polys_individually, gen_rand_poly, gen_rand_polys, get_point_from_challenge,
         get_points_from_challenge, setup_pcs, vecs_as_slices,
     },
     util::plonky2_util::log2_ceil,
-    Basefold, BasefoldBasecodeParams, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
 };
 
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension};

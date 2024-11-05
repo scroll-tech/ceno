@@ -1,27 +1,9 @@
 use ff::Field;
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::FieldType;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
     ParallelSliceMut,
 };
-
-#[allow(unused)]
-pub fn sum_check_first_round_field_type<E: ExtensionField>(
-    eq: &mut [E],
-    bh_values: &mut FieldType<E>,
-) -> Vec<E> {
-    // The input polynomials are in the form of evaluations. Instead of viewing
-    // every one element as the evaluation of the polynomial at a single point,
-    // we can view every two elements as partially evaluating the polynomial at
-    // a single point, leaving the first variable free, and obtaining a univariate
-    // polynomial. The one_level_interp_hc transforms the evaluation forms into
-    // the coefficient forms, for every of these partial polynomials.
-    one_level_interp_hc(eq);
-    one_level_interp_hc_field_type(bh_values);
-    parallel_pi_field_type(bh_values, eq)
-    //    p_i(&bh_values, &eq)
-}
 
 pub fn sum_check_first_round<E: ExtensionField>(eq: &mut [E], bh_values: &mut [E]) -> Vec<E> {
     // The input polynomials are in the form of evaluations. Instead of viewing
@@ -34,15 +16,6 @@ pub fn sum_check_first_round<E: ExtensionField>(eq: &mut [E], bh_values: &mut [E
     one_level_interp_hc(bh_values);
     parallel_pi(bh_values, eq)
     //    p_i(&bh_values, &eq)
-}
-
-#[allow(unused)]
-pub fn one_level_interp_hc_field_type<E: ExtensionField>(evals: &mut FieldType<E>) {
-    match evals {
-        FieldType::Ext(evals) => one_level_interp_hc(evals),
-        FieldType::Base(evals) => one_level_interp_hc(evals),
-        _ => unreachable!(),
-    }
 }
 
 pub fn one_level_interp_hc<F: Field>(evals: &mut [F]) {
@@ -65,15 +38,6 @@ pub fn one_level_eval_hc<F: Field>(evals: &mut Vec<F>, challenge: F) {
         index += 1;
         index % 2 == 0
     });
-}
-
-#[allow(unused)]
-fn parallel_pi_field_type<E: ExtensionField>(evals: &mut FieldType<E>, eq: &mut [E]) -> Vec<E> {
-    match evals {
-        FieldType::Ext(evals) => parallel_pi(evals, eq),
-        FieldType::Base(evals) => parallel_pi_base(evals, eq),
-        _ => unreachable!(),
-    }
 }
 
 fn parallel_pi<F: Field>(evals: &[F], eq: &[F]) -> Vec<F> {
@@ -101,42 +65,6 @@ fn parallel_pi<F: Field>(evals: &[F], eq: &[F]) -> Vec<F> {
     thirds.par_iter_mut().enumerate().for_each(|(i, f)| {
         if i % 2 == 0 {
             *f = evals[i + 1] * eq[i + 1];
-        }
-    });
-
-    coeffs[0] = firsts.par_iter().sum();
-    coeffs[1] = seconds.par_iter().sum();
-    coeffs[2] = thirds.par_iter().sum();
-
-    coeffs
-}
-
-#[allow(unused)]
-fn parallel_pi_base<E: ExtensionField>(evals: &[E::BaseField], eq: &[E]) -> Vec<E> {
-    if evals.len() == 1 {
-        return vec![E::from(evals[0]), E::from(evals[0]), E::from(evals[0])];
-    }
-    let mut coeffs = vec![E::ZERO, E::ZERO, E::ZERO];
-
-    // Manually write down the multiplication formular of two linear polynomials
-    let mut firsts = vec![E::ZERO; evals.len()];
-    firsts.par_iter_mut().enumerate().for_each(|(i, f)| {
-        if i % 2 == 0 {
-            *f = E::from(evals[i]) * eq[i];
-        }
-    });
-
-    let mut seconds = vec![E::ZERO; evals.len()];
-    seconds.par_iter_mut().enumerate().for_each(|(i, f)| {
-        if i % 2 == 0 {
-            *f = E::from(evals[i + 1]) * eq[i] + E::from(evals[i]) * eq[i + 1];
-        }
-    });
-
-    let mut thirds = vec![E::ZERO; evals.len()];
-    thirds.par_iter_mut().enumerate().for_each(|(i, f)| {
-        if i % 2 == 0 {
-            *f = E::from(evals[i + 1]) * eq[i + 1];
         }
     });
 

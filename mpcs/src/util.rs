@@ -5,14 +5,14 @@ pub mod plonky2_util;
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{izip, Either, Itertools};
+use itertools::{Either, Itertools, izip};
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType},
     virtual_poly_v2::ArcMultilinearExtension,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod merkle_tree;
-use crate::{util::parallel::parallelize, Error};
+use crate::{Error, util::parallel::parallelize};
 pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
@@ -195,7 +195,7 @@ pub fn field_type_iter_base<E: ExtensionField>(
 pub fn field_type_iter_range_base<'a, E: ExtensionField>(
     values: &'a FieldType<E>,
     range: impl IntoIterator<Item = usize> + 'a,
-) -> impl Iterator<Item = &E::BaseField> + 'a {
+) -> impl Iterator<Item = &'a E::BaseField> + 'a {
     match values {
         FieldType::Ext(coeffs) => {
             Either::Left(range.into_iter().flat_map(|i| coeffs[i].as_bases()))
@@ -274,8 +274,8 @@ pub mod test {
     type E = goldilocks::GoldilocksExt2;
     type F = goldilocks::Goldilocks;
     use rand::{
-        rngs::{OsRng, StdRng},
         CryptoRng, RngCore, SeedableRng,
+        rngs::{OsRng, StdRng},
     };
     use std::{array, iter, ops::Range};
 

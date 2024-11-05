@@ -1,4 +1,5 @@
 use crate::{
+    Error, Evaluation, PolynomialCommitmentScheme,
     sum_check::{
         classic::{ClassicSumCheck, Coefficients, CoefficientsProver, SumcheckProof},
         eq_xy_eval,
@@ -9,7 +10,6 @@ use crate::{
         merkle_tree::{Hasher, MerkleTree},
         plonky2_util::reverse_index_bits_in_place_field_type,
     },
-    Error, Evaluation, PolynomialCommitmentScheme,
 };
 use ark_std::{end_timer, start_timer};
 use basic::BasicBasefoldStrategy;
@@ -22,19 +22,18 @@ pub use encoding::{
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use query_phase::{prover_query_phase, verifier_query_phase, QueryCheckStrategy};
+use query_phase::{QueryCheckStrategy, prover_query_phase, verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::BasefoldSpec;
 use transcript::Transcript;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
     virtual_poly::build_eq_x_r_vec,
 };
 
-use rand_chacha::ChaCha8Rng;
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelRefIterator, ParallelIterator},
@@ -50,7 +49,7 @@ pub use structure::{
     BasefoldVerifierParams,
 };
 mod commit_phase;
-use commit_phase::{commit_phase, CommitPhaseStrategy};
+use commit_phase::{CommitPhaseStrategy, commit_phase};
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
@@ -530,7 +529,6 @@ where
     type Commitment = BasefoldCommitment<E, Spec>;
     type CommitmentChunk = <Spec::Hasher as Hasher<E>>::Digest;
     type Proof = BasefoldProof<E, Spec>;
-    type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error> {
         let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size));
@@ -773,7 +771,7 @@ mod test {
     };
     use goldilocks::GoldilocksExt2;
 
-    use super::{structure::BasefoldBasecodeParams, BasefoldRSParams};
+    use super::{BasefoldRSParams, structure::BasefoldBasecodeParams};
 
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
     type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;

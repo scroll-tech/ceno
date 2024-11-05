@@ -8,14 +8,14 @@ use ff_ext::ExtensionField;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::mle::FieldType;
 
 use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
-use super::{query_phase::BasefoldQueriesResult, Basecode, BasecodeDefaultSpec};
+use super::{Basecode, BasecodeDefaultSpec, query_phase::BasefoldQueriesResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(

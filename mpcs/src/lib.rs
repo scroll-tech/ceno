@@ -1,6 +1,5 @@
 use ff_ext::ExtensionField;
-use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::Transcript;
 
@@ -113,7 +112,6 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type Commitment: Clone + Debug + Default + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
     type Proof: Clone + Debug + Serialize + DeserializeOwned;
-    type Rng: RngCore + Clone;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error>;
 
@@ -297,10 +295,10 @@ pub enum Error {
 
 mod basefold;
 pub use basefold::{
-    coset_fft, fft, fft_root_table, one_level_eval_hc, one_level_interp_hc, Basecode,
-    BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
+    Basecode, BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
     BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
-    EncodingScheme, RSCode, RSCodeDefaultSpec,
+    EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
+    one_level_interp_hc,
 };
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
