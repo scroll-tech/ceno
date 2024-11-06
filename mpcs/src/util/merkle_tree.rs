@@ -75,16 +75,16 @@ where
 
     pub fn merkle_path_without_leaf_sibling_or_root(
         &self,
-        leaf_index: usize,
+        leaf_group_index: usize, // Two leaves make a group.
     ) -> MerklePathWithoutLeafOrRoot<E> {
-        assert!(leaf_index < self.bottom_size());
+        assert!(leaf_group_index < self.bottom_size());
         MerklePathWithoutLeafOrRoot::<E>::new(
             self.inner
                 .iter()
                 .take(self.height() - 1)
                 .enumerate()
                 .map(|(index, layer)| {
-                    Digest::<E::BaseField>(layer[(leaf_index >> index) ^ 1].clone().0)
+                    Digest::<E::BaseField>(layer[(leaf_group_index >> index) ^ 1].clone().0)
                 })
                 .collect(),
         )
