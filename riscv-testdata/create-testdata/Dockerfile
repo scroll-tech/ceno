@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 ubuntu:latest AS builder-stage
+FROM --platform=linux/amd64 ubuntu:latest AS builder-stage_amd64
 
 # Set the working directory
 WORKDIR /root
@@ -43,5 +43,5 @@ RUN rm --force /root/riscv-tests/isa/.gitignore
 FROM scratch AS exporter-stage
 
 # Copy all built tests to the host system
-COPY --from=builder-stage /root/riscv-tests/isa /
-COPY --from=builder-stage /root/riscv-tests/.testdata_generated_from_this_commit /
+COPY --from=builder-stage_amd64 /root/riscv-tests/isa /
+COPY --from=builder-stage_amd64 /root/riscv-tests/.testdata_generated_from_this_commit /
