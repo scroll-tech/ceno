@@ -5,8 +5,9 @@ use std::{
     process::Command,
 };
 
-// Add each example to this list.
-// Contact Matthias, if you examples get  complicated enough to need their own crates, instead of just being one file.
+/// Add each example to this list.
+///
+/// Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
 const EXAMPLES: &[&str] = &[
     "ceno_rt_alloc",
     "ceno_rt_io",
