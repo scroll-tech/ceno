@@ -175,7 +175,7 @@ pub fn field_type_to_ext_vec<E: ExtensionField>(evaluations: &FieldType<E>) -> V
 pub fn field_type_as_ext<E: ExtensionField>(values: &FieldType<E>) -> &Vec<E> {
     match values {
         FieldType::Ext(coeffs) => coeffs,
-        FieldType::Base(_) => panic!("Expected base field"),
+        FieldType::Base(_) => panic!("Expected ext field"),
         _ => unreachable!(),
     }
 }
