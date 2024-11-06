@@ -38,7 +38,7 @@ RUN autoconf && \
     cd isa && \
     make rv32ui rv32um XLEN=32 RISCV_GCC_OPTS="-save-temps -frandom-seed=1 -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles"
 
-RUN rm -f /root/riscv-tests/isa/.gitignore
+RUN rm --force /root/riscv-tests/isa/.gitignore
 
 FROM scratch AS exporter-stage
 
