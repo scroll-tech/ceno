@@ -5,6 +5,9 @@ use crate::{
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::mle::FieldType;
@@ -12,13 +15,7 @@ use multilinear_extensions::mle::FieldType;
 use std::{marker::PhantomData, slice};
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
-use super::{
-    Basecode, BasecodeDefaultSpec,
-    query_phase::{
-        BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-        SimpleBatchQueriesResultWithMerklePath,
-    },
-};
+use super::{Basecode, BasecodeDefaultSpec, query_phase::BasefoldQueriesResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -100,8 +97,35 @@ where
         self.codeword_tree.batch_leaves(coeffs)
     }
 
+    pub fn batch_codewords_at(&self, coeffs: &[E], index: usize) -> E {
+        self.codeword_tree.batch_leaf(coeffs, index)
+    }
+
+    pub fn iter_batch_codewords<'a>(&'a self, coeffs: &'a [E]) -> impl Iterator<Item = E> + 'a {
+        (0..self.codeword_size()).map(|i| {
+            self.get_codeword_entry_ext(i)
+                .iter()
+                .zip(coeffs.iter())
+                .map(|(a, b)| *a * b)
+                .sum()
+        })
+    }
+
+    pub fn par_iter_batch_codewords<'a>(
+        &'a self,
+        coeffs: &'a [E],
+    ) -> impl IndexedParallelIterator<Item = E> + 'a {
+        (0..self.codeword_size()).into_par_iter().map(|i| {
+            self.get_codeword_entry_ext(i)
+                .par_iter()
+                .zip(coeffs.par_iter())
+                .map(|(a, b)| *a * b)
+                .sum()
+        })
+    }
+
     pub fn codeword_size(&self) -> usize {
-        self.codeword_tree.size().1
+        self.codeword_tree.leaves_size().1
     }
 
     pub fn codeword_size_log(&self) -> usize {
@@ -183,6 +207,10 @@ where
 
     pub fn root(&self) -> Digest<E::BaseField> {
         self.root.clone()
+    }
+
+    pub fn root_ref(&self) -> &Digest<E::BaseField> {
+        &self.root
     }
 
     pub fn num_vars(&self) -> Option<usize> {
@@ -277,42 +305,6 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    Single(QueriesResultWithMerklePath<E>),
-    Batched(BatchedQueriesResultWithMerklePath<E>),
-    SimpleBatched(SimpleBatchQueriesResultWithMerklePath<E>),
-}
-
-impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn as_single(&self) -> &QueriesResultWithMerklePath<E> {
-        match self {
-            Self::Single(x) => x,
-            _ => panic!("Not a single query result"),
-        }
-    }
-
-    pub fn as_batched(&self) -> &BatchedQueriesResultWithMerklePath<E> {
-        match self {
-            Self::Batched(x) => x,
-            _ => panic!("Not a batched query result"),
-        }
-    }
-
-    pub fn as_simple_batched(&self) -> &SimpleBatchQueriesResultWithMerklePath<E> {
-        match self {
-            Self::SimpleBatched(x) => x,
-            _ => panic!("Not a simple batched query result"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -320,7 +312,7 @@ where
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) roots: Vec<Digest<E::BaseField>>,
     pub(crate) final_message: Vec<E>,
-    pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
+    pub(crate) query_result: BasefoldQueriesResult<E>,
     pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
     pub(crate) trivial_proof: Vec<FieldType<E>>,
 }
@@ -334,9 +326,7 @@ where
             sumcheck_messages: vec![],
             roots: vec![],
             final_message: vec![],
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
-                QueriesResultWithMerklePath::empty(),
-            ),
+            query_result: BasefoldQueriesResult::empty(),
             sumcheck_proof: None,
             trivial_proof: evals,
         }

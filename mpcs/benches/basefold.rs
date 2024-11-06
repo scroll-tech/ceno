@@ -8,7 +8,7 @@ use mpcs::{
     Basefold, BasefoldBasecodeParams, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
     test_util::{
         commit_polys_individually, gen_rand_poly, gen_rand_polys, get_point_from_challenge,
-        get_points_from_challenge, setup_pcs,
+        get_points_from_challenge, setup_pcs, vecs_as_slices,
     },
     util::plonky2_util::log2_ceil,
 };
@@ -66,6 +66,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
         let eval = poly.evaluate(point.as_slice());
         transcript.append_field_element_ext(&eval);
         let transcript_for_bench = transcript.clone();
+        let poly = ArcMultilinearExtension::from(poly);
         let proof = Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
 
         group.bench_function(BenchmarkId::new("open", format!("{}", num_vars)), |b| {
@@ -97,7 +98,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
     }
 }
 
-fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
+fn bench_batch_vlmp_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
     c: &mut Criterion,
     is_base: bool,
     id: &str,
@@ -147,8 +148,19 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
-            let proof =
-                Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
+            let polys = polys
+                .iter()
+                .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                .collect::<Vec<_>>();
+            let proof = Pcs::batch_open_vlmp(
+                &pp,
+                &polys,
+                &comms,
+                &vecs_as_slices(&points),
+                &evals,
+                &mut transcript,
+            )
+            .unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_open", format!("{}-{}", num_vars, batch_size)),
@@ -156,8 +168,15 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                     b.iter_batched(
                         || transcript_for_bench.clone(),
                         |mut transcript| {
-                            Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript)
-                                .unwrap();
+                            Pcs::batch_open_vlmp(
+                                &pp,
+                                &polys,
+                                &comms,
+                                &vecs_as_slices(&points),
+                                &evals,
+                                &mut transcript,
+                            )
+                            .unwrap();
                         },
                         BatchSize::SmallInput,
                     );
@@ -188,7 +207,15 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
 
             let backup_transcript = transcript.clone();
 
-            Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
+            Pcs::batch_verify_vlmp(
+                &vp,
+                &comms,
+                &vecs_as_slices(&points),
+                &evals,
+                &proof,
+                &mut transcript,
+            )
+            .unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_verify", format!("{}-{}", num_vars, batch_size)),
@@ -196,10 +223,10 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                     b.iter_batched(
                         || backup_transcript.clone(),
                         |mut transcript| {
-                            Pcs::batch_verify(
+                            Pcs::batch_verify_vlmp(
                                 &vp,
                                 &comms,
-                                &points,
+                                &vecs_as_slices(&points),
                                 &evals,
                                 &proof,
                                 &mut transcript,
@@ -325,20 +352,20 @@ fn bench_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
     bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, true, "basecode");
 }
 
-fn bench_batch_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
-    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, false, "rs");
+fn bench_batch_vlmp_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, false, "rs");
 }
 
-fn bench_batch_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
-    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, false, "basecode");
+fn bench_batch_vlmp_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, false, "basecode");
 }
 
-fn bench_batch_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
-    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, true, "rs");
+fn bench_batch_vlmp_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, true, "rs");
 }
 
-fn bench_batch_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
-    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, true, "basecode");
+fn bench_batch_vlmp_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
+    bench_batch_vlmp_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, true, "basecode");
 }
 
 fn bench_simple_batch_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
@@ -362,8 +389,8 @@ criterion_group! {
   config = Criterion::default().warm_up_time(Duration::from_millis(3000));
   targets =
   bench_simple_batch_commit_open_verify_goldilocks_base_rs, bench_simple_batch_commit_open_verify_goldilocks_ext_rs,
-  bench_batch_commit_open_verify_goldilocks_base_rs, bench_batch_commit_open_verify_goldilocks_ext_rs, bench_commit_open_verify_goldilocks_base_rs, bench_commit_open_verify_goldilocks_ext_rs,
-  bench_simple_batch_commit_open_verify_goldilocks_base_basecode, bench_simple_batch_commit_open_verify_goldilocks_ext_basecode, bench_batch_commit_open_verify_goldilocks_base_basecode, bench_batch_commit_open_verify_goldilocks_ext_basecode, bench_commit_open_verify_goldilocks_base_basecode, bench_commit_open_verify_goldilocks_ext_basecode,
+  bench_batch_vlmp_commit_open_verify_goldilocks_base_rs, bench_batch_vlmp_commit_open_verify_goldilocks_ext_rs, bench_commit_open_verify_goldilocks_base_rs, bench_commit_open_verify_goldilocks_ext_rs,
+  bench_simple_batch_commit_open_verify_goldilocks_base_basecode, bench_simple_batch_commit_open_verify_goldilocks_ext_basecode, bench_batch_vlmp_commit_open_verify_goldilocks_base_basecode, bench_batch_vlmp_commit_open_verify_goldilocks_ext_basecode, bench_commit_open_verify_goldilocks_base_basecode, bench_commit_open_verify_goldilocks_ext_basecode,
 }
 
 criterion_main!(bench_basefold);
