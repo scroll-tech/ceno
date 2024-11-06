@@ -13,11 +13,12 @@ pub struct Platform {
     pub ram_end: Addr,
 }
 
+// TODO(Matthias): read from elf.
 pub const CENO_PLATFORM: Platform = Platform {
-    rom_start: 0x2000_0000,
-    rom_end: 0x3000_0000 - 1,
-    ram_start: 0x8000_0000,
-    ram_end: 0xFFFF_FFFF,
+    rom_start: 0x8000_0000,
+    rom_end: 0xB000_0000 - 1,
+    ram_start: 0x2000_0000,
+    ram_end: 0x8000_0000 - 1,
 };
 
 impl Platform {

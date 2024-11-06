@@ -88,7 +88,7 @@ pub struct Emulator {
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
-    IllegalInstruction(u32),
+    IllegalInstruction(u32, u32),
     Breakpoint,
     LoadAddressMisaligned,
     LoadAccessFault(ByteAddr),
@@ -471,7 +471,7 @@ impl Emulator {
         let word = ctx.fetch(pc.waddr())?;
         if word & 0x03 != 0x03 {
             // Opcode must end in 0b11 in RV32IM.
-            ctx.trap(TrapCause::IllegalInstruction(word))?;
+            ctx.trap(TrapCause::IllegalInstruction(pc.0, word))?;
             return Err(anyhow!(
                 "Fatal: illegal instruction at pc={:?}: 0x{:08x}",
                 pc,
@@ -490,7 +490,7 @@ impl Emulator {
             InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
             InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
             InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
-            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(word))?,
+            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(pc.0, word))?,
         } {
             ctx.on_normal_end(&decoded);
         };
@@ -765,7 +765,7 @@ impl Emulator {
             InsnKind::EANY => match decoded.rs2 {
                 0 => ctx.ecall(),
                 1 => ctx.trap(TrapCause::Breakpoint),
-                _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
+                _ => ctx.trap(TrapCause::IllegalInstruction(ctx.get_pc().0, decoded.insn)),
             },
             _ => unreachable!(),
         }
