@@ -16,6 +16,7 @@ use crate::{
     set_val,
     tables::InsnRecord,
     uint::Value,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -54,7 +55,7 @@ pub struct DummyConfig<E: ExtensionField> {
     rs2: Option<(ReadRS2<E>, UInt<E>)>,
     rd: Option<(WriteRD<E>, UInt<E>)>,
 
-    mem_addr_val: Option<(WitIn, UInt<E>)>,
+    mem_addr_val: Option<[WitIn; 3]>,
     mem_read: Option<ReadMEM<E>>,
     mem_write: Option<WriteMEM>,
 
@@ -120,10 +121,11 @@ impl<E: ExtensionField> DummyConfig<E> {
 
         // Memory
         let mem_addr_val = if with_mem_read || with_mem_write {
-            Some((
+            Some([
                 circuit_builder.create_witin(|| "mem_addr"),
-                UInt::new_unchecked(|| "mem_val", circuit_builder)?,
-            ))
+                circuit_builder.create_witin(|| "mem_before"),
+                circuit_builder.create_witin(|| "mem_after"),
+            ])
         } else {
             None
         };
@@ -131,8 +133,8 @@ impl<E: ExtensionField> DummyConfig<E> {
         let mem_read = if with_mem_read {
             Some(ReadMEM::construct_circuit(
                 circuit_builder,
-                mem_addr_val.as_ref().unwrap().0.expr(),
-                mem_addr_val.as_ref().unwrap().1.memory_expr(),
+                mem_addr_val.as_ref().unwrap()[0].expr(),
+                mem_addr_val.as_ref().unwrap()[1].expr(),
                 vm_state.ts,
             )?)
         } else {
@@ -142,8 +144,9 @@ impl<E: ExtensionField> DummyConfig<E> {
         let mem_write = if with_mem_write {
             Some(WriteMEM::construct_circuit(
                 circuit_builder,
-                mem_addr_val.as_ref().unwrap().0.expr(),
-                mem_addr_val.as_ref().unwrap().1.memory_expr(),
+                mem_addr_val.as_ref().unwrap()[0].expr(),
+                mem_addr_val.as_ref().unwrap()[1].expr(),
+                mem_addr_val.as_ref().unwrap()[2].expr(),
                 vm_state.ts,
             )?)
         } else {
@@ -151,13 +154,12 @@ impl<E: ExtensionField> DummyConfig<E> {
         };
 
         // Fetch instruction
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
 
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
-            codes.opcode.into(),
-            rd.as_ref().map(|(r, _)| r.id.expr()).unwrap_or(0.into()),
-            codes.funct3_or_zero().into(),
+            codes.kind.into(),
+            rd.as_ref().map(|(r, _)| r.id.expr()),
             rs1.as_ref().map(|(r, _)| r.id.expr()).unwrap_or(0.into()),
             rs2.as_ref().map(|(r, _)| r.id.expr()).unwrap_or(0.into()),
             imm.expr(),
@@ -208,23 +210,21 @@ impl<E: ExtensionField> DummyConfig<E> {
         }
 
         // Memory
-        if let Some((mem_addr, mem_val)) = &self.mem_addr_val {
+        if let Some([mem_addr, mem_before, mem_after]) = &self.mem_addr_val {
             let mem_op = step.memory_op().expect("memory operation");
             set_val!(instance, mem_addr, u64::from(mem_op.addr));
-            mem_val.assign_value(instance, Value::new_unchecked(mem_op.value.after));
+            set_val!(instance, mem_before, mem_op.value.before as u64);
+            set_val!(instance, mem_after, mem_op.value.after as u64);
         }
         if let Some(mem_read) = &self.mem_read {
             mem_read.assign_instance(instance, lk_multiplicity, step)?;
         }
         if let Some(mem_write) = &self.mem_write {
-            mem_write.assign_instance(instance, lk_multiplicity, step)?;
+            mem_write.assign_instance::<E>(instance, lk_multiplicity, step)?;
         }
 
-        set_val!(
-            instance,
-            self.imm,
-            InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn())
-        );
+        let imm = i64_to_base::<E::BaseField>(InsnRecord::imm_internal(&step.insn()));
+        set_val!(instance, self.imm, imm);
 
         Ok(())
     }
