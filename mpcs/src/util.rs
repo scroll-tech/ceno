@@ -199,6 +199,14 @@ pub fn field_type_iter_range_base<'a, E: ExtensionField>(
     }
 }
 
+pub fn field_type_to_ext_vec<E: ExtensionField>(evaluations: &FieldType<E>) -> Vec<E> {
+    match evaluations {
+        FieldType::Ext(coeffs) => coeffs.to_vec(),
+        FieldType::Base(coeffs) => coeffs.iter().map(|x| (*x).into()).collect(),
+        _ => unreachable!(),
+    }
+}
+
 pub fn multiply_poly<E: ExtensionField>(poly: &mut [E], scalar: &E) {
     for coeff in poly.iter_mut() {
         *coeff *= scalar;

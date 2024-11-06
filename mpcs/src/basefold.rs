@@ -11,7 +11,7 @@ use crate::{
             inner_product, inner_product_three, interpolate_field_type_over_boolean_hypercube,
         },
         expression::{Expression, Query, Rotation},
-        ext_to_usize,
+        ext_to_usize, field_type_to_ext_vec,
         hash::{Digest, write_digest_to_transcript},
         log2_strict,
         merkle_tree::MerkleTree,
