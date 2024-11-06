@@ -101,7 +101,7 @@ where
     }
 
     pub fn codeword_size(&self) -> usize {
-        self.codeword_tree.size().1
+        self.codeword_tree.leaves_size().1
     }
 
     pub fn codeword_size_log(&self) -> usize {
