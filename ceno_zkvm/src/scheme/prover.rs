@@ -87,17 +87,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
 
-        let mut opcodes = vec![];
-        let mut tables = vec![];
-        for (circuit_name, (is_opcode, witness)) in witnesses.witnesses {
-            if is_opcode {
-                opcodes.push((circuit_name, witness));
-            } else {
-                tables.push((circuit_name, witness));
-            }
-        }
-        // commit to opcode circuits first and then commit to table circuits
-        for (circuit_name, witness) in opcodes.into_iter().chain(tables.into_iter()) {
+        // commit to opcode circuits first and then commit to table circuits, sorted by name
+        for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let commit_dur = std::time::Instant::now();
             let num_instances = witness.num_instances();
             let witness = match num_instances {

@@ -9,7 +9,7 @@ use crate::{
 };
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
@@ -205,7 +205,8 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    pub witnesses: BTreeMap<String, (bool, RowMajorMatrix<E::BaseField>)>,
+    witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
@@ -220,14 +221,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
-        let (witness, logup_multiplicity) = match records.len() {
-            0 => (
-                RowMajorMatrix::new(0, cs.num_witin as usize),
-                LkMultiplicity::default(),
-            ),
-            _ => OC::assign_instances(config, cs.num_witin as usize, records)?,
-        };
-        assert!(self.witnesses.insert(OC::name(), (true, witness)).is_none());
+        let (witness, logup_multiplicity) =
+            OC::assign_instances(config, cs.num_witin as usize, records)?;
+        assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
+        assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
@@ -278,13 +275,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        assert!(
-            self.witnesses
-                .insert(TC::name(), (false, witness))
-                .is_none()
-        );
+        assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
+        assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
         Ok(())
+    }
+
+    /// Iterate opcode circuits, then table circuits, sorted by name.
+    pub fn into_iter_sorted(self) -> impl Iterator<Item = (String, RowMajorMatrix<E::BaseField>)> {
+        chain(self.witnesses_opcodes, self.witnesses_tables)
     }
 }
 
