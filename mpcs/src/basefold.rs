@@ -610,7 +610,7 @@ where
                     // this accumulator
                     merged_polys[eval.point()] = (
                         eq_xt_i,
-                        field_type_to_ext_vec(&polys[eval.poly()].evaluations()),
+                        field_type_to_ext_vec(polys[eval.poly()].evaluations()),
                     );
                 } else {
                     // If the accumulator is unempty now, first force its scalar to 1, i.e.,
