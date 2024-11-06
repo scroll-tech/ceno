@@ -193,8 +193,17 @@ pub fn coset_fft<E: ExtensionField>(
 pub struct RSCodeDefaultSpec {}
 
 impl RSCodeSpec for RSCodeDefaultSpec {
+    // According to Theorem 1 of paper <BaseFold in the List Decoding Regime>
+    // (https://eprint.iacr.org/2024/1571), the soundness error is bounded by
+    // $O(1/|F|) + (\sqrt{\rho}+\epsilon)^s$
+    // where $s$ is the query complexity and $\epsilon$ is a small value
+    // that can be ignored. So the number of queries can be estimated by
+    // $$
+    // \frac{2\lambda}{-\log\rho}
+    // $$
+    // If we take $\lambda=100$ and $\rho=1/2$, then the number of queries is $200$.
     fn get_number_queries() -> usize {
-        972
+        200
     }
 
     fn get_rate_log() -> usize {

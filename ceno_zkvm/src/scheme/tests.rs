@@ -10,7 +10,6 @@ use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
-use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
 use crate::{
@@ -120,7 +119,12 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZKVMProver::new(pk);
         let mut transcript = Transcript::new(b"test");
-        let wits_in = zkvm_witness.witnesses.remove(&name).unwrap().into_mles();
+        let wits_in = zkvm_witness
+            .into_iter_sorted()
+            .next()
+            .unwrap()
+            .1
+            .into_mles();
         // commit to main traces
         let commit = Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript).unwrap();
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
@@ -197,7 +201,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     // set up program
     let program = Program::new(

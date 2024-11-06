@@ -758,7 +758,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             proof.fixed_in_evals.len(),
             input_opening_point,
             proof.fixed_in_evals,
-            circuit_vk.fixed_commit.as_ref().unwrap(),
+            circuit_vk.fixed_commit,
         );
 
         PCS::simple_batch_verify(

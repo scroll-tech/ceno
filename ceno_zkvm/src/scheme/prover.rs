@@ -86,9 +86,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // commit to main traces
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
-        // sort by circuit name, and we rely on an assumption that
-        // table circuit witnesses come after opcode circuit witnesses
-        for (circuit_name, witness) in witnesses.witnesses {
+
+        // commit to opcode circuits first and then commit to table circuits, sorted by name
+        for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let commit_dur = std::time::Instant::now();
             let num_instances = witness.num_instances();
             let witness = match num_instances {

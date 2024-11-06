@@ -19,7 +19,7 @@ use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use transcript::Transcript;
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
