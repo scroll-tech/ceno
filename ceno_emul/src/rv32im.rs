@@ -24,9 +24,6 @@ pub trait EmuContext {
     // Handle environment call
     fn ecall(&mut self) -> Result<bool>;
 
-    // Handle a machine return
-    fn mret(&self) -> Result<bool>;
-
     // Handle a trap
     fn trap(&self, cause: TrapCause) -> Result<bool>;
 
@@ -88,7 +85,6 @@ pub struct Emulator {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
@@ -105,6 +101,7 @@ pub enum TrapCause {
 pub struct DecodedInstruction {
     insn: u32,
     top_bit: u32,
+    // The bit fields of the instruction encoding, regardless of the instruction format.
     func7: u32,
     rs2: u32,
     rs1: u32,
@@ -114,8 +111,9 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum InsnCategory {
+enum InsnCategory {
     Compute,
+    Branch,
     Load,
     Store,
     System,
@@ -183,8 +181,8 @@ pub enum InsnKind {
     SB,
     SH,
     SW,
+    /// ECALL and EBREAK etc.
     EANY,
-    MRET,
 }
 use InsnKind::*;
 
@@ -204,17 +202,10 @@ pub struct InsnCodes {
     pub func7: u32,
 }
 
-impl InsnCodes {
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        match self.format {
-            R | I | S | B => self.func3,
-            _ => 0,
-        }
-    }
-}
-
 impl DecodedInstruction {
+    /// A virtual register which absorbs the writes to x0.
+    pub const RD_NULL: u32 = 32;
+
     pub fn new(insn: u32) -> Self {
         Self {
             insn,
@@ -228,28 +219,6 @@ impl DecodedInstruction {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn from_raw(kind: InsnKind, rs1: u32, rs2: u32, rd: u32) -> Self {
-        // limit the range of inputs
-        let rs2 = rs2 & 0x1f; // 5bits mask
-        let rs1 = rs1 & 0x1f;
-        let rd = rd & 0x1f;
-        let func7 = kind.codes().func7;
-        let func3 = kind.codes().func3;
-        let opcode = kind.codes().opcode;
-        let insn = func7 << 25 | rs2 << 20 | rs1 << 15 | func3 << 12 | rd << 7 | opcode;
-        Self {
-            insn,
-            top_bit: func7 | 0x80,
-            func7,
-            rs2,
-            rs1,
-            func3,
-            rd,
-            opcode,
-        }
-    }
-
     pub fn encoded(&self) -> u32 {
         self.insn
     }
@@ -258,27 +227,13 @@ impl DecodedInstruction {
         self.opcode
     }
 
-    /// Get the rd field, regardless of the instruction format.
-    pub fn rd(&self) -> u32 {
-        self.rd
-    }
-
-    /// Get the register destination, or zero if the instruction does not write to a register.
-    pub fn rd_or_zero(&self) -> u32 {
+    /// The internal register destination. It is either the regular rd, or an internal RD_NULL if
+    /// the instruction does not write to a register or writes to x0.
+    pub fn rd_internal(&self) -> u32 {
         match self.codes().format {
-            R | I | U | J => self.rd,
-            _ => 0,
+            R | I | U | J if self.rd != 0 => self.rd,
+            _ => Self::RD_NULL,
         }
-    }
-
-    /// Get the funct3 field, regardless of the instruction format.
-    pub fn funct3(&self) -> u32 {
-        self.func3
-    }
-
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        self.codes().funct3_or_zero()
     }
 
     /// Get the rs1 field, regardless of the instruction format.
@@ -307,68 +262,37 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct7 field, regardless of the instruction format.
-    pub fn funct7(&self) -> u32 {
-        self.func7
-    }
-
-    /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
-    pub fn imm_or_funct7(&self) -> u32 {
-        match self.codes() {
-            InsnCodes { format: R, .. } => self.func7,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI,
-                ..
-            } => 1 << self.rs2(), // decode the shift as a multiplication by 2.pow(rs2)
-            InsnCodes { format: I, .. } => self.imm_i(),
-            InsnCodes { format: S, .. } => self.imm_s(),
-            InsnCodes { format: B, .. } => self.imm_b(),
-            InsnCodes { format: U, .. } => self.imm_u(),
-            InsnCodes { format: J, .. } => self.imm_j(),
+    pub fn immediate(&self) -> u32 {
+        match self.codes().format {
+            R => 0,
+            I => self.imm_i(),
+            S => self.imm_s(),
+            B => self.imm_b(),
+            U => self.imm_u(),
+            J => self.imm_j(),
         }
-    }
-
-    /// Indicate whether the immediate is interpreted as a signed integer, and it is negative.
-    pub fn imm_is_negative(&self) -> bool {
-        match self.codes() {
-            InsnCodes { format: R | U, .. } => false,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI,
-                ..
-            } => false,
-            _ => self.top_bit != 0,
-        }
-    }
-
-    pub fn sign_bit(&self) -> u32 {
-        self.top_bit
     }
 
     pub fn codes(&self) -> InsnCodes {
         FastDecodeTable::get().lookup(self)
     }
 
-    pub fn kind(&self) -> (InsnCategory, InsnKind) {
-        let i = FastDecodeTable::get().lookup(self);
-        (i.category, i.kind)
-    }
-
-    pub fn imm_b(&self) -> u32 {
+    fn imm_b(&self) -> u32 {
         (self.top_bit * 0xfffff000)
             | ((self.rd & 1) << 11)
             | ((self.func7 & 0x3f) << 5)
             | (self.rd & 0x1e)
     }
 
-    pub fn imm_i(&self) -> u32 {
-        (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rs2
+    fn imm_i(&self) -> u32 {
+        (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
-    pub fn imm_s(&self) -> u32 {
+    fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
 
-    pub fn imm_j(&self) -> u32 {
+    fn imm_j(&self) -> u32 {
         (self.top_bit * 0xfff00000)
             | (self.rs1 << 15)
             | (self.func3 << 12)
@@ -377,35 +301,8 @@ impl DecodedInstruction {
             | (self.rs2 & 0x1e)
     }
 
-    pub fn imm_u(&self) -> u32 {
+    fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
-    }
-}
-
-#[cfg(test)]
-#[test]
-#[allow(clippy::identity_op)]
-fn test_decode_imm() {
-    for (i, expected) in [
-        // Example of I-type: ADDI.
-        // imm    | rs1     | funct3      | rd     | opcode
-        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
-        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
-        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (
-            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
-            1 << 31,
-        ),
-        // Example of R-type with funct7: SUB.
-        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-        (
-            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
-            0x20,
-        ),
-    ] {
-        let imm = DecodedInstruction::new(i).imm_or_funct7();
-        assert_eq!(imm, expected);
     }
 }
 
@@ -427,7 +324,7 @@ const fn insn(
     }
 }
 
-type InstructionTable = [InsnCodes; 48];
+type InstructionTable = [InsnCodes; 47];
 type FastInstructionTable = [u8; 1 << 10];
 
 const RV32IM_ISA: InstructionTable = [
@@ -451,12 +348,12 @@ const RV32IM_ISA: InstructionTable = [
     insn(I, SRAI, Compute, 0x13, 0x5, 0x20),
     insn(I, SLTI, Compute, 0x13, 0x2, -1),
     insn(I, SLTIU, Compute, 0x13, 0x3, -1),
-    insn(B, BEQ, Compute, 0x63, 0x0, -1),
-    insn(B, BNE, Compute, 0x63, 0x1, -1),
-    insn(B, BLT, Compute, 0x63, 0x4, -1),
-    insn(B, BGE, Compute, 0x63, 0x5, -1),
-    insn(B, BLTU, Compute, 0x63, 0x6, -1),
-    insn(B, BGEU, Compute, 0x63, 0x7, -1),
+    insn(B, BEQ, Branch, 0x63, 0x0, -1),
+    insn(B, BNE, Branch, 0x63, 0x1, -1),
+    insn(B, BLT, Branch, 0x63, 0x4, -1),
+    insn(B, BGE, Branch, 0x63, 0x5, -1),
+    insn(B, BLTU, Branch, 0x63, 0x6, -1),
+    insn(B, BGEU, Branch, 0x63, 0x7, -1),
     insn(J, JAL, Compute, 0x6f, -1, -1),
     insn(I, JALR, Compute, 0x67, 0x0, -1),
     insn(U, LUI, Compute, 0x37, -1, -1),
@@ -478,7 +375,6 @@ const RV32IM_ISA: InstructionTable = [
     insn(S, SH, Store, 0x23, 0x1, -1),
     insn(S, SW, Store, 0x23, 0x2, -1),
     insn(I, EANY, System, 0x73, 0x0, 0x00),
-    insn(I, MRET, System, 0x73, 0x0, 0x18),
 ];
 
 #[cfg(test)]
@@ -586,9 +482,11 @@ impl Emulator {
         let decoded = DecodedInstruction::new(word);
         let insn = self.table.lookup(&decoded);
         ctx.on_insn_decoded(&decoded);
+        tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
         if match insn.category {
             InsnCategory::Compute => self.step_compute(ctx, insn.kind, &decoded)?,
+            InsnCategory::Branch => self.step_branch(ctx, insn.kind, &decoded)?,
             InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
             InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
             InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
@@ -610,15 +508,7 @@ impl Emulator {
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
-        let mut rd = decoded.rd;
         let imm_i = decoded.imm_i();
-        let mut br_cond = |cond| -> u32 {
-            rd = 0;
-            if cond {
-                new_pc = pc.wrapping_add(decoded.imm_b());
-            }
-            0
-        };
         let out = match kind {
             // Instructions that do not read rs1 nor rs2.
             JAL => {
@@ -686,12 +576,6 @@ impl Emulator {
                                     0
                                 }
                             }
-                            BEQ => br_cond(rs1 == rs2),
-                            BNE => br_cond(rs1 != rs2),
-                            BLT => br_cond((rs1 as i32) < (rs2 as i32)),
-                            BGE => br_cond((rs1 as i32) >= (rs2 as i32)),
-                            BLTU => br_cond(rs1 < rs2),
-                            BGEU => br_cond(rs1 >= rs2),
                             MUL => rs1.wrapping_mul(rs2),
                             MULH => {
                                 (sign_extend_u32(rs1).wrapping_mul(sign_extend_u32(rs2)) >> 32)
@@ -737,7 +621,42 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
+        ctx.set_pc(new_pc);
+        Ok(true)
+    }
+
+    fn step_branch<M: EmuContext>(
+        &self,
+        ctx: &mut M,
+        kind: InsnKind,
+        decoded: &DecodedInstruction,
+    ) -> Result<bool> {
+        use InsnKind::*;
+
+        let pc = ctx.get_pc();
+        let rs1 = ctx.load_register(decoded.rs1 as RegIdx)?;
+        let rs2 = ctx.load_register(decoded.rs2 as RegIdx)?;
+
+        let taken = match kind {
+            BEQ => rs1 == rs2,
+            BNE => rs1 != rs2,
+            BLT => (rs1 as i32) < (rs2 as i32),
+            BGE => (rs1 as i32) >= (rs2 as i32),
+            BLTU => rs1 < rs2,
+            BGEU => rs1 >= rs2,
+            _ => unreachable!("Illegal branch instruction: {:?}", kind),
+        };
+
+        let new_pc = if taken {
+            pc.wrapping_add(decoded.imm_b())
+        } else {
+            pc + WORD_SIZE
+        };
+
+        if !new_pc.is_aligned() {
+            return ctx.trap(TrapCause::InstructionAddressMisaligned);
+        }
         ctx.set_pc(new_pc);
         Ok(true)
     }
@@ -789,7 +708,7 @@ impl Emulator {
             }
             _ => unreachable!(),
         };
-        ctx.store_register(decoded.rd as usize, out)?;
+        ctx.store_register(decoded.rd_internal() as usize, out)?;
         ctx.set_pc(ctx.get_pc() + WORD_SIZE);
         Ok(true)
     }
@@ -805,6 +724,7 @@ impl Emulator {
         let addr = ByteAddr(rs1.wrapping_add(decoded.imm_s()));
         let shift = 8 * (addr.0 & 3);
         if !ctx.check_data_store(addr) {
+            tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
             return ctx.trap(TrapCause::StoreAccessFault);
         }
         let mut data = ctx.peek_memory(addr.waddr());
@@ -847,7 +767,6 @@ impl Emulator {
                 1 => ctx.trap(TrapCause::Breakpoint),
                 _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
             },
-            InsnKind::MRET => ctx.mret(),
             _ => unreachable!(),
         }
     }

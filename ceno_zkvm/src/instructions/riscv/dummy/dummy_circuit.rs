@@ -56,7 +56,7 @@ pub struct DummyConfig<E: ExtensionField> {
 
     mem_addr_val: Option<(WitIn, UInt<E>)>,
     mem_read: Option<ReadMEM<E>>,
-    mem_write: Option<WriteMEM<E>>,
+    mem_write: Option<WriteMEM>,
 
     imm: WitIn,
 }
@@ -121,7 +121,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         // Memory
         let mem_addr_val = if with_mem_read || with_mem_write {
             Some((
-                circuit_builder.create_witin(|| "mem_addr")?,
+                circuit_builder.create_witin(|| "mem_addr"),
                 UInt::new_unchecked(|| "mem_val", circuit_builder)?,
             ))
         } else {

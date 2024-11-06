@@ -43,6 +43,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
+        assert!(max_thread_id.is_power_of_two());
 
         let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
         assert!(

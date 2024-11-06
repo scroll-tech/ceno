@@ -15,7 +15,7 @@ use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
+type Pcs = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
 type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
