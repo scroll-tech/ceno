@@ -198,9 +198,9 @@ pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
     category: InsnCategory,
-    pub opcode: u32,
-    pub func3: u32,
-    pub func7: u32,
+    pub(crate) opcode: u32,
+    pub(crate) func3: u32,
+    pub(crate) func7: u32,
 }
 
 impl DecodedInstruction {
@@ -237,14 +237,6 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the funct3 field, or zero if the instruction does not use funct3.
-    pub fn funct3_or_zero(&self) -> u32 {
-        match self.codes().format {
-            R | I | S | B => self.func3,
-            _ => 0,
-        }
-    }
-
     /// Get the rs1 field, regardless of the instruction format.
     pub fn rs1(&self) -> u32 {
         self.rs1
@@ -271,36 +263,14 @@ impl DecodedInstruction {
         }
     }
 
-    /// Get the decoded immediate, or 2^shift, or the funct7 field, depending on the instruction format.
-    pub fn imm_or_funct7(&self) -> u32 {
+    pub fn immediate(&self) -> u32 {
         match self.codes().format {
-            R => self.func7,
-            I => match self.codes().kind {
-                // decode the shift as a multiplication/division by 1 << immediate
-                SLLI | SRLI | SRAI => 1 << self.imm_shamt(),
-                _ => self.imm_i(),
-            },
+            R => 0,
+            I => self.imm_i(),
             S => self.imm_s(),
             B => self.imm_b(),
             U => self.imm_u(),
             J => self.imm_j(),
-        }
-    }
-
-    /// Indicates if the immediate value, when signed, needs to be encoded as field negative.
-    /// example:
-    /// imm = ux::MAX - 1 implies
-    /// imm_field = FIELD_MODULUS - 1 if imm_field_is_negative
-    /// imm_field = ux::MAX - 1 otherwise
-    /// see InsnRecord::imm_or_funct7_field
-    pub fn imm_field_is_negative(&self) -> bool {
-        match self.codes() {
-            InsnCodes { format: R | U, .. } => false,
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI | ADDI | SLTIU,
-                ..
-            } => false,
-            _ => self.top_bit != 0,
         }
     }
 
@@ -319,11 +289,6 @@ impl DecodedInstruction {
         (self.top_bit * 0xffff_f000) | (self.func7 << 5) | self.rs2
     }
 
-    /// Shift amount field of SLLI, SRLI, SRAI.
-    fn imm_shamt(&self) -> u32 {
-        self.rs2
-    }
-
     fn imm_s(&self) -> u32 {
         (self.top_bit * 0xfffff000) | (self.func7 << 5) | self.rd
     }
@@ -339,33 +304,6 @@ impl DecodedInstruction {
 
     fn imm_u(&self) -> u32 {
         self.insn & 0xfffff000
-    }
-}
-
-#[cfg(test)]
-#[test]
-#[allow(clippy::identity_op)]
-fn test_decode_imm() {
-    for (i, expected) in [
-        // Example of I-type: ADDI.
-        // imm    | rs1     | funct3      | rd     | opcode
-        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
-        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
-        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (
-            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
-            1 << 31,
-        ),
-        // Example of R-type with funct7: SUB.
-        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-        (
-            0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33,
-            0x20,
-        ),
-    ] {
-        let imm = DecodedInstruction::new(i).imm_or_funct7();
-        assert_eq!(imm, expected);
     }
 }
 

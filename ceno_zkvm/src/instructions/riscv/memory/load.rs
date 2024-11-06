@@ -13,6 +13,7 @@ use crate::{
     },
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
@@ -30,7 +31,7 @@ pub struct LoadConfig<E: ExtensionField> {
     memory_read: UInt<E>,
     target_limb: Option<WitIn>,
     target_limb_bytes: Option<Vec<WitIn>>,
-    signed_extend_config: Option<SignedExtendConfig>,
+    signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
@@ -205,19 +206,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_value = step.memory_op().unwrap().value.before;
         let memory_read = Value::new(memory_value, lk_multiplicity);
         // imm is signed 12-bit value
-        let imm: E::BaseField = InsnRecord::imm_or_funct7_field(&step.insn());
-        let unaligned_addr = ByteAddr::from(
-            step.rs1()
-                .unwrap()
-                .value
-                .wrapping_add(step.insn().imm_or_funct7()),
-        );
+        let imm = InsnRecord::imm_internal(&step.insn());
+        let unaligned_addr =
+            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
         let shift = unaligned_addr.shift();
         let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];
         let target_limb = memory_read.as_u16_limbs()[addr_low_bits[1] as usize];
         let mut target_limb_bytes = target_limb.to_le_bytes();
 
-        set_val!(instance, config.imm, imm);
+        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
         config
             .im_insn
             .assign_instance(instance, lk_multiplicity, step)?;
@@ -249,7 +246,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             _ => 0,
         };
         if let Some(signed_ext_config) = config.signed_extend_config.as_ref() {
-            signed_ext_config.assign_instance::<E>(instance, lk_multiplicity, val)?;
+            signed_ext_config.assign_instance(instance, lk_multiplicity, val)?;
         }
 
         Ok(())

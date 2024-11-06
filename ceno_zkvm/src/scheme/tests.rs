@@ -10,14 +10,13 @@ use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
-use rand_chacha::ChaCha8Rng;
 use transcript::Transcript;
 
 use crate::{
     circuit_builder::CircuitBuilder,
     declare_program,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
@@ -52,10 +51,7 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let reg_id = cb.create_witin(|| "reg_id");
         (0..RW).try_for_each(|_| {
-            let record = cb.rlc_chip_record(vec![
-                Expression::<E>::Constant(E::BaseField::ONE),
-                reg_id.expr(),
-            ]);
+            let record = cb.rlc_chip_record(vec![1.into(), reg_id.expr()]);
             cb.read_record(|| "read", record.clone())?;
             cb.write_record(|| "write", record)?;
             Result::<(), ZKVMError>::Ok(())
@@ -200,7 +196,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     // set up program
     let program = Program::new(
@@ -299,7 +295,7 @@ fn test_single_add_instance_e2e() {
         )
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)

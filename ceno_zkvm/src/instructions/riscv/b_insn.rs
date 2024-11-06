@@ -10,6 +10,7 @@ use crate::{
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
     set_val,
     tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -60,9 +61,8 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
-            insn_kind.codes().opcode.into(),
+            insn_kind.into(),
             None,
-            insn_kind.codes().func3.into(),
             rs1.id.expr(),
             rs2.id.expr(),
             imm.expr(),
@@ -100,7 +100,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         set_val!(
             instance,
             self.imm,
-            InsnRecord::imm_or_funct7_field::<E::BaseField>(&step.insn())
+            i64_to_base::<E::BaseField>(InsnRecord::imm_internal(&step.insn()))
         );
 
         // Fetch the instruction.
