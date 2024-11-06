@@ -50,6 +50,7 @@ pub struct SraOp;
 impl RIVInstruction for SraOp {
     const INST_KIND: InsnKind = InsnKind::SRA;
 }
+pub type SraInstruction<E> = ShiftLogicalInstruction<E, SraOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftConfig<E>;

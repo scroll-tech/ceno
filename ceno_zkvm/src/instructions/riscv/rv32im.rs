@@ -21,13 +21,18 @@ use crate::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, LtuTableCircuit, MemCircuit, MemFinalRecord, MemInitRecord,
-        ProgramDataCircuit, PubIOCircuit, RegTableCircuit, TableCircuit, U14TableCircuit,
-        U16TableCircuit,
+        OrTableCircuit, PowTableCircuit, ProgramDataCircuit, PubIOCircuit, RegTableCircuit,
+        TableCircuit, U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit,
+        XorTableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind, InsnKind::*, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use mulh::{MulhInstruction, MulhsuInstruction};
+use shift::SraInstruction;
+use slt::SltInstruction;
+use slti::SltiuInstruction;
 use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;
 
@@ -48,9 +53,12 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub xor_config: <XorInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sll_config: <SllInstruction<E> as Instruction<E>>::InstructionConfig,
     pub srl_config: <SrlInstruction<E> as Instruction<E>>::InstructionConfig,
-    // TODO: sra / slt
+    pub sra_config: <SraInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub slt_config: <SltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sltu_config: <SltuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub mul_config: <MulInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub mulh_config: <MulhInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub mulhsu_config: <MulhsuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub mulhu_config: <MulhuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub divu_config: <DivUInstruction<E> as Instruction<E>>::InstructionConfig,
 
@@ -63,7 +71,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub srli_config: <SrliInstruction<E> as Instruction<E>>::InstructionConfig,
     pub srai_config: <SraiInstruction<E> as Instruction<E>>::InstructionConfig,
     pub slti_config: <SltiInstruction<E> as Instruction<E>>::InstructionConfig,
-    // TODO: SLTIU
+    pub sltiu_config: <SltiuInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // Branching Opcodes
     pub beq_config: <BeqInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -94,8 +102,13 @@ pub struct Rv32imConfig<E: ExtensionField> {
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub u8_range_config: <U8TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub u5_range_config: <U5TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub and_table_config: <AndTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub or_table_config: <OrTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub pow_config: <PowTableCircuit<E> as TableCircuit<E>>::TableConfig,
 
     // RW tables.
     pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -115,8 +128,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let xor_config = cs.register_opcode_circuit::<XorInstruction<E>>();
         let sll_config = cs.register_opcode_circuit::<SllInstruction<E>>();
         let srl_config = cs.register_opcode_circuit::<SrlInstruction<E>>();
+        let sra_config = cs.register_opcode_circuit::<SraInstruction<E>>();
+        let slt_config = cs.register_opcode_circuit::<SltInstruction<E>>();
         let sltu_config = cs.register_opcode_circuit::<SltuInstruction<E>>();
         let mul_config = cs.register_opcode_circuit::<MulInstruction<E>>();
+        let mulh_config = cs.register_opcode_circuit::<MulhInstruction<E>>();
+        let mulhsu_config = cs.register_opcode_circuit::<MulhsuInstruction<E>>();
         let mulhu_config = cs.register_opcode_circuit::<MulhuInstruction<E>>();
         let divu_config = cs.register_opcode_circuit::<DivUInstruction<E>>();
 
@@ -129,6 +146,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let srli_config = cs.register_opcode_circuit::<SrliInstruction<E>>();
         let srai_config = cs.register_opcode_circuit::<SraiInstruction<E>>();
         let slti_config = cs.register_opcode_circuit::<SltiInstruction<E>>();
+        let sltiu_config = cs.register_opcode_circuit::<SltiuInstruction<E>>();
 
         // branching opcodes
         let beq_config = cs.register_opcode_circuit::<BeqInstruction<E>>();
@@ -159,8 +177,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
+        let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
+        let u5_range_config = cs.register_table_circuit::<U5TableCircuit<E>>();
         let and_table_config = cs.register_table_circuit::<AndTableCircuit<E>>();
+        let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
+        let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
+        let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
 
         // RW tables
         let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
@@ -179,8 +202,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             xor_config,
             sll_config,
             srl_config,
+            sra_config,
+            slt_config,
             sltu_config,
             mul_config,
+            mulh_config,
+            mulhsu_config,
             mulhu_config,
             divu_config,
             // alu with imm
@@ -192,6 +219,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             srli_config,
             srai_config,
             slti_config,
+            sltiu_config,
             // branching opcodes
             beq_config,
             bne_config,
@@ -218,8 +246,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             // tables
             u16_range_config,
             u14_range_config,
+            u8_range_config,
+            u5_range_config,
             and_table_config,
+            or_table_config,
+            xor_table_config,
             ltu_config,
+            pow_config,
 
             reg_config,
             mem_config,
@@ -243,9 +276,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<XorInstruction<E>>(cs);
         fixed.register_opcode_circuit::<SllInstruction<E>>(cs);
         fixed.register_opcode_circuit::<SrlInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<SraInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<SltInstruction<E>>(cs);
         fixed.register_opcode_circuit::<SltuInstruction<E>>(cs);
-        // TODO: add sra / slt
         fixed.register_opcode_circuit::<MulInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<MulhInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs);
         fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs);
         fixed.register_opcode_circuit::<DivUInstruction<E>>(cs);
         // alu with imm
@@ -257,6 +293,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<SrliInstruction<E>>(cs);
         fixed.register_opcode_circuit::<SraiInstruction<E>>(cs);
         fixed.register_opcode_circuit::<SltiInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<SltiuInstruction<E>>(cs);
         // branching
         fixed.register_opcode_circuit::<BeqInstruction<E>>(cs);
         fixed.register_opcode_circuit::<BneInstruction<E>>(cs);
@@ -283,8 +320,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
         fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
+        fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
+        fixed.register_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &());
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &());
+        fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
+        fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
+        fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
 
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
         fixed.register_table_circuit::<ProgramDataCircuit<E>>(
@@ -348,8 +390,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(XOR, XorInstruction<E>, xor_config);
         assign_opcode!(SLL, SllInstruction<E>, sll_config);
         assign_opcode!(SRL, SrlInstruction<E>, srl_config);
+        assign_opcode!(SRA, SraInstruction<E>, sra_config);
+        assign_opcode!(SLT, SltInstruction<E>, slt_config);
         assign_opcode!(SLTU, SltuInstruction<E>, sltu_config);
         assign_opcode!(MUL, MulInstruction<E>, mul_config);
+        assign_opcode!(MULH, MulhInstruction<E>, mulh_config);
+        assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
         assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
         assign_opcode!(DIVU, DivUInstruction<E>, divu_config);
         // alu with imm
@@ -361,6 +407,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(SRLI, SrliInstruction<E>, srli_config);
         assign_opcode!(SRAI, SraiInstruction<E>, srai_config);
         assign_opcode!(SLTI, SltiInstruction<E>, slti_config);
+        assign_opcode!(SLTIU, SltiuInstruction<E>, sltiu_config);
         // branching
         assign_opcode!(BEQ, BeqInstruction<E>, beq_config);
         assign_opcode!(BNE, BneInstruction<E>, bne_config);
@@ -389,7 +436,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [INVALID, SRA, SLT, SLTIU, MULH, MULHSU, DIV, REM, REMU, EANY]
+            [INVALID, DIV, REM, REMU, EANY]
                 .into_iter()
                 .map(|insn_kind| insn_kind as usize)
                 .collect::<BTreeSet<_>>(),
@@ -408,8 +455,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
         witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
+        witness.assign_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &())?;
+        witness.assign_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &())?;
         witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
+        witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
+        witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
         witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
+        witness.assign_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &())?;
 
         // assign register finalization.
         witness
