@@ -14,7 +14,7 @@ use clap::Parser;
 
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext,
-    InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
+    InsnKind::{ADD, BLTU, EANY, LUI, LW},
     PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
@@ -25,7 +25,6 @@ use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use rand_chacha::ChaCha8Rng;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -53,8 +52,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
         encode_rv32(ADD, 2, 3, 3, 0),              // add x3, x2, x3
         encode_rv32(BLTU, 0, 3, 0, -8_i32 as u32), // bltu x0, x3, -8
         // End.
-        encode_rv32(JAL, 0, 0, 1, 4), // jal x1, 4
-        ECALL_HALT,                   // ecall halt
+        ECALL_HALT, // ecall halt
     );
     program
 };
@@ -76,7 +74,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     let program = Program::new(
         CENO_PLATFORM.pc_base(),
