@@ -167,7 +167,7 @@ pub fn field_type_iter_ext<E: ExtensionField>(
 pub fn field_type_to_ext_vec<E: ExtensionField>(evaluations: &FieldType<E>) -> Vec<E> {
     match evaluations {
         FieldType::Ext(coeffs) => coeffs.to_vec(),
-        FieldType::Base(coeffs) => coeffs.iter().map(|x| (*x).into()).collect(),
+        FieldType::Base(coeffs) => coeffs.iter().map(|&x| x.into()).collect(),
         _ => unreachable!(),
     }
 }
