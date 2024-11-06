@@ -40,12 +40,12 @@ where
             inner: merkelize::<E>(&[leaves]),
         }
     }
-    pub fn from_leaves_base(leaves: &Vec<E::BaseField>) -> Self {
+    pub fn from_leaves_base(leaves: &[E::BaseField]) -> Self {
         Self {
             inner: merkelize_base::<E>(&[leaves]),
         }
     }
-    pub fn from_leaves_ext(leaves: &Vec<E>) -> Self {
+    pub fn from_leaves_ext(leaves: &[E]) -> Self {
         Self {
             inner: merkelize_ext::<E>(&[leaves]),
         }
