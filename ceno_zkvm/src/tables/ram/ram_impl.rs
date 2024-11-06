@@ -299,7 +299,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() == NVRAM::len());
+        assert!(final_mem.len() <= NVRAM::len());
         let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
 
         final_table
@@ -308,6 +308,15 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             .zip(final_mem.into_par_iter())
             .for_each(|(row, rec)| {
                 set_val!(row, self.final_cycle, rec.cycle);
+            });
+
+        // set padding with well-form address
+        final_table
+            .par_iter_mut()
+            .skip(final_mem.len())
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|row| {
+                set_val!(row, self.final_cycle, 0_u64);
             });
 
         Ok(final_table)

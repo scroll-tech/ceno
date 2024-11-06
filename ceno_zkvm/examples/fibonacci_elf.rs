@@ -9,13 +9,12 @@ use ceno_zkvm::{
     },
     state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{MemFinalRecord, ProgramTableCircuit, initial_memory, initial_registers},
+    tables::{MemFinalRecord, ProgramTableCircuit, initial_registers},
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use rand_chacha::ChaCha8Rng;
 use std::{panic, time::Instant};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
@@ -23,7 +22,7 @@ use transcript::Transcript;
 
 fn main() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
     const PROGRAM_SIZE: usize = 1 << 14;
     type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
 
@@ -67,9 +66,7 @@ fn main() {
     );
 
     let reg_init = initial_registers();
-    let mem_init = initial_memory(&[]);
-
-    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[]);
 
     let pk = zkvm_cs
         .clone()
@@ -105,6 +102,7 @@ fn main() {
         Tracer::SUBCYCLES_PER_INSN as u32,
         EXIT_PC as u32,
         end_cycle,
+        vec![],
     );
 
     let mut zkvm_witness = ZKVMWitnesses::default();
@@ -122,12 +120,17 @@ fn main() {
             if index < VMState::REG_COUNT {
                 let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
                 MemFinalRecord {
+                    addr: rec.addr,
                     value: vm.peek_register(index),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             } else {
                 // The table is padded beyond the number of registers.
-                MemFinalRecord { value: 0, cycle: 0 }
+                MemFinalRecord {
+                    addr: rec.addr,
+                    value: 0,
+                    cycle: 0,
+                }
             }
         })
         .collect_vec();
@@ -140,6 +143,7 @@ fn main() {
         .filter_map(|(&addr, &cycle)| {
             if addr >= ByteAddr::from(sp1_platform.ram_start()).waddr() {
                 Some(MemFinalRecord {
+                    addr: addr.into(),
                     value: vm.peek_memory(addr),
                     cycle,
                 })
@@ -151,7 +155,8 @@ fn main() {
 
     // assign table circuits
     config
-        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final)
+        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final, &[], &[
+        ])
         .unwrap();
     // assign program circuit
     zkvm_witness
@@ -179,8 +184,8 @@ fn main() {
 
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.pv[0] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
-    zkvm_proof.pv[1] = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE;
+    zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
+    zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
 
     // capture panic message, if have
     let default_hook = panic::take_hook();
