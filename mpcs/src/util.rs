@@ -6,7 +6,7 @@ pub mod plonky2_util;
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{Either, Itertools, izip};
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType},
     virtual_poly_v2::ArcMultilinearExtension,
@@ -183,19 +183,6 @@ pub fn field_type_iter_ext<E: ExtensionField>(evaluations: &FieldType<E>) -> Fie
     FieldTypeIterExt {
         inner: evaluations,
         index: 0,
-    }
-}
-
-pub fn field_type_iter_range_base<'a, E: ExtensionField>(
-    values: &'a FieldType<E>,
-    range: impl IntoIterator<Item = usize> + 'a,
-) -> impl Iterator<Item = &'a E::BaseField> + 'a {
-    match values {
-        FieldType::Ext(coeffs) => {
-            Either::Left(range.into_iter().flat_map(|i| coeffs[i].as_bases()))
-        }
-        FieldType::Base(coeffs) => Either::Right(range.into_iter().map(|i| &coeffs[i])),
-        _ => unreachable!(),
     }
 }
 
