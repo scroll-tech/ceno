@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{InsnCodes, InsnFormat, InsnKind, StepRecord};
+use ceno_emul::{InsnCategory, InsnCodes, InsnFormat, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::super::{
@@ -75,15 +75,10 @@ impl<E: ExtensionField> DummyConfig<E> {
             InsnFormat::U => (false, false, true),
             InsnFormat::J => (false, false, true),
         };
-        let with_mem_write = codes.opcode == InsnKind::SW.codes().opcode;
-        let with_mem_read = codes.opcode == InsnKind::LW.codes().opcode;
-        let branching = [
-            InsnKind::BEQ.codes().opcode, // All branches.
-            InsnKind::JAL.codes().opcode,
-            InsnKind::JALR.codes().opcode,
-            InsnKind::EANY.codes().opcode,
-        ]
-        .contains(&codes.opcode);
+        let with_mem_write = matches!(codes.category, InsnCategory::Store);
+        let with_mem_read = matches!(codes.category, InsnCategory::Load);
+        let branching = matches!(codes.category, InsnCategory::Branch)
+            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR | InsnKind::EANY);
 
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, branching)?;
