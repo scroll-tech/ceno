@@ -153,10 +153,12 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 let mut evaluations = AdditiveVec::new(max_degree + 1);
 
                 // sum for all round poly evaluations vector
+                let span = entered_span!("main_thread_collect_univariate_result");
                 for _ in 0..max_thread_id {
                     let round_poly_coeffs = thread_based_transcript.read_field_element_exts();
                     evaluations += AdditiveVec(round_poly_coeffs);
                 }
+                exit_span!(span);
 
                 let span = entered_span!("main_thread_get_challenge");
                 transcript.append_field_element_exts(&evaluations.0);

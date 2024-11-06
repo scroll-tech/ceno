@@ -6,12 +6,15 @@ use super::{
         sum_check_last_round,
     },
 };
-use crate::util::{
-    arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
-    field_type_index_ext, field_type_iter_ext,
-    hash::write_digest_to_transcript,
-    log2_strict,
-    merkle_tree::MerkleTree,
+use crate::{
+    entered_span, exit_span,
+    util::{
+        arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
+        field_type_index_ext, field_type_iter_ext,
+        hash::write_digest_to_transcript,
+        log2_strict,
+        merkle_tree::MerkleTree,
+    },
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
@@ -361,14 +364,18 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Simple batch commit phase");
+    // let timer = start_timer!(|| "Simple batch commit phase");
+    let span = entered_span!("Simple batch commit phase");
     assert_eq!(point.len(), num_vars);
     assert_eq!(comm.num_polys, batch_coeffs.len());
-    let prepare_timer = start_timer!(|| "Prepare");
+    // let prepare_timer = start_timer!(|| "Prepare");
+    let prepare_span = entered_span!("Simple batch commit phase");
     let mut trees = Vec::with_capacity(num_vars);
-    let batch_codewords_timer = start_timer!(|| "Batch codewords");
+    // let batch_codewords_timer = start_timer!(|| "Batch codewords");
+    let batch_codewords_timer_span = entered_span!("Simple batch commit phase");
     let mut running_oracle = comm.batch_codewords(batch_coeffs);
-    end_timer!(batch_codewords_timer);
+    // end_timer!(batch_codewords_timer);
+    exit_span!(batch_codewords_timer_span);
     let nthreads = max_usable_threads();
     let per_thread_size = (1 << num_vars).div_ceil(&nthreads);
 
@@ -383,27 +390,35 @@ where
                 .sum()
         })
         .collect::<Vec<_>>();
-    end_timer!(prepare_timer);
+    // end_timer!(prepare_timer);
+    exit_span!(prepare_span);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let build_eq_timer = start_timer!(|| "Basefold::build eq");
+    let build_eq_span = entered_span!("mpcs::build_eq_span");
+    // let build_eq_timer = start_timer!(|| "Basefold::build eq");
     let mut eq = build_eq_x_r_vec(point);
-    end_timer!(build_eq_timer);
+    // end_timer!(build_eq_timer);
+    exit_span!(build_eq_span);
 
-    let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
+    // let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
+    let reverse_bits_span = entered_span!("mpcs::reverse_bits_span");
     reverse_index_bits_in_place(&mut eq);
-    end_timer!(reverse_bits_timer);
+    // end_timer!(reverse_bits_timer);
+    exit_span!(reverse_bits_span);
 
-    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
+    let sumcheck_span = entered_span!("mpcs::sumcheck_first_round");
+    // let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
-    end_timer!(sumcheck_timer);
+    // end_timer!(sumcheck_timer);
+    exit_span!(sumcheck_span);
 
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
     let mut running_tree_inner = Vec::new();
     for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
+        // let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
+        let sumcheck_span = entered_span!("mpcs::sumcheck_round");
         // For the first round, no need to send the running root, because this root is
         // committing to a vector that can be recovered from linearly combining other
         // already-committed vectors.
@@ -414,6 +429,7 @@ where
             .get_and_append_challenge(b"commit round")
             .elements;
 
+        let inner_span = entered_span!("mpcs::fri_compute_new_running_oracle");
         // Fold the current oracle for FRI
         let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
             pp,
@@ -421,21 +437,28 @@ where
             &running_oracle,
             challenge,
         );
+        exit_span!(inner_span);
 
         if i > 0 {
+            let inner_span = entered_span!("mpcs::oracle_to_mktree");
             let running_tree = MerkleTree::<E>::from_inner_leaves(
                 running_tree_inner,
                 FieldType::Ext(running_oracle),
             );
+            exit_span!(inner_span);
             trees.push(running_tree);
         }
 
         if i < num_rounds - 1 {
+            let inner_span = entered_span!("mpcs::oracle_to_mktree");
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
+            exit_span!(inner_span);
+            let inner_span = entered_span!("mpcs::compute_inner_ext");
             running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
             let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
+            exit_span!(inner_span);
             roots.push(running_root);
             running_oracle = new_running_oracle;
         } else {
@@ -480,9 +503,11 @@ where
                 assert_eq!(basecode, new_running_oracle);
             }
         }
-        end_timer!(sumcheck_timer);
+        // end_timer!(sumcheck_timer);
+        exit_span!(sumcheck_span);
     }
-    end_timer!(timer);
+    // end_timer!(timer);
+    exit_span!(span);
     (trees, BasefoldCommitPhaseProof {
         sumcheck_messages,
         roots,
