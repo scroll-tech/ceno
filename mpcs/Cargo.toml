@@ -37,8 +37,8 @@ print-trace = ["ark-std/print-trace"]
 sanity-check = []
 
 [[bench]]
-name = "basefold"
 harness = false
+name = "basefold"
 
 [[bench]]
 harness = false
