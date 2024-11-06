@@ -66,6 +66,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
         let eval = poly.evaluate(point.as_slice());
         transcript.append_field_element_ext(&eval);
         let transcript_for_bench = transcript.clone();
+        let poly = ArcMultilinearExtension::from(poly);
         let proof = Pcs::open(&pp, &poly, &comm, &point, &eval, &mut transcript).unwrap();
 
         group.bench_function(BenchmarkId::new("open", format!("{}", num_vars)), |b| {
@@ -147,6 +148,10 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                 .collect::<Vec<E>>();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
+            let polys = polys
+                .iter()
+                .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                .collect::<Vec<_>>();
             let proof =
                 Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
 

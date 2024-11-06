@@ -6,8 +6,11 @@ pub mod plonky2_util;
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{Itertools, izip};
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
+use itertools::{Either, Itertools, izip};
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, FieldType},
+    virtual_poly_v2::ArcMultilinearExtension,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod merkle_tree;
 use crate::{Error, util::parallel::parallelize};
@@ -183,118 +186,67 @@ pub fn field_type_iter_ext<E: ExtensionField>(evaluations: &FieldType<E>) -> Fie
     }
 }
 
-pub fn multiply_poly<E: ExtensionField>(poly: &mut DenseMultilinearExtension<E>, scalar: &E) {
-    match &mut poly.evaluations {
+pub fn field_type_iter_range_base<'a, E: ExtensionField>(
+    values: &'a FieldType<E>,
+    range: impl IntoIterator<Item = usize> + 'a,
+) -> impl Iterator<Item = &'a E::BaseField> + 'a {
+    match values {
         FieldType::Ext(coeffs) => {
-            for coeff in coeffs.iter_mut() {
-                *coeff *= scalar;
-            }
+            Either::Left(range.into_iter().flat_map(|i| coeffs[i].as_bases()))
         }
-        FieldType::Base(coeffs) => {
-            *poly = DenseMultilinearExtension::<E>::from_evaluations_ext_vec(
-                poly.num_vars,
-                coeffs.iter().map(|x| E::from(*x) * scalar).collect(),
-            );
-        }
+        FieldType::Base(coeffs) => Either::Right(range.into_iter().map(|i| &coeffs[i])),
         _ => unreachable!(),
+    }
+}
+
+pub fn multiply_poly<E: ExtensionField>(poly: &mut [E], scalar: &E) {
+    for coeff in poly.iter_mut() {
+        *coeff *= scalar;
     }
 }
 
 /// Resize to the new number of variables, which must be greater than or equal to
 /// the current number of variables.
-pub fn resize_num_vars<E: ExtensionField>(
-    poly: &mut DenseMultilinearExtension<E>,
-    num_vars: usize,
-) {
-    assert!(num_vars >= poly.num_vars);
-    if num_vars == poly.num_vars {
+pub fn resize_num_vars<E: ExtensionField>(poly: &mut Vec<E>, num_vars: usize) {
+    assert!(num_vars >= log2_strict(poly.len()));
+    if num_vars == log2_strict(poly.len()) {
         return;
     }
-    match &mut poly.evaluations {
-        FieldType::Base(evaluations) => {
-            evaluations.resize(1 << num_vars, E::BaseField::ZERO);
-            // When evaluate a multilinear polynomial outside of its original interpolated hypercube,
-            // the evaluations are just repetitions of the original evaluations
-            (1 << poly.num_vars..1 << num_vars)
-                .for_each(|i| evaluations[i] = evaluations[i & ((1 << poly.num_vars) - 1)]);
-        }
-        FieldType::Ext(evaluations) => {
-            evaluations.resize(1 << num_vars, E::ZERO);
-            (1 << poly.num_vars..1 << num_vars)
-                .for_each(|i| evaluations[i] = evaluations[i & ((1 << poly.num_vars) - 1)])
-        }
-        _ => unreachable!(),
-    }
-    poly.num_vars = num_vars;
+    poly.resize(1 << num_vars, E::ZERO);
+    (log2_strict(poly.len())..1 << num_vars).for_each(|i| poly[i] = poly[i & ((poly.len()) - 1)])
 }
 
 pub fn add_polynomial_with_coeff<E: ExtensionField>(
-    lhs: &mut DenseMultilinearExtension<E>,
-    rhs: &DenseMultilinearExtension<E>,
+    lhs: &mut Vec<E>,
+    rhs: &ArcMultilinearExtension<E>,
     coeff: &E,
 ) {
-    match (lhs.num_vars == 0, rhs.num_vars == 0) {
+    match (lhs.is_empty(), rhs.num_vars() == 0) {
         (_, true) => {}
         (true, false) => {
-            *lhs = rhs.clone();
+            *lhs = field_type_to_ext_vec(rhs.evaluations());
             multiply_poly(lhs, coeff);
         }
         (false, false) => {
-            if lhs.num_vars < rhs.num_vars {
-                resize_num_vars(lhs, rhs.num_vars);
+            if log2_strict(lhs.len()) < rhs.num_vars() {
+                resize_num_vars(lhs, rhs.num_vars());
             }
-            if rhs.num_vars < lhs.num_vars {
-                match &mut lhs.evaluations {
-                    FieldType::Ext(ref mut lhs) => {
-                        parallelize(lhs, |(lhs, start)| {
-                            for (index, lhs) in lhs.iter_mut().enumerate() {
-                                *lhs += *coeff
-                                    * poly_index_ext(
-                                        rhs,
-                                        (start + index) & ((1 << rhs.num_vars) - 1),
-                                    );
-                            }
-                        });
+            if rhs.num_vars() < log2_strict(lhs.len()) {
+                parallelize(lhs, |(lhs, start)| {
+                    for (index, lhs) in lhs.iter_mut().enumerate() {
+                        *lhs += *coeff
+                            * field_type_index_ext(
+                                rhs.evaluations(),
+                                (start + index) & ((1 << rhs.num_vars()) - 1),
+                            );
                     }
-                    FieldType::Base(ref mut lhs_evals) => {
-                        *lhs = DenseMultilinearExtension::<E>::from_evaluations_ext_vec(
-                            lhs.num_vars,
-                            lhs_evals
-                                .iter()
-                                .enumerate()
-                                .map(|(index, lhs)| {
-                                    E::from(*lhs)
-                                        + *coeff
-                                            * poly_index_ext(rhs, index & ((1 << rhs.num_vars) - 1))
-                                })
-                                .collect(),
-                        );
-                    }
-                    _ => unreachable!(),
-                }
+                });
             } else {
-                match &mut lhs.evaluations {
-                    FieldType::Ext(ref mut lhs) => {
-                        parallelize(lhs, |(lhs, start)| {
-                            for (index, lhs) in lhs.iter_mut().enumerate() {
-                                *lhs += *coeff * poly_index_ext(rhs, start + index);
-                            }
-                        });
+                parallelize(lhs, |(lhs, start)| {
+                    for (index, lhs) in lhs.iter_mut().enumerate() {
+                        *lhs += *coeff * field_type_index_ext(rhs.evaluations(), start + index);
                     }
-                    FieldType::Base(ref mut lhs_evals) => {
-                        *lhs = DenseMultilinearExtension::<E>::from_evaluations_ext_vec(
-                            lhs.num_vars,
-                            lhs_evals
-                                .iter()
-                                .enumerate()
-                                .map(|(index, lhs)| {
-                                    E::from(*lhs) + *coeff * poly_index_ext(rhs, index)
-                                })
-                                .collect(),
-                        );
-                    }
-                    _ => unreachable!(),
-                }
+                });
             }
         }
     }

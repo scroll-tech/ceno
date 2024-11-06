@@ -34,7 +34,6 @@ use query_phase::{
     prover_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
     verifier_query_phase,
 };
-use std::{borrow::BorrowMut, ops::Deref};
 pub use structure::BasefoldSpec;
 use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
 use transcript::Transcript;
@@ -51,7 +50,6 @@ use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
 };
-use std::borrow::Cow;
 pub use sumcheck::{one_level_eval_hc, one_level_interp_hc};
 
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
@@ -466,7 +464,7 @@ where
     /// will panic.
     fn open(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithData,
         point: &[E],
         _eval: &E, // Opening does not need eval, except for sanity check
@@ -480,7 +478,7 @@ where
         // the protocol won't work, and saves no verifier work anyway.
         // In this case, simply return the evaluations as trivial proof.
         if comm.is_trivial::<Spec>() {
-            return Ok(Self::Proof::trivial(vec![poly.evaluations.clone()]));
+            return Ok(Self::Proof::trivial(vec![poly.evaluations().clone()]));
         }
 
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
@@ -499,8 +497,8 @@ where
             point,
             comm,
             transcript,
-            poly.num_vars,
-            poly.num_vars - Spec::get_basecode_msg_size_log(),
+            poly.num_vars(),
+            poly.num_vars() - Spec::get_basecode_msg_size_log(),
         );
 
         // 2. Query phase. ---------------------------------------
@@ -546,15 +544,15 @@ where
     /// not very useful in ceno.
     fn batch_open(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         comms: &[Self::CommitmentWithData],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         let timer = start_timer!(|| "Basefold::batch_open");
-        let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
-        let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
+        let num_vars = polys.iter().map(|poly| poly.num_vars()).max().unwrap();
+        let min_num_vars = polys.iter().map(|p| p.num_vars()).min().unwrap();
         assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
 
         comms.iter().for_each(|comm| {
@@ -603,28 +601,31 @@ where
         let merged_polys = evals.iter().zip(poly_iter_ext(&eq_xt)).fold(
             // This folding will generate a vector of |points| pairs of (scalar, polynomial)
             // The polynomials are initialized to zero, and the scalars are initialized to one
-            vec![(E::ONE, Cow::<DenseMultilinearExtension<E>>::default()); points.len()],
+            vec![(E::ONE, Vec::<E>::new()); points.len()],
             |mut merged_polys, (eval, eq_xt_i)| {
                 // For each polynomial to open, eval.point() specifies which point it is to be opened at.
-                if merged_polys[eval.point()].1.num_vars == 0 {
+                if merged_polys[eval.point()].1.is_empty() {
                     // If the accumulator for this point is still the zero polynomial,
                     // directly assign the random coefficient and the polynomial to open to
                     // this accumulator
-                    merged_polys[eval.point()] = (eq_xt_i, Cow::Borrowed(&polys[eval.poly()]));
+                    merged_polys[eval.point()] = (
+                        eq_xt_i,
+                        field_type_to_ext_vec(&polys[eval.poly()].evaluations()),
+                    );
                 } else {
                     // If the accumulator is unempty now, first force its scalar to 1, i.e.,
                     // make (scalar, polynomial) to (1, scalar * polynomial)
                     let coeff = merged_polys[eval.point()].0;
                     if coeff != E::ONE {
                         merged_polys[eval.point()].0 = E::ONE;
-                        multiply_poly(merged_polys[eval.point()].1.to_mut().borrow_mut(), &coeff);
+                        multiply_poly(&mut merged_polys[eval.point()].1, &coeff);
                     }
                     // Equivalent to merged_poly += poly * batch_coeff. Note that
                     // add_assign_mixed_with_coeff allows adding two polynomials with
                     // different variables, and the result has the same number of vars
                     // with the larger one of the two added polynomials.
                     add_polynomial_with_coeff(
-                        merged_polys[eval.point()].1.to_mut().borrow_mut(),
+                        &mut merged_polys[eval.point()].1,
                         &polys[eval.poly()],
                         &eq_xt_i,
                     );
@@ -642,18 +643,16 @@ where
                 .iter()
                 .zip(&points)
                 .map(|((scalar, poly), point)| {
-                    inner_product(
-                        &poly_iter_ext(poly).collect_vec(),
-                        build_eq_x_r_vec(point).iter(),
-                    ) * scalar
-                        * E::from(1 << (num_vars - poly.num_vars))
+                    inner_product(poly, build_eq_x_r_vec(point).iter())
+                        * scalar
+                        * E::from(1 << (num_vars - log2_strict(poly.len())))
                     // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
                 })
                 .sum::<E>();
             assert_eq!(expected_sum, target_sum);
 
             merged_polys.iter().enumerate().for_each(|(i, (_, poly))| {
-                assert_eq!(points[i].len(), poly.num_vars);
+                assert_eq!(points[i].len(), log2_strict(poly.len()));
             });
         }
 
@@ -666,12 +665,17 @@ where
                     * scalar
             })
             .sum();
-        let sumcheck_polys: Vec<&DenseMultilinearExtension<E>> = merged_polys
+        let sumcheck_polys: Vec<DenseMultilinearExtension<E>> = merged_polys
             .iter()
-            .map(|(_, poly)| poly.deref())
+            .map(|(_, poly)| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    log2_strict(poly.len()),
+                    poly.clone(),
+                )
+            })
             .collect_vec();
         let virtual_poly =
-            VirtualPolynomial::new(&expression, sumcheck_polys, &[], points.as_slice());
+            VirtualPolynomial::new(&expression, sumcheck_polys.iter(), &[], points.as_slice());
 
         let (challenges, merged_poly_evals, sumcheck_proof) =
             SumCheck::prove(&(), num_vars, virtual_poly, target_sum, transcript)?;
@@ -695,7 +699,7 @@ where
         if cfg!(feature = "sanity-check") {
             let poly_evals = polys
                 .iter()
-                .map(|poly| poly.evaluate(&challenges[..poly.num_vars]))
+                .map(|poly| poly.evaluate(&challenges[..poly.num_vars()]))
                 .collect_vec();
             let new_target_sum = inner_product(&poly_evals, &coeffs);
             let desired_sum = merged_polys
@@ -705,7 +709,11 @@ where
                 .map(|(((scalar, poly), point), evals_from_sum_check)| {
                     assert_eq!(
                         evals_from_sum_check,
-                        poly.evaluate(&challenges[..poly.num_vars])
+                        DenseMultilinearExtension::from_evaluations_ext_vec(
+                            log2_strict(poly.len()),
+                            poly.clone()
+                        )
+                        .evaluate(&challenges[..log2_strict(poly.len())])
                     );
                     *scalar
                         * evals_from_sum_check
