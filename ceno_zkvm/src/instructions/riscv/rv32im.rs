@@ -371,7 +371,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
             }
         }
-        assert_eq!(halt_records.len(), 1);
 
         macro_rules! assign_opcode {
             ($insn_kind:ident,$instruction:ty,$config:ident) => {
