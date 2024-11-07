@@ -2,6 +2,7 @@
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
+use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::{collections::HashMap, mem::MaybeUninit};
 
@@ -34,14 +35,9 @@ impl OpTableConfig {
         ];
         let mlt = cb.create_witin(|| "mlt");
 
-        let rlc_record = cb.rlc_chip_record(vec![
-            (rom_type as usize).into(),
-            Expression::Fixed(abc[0]),
-            Expression::Fixed(abc[1]),
-            Expression::Fixed(abc[2]),
-        ]);
+        let record_exprs = abc.into_iter().map(|f| Expression::Fixed(f)).collect_vec();
 
-        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
+        cb.lk_table_record(|| "record", table_len, rom_type, record_exprs, mlt.expr())?;
 
         Ok(Self { abc, mlt })
     }

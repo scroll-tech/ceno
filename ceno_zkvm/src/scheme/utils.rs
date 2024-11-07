@@ -380,7 +380,7 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     )
 }
 
-pub(crate) fn eval_by_expr_with_instance<E: ExtensionField>(
+pub fn eval_by_expr_with_instance<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
     instance: &[E],
