@@ -5,7 +5,8 @@ use ceno_emul::{
 use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::{
-        PublicValues, constants::MAX_NUM_VARIABLES, prover::ZKVMProver, verifier::ZKVMVerifier,
+        PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
+        verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
@@ -73,7 +74,7 @@ fn main() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
 
@@ -158,6 +159,7 @@ fn main() {
         .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, vm.program())
         .unwrap();
 
+    MockProver::assert_satisfied_full(zkvm_cs, zkvm_fixed_traces, zkvm_witness.clone(), &pi);
     let timer = Instant::now();
 
     let transcript = Transcript::new(b"riscv");
