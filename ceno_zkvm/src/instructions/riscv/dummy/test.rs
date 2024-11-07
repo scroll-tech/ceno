@@ -15,6 +15,29 @@ type AddDummy<E> = DummyInstruction<E, AddOp>;
 type BeqDummy<E> = DummyInstruction<E, BeqOp>;
 
 #[test]
+fn test_dummy_ecall() {
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cb = CircuitBuilder::new(&mut cs);
+    let config = cb
+        .namespace(
+            || "ecall_dummy",
+            |cb| {
+                let config = EcallDummy::construct_circuit(cb);
+                Ok(config)
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+    let step = StepRecord::new_ecall_instruction(4, MOCK_PC_START, 123, 456, 0);
+    let insn_code = step.insn_code();
+    let (raw_witin, lkm) =
+        EcallDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![step]).unwrap();
+
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+}
+
+#[test]
 fn test_dummy_r() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);

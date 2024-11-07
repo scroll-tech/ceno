@@ -1,8 +1,9 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    CENO_PLATFORM, PC_STEP_SIZE,
+    CENO_PLATFORM, InsnKind, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
+    encode_rv32,
     rv32im::DecodedInstruction,
 };
 
@@ -185,6 +186,33 @@ impl StepRecord {
             Some(memory_op),
             prev_cycle,
         )
+    }
+
+    pub fn new_ecall_instruction(
+        cycle: Cycle,
+        pc: ByteAddr,
+        ecall_id: Word,
+        ecall_arg: Word,
+        previous_cycle: Cycle,
+    ) -> StepRecord {
+        let insn = DecodedInstruction::new(encode_rv32(InsnKind::EANY, 0, 0, 0, 0));
+        StepRecord {
+            cycle,
+            pc: Change::new(pc, pc + PC_STEP_SIZE),
+            insn_code: insn.encoded(),
+            rs1: Some(ReadOp {
+                addr: CENO_PLATFORM.register_vma(CENO_PLATFORM.reg_ecall()).into(),
+                value: ecall_id,
+                previous_cycle,
+            }),
+            rs2: Some(ReadOp {
+                addr: CENO_PLATFORM.register_vma(CENO_PLATFORM.reg_arg0()).into(),
+                value: ecall_arg,
+                previous_cycle,
+            }),
+            rd: None,
+            memory_op: None,
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
