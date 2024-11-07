@@ -1,7 +1,5 @@
 use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use multilinear_extensions::mle::IntoMLEs;
 
 use super::*;
 use crate::{
@@ -45,18 +43,7 @@ fn test_dummy_r() {
     ])
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(Into::into)
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
 #[test]
@@ -87,16 +74,5 @@ fn test_dummy_b() {
     ])
     .unwrap();
 
-    MockProver::assert_satisfied(
-        &cb,
-        &raw_witin
-            .de_interleaving()
-            .into_mles()
-            .into_iter()
-            .map(Into::into)
-            .collect_vec(),
-        &[insn_code],
-        None,
-        Some(lkm),
-    );
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
