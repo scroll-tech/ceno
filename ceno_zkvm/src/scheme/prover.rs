@@ -91,6 +91,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let commit_dur = std::time::Instant::now();
             let num_instances = witness.num_instances();
+            let span = entered_span!("commit to opcode traces", circuit_name=circuit_name);
             let witness = match num_instances {
                 0 => vec![],
                 _ => {
@@ -107,6 +108,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     );
                     witness
                 }
+                exit_span!(span);
             };
             wits.insert(circuit_name, (witness, num_instances));
         }
