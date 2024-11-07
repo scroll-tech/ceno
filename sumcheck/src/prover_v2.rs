@@ -90,8 +90,9 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 );
                 let tx_prover_state = tx_prover_state.clone();
                 let mut thread_based_transcript = thread_based_transcript.clone();
-
+                let current_span = tracing::Span::current();
                 s.spawn(move |_| {
+                    current_span.in_scope(||{
                     let mut challenge = None;
                     let span = entered_span!("prove_rounds");
                     for _ in 0..num_variables {
@@ -127,7 +128,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     } else {
                         tx_prover_state.send(None).unwrap();
                     }
-                });
+                })});
             }
 
             let mut prover_msgs = Vec::with_capacity(num_variables);

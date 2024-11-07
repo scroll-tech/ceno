@@ -25,8 +25,10 @@ use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use sumcheck::{entered_span, exit_span};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_subscriber::fmt::format::FmtSpan;
 use transcript::Transcript;
 
 const PROGRAM_SIZE: usize = 16;
@@ -96,6 +98,7 @@ fn main() {
         .with(
             fmt::layer()
                 .compact()
+                .with_span_events(FmtSpan::CLOSE)
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
@@ -103,6 +106,9 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    let top_level = entered_span!("TOPLEVEL");
+
+    let keygen = entered_span!("KEYGEN");
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
@@ -138,6 +144,7 @@ fn main() {
         .expect("keygen failed");
     let vk = pk.get_vk();
 
+    exit_span!(keygen);
     // proving
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
@@ -277,9 +284,12 @@ fn main() {
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
+
+        let span = entered_span!("CREATE_PROOF");
         let mut zkvm_proof = prover
             .create_proof(zkvm_witness, pi, transcript)
             .expect("create_proof failed");
+        exit_span!(span);
 
         println!(
             "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
@@ -329,4 +339,5 @@ fn main() {
             }
         };
     }
+    exit_span!(top_level);
 }
