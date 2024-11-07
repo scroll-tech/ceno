@@ -46,7 +46,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                     Pcs::setup(poly_size).unwrap();
                 })
             });
-            Pcs::trim(&param, poly_size).unwrap()
+            Pcs::trim(param, poly_size).unwrap()
         };
 
         let mut transcript = T::new(b"BaseFold");
@@ -125,7 +125,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
+                Pcs::trim(param, poly_size).unwrap()
             };
             // Batch commit and open
             let evals = chain![
@@ -266,7 +266,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             let (pp, vp) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
+                Pcs::trim(param, poly_size).unwrap()
             };
             let mut transcript = T::new(b"BaseFold");
             let polys = (0..batch_size)

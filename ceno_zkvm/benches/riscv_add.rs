@@ -45,7 +45,7 @@ fn bench_add(c: &mut Criterion) {
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
 
     let param = Pcs::setup(1 << MAX_NUM_VARIABLES).unwrap();
-    let (pp, vp) = Pcs::trim(&param, 1 << MAX_NUM_VARIABLES).unwrap();
+    let (pp, vp) = Pcs::trim(param, 1 << MAX_NUM_VARIABLES).unwrap();
 
     let pk = zkvm_cs
         .clone()

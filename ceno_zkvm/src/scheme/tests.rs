@@ -89,7 +89,7 @@ fn test_rw_lk_expression_combination() {
 
         // pcs setup
         let param = Pcs::setup(1 << 13).unwrap();
-        let (pp, vp) = Pcs::trim(&param, 1 << 13).unwrap();
+        let (pp, vp) = Pcs::trim(param, 1 << 13).unwrap();
 
         // configure
         let name = TestCircuit::<E, RW, L>::name();
@@ -223,7 +223,7 @@ fn test_single_add_instance_e2e() {
     );
 
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();

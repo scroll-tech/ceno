@@ -41,7 +41,7 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
             let (pp, _) = {
                 let poly_size = 1 << num_vars;
                 let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
+                Pcs::trim(param, poly_size).unwrap()
             };
             let polys = (0..batch_size)
                 .map(|_| {
