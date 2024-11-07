@@ -798,7 +798,7 @@ Hints:
             let fixed: Vec<_> = fixed_trace
                 .circuit_fixed_traces
                 .remove(circuit_name)
-                .map_or(None, |fixed| fixed)
+                .and_then(|fixed| fixed)
                 // .expect(format!("circuit {}'s fixed traces should not be None", circuit_name).as_str())
                 .map_or(vec![], |fixed| {
                     fixed
