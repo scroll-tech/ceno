@@ -3,7 +3,7 @@ use ceno_emul::{
     WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::Rv32imConfig,
+    instructions::riscv::{DummyExtraConfig, Rv32imConfig},
     scheme::{
         PublicValues, constants::MAX_NUM_VARIABLES, prover::ZKVMProver, verifier::ZKVMVerifier,
     },
@@ -66,6 +66,7 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -79,6 +80,7 @@ fn main() {
 
     let reg_init = initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[]);
+    dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
     let pk = zkvm_cs
         .clone()
@@ -121,8 +123,11 @@ fn main() {
 
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
-    config
+    let dummy_records = config
         .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
+        .unwrap();
+    dummy_config
+        .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
 
