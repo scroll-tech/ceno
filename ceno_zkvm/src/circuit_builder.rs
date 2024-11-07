@@ -9,7 +9,7 @@ use crate::{
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
-    structs::{ProvingKey, VerifyingKey, WitnessId},
+    structs::{ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
 
@@ -92,9 +92,15 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
+    // for each read expression we store its ram type and original value before doing RLC
+    // the original value will be used for debugging
+    pub r_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
 
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
+    // for each write expression we store its ram type and original value before doing RLC
+    // the original value will be used for debugging
+    pub w_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
 
     /// init/final ram expression
     pub r_table_expressions: Vec<SetTableExpression<E>>,
@@ -123,9 +129,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
-    #[cfg(test)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
-    #[cfg(test)]
     pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
@@ -142,8 +146,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             instance_name_map: HashMap::new(),
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
+            r_ram_types: vec![],
             w_expressions: vec![],
             w_expressions_namespace_map: vec![],
+            w_ram_types: vec![],
             r_table_expressions: vec![],
             r_table_expressions_namespace_map: vec![],
             w_table_expressions: vec![],
@@ -160,9 +166,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
-            #[cfg(test)]
             debug_map: HashMap::new(),
-            #[cfg(test)]
             lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
@@ -247,16 +251,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         rom_type: ROMType,
-        items: Vec<Expression<E>>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
             std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
-                .chain(
-                    #[cfg(test)]
-                    items.clone(),
-                    #[cfg(not(test))]
-                    items,
-                )
+                .chain(record.clone())
                 .collect(),
         );
         assert_eq!(
@@ -268,8 +267,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
-        #[cfg(test)]
-        self.lk_expressions_items_map.push((rom_type, items));
+        // Since lk_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.lk_expressions_items_map.push((rom_type, record));
         Ok(())
     }
 
@@ -277,13 +277,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         table_len: usize,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let rlc_record = self.rlc_chip_record(
+            vec![(rom_type as usize).into()]
+                .into_iter()
+                .chain(record.clone())
+                .collect_vec(),
+        );
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -297,6 +304,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name_fn().into());
         self.lk_table_expressions_namespace_map.push(path);
+        // Since lk_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.lk_expressions_items_map.push((rom_type, record));
 
         Ok(())
     }
@@ -356,8 +366,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn read_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -367,14 +379,19 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
+        // Since r_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.r_ram_types.push((ram_type, record));
         Ok(())
     }
 
     pub fn write_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -384,6 +401,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
+        self.w_ram_types.push((ram_type, record));
         Ok(())
     }
 

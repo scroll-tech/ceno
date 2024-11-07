@@ -141,13 +141,19 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 
         let mlt = cb.create_witin(|| "mlt");
 
-        let record_exprs = {
-            let mut fields = vec![E::BaseField::from(ROMType::Instruction as u64).expr()];
-            fields.extend(record.as_slice().iter().map(|f| Expression::Fixed(*f)));
-            cb.rlc_chip_record(fields)
-        };
+        let record_exprs = record
+            .as_slice()
+            .iter()
+            .map(|f| Expression::Fixed(*f))
+            .collect_vec();
 
-        cb.lk_table_record(|| "prog table", PROGRAM_SIZE, record_exprs, mlt.expr())?;
+        cb.lk_table_record(
+            || "prog table",
+            PROGRAM_SIZE,
+            ROMType::Instruction,
+            record_exprs,
+            mlt.expr(),
+        )?;
 
         Ok(ProgramTableConfig { record, mlt })
     }
@@ -159,6 +165,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     ) -> RowMajorMatrix<E::BaseField> {
         let num_instructions = program.instructions.len();
         let pc_base = program.base_address;
+        assert!(num_instructions <= PROGRAM_SIZE);
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 
@@ -170,6 +177,13 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 let pc = pc_base + (i * PC_STEP_SIZE) as u32;
                 let insn = DecodedInstruction::new(program.instructions[i]);
                 let values = InsnRecord::from_decoded(pc, &insn);
+
+                tracing::debug!(
+                    "program: pc={:x}, insn={:x?},imm={:x?}",
+                    pc,
+                    values.without_imm(),
+                    InsnRecord::imm_or_funct7_field::<E::BaseField>(&insn)
+                );
 
                 // Copy all the fields except immediate.
                 for (col, val) in config

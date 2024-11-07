@@ -22,31 +22,27 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
-            let read_record = cb.rlc_chip_record(
-                [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
-                    vec![value.clone()],
-                    vec![prev_ts.clone()],
-                ]
-                .concat(),
-            );
+            let read_record = [
+                vec![
+                    Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                    memory_addr.clone(),
+                ],
+                vec![value.clone()],
+                vec![prev_ts.clone()],
+            ]
+            .concat();
             // Write (a, v, t)
-            let write_record = cb.rlc_chip_record(
-                [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
-                    vec![value],
-                    vec![ts.clone()],
-                ]
-                .concat(),
-            );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            let write_record = [
+                vec![
+                    Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                    memory_addr.clone(),
+                ],
+                vec![value],
+                vec![ts.clone()],
+            ]
+            .concat();
+            cb.read_record(|| "read_record", RAMType::Memory, read_record)?;
+            cb.write_record(|| "write_record", RAMType::Memory, write_record)?;
 
             // assert prev_ts < current_ts
             let lt_cfg = AssertLTConfig::construct_circuit(
@@ -74,31 +70,27 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
-            let read_record = cb.rlc_chip_record(
-                [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
-                    vec![prev_values],
-                    vec![prev_ts.clone()],
-                ]
-                .concat(),
-            );
+            let read_record = [
+                vec![
+                    Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                    memory_addr.clone(),
+                ],
+                vec![prev_values],
+                vec![prev_ts.clone()],
+            ]
+            .concat();
             // Write (a, v, t)
-            let write_record = cb.rlc_chip_record(
-                [
-                    vec![
-                        Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
-                        memory_addr.clone(),
-                    ],
-                    vec![value],
-                    vec![ts.clone()],
-                ]
-                .concat(),
-            );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            let write_record = [
+                vec![
+                    Expression::<E>::Constant(E::BaseField::from(RAMType::Memory as u64)),
+                    memory_addr.clone(),
+                ],
+                vec![value],
+                vec![ts.clone()],
+            ]
+            .concat();
+            cb.read_record(|| "read_record", RAMType::Memory, read_record)?;
+            cb.write_record(|| "write_record", RAMType::Memory, write_record)?;
 
             let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,

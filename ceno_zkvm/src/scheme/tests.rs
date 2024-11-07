@@ -23,7 +23,9 @@ use crate::{
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
     set_val,
-    structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{
+        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
+    },
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
@@ -56,8 +58,8 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
                 Expression::<E>::Constant(E::BaseField::ONE),
                 reg_id.expr(),
             ]);
-            cb.read_record(|| "read", record.clone())?;
-            cb.write_record(|| "write", record)?;
+            cb.read_record(|| "read", Register, record.clone())?;
+            cb.write_record(|| "write", Register, record)?;
             Result::<(), ZKVMError>::Ok(())
         })?;
         (0..L).try_for_each(|_| {
