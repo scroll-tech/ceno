@@ -39,14 +39,15 @@ macro_rules! set_fixed_val {
     };
 }
 
-pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send> {
+#[derive(Clone)]
+pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,
     num_padding_rows: usize,
     num_col: usize,
 }
 
-impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
         let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
