@@ -7,6 +7,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     expression::{Expression, fmt},
     scheme::utils::{eval_by_expr_with_fixed, eval_by_expr_with_instance},
+    state::{GlobalState, StateCircuit},
     structs::{RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
@@ -778,9 +779,13 @@ Hints:
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
             let witness = if is_opcode {
-                witnesses.get_opcode_witness(circuit_name).unwrap()
+                witnesses
+                    .get_opcode_witness(circuit_name)
+                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
             } else {
-                witnesses.get_table_witness(circuit_name).unwrap()
+                witnesses
+                    .get_table_witness(circuit_name)
+                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
             };
             let num_rows = witness.num_instances();
 
@@ -946,6 +951,7 @@ Hints:
         }
 
         // find out r != w errors
+        let mut num_rw_mismatch_errors = 0;
 
         macro_rules! derive_ram_rws {
             ($ram_type:expr) => {{
@@ -960,12 +966,17 @@ Hints:
                     if *num_rows == 0 {
                         continue;
                     }
-                    for ((w_rlc_expr, annotation), (_, w_exprs)) in cs
+                    for ((w_rlc_expr, annotation), (_, w_exprs)) in (cs
                         .w_expressions
                         .iter()
-                        .zip(cs.w_expressions_namespace_map.iter())
-                        .zip(cs.w_ram_types.iter())
-                        .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
+                        .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
+                    .zip(
+                        cs.w_expressions_namespace_map
+                            .iter()
+                            .chain(cs.w_table_expressions_namespace_map.iter()),
+                    )
+                    .zip(cs.w_ram_types.iter())
+                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
                         let write_rlc_records =
                             (wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, w_rlc_expr)
@@ -1017,12 +1028,17 @@ Hints:
                     if *num_rows == 0 {
                         continue;
                     }
-                    for ((r_expr, annotation), _) in cs
+                    for ((r_expr, annotation), _) in (cs
                         .r_expressions
                         .iter()
-                        .zip(cs.r_expressions_namespace_map.iter())
-                        .zip(cs.r_ram_types.iter())
-                        .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
+                        .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
+                    .zip(
+                        cs.r_expressions_namespace_map
+                            .iter()
+                            .chain(cs.r_table_expressions_namespace_map.iter()),
+                    )
+                    .zip(cs.r_ram_types.iter())
+                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
                         let read_records =
                             wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, r_expr)
@@ -1051,7 +1067,7 @@ Hints:
             ($reads:ident,$reads_grp_by_annotations:ident,$writes:ident,$writes_grp_by_annotations:ident,$ram_type:expr,$gs:expr) => {
                 for (annotation, (reads, circuit_name)) in $reads_grp_by_annotations.iter() {
                     // (pc, timestamp)
-                    let gs_of_circuit = $gs.get(circuit_name).clone().unwrap();
+                    let gs_of_circuit = $gs.get(circuit_name);
                     let num_missing = reads
                         .iter()
                         .filter(|(read, _)| !$writes.contains(read))
@@ -1062,8 +1078,8 @@ Hints:
                         .filter(|(read, _)| !$writes.contains(read))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc = gs_of_circuit[*row][0].to_canonical_u64();
-                            let ts = gs_of_circuit[*row][1].to_canonical_u64();
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} writes",
                                 annotation,
@@ -1084,9 +1100,10 @@ Hints:
                     if num_missing > 0 {
                         tracing::error!("--------------------");
                     }
+                    num_rw_mismatch_errors += num_missing;
                 }
                 for (annotation, (writes, circuit_name)) in $writes_grp_by_annotations.iter() {
-                    let gs_of_circuit = $gs.get(circuit_name).clone().unwrap();
+                    let gs_of_circuit = $gs.get(circuit_name);
                     let num_missing = writes
                         .iter()
                         .filter(|(write, _)| !$reads.contains(write))
@@ -1097,8 +1114,8 @@ Hints:
                         .filter(|(write, _)| !$reads.contains(write))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc = gs_of_circuit[*row][0].to_canonical_u64();
-                            let ts = gs_of_circuit[*row][1].to_canonical_u64();
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} reads",
                                 annotation,
@@ -1119,13 +1136,34 @@ Hints:
                     if num_missing > 0 {
                         tracing::error!("--------------------");
                     }
+                    num_rw_mismatch_errors += num_missing;
                 }
             };
         }
         // part1 global state
-        // get (pc, timestamp)
-        let (gs_rs, rs_grp_by_anno, gs_ws, ws_grp_by_anno, gs) =
+        let mut cs = ConstraintSystem::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let gs_init = GlobalState::initial_global_state(&mut cb).unwrap();
+        let gs_final = GlobalState::finalize_global_state(&mut cb).unwrap();
+
+        let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
+        gs_rs.insert(eval_by_expr_with_instance(
+            &[],
+            &[],
+            &instance,
+            &challenges,
+            &gs_final,
+        ));
+        gs_ws.insert(eval_by_expr_with_instance(
+            &[],
+            &[],
+            &instance,
+            &challenges,
+            &gs_init,
+        ));
+
+        // gs stores { (pc, timestamp) }
         let gs_clone = gs.clone();
         find_rw_mismatch!(
             gs_rs,
@@ -1159,6 +1197,10 @@ Hints:
             RAMType::Memory,
             gs
         );
+
+        if num_rw_mismatch_errors > 0 {
+            panic!("found {} r/w mismatch errors", num_rw_mismatch_errors);
+        }
     }
 }
 
