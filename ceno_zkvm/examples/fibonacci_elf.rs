@@ -11,6 +11,7 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{MemFinalRecord, ProgramTableCircuit, initial_registers},
 };
+use clap::Parser;
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
@@ -20,13 +21,22 @@ use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
 
+/// Prove the execution of a fixed RISC-V program.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// The maximum number of steps to execute the program.
+    #[arg(short, long)]
+    max_steps: Option<usize>,
+}
+
 fn main() {
+    let args = Args::parse();
+
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
     const PROGRAM_SIZE: usize = 1 << 14;
     type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
-
-    let max_steps = None; // Some(1_000);
 
     // set up logger
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
@@ -82,7 +92,7 @@ fn main() {
 
     let all_records = vm
         .iter_until_halt()
-        .take(max_steps.unwrap_or(usize::MAX))
+        .take(args.max_steps.unwrap_or(usize::MAX))
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
 
@@ -188,7 +198,7 @@ fn main() {
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
-        None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+        None => tracing::error!("Unfinished execution. max_steps={:?}.", args.max_steps),
     }
 
     let transcript = Transcript::new(b"riscv");
