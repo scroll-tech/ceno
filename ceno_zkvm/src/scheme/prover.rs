@@ -87,11 +87,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
 
+        let span = entered_span!("commit_to_traces");
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let commit_dur = std::time::Instant::now();
             let num_instances = witness.num_instances();
-            let span = entered_span!("commit to opcode traces", circuit_name=circuit_name);
+            let span = entered_span!("commit to iteration", circuit_name=circuit_name);
             let witness = match num_instances {
                 0 => vec![],
                 _ => {
@@ -101,17 +102,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                         PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
                             .map_err(ZKVMError::PCSError)?,
                     );
-                    tracing::info!(
-                        "commit to {} traces took {:?}",
-                        circuit_name,
-                        commit_dur.elapsed()
-                    );
+                    // tracing::info!(
+                    //     "commit to {} traces took {:?}",
+                    //     circuit_name,
+                    //     commit_dur.elapsed()
+                    // );
                     witness
                 }
-                exit_span!(span);
             };
+            exit_span!(span);
             wits.insert(circuit_name, (witness, num_instances));
         }
+        exit_span!(span);
 
         // squeeze two challenges from transcript
         let challenges = [

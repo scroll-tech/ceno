@@ -9,10 +9,10 @@ macro_rules! entered_span {
 }#[macro_export]
 macro_rules! tracing_span {
     ($first:expr, $($fields:tt)*) => {
-        tracing::span!(tracing::Level::DEBUG, $first, $($fields)*)
+        tracing::span!(tracing::Level::INFO, $first, $($fields)*)
     };
     ($first:expr $(,)*) => {
-        tracing::span!(tracing::Level::DEBUG, $first)
+        tracing::span!(tracing::Level::INFO, $first)
     };
 }
 #[macro_export]
