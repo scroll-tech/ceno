@@ -15,7 +15,7 @@ use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use std::{panic, time::Instant};
+use std::{panic, time::Instant, usize};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -25,6 +25,8 @@ fn main() {
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
     const PROGRAM_SIZE: usize = 1 << 14;
     type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
+
+    let max_steps = None; // Some(1_000);
 
     // set up logger
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
@@ -80,24 +82,26 @@ fn main() {
 
     let all_records = vm
         .iter_until_halt()
+        .take(max_steps.unwrap_or(usize::MAX))
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
 
-    let halt_record = all_records
+    // Find the exit code from the HALT step, if halting at all.
+    let exit_code = all_records
         .iter()
         .rev()
         .find(|record| {
             record.insn().codes().kind == EANY
                 && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
         })
-        .expect("halt record not found");
+        .and_then(|halt_record| halt_record.rs2())
+        .map(|rs2| rs2.value);
 
     let final_access = vm.tracer().final_accesses();
-
     let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
-    let exit_code = halt_record.rs2().unwrap().value;
+
     let pi = PublicValues::new(
-        exit_code,
+        exit_code.unwrap_or(0),
         vm.program().entry,
         Tracer::SUBCYCLES_PER_INSN as u32,
         EXIT_PC as u32,
@@ -178,9 +182,14 @@ fn main() {
     let transcript = Transcript::new(b"riscv");
     assert!(
         verifier
-            .verify_proof(zkvm_proof.clone(), transcript)
+            .verify_proof_halt(zkvm_proof.clone(), transcript, exit_code.is_some())
             .expect("verify proof return with error"),
     );
+    match exit_code {
+        Some(0) => tracing::info!("exit code 0. Success."),
+        Some(code) => tracing::error!("exit code {}. Failure.", code),
+        None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+    }
 
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof

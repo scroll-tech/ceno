@@ -43,7 +43,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         ZKVMVerifier { vk }
     }
 
+    /// Verify a trace from start to halt.
     pub fn verify_proof(
+        &self,
+        vm_proof: ZKVMProof<E, PCS>,
+        transcript: Transcript<E>,
+    ) -> Result<bool, ZKVMError> {
+        self.verify_proof_halt(vm_proof, transcript, true)
+    }
+
+    /// Verify a trace from start to optional halt.
+    pub fn verify_proof_halt(
+        &self,
+        vm_proof: ZKVMProof<E, PCS>,
+        transcript: Transcript<E>,
+        does_halt: bool,
+    ) -> Result<bool, ZKVMError> {
+        // require ecall/halt proof to exist, depending whether we expect a halt.
+        let num_instances = vm_proof
+            .opcode_proofs
+            .get(&HaltInstruction::<E>::name())
+            .map(|(_, p)| p.num_instances)
+            .unwrap_or(0);
+        if num_instances != (does_halt as usize) {
+            return Err(ZKVMError::VerifyError(format!(
+                "ecall/halt num_instances={}, expected={}",
+                num_instances, does_halt as usize
+            )));
+        }
+
+        self.verify_proof_validity(vm_proof, transcript)
+    }
+
+    fn verify_proof_validity(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: Transcript<E>,
@@ -52,21 +84,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
-
-        // require ecall/halt proof to exist
-        {
-            if let Some((_, proof)) = vm_proof.opcode_proofs.get(&HaltInstruction::<E>::name()) {
-                if proof.num_instances != 1 {
-                    return Err(ZKVMError::VerifyError(
-                        "ecall/halt num_instances != 1".into(),
-                    ));
-                }
-            } else {
-                return Err(ZKVMError::VerifyError(
-                    "ecall/halt proof does not exist".into(),
-                ));
-            }
-        }
 
         let pi_evals = &vm_proof.pi_evals;
 
