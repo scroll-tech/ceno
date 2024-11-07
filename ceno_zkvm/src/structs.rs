@@ -43,7 +43,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
@@ -57,7 +57,7 @@ pub enum ROMType {
     Instruction, // Decoded instruction from the fixed program.
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum RAMType {
     GlobalState,
     Register,
@@ -175,7 +175,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMFixedTraces<E: ExtensionField> {
     pub circuit_fixed_traces: BTreeMap<String, Option<RowMajorMatrix<E::BaseField>>>,
 }
@@ -203,7 +203,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
@@ -212,6 +212,14 @@ pub struct ZKVMWitnesses<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
+    pub fn get_opcode_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_opcodes.get(name).cloned()
+    }
+
+    pub fn get_table_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_tables.get(name).cloned()
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
