@@ -79,7 +79,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         name_fn: N,
         table_len: usize,
         rom_type: ROMType,
-        items: Vec<Expression<E>>,
+        record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
@@ -87,7 +87,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs
-            .lk_table_record(name_fn, table_len, rom_type, items, multiplicity)
+            .lk_table_record(name_fn, table_len, rom_type, record, multiplicity)
     }
 
     pub fn r_table_record<NR, N>(
