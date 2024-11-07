@@ -1,10 +1,14 @@
-#[cfg(test)]
-use super::utils::{eval_by_expr, wit_infer_by_expr};
+use super::{
+    PublicValues,
+    utils::{eval_by_expr, wit_infer_by_expr},
+};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     expression::{Expression, fmt},
-    scheme::utils::eval_by_expr_with_fixed,
+    scheme::utils::{eval_by_expr_with_fixed, eval_by_expr_with_instance},
+    state::{GlobalState, StateCircuit},
+    structs::{RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
         TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
@@ -20,8 +24,9 @@ use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::{Itertools, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
+use rand::thread_rng;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -37,7 +42,7 @@ pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_base());
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
-pub(crate) enum MockProverError<E: ExtensionField> {
+pub enum MockProverError<E: ExtensionField> {
     AssertZeroError {
         expression: Expression<E>,
         evaluated: E::BaseField,
@@ -264,6 +269,7 @@ impl<E: ExtensionField> MockProverError<E> {
         }
     }
 
+    #[cfg(test)]
     fn inst_id(&self) -> usize {
         match self {
             Self::AssertZeroError { inst_id, .. }
@@ -279,7 +285,7 @@ impl<E: ExtensionField> MockProverError<E> {
     }
 }
 
-pub(crate) struct MockProver<E: ExtensionField> {
+pub struct MockProver<E: ExtensionField> {
     _phantom: PhantomData<E>,
 }
 
@@ -738,6 +744,463 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         Self::assert_with_expected_errors(cb, wits_in, programs, &[], challenge, lkm);
+    }
+
+    pub fn assert_satisfied_full(
+        cs: ZKVMConstraintSystem<E>,
+        mut fixed_trace: ZKVMFixedTraces<E>,
+        witnesses: &ZKVMWitnesses<E>,
+        pi: &PublicValues<u32>,
+    ) {
+        let instance = pi
+            .to_vec::<E>()
+            .concat()
+            .into_iter()
+            .map(|i| E::from(i))
+            .collect_vec();
+        let pi_mles = pi
+            .to_vec::<E>()
+            .into_mles()
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec();
+        let mut rng = thread_rng();
+        let challenges = [0u8; 2].map(|_| E::random(&mut rng));
+
+        let mut wit_mles = HashMap::new();
+        let mut fixed_mles = HashMap::new();
+        let mut num_instances = HashMap::new();
+        // Lookup errors
+        let mut rom_inputs =
+            HashMap::<ROMType, Vec<(Vec<E>, String, String, Vec<Expression<E>>)>>::new();
+        let mut rom_tables = HashMap::<ROMType, HashMap<E, E::BaseField>>::new();
+        for (circuit_name, cs) in cs.circuit_css.iter() {
+            let is_opcode = cs.lk_table_expressions.is_empty()
+                && cs.r_table_expressions.is_empty()
+                && cs.w_table_expressions.is_empty();
+            let witness = if is_opcode {
+                witnesses
+                    .get_opcode_witness(circuit_name)
+                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
+            } else {
+                witnesses
+                    .get_table_witness(circuit_name)
+                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
+            };
+            let num_rows = witness.num_instances();
+
+            if witness.num_instances() == 0 {
+                wit_mles.insert(circuit_name.clone(), vec![]);
+                fixed_mles.insert(circuit_name.clone(), vec![]);
+                num_instances.insert(circuit_name.clone(), num_rows);
+                continue;
+            }
+            let witness = witness
+                .into_mles()
+                .into_iter()
+                .map(|w| w.into())
+                .collect_vec();
+            let fixed: Vec<_> = fixed_trace
+                .circuit_fixed_traces
+                .remove(circuit_name)
+                .and_then(|fixed| fixed)
+                // .expect(format!("circuit {}'s fixed traces should not be None", circuit_name).as_str())
+                .map_or(vec![], |fixed| {
+                    fixed
+                        .into_mles()
+                        .into_iter()
+                        .map(|f| f.into())
+                        .collect_vec()
+                });
+            if is_opcode {
+                tracing::info!(
+                    "preprocessing opcode {} with {} entries",
+                    circuit_name,
+                    num_rows
+                );
+                // gather lookup inputs
+                for ((expr, annotation), (rom_type, values)) in cs
+                    .lk_expressions
+                    .iter()
+                    .zip(cs.lk_expressions_namespace_map.clone().into_iter())
+                    .zip(cs.lk_expressions_items_map.clone().into_iter())
+                {
+                    let lk_input =
+                        (wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, expr)
+                            .get_ext_field_vec())[..num_rows]
+                            .to_vec();
+                    rom_inputs.entry(rom_type).or_default().push((
+                        lk_input,
+                        circuit_name.clone(),
+                        annotation,
+                        values,
+                    ));
+                }
+            } else {
+                tracing::info!(
+                    "preprocessing table {} with {} entries",
+                    circuit_name,
+                    num_rows
+                );
+                // gather lookup tables
+                for (expr, (rom_type, _)) in cs
+                    .lk_table_expressions
+                    .iter()
+                    .zip(cs.lk_expressions_items_map.clone().into_iter())
+                {
+                    let lk_table =
+                        wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, &expr.values)
+                            .get_ext_field_vec()
+                            .to_vec();
+
+                    let multiplicity = wit_infer_by_expr(
+                        &fixed,
+                        &witness,
+                        &pi_mles,
+                        &challenges,
+                        &expr.multiplicity,
+                    )
+                    .get_base_field_vec()
+                    .to_vec();
+
+                    assert!(
+                        rom_tables
+                            .insert(
+                                rom_type,
+                                lk_table
+                                    .into_iter()
+                                    .zip(multiplicity.into_iter())
+                                    .collect::<HashMap<_, _>>(),
+                            )
+                            .is_none(),
+                        "cannot assign to rom table {:?} twice",
+                        rom_type
+                    );
+                }
+            }
+            wit_mles.insert(circuit_name.clone(), witness);
+            fixed_mles.insert(circuit_name.clone(), fixed);
+            num_instances.insert(circuit_name.clone(), num_rows);
+        }
+
+        for (rom_type, inputs) in rom_inputs.into_iter() {
+            let table = rom_tables.get_mut(&rom_type).unwrap();
+            for (lk_input_values, circuit_name, lk_input_annotation, input_value_exprs) in inputs {
+                // counting multiplicity in rom_input
+                let mut lk_input_values_multiplicity = HashMap::new();
+                for (row, input_value) in lk_input_values.iter().enumerate() {
+                    // we only keep first row to restore debug information
+                    lk_input_values_multiplicity
+                        .entry(input_value)
+                        .or_insert([0u64, row as u64])[0] += 1;
+                }
+
+                for (k, [input_multiplicity, row]) in lk_input_values_multiplicity {
+                    let table_multiplicity = if let Some(table_multiplicity) = table.get_mut(k) {
+                        if input_multiplicity <= table_multiplicity.to_canonical_u64() {
+                            *table_multiplicity -= E::BaseField::from(input_multiplicity);
+                            continue;
+                        }
+                        table_multiplicity.to_canonical_u64()
+                    } else {
+                        0
+                    };
+                    // log mismatch error
+                    let witness = wit_mles
+                        .get(&circuit_name)
+                        .map(|mles| {
+                            mles.iter()
+                                .map(|mle| E::from(mle.get_base_field_vec()[row as usize]))
+                                .collect_vec()
+                        })
+                        .unwrap();
+                    let values = input_value_exprs
+                        .iter()
+                        .map(|expr| {
+                            eval_by_expr_with_instance(
+                                &[],
+                                &witness,
+                                &instance,
+                                challenges.as_slice(),
+                                expr,
+                            )
+                            .as_bases()[0]
+                        })
+                        .collect_vec();
+                    tracing::error!(
+                        "{}: value {:x?} mismatch lk_multiplicity: real {:x} > remaining {:x} in {:?} table",
+                        lk_input_annotation,
+                        values,
+                        input_multiplicity,
+                        table_multiplicity,
+                        rom_type,
+                    );
+                }
+            }
+            // each table entry's multiplicity should equal to 0
+            for (k, multiplicity) in table {
+                if !multiplicity.is_zero_vartime() {
+                    tracing::error!(
+                        "table {:?}: {:x?} multiplicity = {:x}",
+                        rom_type,
+                        k,
+                        multiplicity.to_canonical_u64()
+                    );
+                }
+            }
+        }
+
+        // find out r != w errors
+        let mut num_rw_mismatch_errors = 0;
+
+        macro_rules! derive_ram_rws {
+            ($ram_type:expr) => {{
+                let mut writes = HashSet::new();
+                let mut writes_grp_by_annotations = HashMap::new();
+                // store (pc, timestamp) for $ram_type == RAMType::GlobalState
+                let mut gs = HashMap::new();
+                for (circuit_name, cs) in cs.circuit_css.iter() {
+                    let fixed = fixed_mles.get(circuit_name).unwrap();
+                    let witness = wit_mles.get(circuit_name).unwrap();
+                    let num_rows = num_instances.get(circuit_name).unwrap();
+                    if *num_rows == 0 {
+                        continue;
+                    }
+                    for ((w_rlc_expr, annotation), (_, w_exprs)) in (cs
+                        .w_expressions
+                        .iter()
+                        .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
+                    .zip(
+                        cs.w_expressions_namespace_map
+                            .iter()
+                            .chain(cs.w_table_expressions_namespace_map.iter()),
+                    )
+                    .zip(cs.w_ram_types.iter())
+                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
+                    {
+                        let write_rlc_records =
+                            (wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, w_rlc_expr)
+                                .get_ext_field_vec())[..*num_rows]
+                                .to_vec();
+
+                        if $ram_type == RAMType::GlobalState {
+                            // w_exprs = [GlobalState, pc, timestamp]
+                            assert_eq!(w_exprs.len(), 3);
+                            let w = w_exprs
+                                .into_iter()
+                                .skip(1)
+                                .map(|expr| {
+                                    let v = wit_infer_by_expr(
+                                        fixed,
+                                        witness,
+                                        &pi_mles,
+                                        &challenges,
+                                        expr,
+                                    );
+                                    v.get_base_field_vec()[..*num_rows].to_vec()
+                                })
+                                .collect_vec();
+                            // convert [[pc], [timestamp]] into [[pc, timestamp]]
+                            let w = (0..*num_rows)
+                                // TODO: use transpose
+                                .map(|row| w.iter().map(|w| w[row]).collect_vec())
+                                .collect_vec();
+
+                            assert!(gs.insert(circuit_name.clone(), w).is_none());
+                        };
+                        let mut records = vec![];
+                        for (row, record_rlc) in write_rlc_records.into_iter().enumerate() {
+                            // TODO: report error
+                            assert_eq!(writes.insert(record_rlc), true);
+                            records.push((record_rlc, row));
+                        }
+                        writes_grp_by_annotations
+                            .insert(annotation.clone(), (records, circuit_name.clone()));
+                    }
+                }
+
+                let mut reads = HashSet::new();
+                let mut reads_grp_by_annotations = HashMap::new();
+                for (circuit_name, cs) in cs.circuit_css.iter() {
+                    let fixed = fixed_mles.get(circuit_name).unwrap();
+                    let witness = wit_mles.get(circuit_name).unwrap();
+                    let num_rows = num_instances.get(circuit_name).unwrap();
+                    if *num_rows == 0 {
+                        continue;
+                    }
+                    for ((r_expr, annotation), _) in (cs
+                        .r_expressions
+                        .iter()
+                        .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
+                    .zip(
+                        cs.r_expressions_namespace_map
+                            .iter()
+                            .chain(cs.r_table_expressions_namespace_map.iter()),
+                    )
+                    .zip(cs.r_ram_types.iter())
+                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
+                    {
+                        let read_records =
+                            wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, r_expr)
+                                .get_ext_field_vec()[..*num_rows]
+                                .to_vec();
+                        let mut records = vec![];
+                        for (row, record) in read_records.into_iter().enumerate() {
+                            assert_eq!(reads.insert(record), true);
+                            records.push((record, row));
+                        }
+                        reads_grp_by_annotations
+                            .insert(annotation.clone(), (records, circuit_name.clone()));
+                    }
+                }
+
+                (
+                    reads,
+                    reads_grp_by_annotations,
+                    writes,
+                    writes_grp_by_annotations,
+                    gs,
+                )
+            }};
+        }
+        macro_rules! find_rw_mismatch {
+            ($reads:ident,$reads_grp_by_annotations:ident,$writes:ident,$writes_grp_by_annotations:ident,$ram_type:expr,$gs:expr) => {
+                for (annotation, (reads, circuit_name)) in $reads_grp_by_annotations.iter() {
+                    // (pc, timestamp)
+                    let gs_of_circuit = $gs.get(circuit_name);
+                    let num_missing = reads
+                        .iter()
+                        .filter(|(read, _)| !$writes.contains(read))
+                        .count();
+                    let num_reads = reads.len();
+                    reads
+                        .iter()
+                        .filter(|(read, _)| !$writes.contains(read))
+                        .take(10)
+                        .for_each(|(_, row)| {
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
+                            tracing::error!(
+                                "{} at row {} (pc={:x},ts={}) not found in {:?} writes",
+                                annotation,
+                                row,
+                                pc,
+                                ts,
+                                $ram_type,
+                            )
+                        });
+
+                    if num_missing > 10 {
+                        tracing::error!(
+                            ".... {} more missing (num_instances = {})",
+                            num_missing - 10,
+                            num_reads,
+                        );
+                    }
+                    if num_missing > 0 {
+                        tracing::error!("--------------------");
+                    }
+                    num_rw_mismatch_errors += num_missing;
+                }
+                for (annotation, (writes, circuit_name)) in $writes_grp_by_annotations.iter() {
+                    let gs_of_circuit = $gs.get(circuit_name);
+                    let num_missing = writes
+                        .iter()
+                        .filter(|(write, _)| !$reads.contains(write))
+                        .count();
+                    let num_writes = writes.len();
+                    writes
+                        .iter()
+                        .filter(|(write, _)| !$reads.contains(write))
+                        .take(10)
+                        .for_each(|(_, row)| {
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
+                            tracing::error!(
+                                "{} at row {} (pc={:x},ts={}) not found in {:?} reads",
+                                annotation,
+                                row,
+                                pc,
+                                ts,
+                                $ram_type,
+                            )
+                        });
+
+                    if num_missing > 10 {
+                        tracing::error!(
+                            ".... {} more missing (num_instances = {})",
+                            num_missing - 10,
+                            num_writes,
+                        );
+                    }
+                    if num_missing > 0 {
+                        tracing::error!("--------------------");
+                    }
+                    num_rw_mismatch_errors += num_missing;
+                }
+            };
+        }
+        // part1 global state
+        let mut cs = ConstraintSystem::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let gs_init = GlobalState::initial_global_state(&mut cb).unwrap();
+        let gs_final = GlobalState::finalize_global_state(&mut cb).unwrap();
+
+        let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
+            derive_ram_rws!(RAMType::GlobalState);
+        gs_rs.insert(eval_by_expr_with_instance(
+            &[],
+            &[],
+            &instance,
+            &challenges,
+            &gs_final,
+        ));
+        gs_ws.insert(eval_by_expr_with_instance(
+            &[],
+            &[],
+            &instance,
+            &challenges,
+            &gs_init,
+        ));
+
+        // gs stores { (pc, timestamp) }
+        let gs_clone = gs.clone();
+        find_rw_mismatch!(
+            gs_rs,
+            rs_grp_by_anno,
+            gs_ws,
+            ws_grp_by_anno,
+            RAMType::GlobalState,
+            gs_clone
+        );
+
+        // part2 registers
+        let (reg_rs, rs_grp_by_anno, reg_ws, ws_grp_by_anno, _) =
+            derive_ram_rws!(RAMType::Register);
+        let gs_clone = gs.clone();
+        find_rw_mismatch!(
+            reg_rs,
+            rs_grp_by_anno,
+            reg_ws,
+            ws_grp_by_anno,
+            RAMType::Register,
+            gs_clone
+        );
+
+        // part3 memory
+        let (mem_rs, rs_grp_by_anno, mem_ws, ws_grp_by_anno, _) = derive_ram_rws!(RAMType::Memory);
+        find_rw_mismatch!(
+            mem_rs,
+            rs_grp_by_anno,
+            mem_ws,
+            ws_grp_by_anno,
+            RAMType::Memory,
+            gs
+        );
+
+        if num_rw_mismatch_errors > 0 {
+            panic!("found {} r/w mismatch errors", num_rw_mismatch_errors);
+        }
     }
 }
 
