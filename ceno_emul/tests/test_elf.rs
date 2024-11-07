@@ -10,6 +10,18 @@ fn test_ceno_rt_mini() -> Result<()> {
 }
 
 #[test]
+fn test_ceno_rt_official() -> Result<()> {
+    let program_elf = include_bytes!("../../riscv-testdata/testdata/rv32ui-p-addi");
+    let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
+    let steps = run(&mut state)?;
+    let last = steps.last().unwrap();
+    // assert_eq!(last.insn().codes().kind, InsnKind::EANY);
+    // assert_eq!(last.rs1().unwrap().value, CENO_PLATFORM.ecall_halt());
+    // assert_eq!(last.rs2().unwrap().value, 1); // panic / halt(1)
+    Ok(())
+}
+
+#[test]
 fn test_ceno_rt_panic() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_panic;
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
