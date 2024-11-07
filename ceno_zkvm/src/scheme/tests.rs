@@ -119,7 +119,12 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZKVMProver::new(pk);
         let mut transcript = Transcript::new(b"test");
-        let wits_in = zkvm_witness.witnesses.remove(&name).unwrap().into_mles();
+        let wits_in = zkvm_witness
+            .into_iter_sorted()
+            .next()
+            .unwrap()
+            .1
+            .into_mles();
         // commit to main traces
         let commit = Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript).unwrap();
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
