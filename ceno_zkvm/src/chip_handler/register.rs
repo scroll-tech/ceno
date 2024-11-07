@@ -24,27 +24,23 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
-            let read_record = cb.rlc_chip_record(
-                [
-                    vec![RAMType::Register.into()],
-                    vec![register_id.expr()],
-                    value.to_vec(),
-                    vec![prev_ts.clone()],
-                ]
-                .concat(),
-            );
+            let read_record = [
+                vec![RAMType::Register.into()],
+                vec![register_id.expr()],
+                value.to_vec(),
+                vec![prev_ts.clone()],
+            ]
+            .concat();
             // Write (a, v, t)
-            let write_record = cb.rlc_chip_record(
-                [
-                    vec![RAMType::Register.into()],
-                    vec![register_id.expr()],
-                    value.to_vec(),
-                    vec![ts.clone()],
-                ]
-                .concat(),
-            );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            let write_record = [
+                vec![RAMType::Register.into()],
+                vec![register_id.expr()],
+                value.to_vec(),
+                vec![ts.clone()],
+            ]
+            .concat();
+            cb.read_record(|| "read_record", RAMType::Register, read_record)?;
+            cb.write_record(|| "write_record", RAMType::Register, write_record)?;
 
             // assert prev_ts < current_ts
             let lt_cfg = AssertLTConfig::construct_circuit(
@@ -73,27 +69,23 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOpe
         assert!(register_id.expr().degree() <= 1);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
-            let read_record = cb.rlc_chip_record(
-                [
-                    vec![RAMType::Register.into()],
-                    vec![register_id.expr()],
-                    prev_values.to_vec(),
-                    vec![prev_ts.clone()],
-                ]
-                .concat(),
-            );
+            let read_record = [
+                vec![RAMType::Register.into()],
+                vec![register_id.expr()],
+                prev_values.to_vec(),
+                vec![prev_ts.clone()],
+            ]
+            .concat();
             // Write (a, v, t)
-            let write_record = cb.rlc_chip_record(
-                [
-                    vec![RAMType::Register.into()],
-                    vec![register_id.expr()],
-                    value.to_vec(),
-                    vec![ts.clone()],
-                ]
-                .concat(),
-            );
-            cb.read_record(|| "read_record", read_record)?;
-            cb.write_record(|| "write_record", write_record)?;
+            let write_record = [
+                vec![RAMType::Register.into()],
+                vec![register_id.expr()],
+                value.to_vec(),
+                vec![ts.clone()],
+            ]
+            .concat();
+            cb.read_record(|| "read_record", RAMType::Register, read_record)?;
+            cb.write_record(|| "write_record", RAMType::Register, write_record)?;
 
             let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,

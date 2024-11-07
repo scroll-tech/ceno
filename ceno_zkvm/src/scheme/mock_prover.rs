@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::utils::{eval_by_expr, wit_infer_by_expr};
 use crate::{
     ROMType,
