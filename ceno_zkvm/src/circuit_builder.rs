@@ -334,13 +334,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        ram_type: RAMType,
         table_spec: SetTableSpec,
-        rlc_record: Expression<E>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -353,6 +355,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name_fn().into());
         self.r_table_expressions_namespace_map.push(path);
+        self.r_ram_types.push((ram_type, record));
 
         Ok(())
     }
@@ -360,13 +363,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        ram_type: RAMType,
         table_spec: SetTableSpec,
-        rlc_record: Expression<E>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -379,6 +384,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name_fn().into());
         self.w_table_expressions_namespace_map.push(path);
+        self.w_ram_types.push((ram_type, record));
 
         Ok(())
     }
