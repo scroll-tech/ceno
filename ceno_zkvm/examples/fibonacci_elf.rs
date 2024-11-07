@@ -3,7 +3,7 @@ use ceno_emul::{
     WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
+    instructions::riscv::Rv32imConfig,
     scheme::{
         PublicValues, constants::MAX_NUM_VARIABLES, prover::ZKVMProver, verifier::ZKVMVerifier,
     },
@@ -104,7 +104,7 @@ fn main() {
         exit_code.unwrap_or(0),
         vm.program().entry,
         Tracer::SUBCYCLES_PER_INSN as u32,
-        EXIT_PC as u32,
+        vm.get_pc().into(),
         end_cycle,
         vec![],
     );
