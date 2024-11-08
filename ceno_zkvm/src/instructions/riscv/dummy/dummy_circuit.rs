@@ -67,19 +67,18 @@ impl<E: ExtensionField> DummyConfig<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         codes: InsnCodes,
     ) -> Result<Self, ZKVMError> {
-        let (with_rs1, with_rs2, with_rd) = match (codes.format, codes.kind) {
-            (_, InsnKind::EANY) => (true, true, false),
-            (InsnFormat::R, _) => (true, true, true),
-            (InsnFormat::I, _) => (true, false, true),
-            (InsnFormat::S, _) => (true, true, false),
-            (InsnFormat::B, _) => (true, true, false),
-            (InsnFormat::U, _) => (false, false, true),
-            (InsnFormat::J, _) => (false, false, true),
+        let (with_rs1, with_rs2, with_rd) = match codes.format {
+            InsnFormat::R => (true, true, true),
+            InsnFormat::I => (true, false, true),
+            InsnFormat::S => (true, true, false),
+            InsnFormat::B => (true, true, false),
+            InsnFormat::U => (false, false, true),
+            InsnFormat::J => (false, false, true),
         };
         let with_mem_write = matches!(codes.category, InsnCategory::Store);
         let with_mem_read = matches!(codes.category, InsnCategory::Load);
         let branching = matches!(codes.category, InsnCategory::Branch)
-            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR | InsnKind::EANY);
+            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR);
 
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, branching)?;
