@@ -9,7 +9,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldDefault, BasefoldRSPoseidonParams, PolynomialCommitmentScheme};
 use transcript::Transcript;
 
 use crate::{
@@ -203,7 +203,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
 
     // set up program
     let program = Program::new(

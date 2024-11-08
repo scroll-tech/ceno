@@ -15,6 +15,7 @@ ff_ext = { path = "../ff_ext" }
 generic-array = { version = "0.14", features = ["serde"] }
 goldilocks.workspace = true
 itertools.workspace = true
+keccak-hash = "0.11.0"
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
@@ -38,11 +39,11 @@ sanity-check = []
 
 [[bench]]
 harness = false
-name = "commit_open_verify_rs"
+name = "hashing"
 
 [[bench]]
 harness = false
-name = "commit_open_verify_basecode"
+name = "basefold"
 
 [[bench]]
 harness = false

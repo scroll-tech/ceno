@@ -1,10 +1,7 @@
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::Transcript;
-use util::hash::Digest;
 
 pub mod sum_check;
 pub mod util;
@@ -62,7 +59,7 @@ pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentSc
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    poly: &DenseMultilinearExtension<E>,
+    poly: &ArcMultilinearExtension<E>,
     comm: &Pcs::CommitmentWithData,
     point: &[E],
     eval: &E,
@@ -73,13 +70,13 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    polys: &[ArcMultilinearExtension<E>],
     comms: &[Pcs::CommitmentWithData],
-    points: &[Vec<E>],
+    points: &[&[E]],
     evals: &[Evaluation<E>],
     transcript: &mut Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
-    Pcs::batch_open(pp, polys, comms, points, evals, transcript)
+    Pcs::batch_open_vlmp(pp, polys, comms, points, evals, transcript)
 }
 
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -96,7 +93,7 @@ pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     vp: &Pcs::VerifierParam,
     comms: &[Pcs::Commitment],
-    points: &[Vec<E>],
+    points: &[&[E]],
     evals: &[Evaluation<E>],
     proof: &Pcs::Proof,
     transcript: &mut Transcript<E>,
@@ -104,7 +101,7 @@ pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 where
     Pcs::Commitment: 'a,
 {
-    Pcs::batch_verify(vp, comms, points, evals, proof, transcript)
+    Pcs::batch_verify_vlmp(vp, comms, points, evals, proof, transcript)
 }
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
@@ -162,18 +159,20 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn open(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithData,
         point: &[E],
         eval: &E,
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
-    fn batch_open(
+    /// Batch version of open that supports variable length opening at multiple
+    /// points (VLMP).
+    fn batch_open_vlmp(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         comms: &[Self::CommitmentWithData],
-        points: &[Vec<E>],
+        points: &[&[E]],
         evals: &[Evaluation<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error>;
@@ -191,6 +190,26 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
+    /// Another version of batch open (Variable Length One Point, VLOP):
+    /// Open polynomials of different number of variables, but still
+    /// at just one point. The size of this point is at least the same
+    /// as the number of variables of the largest polynomials.
+    /// Polynomials of different sizes must be committed separately.
+    /// However, this method does not assume polynomials of the same
+    /// size are committed together. In another word, different commitments
+    /// may be committing polynomials of the same size.
+    /// The length of comms should be the same as polys, and the same as
+    /// evals. Each entry in these arrays corresponds to one group of
+    /// polynomials committed together.
+    fn batch_open_vlop(
+        pp: &Self::ProverParam,
+        polys: &[&[ArcMultilinearExtension<E>]],
+        comms: &[Self::CommitmentWithData],
+        point: &[E],
+        evals: &[&[E]],
+        transcript: &mut Transcript<E>,
+    ) -> Result<Self::Proof, Error>;
+
     fn verify(
         vp: &Self::VerifierParam,
         comm: &Self::Commitment,
@@ -200,15 +219,17 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
 
-    fn batch_verify(
+    /// The corresponding verification method for VLMP.
+    fn batch_verify_vlmp(
         vp: &Self::VerifierParam,
         comms: &[Self::Commitment],
-        points: &[Vec<E>],
+        points: &[&[E]],
         evals: &[Evaluation<E>],
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
 
+    /// The corresponding verification method for simple batch open.
     fn simple_batch_verify(
         vp: &Self::VerifierParam,
         comm: &Self::Commitment,
@@ -217,59 +238,20 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error>;
-}
 
-pub trait NoninteractivePCS<E: ExtensionField>:
-    PolynomialCommitmentScheme<E, CommitmentChunk = Digest<E::BaseField>>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn ni_open(
-        pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
-        comm: &Self::CommitmentWithData,
-        point: &[E],
-        eval: &E,
-    ) -> Result<Self::Proof, Error> {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::open(pp, poly, comm, point, eval, &mut transcript)
-    }
-
-    fn ni_batch_open(
-        pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithData],
-        points: &[Vec<E>],
-        evals: &[Evaluation<E>],
-    ) -> Result<Self::Proof, Error> {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::batch_open(pp, polys, comms, points, evals, &mut transcript)
-    }
-
-    fn ni_verify(
-        vp: &Self::VerifierParam,
-        comm: &Self::Commitment,
-        point: &[E],
-        eval: &E,
-        proof: &Self::Proof,
-    ) -> Result<(), Error> {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::verify(vp, comm, point, eval, proof, &mut transcript)
-    }
-
-    fn ni_batch_verify<'a>(
+    /// The corresponding verification method for VLOP. Note that it is
+    /// not guaranteed that the commitments contain the num vars info, and
+    /// that the point is not necessarily the max num vars of the polys, so
+    /// the num vars should be passed in as a parameter.
+    fn batch_verify_vlop(
         vp: &Self::VerifierParam,
         comms: &[Self::Commitment],
-        points: &[Vec<E>],
-        evals: &[Evaluation<E>],
+        point: &[E],
+        max_num_vars: usize,
+        evals: &[&[E]],
         proof: &Self::Proof,
-    ) -> Result<(), Error>
-    where
-        Self::Commitment: 'a,
-    {
-        let mut transcript = Transcript::<E>::new(b"BaseFold");
-        Self::batch_verify(vp, comms, points, evals, proof, &mut transcript)
-    }
+        transcript: &mut Transcript<E>,
+    ) -> Result<(), Error>;
 }
 
 #[derive(Clone, Debug)]
@@ -313,93 +295,121 @@ pub enum Error {
 
 mod basefold;
 pub use basefold::{
-    Basecode, BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
-    BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
-    EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
-    one_level_interp_hc,
+    Basecode, BasecodeDefaultSpec, Basefold, BasefoldBasecodeKeccakParams,
+    BasefoldBasecodePoseidonParams, BasefoldCommitment, BasefoldCommitmentWithData,
+    BasefoldDefault, BasefoldParams, BasefoldRSKeccakParams, BasefoldRSPoseidonParams,
+    BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table,
+    one_level_eval_hc, one_level_interp_hc,
 };
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::{
+    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+};
 
-fn validate_input<E: ExtensionField>(
-    function: &str,
-    param_num_vars: usize,
-    polys: &[DenseMultilinearExtension<E>],
-    points: &[Vec<E>],
-) -> Result<(), Error> {
-    let polys = polys.iter().collect_vec();
-    let points = points.iter().collect_vec();
-    for poly in polys.iter() {
-        if param_num_vars < poly.num_vars {
-            return Err(err_too_many_variates(
-                function,
-                param_num_vars,
-                poly.num_vars,
-            ));
-        }
-    }
-    for point in points.iter() {
-        if param_num_vars < point.len() {
-            return Err(err_too_many_variates(function, param_num_vars, point.len()));
-        }
-    }
-    Ok(())
-}
-
-fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
-    Error::InvalidPcsParam(if function == "trim" {
-        format!(
-            "Too many variates to {function} (param supports variates up to {upto} but got {got})"
-        )
-    } else {
-        format!(
-            "Too many variates of poly to {function} (param supports variates up to {upto} but got {got})"
-        )
-    })
-}
-
-#[cfg(test)]
+#[doc(hidden)]
 pub mod test_util {
+    #[cfg(test)]
+    use crate::Evaluation;
+    #[cfg(test)]
+    use itertools::chain;
 
-    use crate::{Evaluation, PolynomialCommitmentScheme};
+    use crate::PolynomialCommitmentScheme;
     use ff_ext::ExtensionField;
-    use itertools::{Itertools, chain};
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use rand::{prelude::*, rngs::OsRng};
-    use rand_chacha::ChaCha8Rng;
+    use itertools::Itertools;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
+    #[cfg(test)]
+    use multilinear_extensions::{
+        mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+    };
+    use rand::rngs::OsRng;
     use transcript::Transcript;
 
-    pub fn run_commit_open_verify<E: ExtensionField, Pcs>(
+    pub fn setup_pcs<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+        num_vars: usize,
+    ) -> (Pcs::ProverParam, Pcs::VerifierParam) {
+        let poly_size = 1 << num_vars;
+        let param = Pcs::setup(poly_size).unwrap();
+        Pcs::trim(&param, poly_size).unwrap()
+    }
+
+    pub fn gen_rand_poly<E: ExtensionField>(
+        num_vars: usize,
+        base: bool,
+    ) -> DenseMultilinearExtension<E> {
+        if base {
+            DenseMultilinearExtension::random(num_vars, &mut OsRng)
+        } else {
+            DenseMultilinearExtension::from_evaluations_ext_vec(
+                num_vars,
+                (0..(1 << num_vars))
+                    .map(|_| E::random(&mut OsRng))
+                    .collect_vec(),
+            )
+        }
+    }
+
+    pub fn gen_rand_polys<E: ExtensionField>(
+        num_vars: impl Fn(usize) -> usize,
+        batch_size: usize,
+        base: bool,
+    ) -> Vec<DenseMultilinearExtension<E>> {
+        (0..batch_size)
+            .map(|i| gen_rand_poly(num_vars(i), base))
+            .collect_vec()
+    }
+
+    pub fn get_point_from_challenge<E: ExtensionField>(
+        num_vars: usize,
+        transcript: &mut Transcript<E>,
+    ) -> Vec<E> {
+        (0..num_vars)
+            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
+            .collect()
+    }
+
+    pub fn get_points_from_challenge<E: ExtensionField>(
+        num_vars: impl Fn(usize) -> usize,
+        num_points: usize,
+        transcript: &mut Transcript<E>,
+    ) -> Vec<Vec<E>> {
+        (0..num_points)
+            .map(|i| get_point_from_challenge(num_vars(i), transcript))
+            .collect()
+    }
+
+    pub fn commit_polys_individually<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+        pp: &Pcs::ProverParam,
+        polys: &[DenseMultilinearExtension<E>],
+        transcript: &mut Transcript<E>,
+    ) -> Vec<Pcs::CommitmentWithData> {
+        polys
+            .iter()
+            .map(|poly| Pcs::commit_and_write(pp, poly, transcript).unwrap())
+            .collect_vec()
+    }
+
+    pub fn vecs_as_slices<T>(values: &[Vec<T>]) -> Vec<&[T]> {
+        values.iter().map(|vec| vec.as_slice()).collect::<Vec<_>>()
+    }
+
+    #[cfg(test)]
+    pub fn run_commit_open_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         base: bool,
         num_vars_start: usize,
         num_vars_end: usize,
-    ) where
-        Pcs: PolynomialCommitmentScheme<E>,
-    {
+    ) {
         for num_vars in num_vars_start..num_vars_end {
-            // Setup
-            let (pp, vp) = {
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
-            };
+            let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
+
             // Commit and open
             let (comm, eval, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
-                let poly = if base {
-                    DenseMultilinearExtension::random(num_vars, &mut OsRng)
-                } else {
-                    DenseMultilinearExtension::from_evaluations_ext_vec(
-                        num_vars,
-                        (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-                    )
-                };
-
+                let poly = gen_rand_poly(num_vars, base);
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
-                let point = (0..num_vars)
-                    .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                    .collect::<Vec<_>>();
+                let point = get_point_from_challenge(num_vars, &mut transcript);
                 let eval = poly.evaluate(point.as_slice());
+                let poly = ArcMultilinearExtension::from(poly);
                 transcript.append_field_element_ext(&eval);
+
                 (
                     Pcs::get_pure_commitment(&comm),
                     eval,
@@ -408,25 +418,21 @@ pub mod test_util {
                 )
             };
             // Verify
-            let result = {
+            {
                 let mut transcript = Transcript::new(b"BaseFold");
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
-                let point = (0..num_vars)
-                    .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                    .collect::<Vec<_>>();
+                let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_ext(&eval);
-                let result = Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript);
+                Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
-
-                result
-            };
-            result.unwrap();
+            }
         }
     }
 
-    pub fn run_batch_commit_open_verify<E, Pcs>(
+    #[cfg(test)]
+    pub fn run_batch_vlmp_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
         num_vars_end: usize,
@@ -434,16 +440,15 @@ pub mod test_util {
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
     {
+        use multilinear_extensions::{
+            mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+        };
+
         for num_vars in num_vars_start..num_vars_end {
-            let batch_size = 2;
+            let batch_size = 4;
             let num_points = batch_size >> 1;
-            let rng = ChaCha8Rng::from_seed([0u8; 32]);
-            // Setup
-            let (pp, vp) = {
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
-            };
+            let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
+
             // Batch commit and open
             let evals = chain![
                 (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
@@ -452,34 +457,14 @@ pub mod test_util {
             .unique()
             .collect_vec();
 
-            let (comms, points, evals, proof, challenge) = {
+            let (comms, evals, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
-                let polys = (0..batch_size)
-                    .map(|i| {
-                        if base {
-                            DenseMultilinearExtension::random(num_vars - (i >> 1), &mut rng.clone())
-                        } else {
-                            DenseMultilinearExtension::from_evaluations_ext_vec(
-                                num_vars,
-                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-                            )
-                        }
-                    })
-                    .collect_vec();
+                let polys = gen_rand_polys(|i| num_vars - (i >> 1), batch_size, base);
 
-                let comms = polys
-                    .iter()
-                    .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
-                    .collect_vec();
+                let comms = commit_polys_individually::<E, Pcs>(&pp, &polys, &mut transcript);
 
-                let points = (0..num_points)
-                    .map(|i| {
-                        (0..num_vars - i)
-                            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                            .collect::<Vec<_>>()
-                    })
-                    .take(num_points)
-                    .collect_vec();
+                let points =
+                    get_points_from_challenge(|i| num_vars - i, num_points, &mut transcript);
 
                 let evals = evals
                     .iter()
@@ -497,12 +482,24 @@ pub mod test_util {
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
-                let proof =
-                    Pcs::batch_open(&pp, &polys, &comms, &points, &evals, &mut transcript).unwrap();
-                (comms, points, evals, proof, transcript.read_challenge())
+                let polys = polys
+                    .iter()
+                    .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                    .collect_vec();
+
+                let proof = Pcs::batch_open_vlmp(
+                    &pp,
+                    &polys,
+                    &comms,
+                    &vecs_as_slices(&points),
+                    &evals,
+                    &mut transcript,
+                )
+                .unwrap();
+                (comms, evals, proof, transcript.read_challenge())
             };
             // Batch verify
-            let result = {
+            {
                 let mut transcript = Transcript::new(b"BaseFold");
                 let comms = comms
                     .iter()
@@ -513,16 +510,9 @@ pub mod test_util {
                     })
                     .collect_vec();
 
-                let old_points = points;
-                let points = (0..num_points)
-                    .map(|i| {
-                        (0..num_vars - i)
-                            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                            .collect::<Vec<_>>()
-                    })
-                    .take(num_points)
-                    .collect_vec();
-                assert_eq!(points, old_points);
+                let points =
+                    get_points_from_challenge(|i| num_vars - i, num_points, &mut transcript);
+
                 let values: Vec<E> = evals
                     .iter()
                     .map(Evaluation::value)
@@ -530,17 +520,22 @@ pub mod test_util {
                     .collect::<Vec<E>>();
                 transcript.append_field_element_exts(values.as_slice());
 
-                let result =
-                    Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript);
+                Pcs::batch_verify_vlmp(
+                    &vp,
+                    &comms,
+                    &vecs_as_slices(&points),
+                    &evals,
+                    &proof,
+                    &mut transcript,
+                )
+                .unwrap();
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
-                result
-            };
-
-            result.unwrap();
+            }
         }
     }
 
+    #[cfg(test)]
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
@@ -551,52 +546,23 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
-            let rng = ChaCha8Rng::from_seed([0u8; 32]);
-            // Setup
-            let (pp, vp) = {
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(&param, poly_size).unwrap()
-            };
+            let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
-                let polys = (0..batch_size)
-                    .map(|_| {
-                        if base {
-                            DenseMultilinearExtension::random(num_vars, &mut rng.clone())
-                        } else {
-                            DenseMultilinearExtension::from_evaluations_ext_vec(
-                                num_vars,
-                                (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
-                            )
-                        }
-                    })
-                    .collect_vec();
+                let polys = gen_rand_polys(|_| num_vars, batch_size, base);
                 let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
-
-                let point = (0..num_vars)
-                    .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                    .collect::<Vec<_>>();
-
-                let evals = (0..batch_size)
-                    .map(|i| polys[i].evaluate(&point))
-                    .collect_vec();
-
+                let point = get_point_from_challenge(num_vars, &mut transcript);
+                let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
-                let proof = Pcs::simple_batch_open(
-                    &pp,
-                    polys
-                        .into_iter()
-                        .map(|x| x.into())
-                        .collect::<Vec<_>>()
-                        .as_slice(),
-                    &comm,
-                    &point,
-                    &evals,
-                    &mut transcript,
-                )
-                .unwrap();
+
+                let polys = polys
+                    .iter()
+                    .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                    .collect_vec();
+                let proof =
+                    Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
+                        .unwrap();
                 (
                     Pcs::get_pure_commitment(&comm),
                     evals,
@@ -605,25 +571,115 @@ pub mod test_util {
                 )
             };
             // Batch verify
-            let result = {
+            {
                 let mut transcript = Transcript::new(b"BaseFold");
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
 
-                let point = (0..num_vars)
-                    .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                    .collect::<Vec<_>>();
-
+                let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_exts(&evals);
 
-                let result =
-                    Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript);
+                Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript)
+                    .unwrap();
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
-                result
-            };
+            }
+        }
+    }
 
-            result.unwrap();
+    #[cfg(test)]
+    pub(super) fn run_batch_vlop_commit_open_verify<E, Pcs>(
+        base: bool,
+        num_vars_start: usize,
+        num_vars_end: usize,
+        batch_size_outer: usize,
+        batch_size_inner: usize,
+    ) where
+        E: ExtensionField,
+        Pcs: PolynomialCommitmentScheme<E>,
+    {
+        for num_vars in num_vars_start..num_vars_end {
+            let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
+
+            let (comms, evals, proof, challenge) = {
+                let mut transcript = Transcript::new(b"BaseFold");
+                let (polys, comms) = (0..batch_size_outer)
+                    .map(|i| {
+                        let polys = gen_rand_polys(|_| num_vars - i, batch_size_inner, base);
+                        let comm =
+                            Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+                        (polys, comm)
+                    })
+                    .collect::<(Vec<_>, Vec<_>)>();
+
+                let point = get_point_from_challenge(num_vars, &mut transcript);
+                let evals = polys
+                    .iter()
+                    .map(|polys| {
+                        let evals = polys
+                            .iter()
+                            .map(|poly| poly.evaluate(&point[..poly.num_vars()]))
+                            .collect_vec();
+                        transcript.append_field_element_exts(&evals);
+                        evals
+                    })
+                    .collect_vec();
+
+                let polys = polys
+                    .iter()
+                    .map(|polys| {
+                        polys
+                            .iter()
+                            .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                            .collect_vec()
+                    })
+                    .collect_vec();
+
+                let proof = Pcs::batch_open_vlop(
+                    &pp,
+                    &vecs_as_slices(&polys),
+                    &comms,
+                    &point,
+                    &vecs_as_slices(&evals),
+                    &mut transcript,
+                )
+                .unwrap();
+                (
+                    comms
+                        .iter()
+                        .map(|comm| Pcs::get_pure_commitment(comm))
+                        .collect_vec(),
+                    evals,
+                    proof,
+                    transcript.read_challenge(),
+                )
+            };
+            // Batch verify
+            {
+                let mut transcript = Transcript::new(b"BaseFold");
+                comms
+                    .iter()
+                    .for_each(|comm| Pcs::write_commitment(comm, &mut transcript).unwrap());
+
+                let point = get_point_from_challenge(num_vars, &mut transcript);
+                evals.iter().for_each(|evals| {
+                    transcript.append_field_element_exts(evals);
+                });
+
+                Pcs::batch_verify_vlop(
+                    &vp,
+                    &comms,
+                    &point,
+                    num_vars,
+                    &vecs_as_slices(&evals),
+                    &proof,
+                    &mut transcript,
+                )
+                .unwrap();
+
+                let v_challenge = transcript.read_challenge();
+                assert_eq!(challenge, v_challenge);
+            }
         }
     }
 }

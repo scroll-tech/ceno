@@ -24,7 +24,7 @@ use ceno_zkvm::{
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldRSPoseidonParams, PolynomialCommitmentScheme};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -74,7 +74,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSPoseidonParams>;
 
     let program = Program::new(
         CENO_PLATFORM.pc_base(),
