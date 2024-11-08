@@ -94,43 +94,45 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 // NOTE: Apply the span.in_scope(||) pattern to record work of spawned thread inside
                 // span of parent thread.
                 s.spawn(move |_| {
-                    current_span.in_scope(||{
-                    let mut challenge = None;
-                    let span = entered_span!("prove_rounds");
-                    for _ in 0..num_variables {
-                        let prover_msg = IOPProverStateV2::prove_round_and_update_state(
-                            &mut prover_state,
-                            &challenge,
-                        );
-                        thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
+                    current_span.in_scope(|| {
+                        let mut challenge = None;
+                        let span = entered_span!("prove_rounds");
+                        for _ in 0..num_variables {
+                            let prover_msg = IOPProverStateV2::prove_round_and_update_state(
+                                &mut prover_state,
+                                &challenge,
+                            );
+                            thread_based_transcript
+                                .append_field_element_exts(&prover_msg.evaluations);
 
-                        challenge = Some(
-                            thread_based_transcript.get_and_append_challenge(b"Internal round"),
-                        );
-                        thread_based_transcript.commit_rolling();
-                    }
-                    exit_span!(span);
-                    // pushing the last challenge point to the state
-                    if let Some(p) = challenge {
-                        prover_state.challenges.push(p);
-                        // fix last challenge to collect final evaluation
-                        prover_state
-                            .poly
-                            .flattened_ml_extensions
-                            .iter_mut()
-                            .for_each(|mle| {
-                                let mle = Arc::get_mut(mle).unwrap();
-                                if mle.num_vars() > 0 {
-                                    mle.fix_variables_in_place(&[p.elements]);
-                                }
-                            });
-                        tx_prover_state
-                            .send(Some((thread_id, prover_state)))
-                            .unwrap();
-                    } else {
-                        tx_prover_state.send(None).unwrap();
-                    }
-                })});
+                            challenge = Some(
+                                thread_based_transcript.get_and_append_challenge(b"Internal round"),
+                            );
+                            thread_based_transcript.commit_rolling();
+                        }
+                        exit_span!(span);
+                        // pushing the last challenge point to the state
+                        if let Some(p) = challenge {
+                            prover_state.challenges.push(p);
+                            // fix last challenge to collect final evaluation
+                            prover_state
+                                .poly
+                                .flattened_ml_extensions
+                                .iter_mut()
+                                .for_each(|mle| {
+                                    let mle = Arc::get_mut(mle).unwrap();
+                                    if mle.num_vars() > 0 {
+                                        mle.fix_variables_in_place(&[p.elements]);
+                                    }
+                                });
+                            tx_prover_state
+                                .send(Some((thread_id, prover_state)))
+                                .unwrap();
+                        } else {
+                            tx_prover_state.send(None).unwrap();
+                        }
+                    })
+                });
             }
 
             let mut prover_msgs = Vec::with_capacity(num_variables);
