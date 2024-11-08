@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    Program,
+    PC_STEP_SIZE, Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
@@ -122,6 +122,11 @@ impl EmuContext for VMState {
             tracing::debug!("halt with exit_code={}", exit_code);
 
             self.halt();
+            Ok(true)
+        } else if self.platform.unsafe_ecall_nop {
+            // Treat unknown ecalls as NOP.
+            tracing::warn!("ecall ignored: syscall_id={}", function);
+            self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
         } else {
             self.trap(TrapCause::EcallError)

@@ -29,7 +29,7 @@ fn test_dummy_ecall() {
         .unwrap()
         .unwrap();
 
-    let step = StepRecord::new_ecall_instruction(4, MOCK_PC_START, 123, 456, 0);
+    let step = StepRecord::new_ecall_nop(4, MOCK_PC_START, 1234, 0);
     let insn_code = step.insn_code();
     let (raw_witin, lkm) =
         EcallDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![step]).unwrap();

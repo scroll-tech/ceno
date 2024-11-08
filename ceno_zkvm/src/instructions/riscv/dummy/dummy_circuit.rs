@@ -67,13 +67,16 @@ impl<E: ExtensionField> DummyConfig<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         codes: InsnCodes,
     ) -> Result<Self, ZKVMError> {
-        let (with_rs1, with_rs2, with_rd) = match codes.format {
-            InsnFormat::R => (true, true, true),
-            InsnFormat::I => (true, false, true),
-            InsnFormat::S => (true, true, false),
-            InsnFormat::B => (true, true, false),
-            InsnFormat::U => (false, false, true),
-            InsnFormat::J => (false, false, true),
+        let (with_rs1, with_rs2, with_rd) = match (codes.format, codes.kind) {
+            // ECALL reads its syscall_id, then do nothing.
+            (_, InsnKind::EANY) => (true, false, false),
+            // Regular instructions do what is implied by their format.
+            (InsnFormat::R, _) => (true, true, true),
+            (InsnFormat::I, _) => (true, false, true),
+            (InsnFormat::S, _) => (true, true, false),
+            (InsnFormat::B, _) => (true, true, false),
+            (InsnFormat::U, _) => (false, false, true),
+            (InsnFormat::J, _) => (false, false, true),
         };
         let with_mem_write = matches!(codes.category, InsnCategory::Store);
         let with_mem_read = matches!(codes.category, InsnCategory::Load);
@@ -150,12 +153,8 @@ impl<E: ExtensionField> DummyConfig<E> {
 
         // Fetch instruction
 
-        // Encode the register IDs
+        // The register IDs of ECALL is fixed, not encoded.
         let rs1_id = match (&rs1, codes.kind) {
-            (None, _) | (_, InsnKind::EANY) => 0.into(),
-            (Some((r, _)), _) => r.id.expr(),
-        };
-        let rs2_id = match (&rs2, codes.kind) {
             (None, _) | (_, InsnKind::EANY) => 0.into(),
             (Some((r, _)), _) => r.id.expr(),
         };
@@ -167,7 +166,7 @@ impl<E: ExtensionField> DummyConfig<E> {
             codes.kind.into(),
             rd.as_ref().map(|(r, _)| r.id.expr()),
             rs1_id,
-            rs2_id,
+            rs2.as_ref().map(|(r, _)| r.id.expr()).unwrap_or(0.into()),
             imm.expr(),
         ))?;
 
