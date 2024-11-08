@@ -102,6 +102,7 @@ fn main() {
 
     // Take filtering directives from RUST_LOG env_var
     // Directive syntax: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+    // Example: RUST_LOG="info" cargo run.. to get spans/events at info level; profiling spans are info
     // Example: RUST_LOG="[sumcheck]" cargo run.. to get only events under the "sumcheck" span
     let filter = EnvFilter::from_default_env();
 
