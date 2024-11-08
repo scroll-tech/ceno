@@ -140,7 +140,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             let tx_prover_state = tx_prover_state.clone();
             let mut thread_based_transcript = thread_based_transcript.clone();
 
-            let span = entered_span!("main_thread_prove_rounds");
+            let main_thread_span = entered_span!("main_thread_prove_rounds");
             // main thread also be one worker thread
             // NOTE inline main thread flow with worker thread to improve efficiency
             // refactor to shared closure cause to 5% throuput drop
@@ -159,7 +159,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     evaluations += AdditiveVec(round_poly_coeffs);
                 }
 
-                let span = entered_span!("main_thread_get_challenge");
+                let get_challenge_span = entered_span!("main_thread_get_challenge");
                 transcript.append_field_element_exts(&evaluations.0);
 
                 let next_challenge = transcript.get_and_append_challenge(b"Internal round");
@@ -167,7 +167,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     thread_based_transcript.send_challenge(next_challenge.elements);
                 });
 
-                exit_span!(span);
+                exit_span!(get_challenge_span);
 
                 prover_msgs.push(IOPProverMessage {
                     evaluations: evaluations.0,
@@ -177,7 +177,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
                 thread_based_transcript.commit_rolling();
             }
-            exit_span!(span);
+            exit_span!(main_thread_span);
             // pushing the last challenge point to the state
             if let Some(p) = challenge {
                 prover_state.challenges.push(p);

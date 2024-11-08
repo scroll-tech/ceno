@@ -52,6 +52,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     }
 
     /// create proof for zkvm execution
+    #[tracing::instrument(skip_all, name = "ZKVM_create_proof")]
     pub fn create_proof(
         &self,
         witnesses: ZKVMWitnesses<E>,
@@ -227,8 +228,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .all(|v| { v.evaluations().len() == next_pow2_instances })
         );
 
+        let wit_inference_span = entered_span!("wit_inference");
         // main constraint: read/write record witness inference
-        let span = entered_span!("wit_inference::record");
+        let span = entered_span!("record");
         let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_expressions
             .par_iter()
@@ -256,7 +258,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         // process last layer by interleaving all the read/write record respectively
         // as last layer is the output of sel stage
-        let span = entered_span!("wit_inference::tower_witness_r_last_layer");
+        let span = entered_span!("tower_witness_r_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let r_records_last_layer =
             interleaving_mles_to_mles(r_records_wit, num_instances, NUM_FANIN, E::ONE);
@@ -264,7 +266,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         // infer all tower witness after last layer
-        let span = entered_span!("wit_inference::tower_witness_r_layers");
+        let span = entered_span!("tower_witness_r_layers");
         let r_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_r_count,
             r_records_last_layer,
@@ -272,14 +274,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_w_last_layer");
+        let span = entered_span!("tower_witness_w_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let w_records_last_layer =
             interleaving_mles_to_mles(w_records_wit, num_instances, NUM_FANIN, E::ONE);
         assert_eq!(w_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_w_layers");
+        let span = entered_span!("tower_witness_w_layers");
         let w_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_w_count,
             w_records_last_layer,
@@ -287,16 +289,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
+        let span = entered_span!("tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let lk_records_last_layer =
             interleaving_mles_to_mles(lk_records_wit, num_instances, NUM_FANIN, chip_record_alpha);
         assert_eq!(lk_records_last_layer.len(), 2);
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_lk_layers");
+        let span = entered_span!("tower_witness_lk_layers");
         let lk_wit_layers = infer_tower_logup_witness(None, lk_records_last_layer);
         exit_span!(span);
+        exit_span!(wit_inference_span);
 
         if cfg!(test) {
             // sanity check
@@ -685,8 +688,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
+        let wit_inference_span = entered_span!("wit_inference");
         // main constraint: lookup denominator and numerator record witness inference
-        let span = entered_span!("wit_inference::record");
+        let span = entered_span!("record");
         let mut records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_table_expressions
             .par_iter()
@@ -714,7 +718,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         // infer all tower witness after last layer
-        let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
+        let span = entered_span!("tower_witness_lk_last_layer");
         let mut r_set_last_layer = r_set_wit
             .iter()
             .chain(w_set_wit.iter())
@@ -762,7 +766,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect::<Vec<_>>();
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_lk_layers");
+        let span = entered_span!("tower_witness_lk_layers");
         let r_wit_layers = r_set_last_layer
             .into_iter()
             .zip(r_set_wit.iter())
@@ -783,6 +787,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .map(|(lk_n, lk_d)| infer_tower_logup_witness(Some(lk_n), lk_d))
             .collect_vec();
         exit_span!(span);
+        exit_span!(wit_inference_span);
 
         if cfg!(test) {
             // sanity check
@@ -835,8 +840,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }));
         }
 
+        let sumcheck_span = entered_span!("sumcheck");
         // product constraint tower sumcheck
-        let span = entered_span!("sumcheck::tower");
+        let span = entered_span!("tower");
         // final evals for verifier
         let r_out_evals = r_wit_layers
             .iter()
@@ -908,7 +914,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             } else {
                 // one sumcheck to make them opening on same point r (with different prefix)
                 // If all table length are the same, we can skip this sumcheck
-                let span = entered_span!("sumcheck::opening_same_point");
+                let span = entered_span!("opening_same_point");
                 // NOTE: max concurrency will be dominated by smallest table since it will blo
                 let num_threads = optimal_sumcheck_threads(min_log2_num_instance);
                 let alpha_pow = get_challenge_pows(
@@ -997,6 +1003,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 )
             };
 
+        exit_span!(sumcheck_span);
         let span = entered_span!("fixed::evals + witin::evals");
         let mut evals = witnesses
             .par_iter()
@@ -1172,9 +1179,6 @@ impl TowerProver {
         let (next_rt, _) =
             (1..=max_round_index).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
                 // in first few round we just run on single thread
-                //let span = entered_span!("SOMETHING");
-
-                //let span = entered_span!("REST");
                 let num_threads = optimal_sumcheck_threads(out_rt.len());
 
                 let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
@@ -1233,9 +1237,11 @@ impl TowerProver {
                         virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
                     }
                 }
-                //exit_span!(span);
                 
                 let span = entered_span!("wrap_batch");
+                // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
+                // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
+                // This is likely a bug in the tracing-flame crate.
                 let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
                     num_threads,
                     virtual_polys.get_batched_polys(),

@@ -94,15 +94,17 @@ fn main() {
             .collect(),
     );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+    let mut fmt_layer =             fmt::layer()
+    .compact()
+    .with_span_events(FmtSpan::CLOSE)
+    .with_thread_ids(false)
+    .with_thread_names(false);
+    fmt_layer.set_ansi(false);
+
     let subscriber = Registry::default()
         .with(
-            fmt::layer()
-                .compact()
-                .with_span_events(FmtSpan::CLOSE)
-                .with_thread_ids(false)
-                .with_thread_names(false),
+            fmt_layer
         )
-        //.with(EnvFilter::from_default_env())
         .with(EnvFilter::new("info"))
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
@@ -287,16 +289,14 @@ fn main() {
 
         let transcript = Transcript::new(b"riscv");
 
-        let span = entered_span!("CREATE_PROOF");
         let mut zkvm_proof = prover
             .create_proof(zkvm_witness, pi, transcript)
             .expect("create_proof failed");
-        exit_span!(span);
 
         println!(
             "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
-            timer.elapsed().as_secs_f64()
+            timer.elapsed().as_secs()
         );
 
         let transcript = Transcript::new(b"riscv");
