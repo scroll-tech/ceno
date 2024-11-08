@@ -45,6 +45,7 @@ fn main() {
         .with(
             fmt::layer()
                 .compact()
+                .without_time()
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
@@ -98,6 +99,10 @@ fn main() {
         .take(args.max_steps.unwrap_or(usize::MAX))
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
+
+    for step in all_records.iter().take(20) {
+        tracing::trace!("{:?} - {:?}\n", step.insn().codes().kind, step);
+    }
 
     // Find the exit code from the HALT step, if halting at all.
     let exit_code = all_records

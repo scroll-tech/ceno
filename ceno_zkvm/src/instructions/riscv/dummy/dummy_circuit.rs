@@ -79,7 +79,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         let with_mem_write = matches!(codes.category, InsnCategory::Store);
         let with_mem_read = matches!(codes.category, InsnCategory::Load);
         let branching = matches!(codes.category, InsnCategory::Branch)
-            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR | InsnKind::EANY);
+            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR);
 
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, branching)?;
