@@ -14,7 +14,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ark_std::iterable::Iterable;
-use constants::BYTE_BIT_WIDTH;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -420,71 +419,6 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             UintLimb::WitIn(c) => Some(c),
             _ => None,
         }
-    }
-
-    /// Builds a `UIntLimbs` instance from a set of cells that represent `RANGE_VALUES`
-    /// assumes range_values are represented in little endian form
-    pub fn from_range_wits_in(
-        _circuit_builder: &mut CircuitBuilder<E>,
-        _range_values: &[WitIn],
-    ) -> Result<Self, UtilError> {
-        // Self::from_different_sized_cell_values(
-        //     circuit_builder,
-        //     range_values,
-        //     RANGE_CHIP_BIT_WIDTH,
-        //     true,
-        // )
-        todo!()
-    }
-
-    /// Builds a `UIntLimbs` instance from a set of cells that represent big-endian `BYTE_VALUES`
-    pub fn from_bytes_big_endian(
-        circuit_builder: &mut CircuitBuilder<E>,
-        bytes: &[WitIn],
-    ) -> Result<Self, UtilError> {
-        Self::from_bytes(circuit_builder, bytes, false)
-    }
-
-    /// Builds a `UIntLimbs` instance from a set of cells that represent little-endian `BYTE_VALUES`
-    pub fn from_bytes_little_endian(
-        circuit_builder: &mut CircuitBuilder<E>,
-        bytes: &[WitIn],
-    ) -> Result<Self, UtilError> {
-        Self::from_bytes(circuit_builder, bytes, true)
-    }
-
-    /// Builds a `UIntLimbs` instance from a set of cells that represent `BYTE_VALUES`
-    pub fn from_bytes(
-        circuit_builder: &mut CircuitBuilder<E>,
-        bytes: &[WitIn],
-        is_little_endian: bool,
-    ) -> Result<Self, UtilError> {
-        Self::from_different_sized_cell_values(
-            circuit_builder,
-            bytes,
-            BYTE_BIT_WIDTH,
-            is_little_endian,
-        )
-    }
-
-    /// Builds a `UIntLimbs` instance from a set of cell values of a certain `CELL_WIDTH`
-    fn from_different_sized_cell_values(
-        _circuit_builder: &mut CircuitBuilder<E>,
-        _wits_in: &[WitIn],
-        _cell_width: usize,
-        _is_little_endian: bool,
-    ) -> Result<Self, UtilError> {
-        todo!()
-        // let mut values = convert_decomp(
-        //     circuit_builder,
-        //     wits_in,
-        //     cell_width,
-        //     Self::MAX_CELL_BIT_WIDTH,
-        //     is_little_endian,
-        // )?;
-        // debug_assert!(values.len() <= Self::NUM_CELLS);
-        // pad_cells(circuit_builder, &mut values, Self::NUM_CELLS);
-        // values.try_into()
     }
 
     /// Generate ((0)_{2^C}, (1)_{2^C}, ..., (size - 1)_{2^C})
