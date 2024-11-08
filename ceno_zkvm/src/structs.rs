@@ -212,6 +212,14 @@ pub struct ZKVMWitnesses<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
+    pub fn get_opcode_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_opcodes.get(name).cloned()
+    }
+
+    pub fn get_table_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_tables.get(name).cloned()
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
