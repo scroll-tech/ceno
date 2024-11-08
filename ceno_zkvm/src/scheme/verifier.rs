@@ -42,7 +42,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
         ZKVMVerifier { vk }
     }
-
+    #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,

@@ -25,8 +25,9 @@ use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use sumcheck::{entered_span, exit_span};
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::Transcript;
 
 const PROGRAM_SIZE: usize = 16;
@@ -92,16 +93,28 @@ fn main() {
             .collect(),
     );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+    let mut fmt_layer = fmt::layer()
+        .compact()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_thread_ids(false)
+        .with_thread_names(false);
+    fmt_layer.set_ansi(false);
+
+    // Take filtering directives from RUST_LOG env_var
+    // Directive syntax: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+    // Example: RUST_LOG="info" cargo run.. to get spans/events at info level; profiling spans are info
+    // Example: RUST_LOG="[sumcheck]" cargo run.. to get only events under the "sumcheck" span
+    let filter = EnvFilter::from_default_env();
+
     let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
-        )
-        .with(EnvFilter::from_default_env())
+        .with(fmt_layer)
+        .with(filter)
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let top_level = entered_span!("TOPLEVEL");
+
+    let keygen = entered_span!("KEYGEN");
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
@@ -138,6 +151,7 @@ fn main() {
         .expect("keygen failed");
     let vk = pk.get_vk();
 
+    exit_span!(keygen);
     // proving
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
@@ -284,6 +298,7 @@ fn main() {
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
+
         let mut zkvm_proof = prover
             .create_proof(zkvm_witness, pi, transcript)
             .expect("create_proof failed");
@@ -291,7 +306,7 @@ fn main() {
         println!(
             "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
-            timer.elapsed().as_secs_f64()
+            timer.elapsed().as_secs()
         );
 
         let transcript = Transcript::new(b"riscv");
@@ -336,4 +351,5 @@ fn main() {
             }
         };
     }
+    exit_span!(top_level);
 }
