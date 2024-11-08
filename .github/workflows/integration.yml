@@ -57,3 +57,8 @@ jobs:
         env:
           RAYON_NUM_THREADS: 2
         run: cargo run --package ceno_zkvm --example riscv_opcodes --target ${{ matrix.target }} -- --start 10 --end 11
+
+      - name: Run fibonacci
+        env:
+          RAYON_NUM_THREADS: 2
+        run: cargo run --package ceno_zkvm --example fibonacci_elf --target ${{ matrix.target }} -- 

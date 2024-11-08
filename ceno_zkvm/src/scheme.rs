@@ -132,12 +132,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         let pi_evals = raw_pi
             .iter()
             .map(|pv| {
-                assert!(!pv.is_empty());
                 if pv.len() == 1 {
                     // this is constant poly, and always evaluate to same constant value
                     E::from(pv[0])
                 } else {
                     // set 0 as placeholder. will be evaluate lazily
+                    // Or the vector is empty, i.e. the constant 0 polynomial.
                     E::ZERO
                 }
             })
