@@ -357,14 +357,26 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
     })
 }
 
-#[cfg(test)]
+// TODO: Need to use some functions here in the integration benchmarks. But
+// unfortunately integration benchmarks do not compile the #[cfg(test)]
+// code. So remove the gate for the entire module, only gate the test
+// functions.
+//
+// This is not the best way: the test utility functions should not be
+// compiled in the release build. Need a better solution.
+#[doc(hidden)]
 pub mod test_util {
-    use crate::{Evaluation, PolynomialCommitmentScheme};
+    #[cfg(test)]
+    use crate::Evaluation;
+    use crate::PolynomialCommitmentScheme;
     use ff_ext::ExtensionField;
-    use itertools::{Itertools, chain};
+    use itertools::Itertools;
+    #[cfg(test)]
+    use itertools::chain;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
+    #[cfg(test)]
     use multilinear_extensions::{
-        mle::{DenseMultilinearExtension, MultilinearExtension},
-        virtual_poly_v2::ArcMultilinearExtension,
+        mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
     use transcript::Transcript;
@@ -432,6 +444,7 @@ pub mod test_util {
             .collect_vec()
     }
 
+    #[cfg(test)]
     pub fn run_commit_open_verify<E: ExtensionField, Pcs>(
         base: bool,
         num_vars_start: usize,
@@ -472,6 +485,7 @@ pub mod test_util {
         }
     }
 
+    #[cfg(test)]
     pub fn run_batch_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
@@ -552,6 +566,7 @@ pub mod test_util {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs>(
         base: bool,
         num_vars_start: usize,
