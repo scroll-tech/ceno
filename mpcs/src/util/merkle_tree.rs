@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use multilinear_extensions::mle::FieldType;
+use multilinear_extensions::{mle::FieldType, util::max_usable_threads};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -90,8 +90,11 @@ where
     }
 
     pub fn batch_leaves(&self, coeffs: &[E]) -> Vec<E> {
+        let nthreads = max_usable_threads();
+        let leafs_size = self.leaves[0].len().div_ceil(nthreads);
         (0..self.leaves[0].len())
             .into_par_iter()
+            .with_min_len(leafs_size)
             .map(|i| {
                 self.leaves
                     .iter()
