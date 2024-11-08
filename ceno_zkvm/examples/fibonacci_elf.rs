@@ -58,6 +58,7 @@ fn main() {
         rom_end: 0x003f_ffff,
         ram_start: 0x0020_0000,
         ram_end: 0xffff_ffff,
+        unsafe_ecall_nop: true,
     };
     let elf_bytes = include_bytes!(r"fibonacci.elf");
     let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();

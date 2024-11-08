@@ -117,17 +117,19 @@ impl EmuContext for VMState {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(self.platform.reg_ecall())?;
-        let arg0 = self.load_register(self.platform.reg_arg0())?;
         if function == self.platform.ecall_halt() {
-            tracing::info!("halt with exit_code={}", arg0);
+            let exit_code = self.load_register(self.platform.reg_arg0())?;
+            tracing::debug!("halt with exit_code={}", exit_code);
+
             self.halt();
             Ok(true)
-        } else {
-            // self.trap(TrapCause::EcallError)
+        } else if self.platform.unsafe_ecall_nop {
             // Treat unknown ecalls as NOP.
-            tracing::warn!("ecall ignored (syscall_id={} arg0={})", function, arg0);
-            self.set_pc(ByteAddr(self.pc + PC_STEP_SIZE as u32));
+            tracing::warn!("ecall ignored: syscall_id={}", function);
+            self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
+        } else {
+            self.trap(TrapCause::EcallError)
         }
     }
 
