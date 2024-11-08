@@ -11,6 +11,8 @@ pub struct Platform {
     pub rom_end: Addr,
     pub ram_start: Addr,
     pub ram_end: Addr,
+    /// If true, ecall instructions are no-op instead of trap. Testing only.
+    pub unsafe_ecall_nop: bool,
 }
 
 pub const CENO_PLATFORM: Platform = Platform {
@@ -18,6 +20,7 @@ pub const CENO_PLATFORM: Platform = Platform {
     rom_end: 0x3000_0000 - 1,
     ram_start: 0x8000_0000,
     ram_end: 0xFFFF_FFFF,
+    unsafe_ecall_nop: false,
 };
 
 impl Platform {

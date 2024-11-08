@@ -123,12 +123,13 @@ impl EmuContext for VMState {
 
             self.halt();
             Ok(true)
-        } else {
-            // self.trap(TrapCause::EcallError)
-            // ignore ecall other than halt for now
-            tracing::debug!("ecall with syscall_id={:x}", function);
-            self.set_pc(ByteAddr(self.pc + PC_STEP_SIZE as u32));
+        } else if self.platform.unsafe_ecall_nop {
+            // Treat unknown ecalls as NOP.
+            tracing::warn!("ecall ignored: syscall_id={}", function);
+            self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
+        } else {
+            self.trap(TrapCause::EcallError)
         }
     }
 

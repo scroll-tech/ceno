@@ -1,8 +1,9 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    CENO_PLATFORM, PC_STEP_SIZE,
+    CENO_PLATFORM, InsnKind, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
+    encode_rv32,
     rv32im::DecodedInstruction,
 };
 
@@ -185,6 +186,28 @@ impl StepRecord {
             Some(memory_op),
             prev_cycle,
         )
+    }
+
+    /// Create a test record for an ECALL instruction that does NOP.
+    pub fn new_ecall_nop(
+        cycle: Cycle,
+        pc: ByteAddr,
+        ecall_id: Word,
+        previous_cycle: Cycle,
+    ) -> StepRecord {
+        StepRecord {
+            cycle,
+            pc: Change::new(pc, pc + PC_STEP_SIZE),
+            insn_code: encode_rv32(InsnKind::EANY, 0, 0, 0, 0),
+            rs1: Some(ReadOp {
+                addr: CENO_PLATFORM.register_vma(CENO_PLATFORM.reg_ecall()).into(),
+                value: ecall_id,
+                previous_cycle,
+            }),
+            rs2: None,
+            rd: None,
+            memory_op: None,
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
