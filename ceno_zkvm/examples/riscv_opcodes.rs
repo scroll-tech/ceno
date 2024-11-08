@@ -101,11 +101,16 @@ fn main() {
     .with_thread_names(false);
     fmt_layer.set_ansi(false);
 
+    // Take filtering directives from RUST_LOG env_var
+    // Directive syntax: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+    // Example: RUST_LOG="[sumcheck]" cargo run.. to get only events under the "sumcheck" span
+    let filter = EnvFilter::from_default_env();
+
     let subscriber = Registry::default()
         .with(
             fmt_layer
         )
-        .with(EnvFilter::new("info"))
+        .with(filter)
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
