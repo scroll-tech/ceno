@@ -102,13 +102,15 @@ fn main() {
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
-        .with(EnvFilter::from_default_env())
+        //.with(EnvFilter::from_default_env())
+        .with(EnvFilter::new("info"))
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let top_level = entered_span!("TOPLEVEL");
 
     let keygen = entered_span!("KEYGEN");
+
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
