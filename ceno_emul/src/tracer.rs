@@ -188,26 +188,26 @@ impl StepRecord {
         )
     }
 
-    /// Create a test record for an ECALL instruction that does NOP.
-    pub fn new_ecall_nop(
-        cycle: Cycle,
-        pc: ByteAddr,
-        ecall_id: Word,
-        previous_cycle: Cycle,
-    ) -> StepRecord {
-        StepRecord {
+    /// Create a test record for an ECALL instruction that can do anything.
+    pub fn new_ecall_any(cycle: Cycle, pc: ByteAddr) -> StepRecord {
+        let value = 1234;
+        Self::new_insn(
             cycle,
-            pc: Change::new(pc, pc + PC_STEP_SIZE),
-            insn_code: encode_rv32(InsnKind::EANY, 0, 0, 0, 0),
-            rs1: Some(ReadOp {
-                addr: CENO_PLATFORM.register_vma(CENO_PLATFORM.reg_ecall()).into(),
-                value: ecall_id,
-                previous_cycle,
+            Change::new(pc, pc + PC_STEP_SIZE),
+            encode_rv32(InsnKind::EANY, 0, 0, 0, 0),
+            Some(value),
+            Some(value),
+            Some(Change::new(value, value)),
+            Some(WriteOp {
+                addr: CENO_PLATFORM.ram_start().into(),
+                value: Change {
+                    before: value,
+                    after: value,
+                },
+                previous_cycle: 0,
             }),
-            rs2: None,
-            rd: None,
-            memory_op: None,
-        }
+            0,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
