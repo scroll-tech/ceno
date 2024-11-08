@@ -361,6 +361,7 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
 // unfortunately integration benchmarks do not compile the #[cfg(test)]
 // code. So remove the gate for the entire module, only gate the test
 // functions.
+// TODO(Matthias): use cfg(or(test, bench)) or something like that.
 //
 // This is not the best way: the test utility functions should not be
 // compiled in the release build. Need a better solution.
@@ -389,20 +390,38 @@ pub mod test_util {
         Pcs::trim(&param, poly_size).unwrap()
     }
 
+    pub fn gen_rand_poly_base<E: ExtensionField>(num_vars: usize) -> DenseMultilinearExtension<E> {
+        DenseMultilinearExtension::random(num_vars, &mut OsRng)
+    }
+
+    pub fn gen_rand_poly_ext<E: ExtensionField>(num_vars: usize) -> DenseMultilinearExtension<E> {
+        DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_vars,
+            (0..(1 << num_vars))
+                .map(|_| E::random(&mut OsRng))
+                .collect_vec(),
+        )
+    }
+
     pub fn gen_rand_poly<E: ExtensionField>(
         num_vars: usize,
         base: bool,
     ) -> DenseMultilinearExtension<E> {
         if base {
-            DenseMultilinearExtension::random(num_vars, &mut OsRng)
+            gen_rand_poly_base(num_vars)
         } else {
-            DenseMultilinearExtension::from_evaluations_ext_vec(
-                num_vars,
-                (0..(1 << num_vars))
-                    .map(|_| E::random(&mut OsRng))
-                    .collect_vec(),
-            )
+            gen_rand_poly_ext(num_vars)
         }
+    }
+
+    pub fn gen_rand_polys_general<E: ExtensionField>(
+        num_vars: impl Fn(usize) -> usize,
+        batch_size: usize,
+        gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
+    ) -> Vec<DenseMultilinearExtension<E>> {
+        (0..batch_size)
+            .map(|i| gen_rand_poly(num_vars(i)))
+            .collect_vec()
     }
 
     pub fn gen_rand_polys<E: ExtensionField>(
