@@ -2,8 +2,6 @@ use crate::utils::const_min;
 
 use super::{UIntLimbs, util::max_carry_word_for_multiplication};
 
-pub const BYTE_BIT_WIDTH: usize = 8;
-
 use ff_ext::ExtensionField;
 
 impl<const TOTAL_BITS: usize, const CAPACITY: usize, E: ExtensionField>
