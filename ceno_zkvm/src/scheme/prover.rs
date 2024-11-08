@@ -92,7 +92,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
-            let span = entered_span!("commit to iteration", circuit_name=circuit_name);
+            let span = entered_span!("commit to iteration", circuit_name = circuit_name);
             let witness = match num_instances {
                 0 => vec![],
                 _ => {
@@ -1237,7 +1237,7 @@ impl TowerProver {
                         virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
                     }
                 }
-                
+                                
                 let wrap_batch_span = entered_span!("wrap_batch");
                 // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
                 // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`

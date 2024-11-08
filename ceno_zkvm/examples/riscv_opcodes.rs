@@ -27,8 +27,7 @@ use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use sumcheck::{entered_span, exit_span};
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::Transcript;
 
 const PROGRAM_SIZE: usize = 16;
@@ -94,11 +93,11 @@ fn main() {
             .collect(),
     );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
-    let mut fmt_layer =             fmt::layer()
-    .compact()
-    .with_span_events(FmtSpan::CLOSE)
-    .with_thread_ids(false)
-    .with_thread_names(false);
+    let mut fmt_layer = fmt::layer()
+        .compact()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_thread_ids(false)
+        .with_thread_names(false);
     fmt_layer.set_ansi(false);
 
     // Take filtering directives from RUST_LOG env_var
@@ -107,9 +106,7 @@ fn main() {
     let filter = EnvFilter::from_default_env();
 
     let subscriber = Registry::default()
-        .with(
-            fmt_layer
-        )
+        .with(fmt_layer)
         .with(filter)
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
