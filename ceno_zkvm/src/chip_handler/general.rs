@@ -93,27 +93,31 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        ram_type: RAMType,
         table_spec: SetTableSpec,
-        rlc_record: Expression<E>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.r_table_record(name_fn, table_spec, rlc_record)
+        self.cs
+            .r_table_record(name_fn, ram_type, table_spec, record)
     }
 
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        ram_type: RAMType,
         table_spec: SetTableSpec,
-        rlc_record: Expression<E>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.w_table_record(name_fn, table_spec, rlc_record)
+        self.cs
+            .w_table_record(name_fn, ram_type, table_spec, record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
