@@ -67,21 +67,23 @@ impl<E: ExtensionField> DummyConfig<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         codes: InsnCodes,
     ) -> Result<Self, ZKVMError> {
-        let (with_rs1, with_rs2, with_rd) = match (codes.format, codes.kind) {
-            // ECALL reads its syscall_id, then do nothing.
-            (_, InsnKind::EANY) => (true, false, false),
+        // ECALL can do everything.
+        let is_ecall = matches!(codes.kind, InsnKind::EANY);
+        let (with_rs1, with_rs2, with_rd) = match codes.format {
+            _ if is_ecall => (true, true, true),
             // Regular instructions do what is implied by their format.
-            (InsnFormat::R, _) => (true, true, true),
-            (InsnFormat::I, _) => (true, false, true),
-            (InsnFormat::S, _) => (true, true, false),
-            (InsnFormat::B, _) => (true, true, false),
-            (InsnFormat::U, _) => (false, false, true),
-            (InsnFormat::J, _) => (false, false, true),
+            InsnFormat::R => (true, true, true),
+            InsnFormat::I => (true, false, true),
+            InsnFormat::S => (true, true, false),
+            InsnFormat::B => (true, true, false),
+            InsnFormat::U => (false, false, true),
+            InsnFormat::J => (false, false, true),
         };
-        let with_mem_write = matches!(codes.category, InsnCategory::Store);
+        let with_mem_write = matches!(codes.category, InsnCategory::Store) || is_ecall;
         let with_mem_read = matches!(codes.category, InsnCategory::Load);
         let branching = matches!(codes.category, InsnCategory::Branch)
-            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR);
+            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR)
+            || is_ecall;
 
         // State in and out
         let vm_state = StateInOut::construct_circuit(circuit_builder, branching)?;
@@ -154,9 +156,17 @@ impl<E: ExtensionField> DummyConfig<E> {
         // Fetch instruction
 
         // The register IDs of ECALL is fixed, not encoded.
-        let rs1_id = match (&rs1, codes.kind) {
-            (None, _) | (_, InsnKind::EANY) => 0.into(),
-            (Some((r, _)), _) => r.id.expr(),
+        let rs1_id = match &rs1 {
+            Some((r, _)) if !is_ecall => r.id.expr(),
+            _ => 0.into(),
+        };
+        let rs2_id = match &rs2 {
+            Some((r, _)) if !is_ecall => r.id.expr(),
+            _ => 0.into(),
+        };
+        let rd_id = match &rd {
+            Some((r, _)) if !is_ecall => Some(r.id.expr()),
+            _ => None,
         };
 
         let imm = circuit_builder.create_witin(|| "imm");
@@ -164,9 +174,9 @@ impl<E: ExtensionField> DummyConfig<E> {
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             codes.kind.into(),
-            rd.as_ref().map(|(r, _)| r.id.expr()),
+            rd_id,
             rs1_id,
-            rs2.as_ref().map(|(r, _)| r.id.expr()).unwrap_or(0.into()),
+            rs2_id,
             imm.expr(),
         ))?;
 
