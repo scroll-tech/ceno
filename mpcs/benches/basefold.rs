@@ -8,7 +8,7 @@ use itertools::{Itertools, chain};
 use mpcs::{
     Basefold, BasefoldBasecodeParams, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
     test_util::{
-        commit_polys_individually, gen_rand_poly_base, gen_rand_poly_ext, gen_rand_polys_general,
+        commit_polys_individually, gen_rand_poly_base, gen_rand_poly_ext, gen_rand_polys,
         get_point_from_challenge, get_points_from_challenge, setup_pcs,
     },
     util::plonky2_util::log2_ceil,
@@ -141,7 +141,7 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
             .collect_vec();
 
             let mut transcript = T::new(b"BaseFold");
-            let polys = gen_rand_polys_general(
+            let polys = gen_rand_polys(
                 |i| num_vars - log2_ceil((i >> 1) + 1),
                 batch_size,
                 switch.gen_rand_poly,
@@ -247,7 +247,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
-            let polys = gen_rand_polys_general(|_| num_vars, batch_size, switch.gen_rand_poly);
+            let polys = gen_rand_polys(|_| num_vars, batch_size, switch.gen_rand_poly);
             let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
 
             group.bench_function(
