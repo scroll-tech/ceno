@@ -11,6 +11,9 @@ goldilocks.workspace = true
 serde.workspace = true
 unroll = "0.1"
 
+[lib]
+bench = false
+
 [dev-dependencies]
 ark-std.workspace = true
 plonky2.workspace = true
