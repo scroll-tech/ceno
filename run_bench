@@ -2,5 +2,7 @@
 
 ## This needs [lib] bench = false in the Cargo.toml of the packages
 # cargo bench --workspace --exclude ceno_rt -- --save-baseline nov-9-master
-# cargo bench --package poseidon -- --save-base line nov-9-master
-cargo bench --workspace --exclude ceno_rt -- --baseline nov-9-master
+# cargo bench --package poseidon --package ceno_zkvm -- --save-baseline nov-9-master
+
+cargo bench --package poseidon --package ceno_zkvm -- --baseline nov-9-master
+# cargo bench --workspace --exclude ceno_rt -- --baseline nov-9-master
