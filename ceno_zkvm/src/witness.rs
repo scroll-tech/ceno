@@ -136,7 +136,6 @@ pub struct LkMultiplicity {
 
 impl LkMultiplicity {
     /// assert within range
-    #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
         match C {
             16 => self.increment(ROMType::U16, v),

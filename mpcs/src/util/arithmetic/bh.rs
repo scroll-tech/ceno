@@ -140,14 +140,12 @@ impl BooleanHypercube {
     }
 }
 
-#[inline(always)]
 fn next(mut b: usize, num_vars: usize, primitive: usize) -> usize {
     b <<= 1;
     b ^= (b >> num_vars) * primitive;
     b
 }
 
-#[inline(always)]
 fn prev(b: usize, x_inv: usize) -> usize {
     (b >> 1) ^ ((b & 1) * x_inv)
 }

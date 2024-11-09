@@ -235,7 +235,6 @@ impl AdaptedField for Goldilocks {
 ///   - It is only correct if x + y < 2**64 + ORDER = 0x1ffffffff00000001.
 ///   - It is only faster in some circumstances. In particular, on x86 it overwrites both inputs in
 ///     the registers, so its use is not recommended when either input will be used again.
-#[inline(always)]
 #[cfg(target_arch = "x86_64")]
 unsafe fn add_no_canonicalize_trashing_input(x: u64, y: u64) -> u64 {
     let res_wrapped: u64;
@@ -262,7 +261,6 @@ unsafe fn add_no_canonicalize_trashing_input(x: u64, y: u64) -> u64 {
     res_wrapped + adjustment
 }
 
-#[inline(always)]
 #[cfg(not(target_arch = "x86_64"))]
 const unsafe fn add_no_canonicalize_trashing_input(x: u64, y: u64) -> u64 {
     let (res_wrapped, carry) = x.overflowing_add(y);
@@ -272,7 +270,6 @@ const unsafe fn add_no_canonicalize_trashing_input(x: u64, y: u64) -> u64 {
 
 /// Reduces to a 64-bit value. The result might not be in canonical form; it could be in between the
 /// field order and `2^64`.
-#[inline]
 fn reduce96((x_lo, x_hi): (u64, u32)) -> Goldilocks {
     let t1 = x_hi as u64 * EPSILON;
     let t2 = unsafe { add_no_canonicalize_trashing_input(x_lo, t1) };
@@ -281,7 +278,6 @@ fn reduce96((x_lo, x_hi): (u64, u32)) -> Goldilocks {
 
 /// Reduces to a 64-bit value. The result might not be in canonical form; it could be in between the
 /// field order and `2^64`.
-#[inline]
 fn reduce128(x: u128) -> Goldilocks {
     let (x_lo, x_hi) = split(x); // This is a no-op
     let x_hi_hi = x_hi >> 32;
@@ -297,12 +293,10 @@ fn reduce128(x: u128) -> Goldilocks {
     Goldilocks(t2)
 }
 
-#[inline]
 const fn split(x: u128) -> (u64, u64) {
     (x as u64, (x >> 64) as u64)
 }
 
-#[inline(always)]
 #[cfg(target_arch = "x86_64")]
 pub fn assume(p: bool) {
     debug_assert!(p);
@@ -321,7 +315,6 @@ pub fn assume(p: bool) {
 ///         y = bar();
 ///     }
 /// This function has no semantics. It is a hint only.
-#[inline(always)]
 pub fn branch_hint() {
     // NOTE: These are the currently supported assembly architectures. See the
     // [nightly reference](https://doc.rust-lang.org/nightly/reference/inline-assembly.html) for

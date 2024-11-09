@@ -26,7 +26,6 @@ pub fn create_uninit_vec<T: Sized>(len: usize) -> Vec<MaybeUninit<T>> {
     vec
 }
 
-#[inline(always)]
 pub fn largest_even_below(n: usize) -> usize {
     if n % 2 == 0 { n } else { n.saturating_sub(1) }
 }

@@ -23,7 +23,6 @@ pub trait Poseidon: AdaptedField {
     const FAST_PARTIAL_ROUND_W_HATS: [[u64; SPONGE_WIDTH - 1]; N_PARTIAL_ROUNDS];
     const FAST_PARTIAL_ROUND_INITIAL_MATRIX: [[u64; SPONGE_WIDTH - 1]; SPONGE_WIDTH - 1];
 
-    #[inline]
     fn poseidon(input: [Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
         let mut state = input;
         let mut round_ctr = 0;
@@ -36,7 +35,6 @@ pub trait Poseidon: AdaptedField {
         state
     }
 
-    #[inline]
     fn full_rounds(state: &mut [Self; SPONGE_WIDTH], round_ctr: &mut usize) {
         for _ in 0..HALF_N_FULL_ROUNDS {
             Self::constant_layer(state, *round_ctr);
@@ -46,7 +44,6 @@ pub trait Poseidon: AdaptedField {
         }
     }
 
-    #[inline]
     fn partial_rounds(state: &mut [Self; SPONGE_WIDTH], round_ctr: &mut usize) {
         Self::partial_first_constant_layer(state);
         *state = Self::mds_partial_layer_init(state);
@@ -61,7 +58,6 @@ pub trait Poseidon: AdaptedField {
         *round_ctr += N_PARTIAL_ROUNDS;
     }
 
-    #[inline(always)]
     #[unroll_for_loops]
     fn constant_layer(state: &mut [Self; SPONGE_WIDTH], round_ctr: usize) {
         for i in 0..12 {
@@ -74,7 +70,6 @@ pub trait Poseidon: AdaptedField {
         }
     }
 
-    #[inline(always)]
     #[unroll_for_loops]
     fn sbox_layer(state: &mut [Self; SPONGE_WIDTH]) {
         for i in 0..12 {
@@ -84,7 +79,6 @@ pub trait Poseidon: AdaptedField {
         }
     }
 
-    #[inline(always)]
     #[unroll_for_loops]
     fn mds_layer(state_: &[Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
         let mut result = [Self::ZERO; SPONGE_WIDTH];
@@ -107,7 +101,6 @@ pub trait Poseidon: AdaptedField {
         result
     }
 
-    #[inline(always)]
     #[unroll_for_loops]
     fn partial_first_constant_layer(state: &mut [Self; SPONGE_WIDTH]) {
         for i in 0..12 {
@@ -117,7 +110,6 @@ pub trait Poseidon: AdaptedField {
         }
     }
 
-    #[inline(always)]
     #[unroll_for_loops]
     fn mds_partial_layer_init(state: &[Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
         let mut result = [Self::ZERO; SPONGE_WIDTH];
@@ -145,7 +137,6 @@ pub trait Poseidon: AdaptedField {
         result
     }
 
-    #[inline(always)]
     fn sbox_monomial(x: Self) -> Self {
         // Observed a performance improvement by using x*x rather than x.square().
         // In Plonky2, where this function originates, operations might be over an algebraic extension field.
@@ -167,7 +158,6 @@ pub trait Poseidon: AdaptedField {
     ///
     /// M_00 is a scalar, v is 1x(t-1), w_hat is (t-1)x1 and Id is the
     /// (t-1)x(t-1) identity matrix.
-    #[inline(always)]
     #[unroll_for_loops]
     fn mds_partial_layer_fast(state: &[Self; SPONGE_WIDTH], r: usize) -> [Self; SPONGE_WIDTH] {
         // Set d = [M_00 | w^] dot [state]
@@ -197,7 +187,6 @@ pub trait Poseidon: AdaptedField {
         result
     }
 
-    #[inline(always)]
     #[unroll_for_loops]
     fn mds_row_shf(r: usize, v: &[u64; SPONGE_WIDTH]) -> u128 {
         debug_assert!(r < SPONGE_WIDTH);
@@ -222,14 +211,12 @@ pub trait Poseidon: AdaptedField {
     }
 }
 
-#[inline(always)]
 const fn add_u160_u128((x_lo, x_hi): (u128, u32), y: u128) -> (u128, u32) {
     let (res_lo, over) = x_lo.overflowing_add(y);
     let res_hi = x_hi + (over as u32);
     (res_lo, res_hi)
 }
 
-#[inline(always)]
 fn reduce_u160<F: AdaptedField>((n_lo, n_hi): (u128, u32)) -> F {
     let n_lo_hi = (n_lo >> 64) as u64;
     let n_lo_lo = n_lo as u64;
@@ -258,7 +245,6 @@ pub trait AdaptedField: SmallField {
     /// Equivalent to *self + Self::from_canonical_u64(rhs), but may be cheaper. The caller must
     /// ensure that 0 <= rhs < Self::ORDER. The function may return incorrect results if this
     /// precondition is not met. It is marked unsafe for this reason.
-    #[inline]
     unsafe fn add_canonical_u64(&self, rhs: u64) -> Self {
         // Default implementation.
         *self + Self::from_canonical_u64(rhs)

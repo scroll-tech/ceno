@@ -265,7 +265,6 @@ const BIT_REVERSE_6BIT: &[u8] = &[
     0o07, 0o47, 0o27, 0o67, 0o17, 0o57, 0o37, 0o77,
 ];
 
-#[inline(always)]
 pub fn assume(p: bool) {
     debug_assert!(p);
     if !p {
@@ -283,7 +282,6 @@ pub fn assume(p: bool) {
 ///         y = bar();
 ///     }
 /// This function has no semantics. It is a hint only.
-#[inline(always)]
 pub fn branch_hint() {
     // NOTE: These are the currently supported assembly architectures. See the
     // [nightly reference](https://doc.rust-lang.org/nightly/reference/inline-assembly.html) for

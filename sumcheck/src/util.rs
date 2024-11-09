@@ -177,7 +177,6 @@ pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
 }
 
 /// compute the factorial(a) = 1 * 2 * ... * a
-#[inline]
 fn field_factorial<F: PrimeField>(a: usize) -> F {
     let mut res = F::ONE;
     for i in 2..=a {
