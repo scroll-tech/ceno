@@ -3,3 +3,6 @@ edition.workspace = true
 license.workspace = true
 name = "ceno-examples"
 version.workspace = true
+
+[lib]
+bench = false

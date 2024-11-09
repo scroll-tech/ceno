@@ -4,6 +4,9 @@ license.workspace = true
 name = "mpcs"
 version.workspace = true
 
+[lib]
+bench = false
+
 [dependencies]
 aes = "0.8"
 ark-std.workspace = true

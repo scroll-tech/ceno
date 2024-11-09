@@ -4,6 +4,9 @@ license.workspace = true
 name = "ceno_emul"
 version.workspace = true
 
+[lib]
+bench = false
+
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
 elf = "0.7"

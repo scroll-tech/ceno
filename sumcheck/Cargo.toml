@@ -4,6 +4,9 @@ license.workspace = true
 name = "sumcheck"
 version.workspace = true
 
+[lib]
+bench = false
+
 [dependencies]
 ark-std.workspace = true
 ff.workspace = true

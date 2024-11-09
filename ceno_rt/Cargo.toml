@@ -4,5 +4,8 @@ license.workspace = true
 name = "ceno_rt"
 version.workspace = true
 
+[lib]
+bench = false
+
 [dependencies]
 riscv = "0.12"

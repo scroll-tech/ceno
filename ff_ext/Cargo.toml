@@ -4,6 +4,9 @@ license.workspace = true
 name = "ff_ext"
 version.workspace = true
 
+[lib]
+bench = false
+
 [dependencies]
 ff.workspace = true
 goldilocks.workspace = true
