@@ -6,7 +6,7 @@ rm -rf /tmp/pgo-data
 
 # STEP 1: Build the instrumented binaries
 RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" \
-  cargo bench --package poseidon --package ceno_zkvm -- --baseline nov-9-master
+  cargo bench --package poseidon -- --baseline nov-9-master
 
 # # STEP 2: Run the instrumented binaries with some typical data
 # ./target/x86_64-unknown-linux-gnu/release/myprogram mydata1.csv
@@ -18,6 +18,6 @@ llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
 
 # STEP 4: Use the `.profdata` file for guiding optimizations
 RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" \
-  cargo bench --package poseidon --package ceno_zkvm -- --baseline nov-9-master
+  cargo bench --package poseidon -- --baseline nov-9-master
 
     # cargo build --release --target=x86_64-unknown-linux-gnu
