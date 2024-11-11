@@ -79,9 +79,13 @@ where
         self.inner.first().unwrap().len()
     }
 
+    // Given the leaf group index, returns the Merkle path for this
+    // leaf group. Here a leaf group represents two leaves that
+    // are hashed together in the tree. The leaf group index is
+    // the index of this leaf group in all the leaf groups.
     pub fn merkle_path_without_leaf_sibling_or_root(
         &self,
-        leaf_group_index: usize, // Two leaves make a group.
+        leaf_group_index: usize,
     ) -> MerklePathWithoutLeafOrRoot<E> {
         assert!(leaf_group_index < self.bottom_size());
         MerklePathWithoutLeafOrRoot::new(
