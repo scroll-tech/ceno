@@ -9,6 +9,7 @@ pub mod branch;
 pub mod config;
 pub mod constants;
 pub mod divu;
+pub mod dummy;
 pub mod ecall;
 pub mod jump;
 pub mod logic;
@@ -40,3 +41,10 @@ mod test_utils;
 pub trait RIVInstruction {
     const INST_KIND: InsnKind;
 }
+
+pub use arith::{AddInstruction, MulInstruction, SubInstruction};
+pub use jump::{AuipcInstruction, JalInstruction, JalrInstruction, LuiInstruction};
+pub use memory::{
+    LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, LwInstruction, SbInstruction,
+    ShInstruction, SwInstruction,
+};

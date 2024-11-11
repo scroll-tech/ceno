@@ -1,8 +1,9 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    CENO_PLATFORM, PC_STEP_SIZE,
+    CENO_PLATFORM, InsnKind, PC_STEP_SIZE,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
+    encode_rv32,
     rv32im::DecodedInstruction,
 };
 
@@ -184,6 +185,28 @@ impl StepRecord {
             None,
             Some(memory_op),
             prev_cycle,
+        )
+    }
+
+    /// Create a test record for an ECALL instruction that can do anything.
+    pub fn new_ecall_any(cycle: Cycle, pc: ByteAddr) -> StepRecord {
+        let value = 1234;
+        Self::new_insn(
+            cycle,
+            Change::new(pc, pc + PC_STEP_SIZE),
+            encode_rv32(InsnKind::EANY, 0, 0, 0, 0),
+            Some(value),
+            Some(value),
+            Some(Change::new(value, value)),
+            Some(WriteOp {
+                addr: CENO_PLATFORM.ram_start().into(),
+                value: Change {
+                    before: value,
+                    after: value,
+                },
+                previous_cycle: 0,
+            }),
+            0,
         )
     }
 
