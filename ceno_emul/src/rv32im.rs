@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use anyhow::{Result, anyhow};
+use itertools::enumerate;
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
@@ -402,7 +403,7 @@ struct FastDecodeTable {
 impl FastDecodeTable {
     fn new() -> Self {
         let mut table: FastInstructionTable = [0; 1 << 10];
-        for (isa_idx, insn) in RV32IM_ISA.iter().enumerate() {
+        for (isa_idx, insn) in enumerate(&RV32IM_ISA) {
             Self::add_insn(&mut table, insn, isa_idx);
         }
         Self { table }

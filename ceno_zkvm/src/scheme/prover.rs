@@ -61,10 +61,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut vm_proof = ZKVMProof::empty(pi);
 
         // including raw public input to transcript
-        vm_proof
-            .raw_pi
-            .iter()
-            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+        vm_proof.raw_pi.iter().flatten().for_each(|v| {
+            transcript.append_field_element(v);
+        });
 
         let pi: Vec<ArcMultilinearExtension<E>> = vm_proof
             .raw_pi

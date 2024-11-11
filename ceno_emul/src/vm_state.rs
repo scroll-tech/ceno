@@ -44,7 +44,7 @@ impl VMState {
         };
 
         // init memory from program.image
-        for (&addr, &value) in program.image.iter() {
+        for (&addr, &value) in &program.image {
             vm.init_memory(ByteAddr(addr).waddr(), value);
         }
 

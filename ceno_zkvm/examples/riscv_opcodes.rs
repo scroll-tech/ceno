@@ -23,7 +23,7 @@ use ceno_zkvm::{
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
@@ -154,7 +154,7 @@ fn main() {
         let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
         // init mmio
-        for record in program_data_init.iter().chain(public_io_init.iter()) {
+        for record in chain!(&program_data_init, &public_io_init) {
             vm.init_memory(record.addr.into(), record.value);
         }
 
