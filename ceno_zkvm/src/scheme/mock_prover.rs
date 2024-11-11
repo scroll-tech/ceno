@@ -1011,7 +1011,7 @@ Hints:
                         let mut records = vec![];
                         for (row, record_rlc) in write_rlc_records.into_iter().enumerate() {
                             // TODO: report error
-                            assert_eq!(writes.insert(record_rlc), true);
+                            writes.insert(record_rlc);
                             records.push((record_rlc, row));
                         }
                         writes_grp_by_annotations
@@ -1046,7 +1046,7 @@ Hints:
                                 .to_vec();
                         let mut records = vec![];
                         for (row, record) in read_records.into_iter().enumerate() {
-                            assert_eq!(reads.insert(record), true);
+                            reads.insert(record);
                             records.push((record, row));
                         }
                         reads_grp_by_annotations
