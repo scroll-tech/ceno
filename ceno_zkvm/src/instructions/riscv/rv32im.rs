@@ -438,7 +438,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [INVALID, DIV, REM, REMU]
+            [INVALID, DIV, REM, REMU, EANY]
                 .into_iter()
                 .map(|insn_kind| insn_kind as usize)
                 .collect::<BTreeSet<_>>(),

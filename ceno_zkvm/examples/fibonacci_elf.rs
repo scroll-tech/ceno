@@ -45,7 +45,6 @@ fn main() {
         .with(
             fmt::layer()
                 .compact()
-                .without_time()
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
@@ -65,7 +64,7 @@ fn main() {
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
