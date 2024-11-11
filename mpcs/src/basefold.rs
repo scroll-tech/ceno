@@ -287,10 +287,10 @@ where
     /// Derive the proving key and verification key from the public parameter.
     /// This step simultaneously trims the parameter for the particular size.
     fn trim(
-        pp: &Self::Param,
+        pp: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        <Spec::EncodingScheme as EncodingScheme<E>>::trim(&pp.params, log2_strict(poly_size)).map(
+        <Spec::EncodingScheme as EncodingScheme<E>>::trim(pp.params, log2_strict(poly_size)).map(
             |(pp, vp)| {
                 (
                     BasefoldProverParams {
