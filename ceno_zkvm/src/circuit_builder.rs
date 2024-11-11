@@ -471,6 +471,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.ns.pop_namespace();
         t
     }
+
+    pub fn stats(&self) -> [(&str, usize); 4] {
+        return [
+            ("witnesses", self.num_witin as usize),
+            ("reads", self.r_expressions.len()),
+            ("writes", self.w_expressions.len()),
+            ("lookups", self.lk_expressions.len())
+        ];
+    }
 }
 
 #[cfg(test)]

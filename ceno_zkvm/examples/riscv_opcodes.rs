@@ -25,10 +25,10 @@ use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use tracing::{span, Level};
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_subscriber::{filter::filter_fn, fmt, layer::SubscriberExt, EnvFilter, Registry};
 use transcript::Transcript;
-
 const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
@@ -92,23 +92,32 @@ fn main() {
             .collect(),
     );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+    let mut fmt_layer =             fmt::layer()
+    .compact()
+    .with_thread_ids(false)
+    .with_thread_names(false)
+    .without_time()
+    .with_file(false);
+    fmt_layer.set_ansi(false);
     let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
+        .with(fmt_layer
         )
-        .with(EnvFilter::from_default_env())
+        //.with(EnvFilter::from_default_env())
+        //.with(filter_fn(|meta|meta.fields().field("stats").is_some()))
+        .with(filter_fn(|_| false))
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
-
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
+
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    for (circuit, cs) in zkvm_cs.get_css() {
+        println!("{}, {:?}", circuit, cs.stats());
+    }    
+
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
