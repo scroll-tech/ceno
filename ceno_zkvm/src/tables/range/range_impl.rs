@@ -30,10 +30,9 @@ impl RangeTableConfig {
         let fixed = cb.create_fixed(|| "fixed")?;
         let mlt = cb.create_witin(|| "mlt");
 
-        let rlc_record =
-            cb.rlc_chip_record(vec![(rom_type as usize).into(), Expression::Fixed(fixed)]);
+        let record_exprs = vec![Expression::Fixed(fixed)];
 
-        cb.lk_table_record(|| "record", table_len, rlc_record, mlt.expr())?;
+        cb.lk_table_record(|| "record", table_len, rom_type, record_exprs, mlt.expr())?;
 
         Ok(Self { fixed, mlt })
     }

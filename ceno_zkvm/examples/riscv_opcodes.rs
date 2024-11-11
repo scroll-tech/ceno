@@ -3,7 +3,7 @@ use std::{panic, time::Instant};
 use ceno_zkvm::{
     declare_program,
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
-    scheme::prover::ZKVMProver,
+    scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
     tables::{
         DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_program_data,
@@ -134,7 +134,7 @@ fn main() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
 
@@ -273,6 +273,13 @@ fn main() {
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
+
+        MockProver::assert_satisfied_full(
+            zkvm_cs.clone(),
+            zkvm_fixed_traces.clone(),
+            &zkvm_witness,
+            &pi,
+        );
 
         let timer = Instant::now();
 

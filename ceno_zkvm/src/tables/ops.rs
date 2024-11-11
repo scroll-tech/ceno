@@ -90,3 +90,4 @@ impl OpsTable for PowTable {
         (0..Self::len() as u64).map(|b| [2, b, 1 << b]).collect()
     }
 }
+pub type PowTableCircuit<E> = OpsTableCircuit<E, PowTable>;
