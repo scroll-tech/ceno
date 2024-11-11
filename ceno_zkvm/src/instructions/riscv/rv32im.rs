@@ -100,7 +100,6 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub sb_config: <SbInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // Ecall Opcodes
-    pub ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -176,7 +175,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let sb_config = cs.register_opcode_circuit::<SbInstruction<E>>();
 
         // ecall opcodes
-        let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
@@ -246,7 +244,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             lbu_config,
             lb_config,
             // ecall opcodes
-            ecall_config,
             halt_config,
             // tables
             u16_range_config,
@@ -435,8 +432,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(SH, ShInstruction<E>, sh_config);
         assign_opcode!(SB, SbInstruction<E>, sb_config);
 
-        // ecall
-        assign_opcode!(EANY, EcallDummy<E>, ecall_config);
         // ecall / halt
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
 
