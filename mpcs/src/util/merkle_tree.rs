@@ -28,6 +28,12 @@ pub struct MerkleTreeDigests<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    // This structure contains all the digests in the Merkle tree without
+    // the leaves. Each vector represents a layer in the Merkle tree.
+    // The first vector consists of the parents of the leaves, so the
+    // size of the first vector is `merkle_tree_size / 2`.
+    // The last vector consists of only the root.
+    // The length of the outer vector is exactly the Merkle tree height.
     inner: Vec<Vec<Digest<E::BaseField>>>,
 }
 
@@ -78,13 +84,27 @@ where
         leaf_group_index: usize, // Two leaves make a group.
     ) -> MerklePathWithoutLeafOrRoot<E> {
         assert!(leaf_group_index < self.bottom_size());
-        MerklePathWithoutLeafOrRoot::<E>::new(
+        MerklePathWithoutLeafOrRoot::new(
             self.inner
                 .iter()
                 .take(self.height() - 1)
                 .enumerate()
-                .map(|(index, layer)| {
-                    Digest::<E::BaseField>(layer[(leaf_group_index >> index) ^ 1].clone().0)
+                .map(|(layer_index, layer)| {
+                    // For each leaf group (i.e., 2 leaves that are hashed
+                    // together into their parent node), their ancestors
+                    // consist of their parent node, and all the way
+                    // up to the root.
+                    // Their parent is in `layer[0]`, and the index of their
+                    // parent in `layer[0]` is exactly `leaf_group_index`.
+                    // Similarly, the grandparent is in `layer[1]`, then the
+                    // index of their grandparent in `layer[1]` is exactly
+                    // `leaf_group_index >> 1`. In general, their ancestors
+                    // are
+                    // `layers[layer_index][(leaf_group_index >> layer_index)]`.
+                    // Note that the Merkle path are not the ancestors, but
+                    // siblings of all the ancestors, that's why we need the
+                    // `^1`.
+                    Digest::<E::BaseField>(layer[(leaf_group_index >> layer_index) ^ 1].clone().0)
                 })
                 .collect(),
         )

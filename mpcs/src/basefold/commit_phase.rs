@@ -98,8 +98,7 @@ where
         );
 
         if i > 0 {
-            let running_tree =
-                MerkleTree::<E>::new(running_tree_inner, FieldType::Ext(running_oracle));
+            let running_tree = MerkleTree::new(running_tree_inner, FieldType::Ext(running_oracle));
             trees.push(running_tree);
         }
 
@@ -114,7 +113,7 @@ where
             // Then the oracle will be used to fold to the next oracle in the next
             // round. After that, this oracle is free to be moved to build the
             // complete Merkle tree.
-            running_tree_inner = MerkleTreeDigests::<E>::from_leaves_ext(&new_running_oracle);
+            running_tree_inner = MerkleTreeDigests::from_leaves_ext(&new_running_oracle);
             let running_root = running_tree_inner.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root.clone());
@@ -264,8 +263,7 @@ where
         );
 
         if i > 0 {
-            let running_tree =
-                MerkleTree::<E>::new(running_tree_inner, FieldType::Ext(running_oracle));
+            let running_tree = MerkleTree::new(running_tree_inner, FieldType::Ext(running_oracle));
             trees.push(running_tree);
         }
 
@@ -273,7 +271,7 @@ where
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
             sumcheck_messages.push(last_sumcheck_message.clone());
-            running_tree_inner = MerkleTreeDigests::<E>::from_leaves_ext(&new_running_oracle);
+            running_tree_inner = MerkleTreeDigests::from_leaves_ext(&new_running_oracle);
             let running_root = running_tree_inner.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
@@ -412,15 +410,14 @@ where
         );
 
         if i > 0 {
-            let running_tree =
-                MerkleTree::<E>::new(running_tree_inner, FieldType::Ext(running_oracle));
+            let running_tree = MerkleTree::new(running_tree_inner, FieldType::Ext(running_oracle));
             trees.push(running_tree);
         }
 
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
-            running_tree_inner = MerkleTreeDigests::<E>::from_leaves_ext(&new_running_oracle);
+            running_tree_inner = MerkleTreeDigests::from_leaves_ext(&new_running_oracle);
             let running_root = running_tree_inner.root();
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
