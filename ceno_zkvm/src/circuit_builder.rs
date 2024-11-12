@@ -476,52 +476,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     }
 }
 
-pub struct ConstraintStats {
-    witnesses: usize,
-    reads: usize,
-    writes: usize,
-    lookups: usize,
-    assert_zero_expr_degrees: Vec<usize>,
-    assert_zero_sumcheck_expr_degrees: Vec<usize>,
-}
-
-impl<E: ExtensionField> ConstraintSystem<E> {
-    pub fn stats(&self) -> ConstraintStats {
-        let just_degrees =
-            |exprs: &Vec<Expression<E>>| exprs.iter().map(|e| e.degree()).collect::<Vec<_>>();
-        ConstraintStats {
-            witnesses: self.num_witin as usize,
-            reads: self.r_expressions.len(),
-            writes: self.w_expressions.len(),
-            lookups: self.lk_expressions.len(),
-            assert_zero_expr_degrees: just_degrees(&self.assert_zero_expressions),
-            assert_zero_sumcheck_expr_degrees: just_degrees(&self.assert_zero_sumcheck_expressions),
-        }
-    }
-}
-
-pub struct StatsReport {
-    stats: BTreeMap<String, ConstraintStats>,
-}
-
-impl<E: ExtensionField> From<&ZKVMConstraintSystem<E>> for StatsReport {
-    fn from(zkvm_system: &ZKVMConstraintSystem<E>) -> Self {
-        StatsReport {
-            stats: zkvm_system
-                .get_css()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.stats()))
-                .collect::<BTreeMap<_, _>>(),
-        }
-    }
-}
-
-impl StatsReport {
-    pub fn get_stats(&self) -> &BTreeMap<String, ConstraintStats> {
-        &self.stats
-    }
-}
-
 #[cfg(test)]
 impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn register_debug_expr<T: Into<usize>>(&mut self, debug_index: T, expr: Expression<E>) {

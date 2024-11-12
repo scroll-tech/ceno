@@ -14,6 +14,7 @@ pub mod expression;
 pub mod gadgets;
 mod keygen;
 pub mod state;
+mod stats;
 pub mod structs;
 mod uint;
 mod utils;
