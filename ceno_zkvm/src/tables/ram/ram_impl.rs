@@ -1,12 +1,17 @@
-use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    mem::MaybeUninit,
+};
 
+use ceno_emul::Addr;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    circuit_builder::{CircuitBuilder, SetTableAddrType, SetTableSpec},
+    circuit_builder::{CircuitBuilder, DynamicAddr, SetTableAddrType, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
@@ -77,8 +82,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
             },
             init_table,
@@ -88,8 +91,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
             },
             final_table,
@@ -141,26 +142,30 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                 set_fixed_val!(row, self.addr, (rec.addr as u64).into());
             });
 
+        // Select addresses from the range as padding.
+        let accessed_addrs = init_mem
+            .iter()
+            .map(|record| record.addr)
+            .collect::<HashSet<Addr>>();
+        let unused_addrs = (NVRAM::OFFSET_ADDR..NVRAM::END_ADDR)
+            .filter(|&addr| !accessed_addrs.contains(&addr))
+            .take(NVRAM::len() - init_mem.len())
+            .collect_vec();
+
         // set padding with well-form address with 0 value
-        if NVRAM::len() - init_mem.len() > 0 {
-            let paddin_entry_start = init_mem.len();
-            init_table
-                .par_iter_mut()
-                .skip(init_mem.len())
-                .enumerate()
-                .with_min_len(MIN_PAR_SIZE)
-                .for_each(|(i, row)| {
-                    // set value limb to 0
-                    self.init_v.iter().for_each(|limb| {
-                        set_fixed_val!(row, limb, 0u64.into());
-                    });
-                    set_fixed_val!(
-                        row,
-                        self.addr,
-                        (NVRAM::addr(paddin_entry_start + i) as u64).into()
-                    );
+        init_table
+            .par_iter_mut()
+            .skip(init_mem.len())
+            .zip_eq(unused_addrs)
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|(row, addr): (&mut [MaybeUninit<F>], Addr)| {
+                // set value limb to 0
+                self.init_v.iter().for_each(|limb| {
+                    set_fixed_val!(row, limb, 0u64.into());
                 });
-        }
+                set_fixed_val!(row, self.addr, (addr as u64).into());
+            });
+
         init_table
     }
 
@@ -251,8 +256,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
             },
             init_table,
@@ -262,8 +265,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
                 len: NVRAM::len(),
             },
             final_table,
@@ -368,9 +369,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             || "init_table",
             DVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::DynamicAddr,
-                addr_witin_id: Some(addr.id.into()),
-                offset: DVRAM::OFFSET_ADDR,
+                addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
+                    addr_witin_id: addr.id.into(),
+                    offset: DVRAM::OFFSET_ADDR,
+                }),
                 len: DVRAM::max_len(),
             },
             init_table,
@@ -379,9 +381,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             || "final_table",
             DVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::DynamicAddr,
-                addr_witin_id: Some(addr.id.into()),
-                offset: DVRAM::OFFSET_ADDR,
+                addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
+                    addr_witin_id: addr.id.into(),
+                    offset: DVRAM::OFFSET_ADDR,
+                }),
                 len: DVRAM::max_len(),
             },
             final_table,

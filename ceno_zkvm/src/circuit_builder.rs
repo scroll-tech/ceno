@@ -78,14 +78,18 @@ pub struct LogupTableExpression<E: ExtensionField> {
 #[derive(Clone, Debug)]
 pub enum SetTableAddrType {
     FixedAddr,
-    DynamicAddr,
+    DynamicAddr(DynamicAddr),
+}
+
+#[derive(Clone, Debug)]
+pub struct DynamicAddr {
+    pub addr_witin_id: usize,
+    pub offset: Addr,
 }
 
 #[derive(Clone, Debug)]
 pub struct SetTableSpec {
     pub addr_type: SetTableAddrType,
-    pub addr_witin_id: Option<usize>,
-    pub offset: Addr,
     pub len: usize,
 }
 

@@ -539,7 +539,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 [num_vars, num_vars]
             }
             // dynamic: respect prover hint
-            SetTableAddrType::DynamicAddr => {
+            SetTableAddrType::DynamicAddr(_) => {
                 // check number of vars doesn't exceed max len defined in vk
                 // this is important to prevent address overlapping
                 assert!((1 << hint_num_vars) <= r.table_spec.len);
@@ -718,18 +718,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify dynamic address evaluation succinctly
         // TODO we can also skip their mpcs proof
         for r_table in cs.r_table_expressions.iter() {
-            match r_table.table_spec.addr_type {
+            match &r_table.table_spec.addr_type {
                 SetTableAddrType::FixedAddr => (),
-                SetTableAddrType::DynamicAddr => {
-                    let offset = r_table.table_spec.offset;
+                SetTableAddrType::DynamicAddr(spec) => {
                     let expected_eval = eval_wellform_address_vec(
-                        offset as u64,
+                        spec.offset as u64,
                         WORD_SIZE as u64,
                         &input_opening_point,
                     );
-                    if expected_eval
-                        != proof.wits_in_evals[r_table.table_spec.addr_witin_id.unwrap()]
-                    {
+                    if expected_eval != proof.wits_in_evals[spec.addr_witin_id] {
                         return Err(ZKVMError::VerifyError(
                             "dynamic addr evaluate != expected_evals".into(),
                         ));

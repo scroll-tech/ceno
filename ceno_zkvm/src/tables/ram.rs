@@ -66,6 +66,11 @@ impl NonVolatileTable for ProgramDataTable {
     const OFFSET_ADDR: Addr = CENO_PLATFORM.program_data_start();
     const END_ADDR: Addr = CENO_PLATFORM.program_data_end() + 1;
 
+    fn len() -> usize {
+        // TODO: take as program parameter.
+        1 << 16 // 128KB
+    }
+
     fn name() -> &'static str {
         "ProgramDataTable"
     }

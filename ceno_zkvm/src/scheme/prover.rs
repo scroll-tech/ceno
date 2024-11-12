@@ -1024,7 +1024,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .map(|(t, mle)| match t.table_spec.addr_type {
                 // for fixed address, prover
                 SetTableAddrType::FixedAddr => 0,
-                SetTableAddrType::DynamicAddr => mle.num_vars(),
+                SetTableAddrType::DynamicAddr(_) => mle.num_vars(),
             })
             .collect_vec();
         // TODO implement mechanism to skip commitment
