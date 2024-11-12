@@ -22,7 +22,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
-use itertools::{Itertools, izip};
+use itertools::{Itertools, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
 use rand::thread_rng;
 use std::{
@@ -504,7 +504,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
                 let expr_evaluated = expr_evaluated.get_base_field_vec();
 
-                for (inst_id, element) in expr_evaluated.iter().enumerate() {
+                for (inst_id, element) in enumerate(expr_evaluated) {
                     if *element != E::BaseField::ZERO {
                         errors.push(MockProverError::AssertZeroError {
                             expression: expr.clone(),
@@ -528,7 +528,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
-            for (inst_id, element) in expr_evaluated.iter().enumerate() {
+            for (inst_id, element) in enumerate(expr_evaluated) {
                 if !table.contains(&element.to_canonical_u64_vec()) {
                     errors.push(MockProverError::LookupError {
                         expression: expr.clone(),
@@ -883,12 +883,12 @@ Hints:
             num_instances.insert(circuit_name.clone(), num_rows);
         }
 
-        for (rom_type, inputs) in rom_inputs.into_iter() {
+        for (rom_type, inputs) in rom_inputs {
             let table = rom_tables.get_mut(&rom_type).unwrap();
             for (lk_input_values, circuit_name, lk_input_annotation, input_value_exprs) in inputs {
                 // counting multiplicity in rom_input
                 let mut lk_input_values_multiplicity = HashMap::new();
-                for (row, input_value) in lk_input_values.iter().enumerate() {
+                for (row, input_value) in enumerate(&lk_input_values) {
                     // we only keep first row to restore debug information
                     lk_input_values_multiplicity
                         .entry(input_value)
@@ -1009,7 +1009,7 @@ Hints:
                             assert!(gs.insert(circuit_name.clone(), w).is_none());
                         };
                         let mut records = vec![];
-                        for (row, record_rlc) in write_rlc_records.into_iter().enumerate() {
+                        for (row, record_rlc) in enumerate(write_rlc_records) {
                             // TODO: report error
                             assert_eq!(writes.insert(record_rlc), true);
                             records.push((record_rlc, row));
@@ -1045,7 +1045,7 @@ Hints:
                                 .get_ext_field_vec()[..*num_rows]
                                 .to_vec();
                         let mut records = vec![];
-                        for (row, record) in read_records.into_iter().enumerate() {
+                        for (row, record) in enumerate(read_records) {
                             assert_eq!(reads.insert(record), true);
                             records.push((record, row));
                         }

@@ -1,6 +1,6 @@
 use ceno_emul::Addr;
-use itertools::Itertools;
-use std::{collections::HashMap, marker::PhantomData};
+use itertools::{Itertools, chain};
+use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
@@ -49,7 +49,7 @@ impl NameSpace {
         let mut name = String::new();
 
         let mut needs_separation = false;
-        for ns in ns.iter().chain(Some(&this).into_iter()) {
+        for ns in chain!(ns, once(&this)) {
             if needs_separation {
                 name += "/";
             }
