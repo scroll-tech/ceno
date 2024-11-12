@@ -89,13 +89,6 @@ impl Program {
             .filter(|x| x.p_type == elf::abi::PT_LOAD)
             .enumerate()
         {
-            tracing::debug!(
-                "loadable segement {}: PF_R={}, PF_W={}, PF_X={}",
-                idx,
-                segment.p_flags & PF_R != 0,
-                segment.p_flags & PF_W != 0,
-                segment.p_flags & PF_X != 0,
-            );
             let file_size: u32 = segment
                 .p_filesz
                 .try_into()
@@ -124,6 +117,28 @@ impl Program {
             if vaddr % WORD_SIZE as u32 != 0 {
                 bail!("vaddr {vaddr:08x} is unaligned");
             }
+            tracing::debug!(
+                "ELF segment {}: {}{}{} vaddr={vaddr:08x} file_size={file_size} mem_size={mem_size}",
+                idx,
+                if segment.p_flags & PF_R != 0 {
+                    "R"
+                } else {
+                    "-"
+                },
+                if segment.p_flags & PF_W != 0 {
+                    "W"
+                } else {
+                    "-"
+                },
+                if segment.p_flags & PF_X != 0 {
+                    "X"
+                } else {
+                    "-"
+                },
+                vaddr = vaddr,
+                file_size = file_size,
+                mem_size = mem_size
+            );
             let offset: u32 = segment
                 .p_offset
                 .try_into()

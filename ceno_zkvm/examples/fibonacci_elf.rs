@@ -3,14 +3,14 @@ use ceno_emul::{
     WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::Rv32imConfig,
+    instructions::riscv::{DummyExtraConfig, Rv32imConfig},
     scheme::{
         PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
         verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{MemFinalRecord, ProgramTableCircuit, initial_registers},
+    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, initial_registers},
 };
 use clap::Parser;
 use ff_ext::ff::Field;
@@ -64,10 +64,11 @@ fn main() {
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -79,8 +80,24 @@ fn main() {
         vm.program(),
     );
 
+    let program_data_init = vm
+        .program()
+        .image
+        .iter()
+        .map(|(addr, value)| MemInitRecord {
+            addr: *addr,
+            value: *value,
+        })
+        .collect_vec();
+
     let reg_init = initial_registers();
-    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[]);
+    config.generate_fixed_traces(
+        &zkvm_cs,
+        &mut zkvm_fixed_traces,
+        &reg_init,
+        &program_data_init,
+    );
+    dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
     let pk = zkvm_cs
         .clone()
@@ -97,6 +114,10 @@ fn main() {
         .take(args.max_steps.unwrap_or(usize::MAX))
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
+
+    for step in all_records.iter().take(20) {
+        tracing::trace!("{:?} - {:?}\n", step.insn().codes().kind, step);
+    }
 
     // Find the exit code from the HALT step, if halting at all.
     let exit_code = all_records
@@ -123,8 +144,11 @@ fn main() {
 
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
-    config
+    let dummy_records = config
         .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
+        .unwrap();
+    dummy_config
+        .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
 

@@ -133,11 +133,7 @@ impl EmuContext for VMState {
             self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
         } else {
-            // self.trap(TrapCause::EcallError)
-            // ignore ecall other than halt for now
-            tracing::debug!("ecall with syscall_id={:x}", function);
-            self.set_pc(ByteAddr(self.pc + PC_STEP_SIZE as u32));
-            Ok(true)
+            self.trap(TrapCause::EcallError)
         }
     }
 

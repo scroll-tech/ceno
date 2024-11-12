@@ -23,6 +23,6 @@ fn test_multiple_opcode() {
         |cs| SubInstruction::construct_circuit(&mut CircuitBuilder::<E>::new(cs)),
     );
     let param = Pcs::setup(1 << 10).unwrap();
-    let (pp, _) = Pcs::trim(&param, 1 << 10).unwrap();
+    let (pp, _) = Pcs::trim(param, 1 << 10).unwrap();
     cs.key_gen::<Pcs>(&pp, None);
 }
