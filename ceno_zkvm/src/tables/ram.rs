@@ -62,7 +62,7 @@ pub struct ProgramDataTable;
 impl NonVolatileTable for ProgramDataTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
-    const WRITABLE: bool = false;
+    const WRITABLE: bool = true;
     const OFFSET_ADDR: Addr = CENO_PLATFORM.program_data_start();
     const END_ADDR: Addr = CENO_PLATFORM.program_data_end() + 1;
 

@@ -10,7 +10,7 @@ use ceno_zkvm::{
     },
     state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{MemFinalRecord, ProgramTableCircuit, initial_registers},
+    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, initial_registers},
 };
 use clap::Parser;
 use ff_ext::ff::Field;
@@ -80,8 +80,23 @@ fn main() {
         vm.program(),
     );
 
+    let program_data_init = vm
+        .program()
+        .image
+        .iter()
+        .map(|(addr, value)| MemInitRecord {
+            addr: *addr,
+            value: *value,
+        })
+        .collect_vec();
+
     let reg_init = initial_registers();
-    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[]);
+    config.generate_fixed_traces(
+        &zkvm_cs,
+        &mut zkvm_fixed_traces,
+        &reg_init,
+        &program_data_init,
+    );
     dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
     let pk = zkvm_cs

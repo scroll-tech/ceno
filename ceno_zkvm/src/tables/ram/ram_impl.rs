@@ -111,7 +111,12 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         num_fixed: usize,
         init_mem: &[MemInitRecord],
     ) -> RowMajorMatrix<F> {
-        assert!(NVRAM::len().is_power_of_two());
+        assert!(
+            NVRAM::len().is_power_of_two(),
+            "{} len {} must be a power of 2",
+            NVRAM::name(),
+            NVRAM::len()
+        );
         assert!(init_mem.len() <= NVRAM::len());
 
         // for ram in memory offline check
