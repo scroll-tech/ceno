@@ -176,6 +176,18 @@ fn main() {
         .collect_vec();
 
     // Find the final memory values and cycles.
+    let program_data_final = program_data_init
+        .iter()
+        .map(|rec| {
+            let vma: WordAddr = rec.addr.into();
+            MemFinalRecord {
+                addr: rec.addr,
+                value: vm.peek_memory(vma),
+                cycle: *final_access.get(&vma).unwrap_or(&0),
+            }
+        })
+        .collect_vec();
+
     let mem_final = vm
         .tracer()
         .final_accesses()
@@ -195,8 +207,14 @@ fn main() {
 
     // assign table circuits
     config
-        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final, &[], &[
-        ])
+        .assign_table_circuit(
+            &zkvm_cs,
+            &mut zkvm_witness,
+            &reg_final,
+            &mem_final,
+            &program_data_final,
+            &[],
+        )
         .unwrap();
     // assign program circuit
     zkvm_witness
