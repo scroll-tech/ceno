@@ -283,6 +283,8 @@ fn main() {
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
 
+        
+
         MockProver::assert_satisfied_full(
             zkvm_cs.clone(),
             zkvm_fixed_traces.clone(),

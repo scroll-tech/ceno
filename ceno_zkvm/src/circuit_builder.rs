@@ -1,6 +1,9 @@
 use ceno_emul::Addr;
 use itertools::Itertools;
-use std::{collections::HashMap, marker::PhantomData};
+use std::{
+    collections::{BTreeMap, HashMap},
+    marker::PhantomData,
+};
 
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
@@ -10,7 +13,7 @@ use crate::{
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
-    structs::{ProvingKey, RAMType, VerifyingKey, WitnessId},
+    structs::{ProvingKey, RAMType, VerifyingKey, WitnessId, ZKVMConstraintSystem},
     witness::RowMajorMatrix,
 };
 
@@ -471,7 +474,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.ns.pop_namespace();
         t
     }
-
 }
 
 pub struct ConstraintStats {
@@ -480,22 +482,43 @@ pub struct ConstraintStats {
     writes: usize,
     lookups: usize,
     assert_zero_expr_degrees: Vec<usize>,
-    assert_zero_sumcheck_expr_degrees: Vec<usize>
+    assert_zero_sumcheck_expr_degrees: Vec<usize>,
 }
 
-
-impl<E:ExtensionField> ConstraintSystem<E> {
+impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn stats(&self) -> ConstraintStats {
+        let just_degrees =
+            |exprs: &Vec<Expression<E>>| exprs.iter().map(|e| e.degree()).collect::<Vec<_>>();
         ConstraintStats {
             witnesses: self.num_witin as usize,
             reads: self.r_expressions.len(),
             writes: self.w_expressions.len(),
             lookups: self.lk_expressions.len(),
-            assert_zero_expr_degrees: 
-                self.assert_zero_expressions.iter().map(|e| e.degree()).collect::<Vec<_>>(),
-            assert_zero_sumcheck_expr_degrees: 
-                self.assert_zero_sumcheck_expressions.iter().map(|e| e.degree()).collect::<Vec<_>>(),
+            assert_zero_expr_degrees: just_degrees(&self.assert_zero_expressions),
+            assert_zero_sumcheck_expr_degrees: just_degrees(&self.assert_zero_sumcheck_expressions),
         }
+    }
+}
+
+pub struct StatsReport {
+    stats: BTreeMap<String, ConstraintStats>,
+}
+
+impl<E: ExtensionField> From<&ZKVMConstraintSystem<E>> for StatsReport {
+    fn from(zkvm_system: &ZKVMConstraintSystem<E>) -> Self {
+        StatsReport {
+            stats: zkvm_system
+                .get_css()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.stats()))
+                .collect::<BTreeMap<_, _>>(),
+        }
+    }
+}
+
+impl StatsReport {
+    pub fn get_stats(&self) -> &BTreeMap<String, ConstraintStats> {
+        &self.stats
     }
 }
 
