@@ -1046,6 +1046,7 @@ Hints:
                                 .to_vec();
                         let mut records = vec![];
                         for (row, record) in read_records.into_iter().enumerate() {
+                            // TODO: return error
                             assert_eq!(reads.insert(record), true);
                             records.push((record, row));
                         }

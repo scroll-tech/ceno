@@ -18,8 +18,8 @@ pub struct Platform {
 pub const CENO_PLATFORM: Platform = Platform {
     rom_start: 0x2000_0000,
     rom_end: 0x3000_0000 - 1,
-    ram_start: 0x8000_0000,
-    ram_end: 0xFFFF_FFFF,
+    ram_start: 0x0020_0000,
+    ram_end: 0x0040_0000 - 1,
     unsafe_ecall_nop: false,
 };
 

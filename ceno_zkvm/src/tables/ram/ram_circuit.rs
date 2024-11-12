@@ -16,6 +16,7 @@ pub struct MemInitRecord {
     pub value: Word,
 }
 
+#[derive(Clone, Debug)]
 pub struct MemFinalRecord {
     pub addr: Addr,
     pub cycle: Cycle,
