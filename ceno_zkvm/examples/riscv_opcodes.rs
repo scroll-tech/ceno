@@ -115,7 +115,7 @@ fn main() {
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     for (circuit, cs) in zkvm_cs.get_css() {
-        println!("{}, {:?}", circuit, cs.stats());
+        println!("{}, {:?}", circuit, cs.assert_zero_sumcheck_expressions.iter().map(|e| e.degree()).collect::<Vec<_>>());
     }    
 
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();

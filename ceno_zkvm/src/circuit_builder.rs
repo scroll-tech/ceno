@@ -472,13 +472,30 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         t
     }
 
-    pub fn stats(&self) -> [(&str, usize); 4] {
-        return [
-            ("witnesses", self.num_witin as usize),
-            ("reads", self.r_expressions.len()),
-            ("writes", self.w_expressions.len()),
-            ("lookups", self.lk_expressions.len())
-        ];
+}
+
+pub struct ConstraintStats {
+    witnesses: usize,
+    reads: usize,
+    writes: usize,
+    lookups: usize,
+    assert_zero_expr_degrees: Vec<usize>,
+    assert_zero_sumcheck_expr_degrees: Vec<usize>
+}
+
+
+impl<E:ExtensionField> ConstraintSystem<E> {
+    pub fn stats(&self) -> ConstraintStats {
+        ConstraintStats {
+            witnesses: self.num_witin as usize,
+            reads: self.r_expressions.len(),
+            writes: self.w_expressions.len(),
+            lookups: self.lk_expressions.len(),
+            assert_zero_expr_degrees: 
+                self.assert_zero_expressions.iter().map(|e| e.degree()).collect::<Vec<_>>(),
+            assert_zero_sumcheck_expr_degrees: 
+                self.assert_zero_sumcheck_expressions.iter().map(|e| e.degree()).collect::<Vec<_>>(),
+        }
     }
 }
 
