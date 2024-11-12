@@ -57,7 +57,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
                     Pcs::setup(poly_size).unwrap();
                 })
             });
-            Pcs::trim(&param, poly_size).unwrap()
+            Pcs::trim(param, poly_size).unwrap()
         };
 
         let mut transcript = T::new(b"BaseFold");
