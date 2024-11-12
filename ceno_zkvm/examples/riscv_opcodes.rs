@@ -1,4 +1,4 @@
-use std::{panic, time::Instant};
+use std::{collections::BTreeMap, panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
@@ -19,6 +19,7 @@ use ceno_emul::{
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    stats::StatsReport,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
@@ -123,7 +124,9 @@ fn main() {
         );
     }
 
-    let report = StatsReport::from(&zkvm_cs);
+    let mut report = StatsReport::from(&zkvm_cs);
+    println!("Before counts:");
+    report.pretty_print();
 
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
@@ -289,6 +292,16 @@ fn main() {
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
+
+        // get instance counts from witness matrices
+        let counts = zkvm_witness
+            .clone()
+            .into_iter_sorted()
+            .map(|(key, value)| (key, value.num_instances()))
+            .collect::<BTreeMap<_, _>>();
+        report.init_instance_counts(counts);
+        println!("After counts:");
+        report.pretty_print();
 
         MockProver::assert_satisfied_full(
             zkvm_cs.clone(),
