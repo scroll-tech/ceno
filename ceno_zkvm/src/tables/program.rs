@@ -104,11 +104,22 @@ pub struct ProgramTableConfig {
     mlt: WitIn,
 }
 
-pub struct ProgramTableCircuit<E, const PROGRAM_SIZE: usize>(PhantomData<E>);
+#[derive(Clone, Default)]
+pub struct ProgramTableCircuit<E> {
+    program_size: usize,
+    phantom_data: PhantomData<E>,
+}
 
-impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
-    for ProgramTableCircuit<E, PROGRAM_SIZE>
-{
+impl<E: ExtensionField> ProgramTableCircuit<E> {
+    pub fn new(program_size: usize) -> Self {
+        ProgramTableCircuit {
+            program_size,
+            phantom_data: PhantomData::default(),
+        }
+    }
+}
+
+impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     type TableConfig = ProgramTableConfig;
     type FixedInput = Program;
     type WitnessInput = Program;
@@ -117,7 +128,10 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         "PROGRAM".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
+    fn construct_circuit(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<ProgramTableConfig, ZKVMError> {
         let record = InsnRecord([
             cb.create_fixed(|| "pc")?,
             cb.create_fixed(|| "kind")?,
@@ -137,7 +151,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 
         cb.lk_table_record(
             || "prog table",
-            PROGRAM_SIZE,
+            self.program_size,
             ROMType::Instruction,
             record_exprs,
             mlt.expr(),
@@ -147,13 +161,14 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     }
 
     fn generate_fixed_traces(
+        &self,
         config: &ProgramTableConfig,
         num_fixed: usize,
         program: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         let num_instructions = program.instructions.len();
         let pc_base = program.base_address;
-        assert!(num_instructions <= PROGRAM_SIZE);
+        assert!(num_instructions <= self.program_size);
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 

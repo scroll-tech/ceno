@@ -21,9 +21,12 @@ pub trait RangeTable {
     }
 }
 
+#[derive(Default)]
 pub struct RangeTableCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit<E, RANGE> {
+impl<E: ExtensionField, RANGE: RangeTable + Default> TableCircuit<E>
+    for RangeTableCircuit<E, RANGE>
+{
     type TableConfig = RangeTableConfig;
     type FixedInput = ();
     type WitnessInput = ();
@@ -32,7 +35,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         format!("RANGE_{:?}", RANGE::ROM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
+    fn construct_circuit(&self, cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
             |cb| RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE, RANGE::len()),
@@ -40,6 +43,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     }
 
     fn generate_fixed_traces(
+        &self,
         config: &RangeTableConfig,
         num_fixed: usize,
         _input: &(),

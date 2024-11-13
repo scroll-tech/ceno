@@ -28,9 +28,10 @@ pub trait OpsTable {
     }
 }
 
+#[derive(Default)]
 pub struct OpsTableCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP> {
+impl<E: ExtensionField, OP: OpsTable + Default> TableCircuit<E> for OpsTableCircuit<E, OP> {
     type TableConfig = OpTableConfig;
     type FixedInput = ();
     type WitnessInput = ();
@@ -39,7 +40,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         format!("OPS_{:?}", OP::ROM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
+    fn construct_circuit(&self, cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
             |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len()),
@@ -47,6 +48,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     }
 
     fn generate_fixed_traces(
+        &self,
         config: &OpTableConfig,
         num_fixed: usize,
         _input: &(),

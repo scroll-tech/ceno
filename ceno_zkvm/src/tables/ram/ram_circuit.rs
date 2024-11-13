@@ -56,9 +56,10 @@ pub trait NonVolatileTable {
 }
 
 /// non-volatile indicates initial value is configurable
+#[derive(Default)]
 pub struct NonVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
+impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone + Default> TableCircuit<E>
     for NonVolatileRamCircuit<E, NVRAM>
 {
     type TableConfig = NonVolatileTableConfig<NVRAM>;
@@ -69,7 +70,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
+    fn construct_circuit(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb),
@@ -77,6 +81,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 
     fn generate_fixed_traces(
+        &self,
         config: &Self::TableConfig,
         num_fixed: usize,
         init_v: &Self::FixedInput,
@@ -96,9 +101,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 }
 
+#[derive(Default)]
 pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
+impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone + Default> TableCircuit<E>
     for PubIORamCircuit<E, NVRAM>
 {
     type TableConfig = PubIOTableConfig<NVRAM>;
@@ -109,7 +115,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
+    fn construct_circuit(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb),
@@ -117,6 +126,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 
     fn generate_fixed_traces(
+        &self,
         config: &Self::TableConfig,
         num_fixed: usize,
         _init_v: &Self::FixedInput,
@@ -157,9 +167,10 @@ pub trait DynVolatileRamTable {
     }
 }
 
+#[derive(Default)]
 pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
-impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableCircuit<E>
+impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone + Default> TableCircuit<E>
     for DynVolatileRamCircuit<E, DVRAM>
 {
     type TableConfig = DynVolatileRamTableConfig<DVRAM>;
@@ -170,7 +181,10 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         format!("RAM_{:?}", DVRAM::RAM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
+    fn construct_circuit(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb),
@@ -178,6 +192,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
     }
 
     fn generate_fixed_traces(
+        &self,
         _config: &Self::TableConfig,
         _num_fixed: usize,
         _init_v: &Self::FixedInput,

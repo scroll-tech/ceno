@@ -6,7 +6,7 @@ mod range_circuit;
 pub use range_circuit::{RangeTable, RangeTableCircuit};
 
 use crate::structs::ROMType;
-
+#[derive(Default)]
 pub struct U5Table;
 impl RangeTable for U5Table {
     const ROM_TYPE: ROMType = ROMType::U5;
@@ -16,6 +16,7 @@ impl RangeTable for U5Table {
 }
 pub type U5TableCircuit<E> = RangeTableCircuit<E, U5Table>;
 
+#[derive(Default)]
 pub struct U8Table;
 impl RangeTable for U8Table {
     const ROM_TYPE: ROMType = ROMType::U8;
@@ -25,6 +26,7 @@ impl RangeTable for U8Table {
 }
 pub type U8TableCircuit<E> = RangeTableCircuit<E, U8Table>;
 
+#[derive(Default)]
 pub struct U14Table;
 impl RangeTable for U14Table {
     const ROM_TYPE: ROMType = ROMType::U14;
@@ -34,6 +36,7 @@ impl RangeTable for U14Table {
 }
 pub type U14TableCircuit<E> = RangeTableCircuit<E, U14Table>;
 
+#[derive(Default)]
 pub struct U16Table;
 impl RangeTable for U16Table {
     const ROM_TYPE: ROMType = ROMType::U16;
@@ -41,4 +44,5 @@ impl RangeTable for U16Table {
         1 << 16
     }
 }
+
 pub type U16TableCircuit<E> = RangeTableCircuit<E, U16Table>;

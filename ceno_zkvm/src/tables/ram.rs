@@ -9,7 +9,7 @@ mod ram_circuit;
 mod ram_impl;
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MemTable;
 
 impl DynVolatileRamTable for MemTable {
@@ -31,7 +31,7 @@ impl DynVolatileRamTable for MemTable {
 pub type MemCircuit<E> = DynVolatileRamCircuit<E, MemTable>;
 
 /// RegTable, fix size without offset
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RegTable;
 
 impl NonVolatileTable for RegTable {
@@ -56,7 +56,7 @@ impl NonVolatileTable for RegTable {
 
 pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ProgramDataTable;
 
 impl NonVolatileTable for ProgramDataTable {
@@ -73,7 +73,7 @@ impl NonVolatileTable for ProgramDataTable {
 
 pub type ProgramDataCircuit<E> = NonVolatileRamCircuit<E, ProgramDataTable>;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PubIOTable;
 
 impl NonVolatileTable for PubIOTable {

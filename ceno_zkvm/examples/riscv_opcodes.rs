@@ -57,7 +57,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     );
     program
 };
-type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
+type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -122,7 +122,9 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
+    let ptc_with_size = ProgramTableCircuit::new(PROGRAM_SIZE);
+    let prog_config =
+        zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>(ptc_with_size.clone());
     zkvm_cs.register_global_state::<GlobalState>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -131,6 +133,7 @@ fn main() {
         &zkvm_cs,
         &prog_config,
         &program,
+        ptc_with_size.clone(),
     );
 
     let reg_init = initial_registers();
@@ -285,7 +288,12 @@ fn main() {
 
         // assign program circuit
         zkvm_witness
-            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
+            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
+                &zkvm_cs,
+                &prog_config,
+                &program,
+                ptc_with_size.clone(),
+            )
             .unwrap();
 
         MockProver::assert_satisfied_full(

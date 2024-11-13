@@ -7,6 +7,7 @@ pub use ops_circuit::{OpsTable, OpsTableCircuit};
 
 use crate::structs::ROMType;
 
+#[derive(Default)]
 pub struct AndTable;
 impl OpsTable for AndTable {
     const ROM_TYPE: ROMType = ROMType::And;
@@ -25,6 +26,7 @@ impl OpsTable for AndTable {
 }
 pub type AndTableCircuit<E> = OpsTableCircuit<E, AndTable>;
 
+#[derive(Default)]
 pub struct OrTable;
 impl OpsTable for OrTable {
     const ROM_TYPE: ROMType = ROMType::Or;
@@ -43,6 +45,7 @@ impl OpsTable for OrTable {
 }
 pub type OrTableCircuit<E> = OpsTableCircuit<E, OrTable>;
 
+#[derive(Default)]
 pub struct XorTable;
 impl OpsTable for XorTable {
     const ROM_TYPE: ROMType = ROMType::Xor;
@@ -61,6 +64,7 @@ impl OpsTable for XorTable {
 }
 pub type XorTableCircuit<E> = OpsTableCircuit<E, XorTable>;
 
+#[derive(Default)]
 pub struct LtuTable;
 impl OpsTable for LtuTable {
     const ROM_TYPE: ROMType = ROMType::Ltu;
@@ -79,6 +83,7 @@ impl OpsTable for LtuTable {
 }
 pub type LtuTableCircuit<E> = OpsTableCircuit<E, LtuTable>;
 
+#[derive(Default)]
 pub struct PowTable;
 impl OpsTable for PowTable {
     const ROM_TYPE: ROMType = ROMType::Pow;

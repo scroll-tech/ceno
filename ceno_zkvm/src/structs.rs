@@ -152,10 +152,10 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         config
     }
 
-    pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
+    pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self, tc: TC) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = TC::construct_circuit(&mut circuit_builder).unwrap();
+        let config = tc.construct_circuit(&mut circuit_builder).unwrap();
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
 
         config
@@ -190,13 +190,14 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
         input: &TC::FixedInput,
+        tc: TC,
     ) {
         let cs = cs.get_cs(&TC::name()).expect("cs not found");
         assert!(
             self.circuit_fixed_traces
                 .insert(
                     TC::name(),
-                    Some(TC::generate_fixed_traces(config, cs.num_fixed, input)),
+                    Some(tc.generate_fixed_traces(config, cs.num_fixed, input)),
                 )
                 .is_none()
         );
@@ -273,6 +274,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
         input: &TC::WitnessInput,
+        tc: TC,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
 

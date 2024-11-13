@@ -18,7 +18,10 @@ pub use program::{InsnRecord, ProgramTableCircuit};
 mod ram;
 pub use ram::*;
 
-pub trait TableCircuit<E: ExtensionField> {
+pub trait TableCircuit<E: ExtensionField>
+where
+    Self: Default,
+{
     type TableConfig: Send + Sync;
     type FixedInput: Send + Sync + ?Sized;
     type WitnessInput: Send + Sync + ?Sized;
@@ -26,10 +29,12 @@ pub trait TableCircuit<E: ExtensionField> {
     fn name() -> String;
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::TableConfig, ZKVMError>;
 
     fn generate_fixed_traces(
+        &self,
         config: &Self::TableConfig,
         num_fixed: usize,
         input: &Self::FixedInput,

@@ -644,13 +644,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn load_program_table(t_vec: &mut Vec<Vec<u64>>, program: &Program, challenge: [E; 2]) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
-        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
-            &config,
-            cs.num_fixed,
-            program,
-        );
+        let mock_ptc = ProgramTableCircuit::new(MOCK_PROGRAM_SIZE);
+        let config = mock_ptc.construct_circuit(&mut cb).unwrap();
+        let fixed = mock_ptc.generate_fixed_traces(&config, cs.num_fixed, program);
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
