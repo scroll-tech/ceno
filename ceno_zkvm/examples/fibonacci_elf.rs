@@ -1,6 +1,6 @@
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState,
-    WordAddr,
+    WORD_SIZE, WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::{DummyExtraConfig, Rv32imConfig},
@@ -15,9 +15,13 @@ use ceno_zkvm::{
 use clap::Parser;
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use std::{panic, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    iter, panic,
+    time::Instant,
+};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -52,13 +56,10 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    let sp1_platform = Platform {
-        rom_start: 0x0020_0800,
-        rom_end: 0x003f_ffff,
-        ram_start: 0x0020_0000,
-        ram_end: 0xffff_ffff,
-        unsafe_ecall_nop: true,
-    };
+    let sp1_platform = CENO_PLATFORM.clone();
+    const STACK_TOP: u32 = 0x0020_0400;
+    const STACK_SIZE: u32 = 1;
+
     let elf_bytes = include_bytes!(r"fibonacci.elf");
     let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
 
@@ -80,15 +81,22 @@ fn main() {
         vm.program(),
     );
 
-    let program_data_init = vm
-        .program()
-        .image
-        .iter()
-        .map(|(addr, value)| MemInitRecord {
-            addr: *addr,
-            value: *value,
-        })
-        .collect_vec();
+    let program_data_init = {
+        let program_addrs = vm
+            .program()
+            .image
+            .iter()
+            .map(|(addr, value)| MemInitRecord {
+                addr: *addr,
+                value: *value,
+            });
+
+        let stack_addrs = (1..=STACK_SIZE)
+            .map(|i| STACK_TOP - i * WORD_SIZE as u32)
+            .map(|addr| MemInitRecord { addr, value: 0 });
+
+        chain!(program_addrs, stack_addrs).collect_vec()
+    };
 
     let reg_init = initial_registers();
     config.generate_fixed_traces(
@@ -188,22 +196,32 @@ fn main() {
         })
         .collect_vec();
 
-    let mem_final = vm
-        .tracer()
-        .final_accesses()
+    let accessed_addrs = final_access
         .iter()
-        .filter_map(|(&addr, &cycle)| {
-            if addr >= ByteAddr::from(sp1_platform.ram_start()).waddr() {
-                Some(MemFinalRecord {
-                    addr: addr.into(),
-                    value: vm.peek_memory(addr),
-                    cycle,
-                })
-            } else {
-                None
-            }
-        })
+        .filter_map(|(&addr, &cycle)| (cycle != 0).then_some(addr.baddr()))
+        .filter(|addr| sp1_platform.can_read(addr.0))
         .collect_vec();
+
+    let handled_addrs = program_data_final
+        .iter()
+        .filter_map(|rec| (rec.cycle != 0).then_some(ByteAddr(rec.addr)))
+        .collect::<HashSet<_>>();
+
+    let accessed_range = accessed_addrs
+        .iter()
+        .into_grouping_map_by(|addr| sp1_platform.format_segment(addr.0))
+        .minmax();
+    tracing::debug!("Memory range (accessed): {:?}", accessed_range);
+
+    let handled_range = handled_addrs
+        .iter()
+        .into_grouping_map_by(|addr| sp1_platform.format_segment(addr.0))
+        .minmax();
+    tracing::debug!("Memory range (handled):  {:?}", handled_range);
+
+    for addr in &accessed_addrs {
+        assert!(handled_addrs.contains(addr), "unhandled addr: {:?}", addr);
+    }
 
     // assign table circuits
     config
@@ -211,7 +229,7 @@ fn main() {
             &zkvm_cs,
             &mut zkvm_witness,
             &reg_final,
-            &mem_final,
+            &[],
             &program_data_final,
             &[],
         )

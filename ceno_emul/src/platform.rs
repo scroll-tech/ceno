@@ -16,12 +16,20 @@ pub struct Platform {
 }
 
 pub const CENO_PLATFORM: Platform = Platform {
-    rom_start: 0x2000_0000,
-    rom_end: 0x3000_0000 - 1,
-    ram_start: 0x0020_0000,
-    ram_end: 0x0040_0000 - 1,
-    unsafe_ecall_nop: false,
+    //rom_start: 0x2000_0000,
+    //rom_end: 0x3000_0000 - 1,
+    //ram_start: 0x0020_0000,
+    //ram_end: 0x0040_0000 - 1,
+    //unsafe_ecall_nop: false,
+
+    // SP1
+    rom_start: 0x0020_0800,
+    rom_end: 0x0020a110 - 1,
+    ram_start: 0x0001_0000,
+    ram_end: 0x8001_0000 - 1,
+    unsafe_ecall_nop: true,
 };
+
 
 impl Platform {
     // Virtual memory layout.
@@ -40,11 +48,11 @@ impl Platform {
 
     // TODO figure out proper region for program_data
     pub const fn program_data_start(&self) -> Addr {
-        0
+        self.ram_start()
     }
 
     pub const fn program_data_end(&self) -> Addr {
-        0x0040_0000 - 1
+        self.ram_end()
     }
 
     // TODO figure out a proper region for public io
@@ -118,7 +126,7 @@ impl Platform {
     }
 
     pub fn can_execute(&self, addr: Addr) -> bool {
-        self.is_rom(addr)
+        true // self.is_rom(addr)
     }
 
     // Environment calls.
@@ -146,6 +154,15 @@ impl Platform {
     /// The code of success.
     pub const fn code_success(&self) -> u32 {
         0
+    }
+
+    pub fn format_segment(&self, addr: u32) -> String {
+        format!(
+            "{}{}{}",
+            if self.can_read(addr) { "R" } else { "-" },
+            if self.can_write(addr) { "W" } else { "-" },
+            if self.can_execute(addr) { "X" } else { "-" },
+        )
     }
 }
 
