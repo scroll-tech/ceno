@@ -19,7 +19,7 @@ use ceno_emul::{
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
-    stats::StatsReport,
+    stats::{StaticReport, TraceReport},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
@@ -113,19 +113,6 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-    // for (circuit, cs) in zkvm_cs.get_css() {
-    //     println!(
-    //         "{}, {:?}",
-    //         circuit,
-    //         cs.assert_zero_sumcheck_expressions
-    //             .iter()
-    //             .map(|e| e.degree())
-    //             .collect::<Vec<_>>()
-    //     );
-    // }
-
-    // println!("Before counts:");
-    // report.pretty_print();
 
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
@@ -138,7 +125,7 @@ fn main() {
         &program,
     );
 
-    let mut report = StatsReport::from(&zkvm_cs);
+    let static_report = StaticReport::new(&zkvm_cs);
 
     let reg_init = initial_registers();
     // Define program constant here
@@ -295,14 +282,13 @@ fn main() {
             .unwrap();
 
         // get instance counts from witness matrices
-        let counts = zkvm_witness
-            .clone()
-            .into_iter_sorted()
-            .map(|(key, value)| (key, value.num_instances()))
-            .collect::<BTreeMap<_, _>>();
-        report.init_instance_counts(counts);
-        println!("With instance counts:");
-        report.pretty_print();
+        let trace_report = TraceReport::new_via_witnesses(
+            &static_report,
+            &zkvm_witness,
+            "EXAMPLE_PROGRAM in riscv_opcodes.rs",
+        );
+
+        trace_report.save_json("report.json");
 
         MockProver::assert_satisfied_full(
             zkvm_cs.clone(),
