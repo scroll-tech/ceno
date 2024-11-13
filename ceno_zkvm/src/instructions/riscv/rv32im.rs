@@ -526,78 +526,23 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         program_data_final: &[MemFinalRecord],
         public_io_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
-        witness.assign_table_circuit::<U16TableCircuit<E>>(
-            cs,
-            &self.u16_range_config,
-            &(),
-            U16TableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<PowTableCircuit<E>>(
-            cs,
-            &self.pow_config,
-            &(),
-            PowTableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<U14TableCircuit<E>>(
-            cs,
-            &self.u14_range_config,
-            &(),
-            U14TableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<U8TableCircuit<E>>(
-            cs,
-            &self.u8_range_config,
-            &(),
-            U8TableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<U5TableCircuit<E>>(
-            cs,
-            &self.u5_range_config,
-            &(),
-            U5TableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<AndTableCircuit<E>>(
-            cs,
-            &self.and_table_config,
-            &(),
-            AndTableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<OrTableCircuit<E>>(
-            cs,
-            &self.or_table_config,
-            &(),
-            OrTableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<XorTableCircuit<E>>(
-            cs,
-            &self.xor_table_config,
-            &(),
-            XorTableCircuit::default(),
-        )?;
-        witness.assign_table_circuit::<LtuTableCircuit<E>>(
-            cs,
-            &self.ltu_config,
-            &(),
-            LtuTableCircuit::default(),
-        )?;
+        witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
+        witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
+        witness.assign_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &())?;
+        witness.assign_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &())?;
+        witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
+        witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
+        witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
+        witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
+        witness.assign_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &())?;
 
         // assign register finalization.
         witness
-            .assign_table_circuit::<RegTableCircuit<E>>(
-                cs,
-                &self.reg_config,
-                reg_final,
-                RegTableCircuit::default(),
-            )
+            .assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)
             .unwrap();
         // assign memory finalization.
         witness
-            .assign_table_circuit::<MemCircuit<E>>(
-                cs,
-                &self.mem_config,
-                mem_final,
-                MemCircuit::default(),
-            )
+            .assign_table_circuit::<MemCircuit<E>>(cs, &self.mem_config, mem_final)
             .unwrap();
         // assign program_data finalization.
         witness
@@ -605,17 +550,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 cs,
                 &self.program_data_config,
                 program_data_final,
-                ProgramDataCircuit::default(),
             )
             .unwrap();
 
         witness
-            .assign_table_circuit::<PubIOCircuit<E>>(
-                cs,
-                &self.public_io_config,
-                public_io_final,
-                PubIOCircuit::default(),
-            )
+            .assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, public_io_final)
             .unwrap();
 
         Ok(())

@@ -114,7 +114,7 @@ impl<E: ExtensionField> ProgramTableCircuit<E> {
     pub fn new(program_size: usize) -> Self {
         ProgramTableCircuit {
             program_size,
-            phantom_data: PhantomData::default(),
+            phantom_data: PhantomData,
         }
     }
 }

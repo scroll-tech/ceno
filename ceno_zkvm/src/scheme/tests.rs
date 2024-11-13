@@ -296,20 +296,10 @@ fn test_single_add_instance_e2e() {
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
     zkvm_witness
-        .assign_table_circuit::<U16TableCircuit<E>>(
-            &zkvm_cs,
-            &u16_range_config,
-            &(),
-            U16TableCircuit::default(),
-        )
+        .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
         .unwrap();
     zkvm_witness
-        .assign_table_circuit::<ProgramTableCircuit<E>>(
-            &zkvm_cs,
-            &prog_config,
-            &program,
-            ProgramTableCircuit::new(PROGRAM_SIZE),
-        )
+        .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
     let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);

@@ -288,12 +288,7 @@ fn main() {
 
         // assign program circuit
         zkvm_witness
-            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
-                &zkvm_cs,
-                &prog_config,
-                &program,
-                ptc_with_size.clone(),
-            )
+            .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
 
         MockProver::assert_satisfied_full(

@@ -274,7 +274,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
         input: &TC::WitnessInput,
-        tc: TC,
+        // tc: TC,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
 
