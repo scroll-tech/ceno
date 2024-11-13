@@ -111,7 +111,7 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum InsnCategory {
+pub enum InsnCategory {
     Compute,
     Branch,
     Load,
@@ -196,7 +196,7 @@ impl InsnKind {
 pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
-    category: InsnCategory,
+    pub category: InsnCategory,
     pub(crate) opcode: u32,
     pub(crate) func3: u32,
     pub(crate) func7: u32,
