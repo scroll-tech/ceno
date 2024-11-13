@@ -306,7 +306,7 @@ fn main() {
         println!(
             "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
-            timer.elapsed().as_secs()
+            timer.elapsed()
         );
 
         let transcript = Transcript::new(b"riscv");
