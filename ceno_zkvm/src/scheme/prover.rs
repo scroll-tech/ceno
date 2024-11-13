@@ -139,9 +139,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 && cs.w_table_expressions.is_empty();
 
             if is_opcode_circuit {
-                tracing::info!(
-                    stats = true,
-                    "STATS: opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
+                tracing::debug!(
+                    "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
                     circuit_name,
                     cs.num_witin,
                     cs.r_expressions.len(),
@@ -163,8 +162,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     &challenges,
                 )?;
                 tracing::info!(
-                    stats = true,
-                    "STATS: generated proof for opcode {} with num_instances={}",
+                    "generated proof for opcode {} with num_instances={}",
                     circuit_name,
                     num_instances
                 );
@@ -183,8 +181,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     &challenges,
                 )?;
                 tracing::info!(
-                    stats = true,
-                    "STATS: generated proof for table {} with num_instances={}",
+                    "generated proof for table {} with num_instances={}",
                     circuit_name,
                     num_instances
                 );
@@ -601,9 +598,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         let pcs_open_span = entered_span!("pcs_open");
         let opening_dur = std::time::Instant::now();
-        tracing::info!(
-            stats = true,
-            "STATS: [opcode {}]: build opening proof for {} polys at {:?}",
+        tracing::debug!(
+            "[opcode {}]: build opening proof for {} polys at {:?}",
             name,
             witnesses.len(),
             input_open_point
@@ -618,8 +614,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         )
         .map_err(ZKVMError::PCSError)?;
         tracing::info!(
-            stats = true,
-            "STATS: [opcode {}] build opening proof took {:?}",
+            "[opcode {}] build opening proof took {:?}",
             name,
             opening_dur.elapsed(),
         );
@@ -1063,9 +1058,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             (None, None)
         };
 
-        tracing::info!(
-            stats = true,
-            "STATS: [table {}] build opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
+        tracing::debug!(
+            "[table {}] build opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
             name,
             fixed.len(),
             input_open_point,
@@ -1083,9 +1077,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         .map_err(ZKVMError::PCSError)?;
         exit_span!(pcs_opening);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
-        tracing::info!(
-            stats = true,
-            "STATS: [table {}] build opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+        tracing::debug!(
+            "[table {}] build opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
             name,
             witnesses.len(),
             input_open_point,

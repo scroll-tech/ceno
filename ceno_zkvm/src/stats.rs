@@ -91,15 +91,6 @@ where
             .expect("Unable to write data");
     }
 }
-
-#[derive(Debug)]
-pub struct StatsReport {
-    // statistics by circuit name
-    stats: BTreeMap<String, CircuitStats>,
-    // number of instances for each circuit name
-    num_instances: Option<BTreeMap<String, usize>>,
-}
-
 pub type StaticReport = Report<CircuitStats>;
 
 impl Report<CircuitStats> {
