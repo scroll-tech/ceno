@@ -10,7 +10,7 @@ use crate::{
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
-    structs::{ProvingKey, RAMType, VerifyingKey, WitnessId, ZKVMConstraintSystem},
+    structs::{ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
 

@@ -51,7 +51,7 @@ impl CircuitStats {
                 ),
             })
         } else {
-            let table_len = if system.lk_table_expressions.len() > 0 {
+            let table_len = if !system.lk_table_expressions.is_empty() {
                 system.lk_table_expressions[0].table_len
             } else {
                 0
@@ -114,10 +114,10 @@ pub struct CircuitStatsTrace {
 
 impl CircuitStatsTrace {
     pub fn new(static_stats: CircuitStats, num_instances: usize) -> Self {
-        return CircuitStatsTrace {
+        CircuitStatsTrace {
             static_stats,
             num_instances,
-        };
+        }
     }
 }
 
@@ -135,10 +135,7 @@ impl Report<CircuitStatsTrace> {
 
         // Ensure we recognize all circuits from the num_instances map
         num_instances.keys().for_each(|key| {
-            assert!(
-                matches!(static_report.get(key), Some(_)),
-                r"unrecognized key {key}."
-            );
+            assert!(static_report.get(key).is_some(), r"unrecognized key {key}.");
         });
 
         // Stitch num instances to corresponding entries. Sort by num instances

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, panic, time::Instant};
+use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
