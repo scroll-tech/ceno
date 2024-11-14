@@ -2,6 +2,7 @@ use crate::{
     circuit_builder::{ConstraintSystem, NameSpace},
     expression::Expression,
     structs::{ZKVMConstraintSystem, ZKVMWitnesses},
+    tables,
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, join};
@@ -240,52 +241,51 @@ impl Report<CircuitStatsTrace> {
         Self::new::<E>(static_report, num_instances, program_name)
     }
 
-    fn display_vec<T: Display>(vec: &Vec<T>) -> String {
-        format!("[{}]", vec.iter().map(|e| format!("{}", e)).join(","))
+    fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
+        format!(
+            "[{}]",
+            map.iter().map(|(k, v)| format!("{k}: {v}")).join(",")
+        )
     }
 
-    // pub fn save_table(&self) {
-    //     let add = self.get("ADD").unwrap();
-    //     if let CircuitStats::OpCode(opstats) = &add.static_stats {
-    //         let header = row![
-    //             "opcode_name",
-    //             "num_instances",
-    //             "lookups",
-    //             "reads",
-    //             "witnesses",
-    //             "writes",
-    //             "0_expr_deg",
-    //             "0_expr_sumcheck_deg"
-    //         ];
-
-    //         let row = row![
-    //             "ADD",
-    //             add.num_instances,
-    //             opstats.lookups,
-    //             opstats.reads,
-    //             opstats.witnesses,
-    //             opstats.writes,
-    //             Self::display_vec(&opstats.assert_zero_expr_degrees.iter().collect_vec()),
-    //             Self::display_vec(
-    //                 &opstats
-    //                     .assert_zero_sumcheck_expr_degrees
-    //                     .iter()
-    //                     .collect_vec()
-    //             )
-    //         ];
-    //         let mut table = Table::new();
-    //         table.add_row(header);
-    //         table.add_row(row);
-    //         table.printstd();
-    //     }
-    //     let ops_and = self.get("OPS_And").unwrap();
-    //     if let CircuitStats::Table(tablestats) = &ops_and.static_stats {
-    //         let header = row!["table_name", "num_instances", "table_len"];
-    //         let row = row!["OPS_And", ops_and.num_instances, tablestats.table_len];
-    //         let mut table = Table::new();
-    //         table.add_row(header);
-    //         table.add_row(row);
-    //         table.printstd();
-    //     }
-    //}
+    pub fn save_table(&self) {
+        let mut opcodes_table = Table::new();
+        opcodes_table.add_row(row![
+            "opcode_name",
+            "num_instances",
+            "lookups",
+            "reads",
+            "witnesses",
+            "writes",
+            "0_expr_deg",
+            "0_expr_sumcheck_deg"
+        ]);
+        let mut tables_table = Table::new();
+        tables_table.add_row(row!["table_name", "num_instances", "table_len"]);
+        for (name, circuit) in &self.circuits {
+            match &circuit.static_stats {
+                CircuitStats::OpCode(opstats) => {
+                    opcodes_table.add_row(row![
+                        name.to_owned(),
+                        circuit.num_instances,
+                        opstats.lookups,
+                        opstats.reads,
+                        opstats.witnesses,
+                        opstats.writes,
+                        Self::display_hashmap(&opstats.assert_zero_expr_degrees),
+                        Self::display_hashmap(&opstats.assert_zero_sumcheck_expr_degrees)
+                    ]);
+                }
+                CircuitStats::Table(tablestats) => {
+                    tables_table.add_row(row![
+                        name.to_owned(),
+                        circuit.num_instances,
+                        tablestats.table_len
+                    ]);
+                }
+            }
+        }
+        opcodes_table.printstd();
+        tables_table.printstd();
+    }
 }
