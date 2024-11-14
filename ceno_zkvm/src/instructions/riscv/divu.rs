@@ -4,6 +4,7 @@ use ff_ext::ExtensionField;
 use super::{
     RIVInstruction,
     constants::{UINT_LIMBS, UInt},
+    dummy::DummyInstruction,
     r_insn::RInstructionConfig,
 };
 use crate::{
@@ -33,11 +34,29 @@ pub struct ArithConfig<E: ExtensionField> {
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
+pub struct DivOp;
+impl RIVInstruction for DivOp {
+    const INST_KIND: InsnKind = InsnKind::DIV;
+}
+pub type DivDummy<E> = DummyInstruction<E, DivOp>; // TODO: implement DivInstruction.
+
 pub struct DivUOp;
 impl RIVInstruction for DivUOp {
     const INST_KIND: InsnKind = InsnKind::DIVU;
 }
 pub type DivUInstruction<E> = ArithInstruction<E, DivUOp>;
+
+pub struct RemOp;
+impl RIVInstruction for RemOp {
+    const INST_KIND: InsnKind = InsnKind::REM;
+}
+pub type RemDummy<E> = DummyInstruction<E, RemOp>; // TODO: implement RemInstruction.
+
+pub struct RemuOp;
+impl RIVInstruction for RemuOp {
+    const INST_KIND: InsnKind = InsnKind::REMU;
+}
+pub type RemuDummy<E> = DummyInstruction<E, RemuOp>; // TODO: implement RemuInstruction.
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;

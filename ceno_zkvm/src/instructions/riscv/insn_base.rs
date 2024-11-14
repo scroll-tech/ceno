@@ -111,16 +111,15 @@ impl<E: ExtensionField> ReadRS1<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rs1() as u64);
-
-        // Register state
-        set_val!(instance, self.prev_ts, step.rs1().unwrap().previous_cycle);
+        let op = step.rs1().expect("rs1 op");
+        set_val!(instance, self.id, op.register_index() as u64);
+        set_val!(instance, self.prev_ts, op.previous_cycle);
 
         // Register read
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().previous_cycle,
+            op.previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS1,
         )?;
 
@@ -166,16 +165,15 @@ impl<E: ExtensionField> ReadRS2<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rs2() as u64);
-
-        // Register state
-        set_val!(instance, self.prev_ts, step.rs2().unwrap().previous_cycle);
+        let op = step.rs2().expect("rs2 op");
+        set_val!(instance, self.id, op.register_index() as u64);
+        set_val!(instance, self.prev_ts, op.previous_cycle);
 
         // Register read
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.rs2().unwrap().previous_cycle,
+            op.previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS2,
         )?;
 
@@ -223,20 +221,21 @@ impl<E: ExtensionField> WriteRD<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.id, step.insn().rd_internal() as u64);
-        set_val!(instance, self.prev_ts, step.rd().unwrap().previous_cycle);
+        let op = step.rd().expect("rd op");
+        set_val!(instance, self.id, op.register_index() as u64);
+        set_val!(instance, self.prev_ts, op.previous_cycle);
 
         // Register state
         self.prev_value.assign_limbs(
             instance,
-            Value::new_unchecked(step.rd().unwrap().value.before).as_u16_limbs(),
+            Value::new_unchecked(op.value.before).as_u16_limbs(),
         );
 
         // Register write
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.rd().unwrap().previous_cycle,
+            op.previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RD,
         )?;
 

@@ -52,32 +52,29 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             None
         };
 
-        let init_table = cb.rlc_chip_record(
-            [
-                vec![(NVRAM::RAM_TYPE as usize).into()],
-                vec![Expression::Fixed(addr)],
-                init_v.iter().map(|v| v.expr()).collect_vec(),
-                vec![Expression::ZERO], // Initial cycle.
-            ]
-            .concat(),
-        );
+        let init_table = [
+            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![Expression::Fixed(addr)],
+            init_v.iter().map(|v| v.expr()).collect_vec(),
+            vec![Expression::ZERO], // Initial cycle.
+        ]
+        .concat();
 
-        let final_table = cb.rlc_chip_record(
-            [
-                // a v t
-                vec![(NVRAM::RAM_TYPE as usize).into()],
-                vec![Expression::Fixed(addr)],
-                final_v
-                    .as_ref()
-                    .map(|v_limb| v_limb.iter().map(|v| v.expr()).collect_vec())
-                    .unwrap_or_else(|| init_v.iter().map(|v| v.expr()).collect_vec()),
-                vec![final_cycle.expr()],
-            ]
-            .concat(),
-        );
+        let final_table = [
+            // a v t
+            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![Expression::Fixed(addr)],
+            final_v
+                .as_ref()
+                .map(|v_limb| v_limb.iter().map(|v| v.expr()).collect_vec())
+                .unwrap_or_else(|| init_v.iter().map(|v| v.expr()).collect_vec()),
+            vec![final_cycle.expr()],
+        ]
+        .concat();
 
         cb.w_table_record(
             || "init_table",
+            NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
@@ -88,6 +85,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         )?;
         cb.r_table_record(
             || "final_table",
+            NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
@@ -226,29 +224,26 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
 
         let final_cycle = cb.create_witin(|| "final_cycle");
 
-        let init_table = cb.rlc_chip_record(
-            [
-                vec![(NVRAM::RAM_TYPE as usize).into()],
-                vec![Expression::Fixed(addr)],
-                vec![init_v.expr()],
-                vec![Expression::ZERO], // Initial cycle.
-            ]
-            .concat(),
-        );
+        let init_table = [
+            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![Expression::Fixed(addr)],
+            vec![init_v.expr()],
+            vec![Expression::ZERO], // Initial cycle.
+        ]
+        .concat();
 
-        let final_table = cb.rlc_chip_record(
-            [
-                // a v t
-                vec![(NVRAM::RAM_TYPE as usize).into()],
-                vec![Expression::Fixed(addr)],
-                vec![init_v.expr()],
-                vec![final_cycle.expr()],
-            ]
-            .concat(),
-        );
+        let final_table = [
+            // a v t
+            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![Expression::Fixed(addr)],
+            vec![init_v.expr()],
+            vec![final_cycle.expr()],
+        ]
+        .concat();
 
         cb.w_table_record(
             || "init_table",
+            NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
@@ -259,6 +254,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         )?;
         cb.r_table_record(
             || "final_table",
+            NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
@@ -337,29 +333,26 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .collect::<Vec<WitIn>>();
         let final_cycle = cb.create_witin(|| "final_cycle");
 
-        let init_table = cb.rlc_chip_record(
-            [
-                vec![(DVRAM::RAM_TYPE as usize).into()],
-                vec![addr.expr()],
-                vec![Expression::ZERO],
-                vec![Expression::ZERO], // Initial cycle.
-            ]
-            .concat(),
-        );
+        let init_table = [
+            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![addr.expr()],
+            vec![Expression::ZERO],
+            vec![Expression::ZERO], // Initial cycle.
+        ]
+        .concat();
 
-        let final_table = cb.rlc_chip_record(
-            [
-                // a v t
-                vec![(DVRAM::RAM_TYPE as usize).into()],
-                vec![addr.expr()],
-                final_v.iter().map(|v| v.expr()).collect_vec(),
-                vec![final_cycle.expr()],
-            ]
-            .concat(),
-        );
+        let final_table = [
+            // a v t
+            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![addr.expr()],
+            final_v.iter().map(|v| v.expr()).collect_vec(),
+            vec![final_cycle.expr()],
+        ]
+        .concat();
 
         cb.w_table_record(
             || "init_table",
+            DVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
                 addr_witin_id: Some(addr.id.into()),
@@ -370,6 +363,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         )?;
         cb.r_table_record(
             || "final_table",
+            DVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
                 addr_witin_id: Some(addr.id.into()),
