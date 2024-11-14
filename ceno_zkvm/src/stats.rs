@@ -2,10 +2,10 @@ use crate::{
     circuit_builder::{ConstraintSystem, NameSpace},
     expression::Expression,
     structs::{ZKVMConstraintSystem, ZKVMWitnesses},
-    tables, utils,
+    utils,
 };
 use ff_ext::ExtensionField;
-use itertools::{Itertools, join};
+use itertools::Itertools;
 use prettytable::{Table, row};
 use serde_json::json;
 use std::{
