@@ -2,7 +2,7 @@ use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
-    instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
+    instructions::riscv::{MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
     tables::{MemFinalRecord, ProgramTableCircuit, init_public_io, initial_registers},
@@ -106,6 +106,7 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -119,7 +120,8 @@ fn main() {
 
     let reg_init = initial_registers();
 
-    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init);
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[]);
 
     let pk = zkvm_cs
         .clone()
@@ -219,7 +221,16 @@ fn main() {
 
         // assign table circuits
         config
-            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &public_io_final)
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
+            .unwrap();
+        mmu_config
+            .assign_table_circuit(
+                &zkvm_cs,
+                &mut zkvm_witness,
+                &reg_final,
+                &[],
+                &public_io_final,
+            )
             .unwrap();
 
         // assign program circuit
