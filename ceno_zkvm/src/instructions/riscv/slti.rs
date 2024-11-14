@@ -42,11 +42,13 @@ pub struct SltiOp;
 impl RIVInstruction for SltiOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTI;
 }
+pub type SltiInstruction<E> = SetLessThanImmInstruction<E, SltiOp>;
 
 pub struct SltiuOp;
 impl RIVInstruction for SltiuOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTIU;
 }
+pub type SltiuInstruction<E> = SetLessThanImmInstruction<E, SltiuOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {
     type InstructionConfig = SetLessThanImmConfig<E>;

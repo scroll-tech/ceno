@@ -22,7 +22,9 @@ use crate::{
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
     set_val,
-    structs::{PointAndEval, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{
+        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
+    },
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
@@ -51,9 +53,9 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let reg_id = cb.create_witin(|| "reg_id");
         (0..RW).try_for_each(|_| {
-            let record = cb.rlc_chip_record(vec![1.into(), reg_id.expr()]);
-            cb.read_record(|| "read", record.clone())?;
-            cb.write_record(|| "write", record)?;
+            let record = vec![1.into(), reg_id.expr()];
+            cb.read_record(|| "read", Register, record.clone())?;
+            cb.write_record(|| "write", Register, record)?;
             Result::<(), ZKVMError>::Ok(())
         })?;
         (0..L).try_for_each(|_| {
@@ -87,7 +89,7 @@ fn test_rw_lk_expression_combination() {
 
         // pcs setup
         let param = Pcs::setup(1 << 13).unwrap();
-        let (pp, vp) = Pcs::trim(&param, 1 << 13).unwrap();
+        let (pp, vp) = Pcs::trim(param, 1 << 13).unwrap();
 
         // configure
         let name = TestCircuit::<E, RW, L>::name();
@@ -119,7 +121,12 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZKVMProver::new(pk);
         let mut transcript = Transcript::new(b"test");
-        let wits_in = zkvm_witness.witnesses.remove(&name).unwrap().into_mles();
+        let wits_in = zkvm_witness
+            .into_iter_sorted()
+            .next()
+            .unwrap()
+            .1
+            .into_mles();
         // commit to main traces
         let commit = Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript).unwrap();
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
@@ -216,7 +223,7 @@ fn test_single_add_instance_e2e() {
     );
 
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();

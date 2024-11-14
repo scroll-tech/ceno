@@ -22,7 +22,7 @@ pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 }
 
 pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
-    param: &Pcs::Param,
+    param: Pcs::Param,
     poly_size: usize,
 ) -> Result<(Pcs::ProverParam, Pcs::VerifierParam), Error> {
     Pcs::trim(param, poly_size)
@@ -117,7 +117,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     fn setup(poly_size: usize) -> Result<Self::Param, Error>;
 
     fn trim(
-        param: &Self::Param,
+        param: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 

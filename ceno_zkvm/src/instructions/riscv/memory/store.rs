@@ -34,30 +34,21 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
 
 pub struct SWOp;
-
 impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
-
-#[cfg(test)]
 pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
 
 pub struct SHOp;
-
 impl RIVInstruction for SHOp {
     const INST_KIND: InsnKind = InsnKind::SH;
 }
-
-#[cfg(test)]
 pub type ShInstruction<E> = StoreInstruction<E, SHOp, 1>;
 
 pub struct SBOp;
-
 impl RIVInstruction for SBOp {
     const INST_KIND: InsnKind = InsnKind::SB;
 }
-
-#[cfg(test)]
 pub type SbInstruction<E> = StoreInstruction<E, SBOp, 0>;
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
