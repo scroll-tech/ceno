@@ -2,7 +2,7 @@ use crate::{
     circuit_builder::{ConstraintSystem, NameSpace},
     expression::Expression,
     structs::{ZKVMConstraintSystem, ZKVMWitnesses},
-    tables,
+    tables, utils,
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, join};
@@ -10,7 +10,6 @@ use prettytable::{Table, row};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt::Display,
     fs::File,
     io::Write,
 };
@@ -35,20 +34,14 @@ impl std::ops::Add for OpCodeStats {
             reads: self.reads + rhs.reads,
             writes: self.writes + rhs.writes,
             lookups: self.lookups + rhs.lookups,
-            assert_zero_expr_degrees: {
-                let mut merged = self.assert_zero_expr_degrees;
-                for (key, value) in rhs.assert_zero_expr_degrees {
-                    *merged.entry(key).or_insert(0) += value;
-                }
-                merged
-            },
-            assert_zero_sumcheck_expr_degrees: {
-                let mut merged = self.assert_zero_sumcheck_expr_degrees;
-                for (key, value) in rhs.assert_zero_sumcheck_expr_degrees {
-                    *merged.entry(key).or_insert(0) += value;
-                }
-                merged
-            },
+            assert_zero_expr_degrees: utils::merge_frequency_tables(
+                self.assert_zero_expr_degrees,
+                rhs.assert_zero_expr_degrees,
+            ),
+            assert_zero_sumcheck_expr_degrees: utils::merge_frequency_tables(
+                self.assert_zero_sumcheck_expr_degrees,
+                rhs.assert_zero_sumcheck_expr_degrees,
+            ),
         }
     }
 }
@@ -241,14 +234,7 @@ impl Report<CircuitStatsTrace> {
         Self::new::<E>(static_report, num_instances, program_name)
     }
 
-    fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
-        format!(
-            "[{}]",
-            map.iter().map(|(k, v)| format!("{k}: {v}")).join(",")
-        )
-    }
-
-    pub fn save_table(&self) {
+    pub fn save_table(&self, filename: &str) {
         let mut opcodes_table = Table::new();
         opcodes_table.add_row(row![
             "opcode_name",
@@ -262,6 +248,7 @@ impl Report<CircuitStatsTrace> {
         ]);
         let mut tables_table = Table::new();
         tables_table.add_row(row!["table_name", "num_instances", "table_len"]);
+
         for (name, circuit) in &self.circuits {
             match &circuit.static_stats {
                 CircuitStats::OpCode(opstats) => {
@@ -272,8 +259,8 @@ impl Report<CircuitStatsTrace> {
                         opstats.reads,
                         opstats.witnesses,
                         opstats.writes,
-                        Self::display_hashmap(&opstats.assert_zero_expr_degrees),
-                        Self::display_hashmap(&opstats.assert_zero_sumcheck_expr_degrees)
+                        utils::display_hashmap(&opstats.assert_zero_expr_degrees),
+                        utils::display_hashmap(&opstats.assert_zero_sumcheck_expr_degrees)
                     ]);
                 }
                 CircuitStats::Table(tablestats) => {
@@ -285,7 +272,8 @@ impl Report<CircuitStatsTrace> {
                 }
             }
         }
-        opcodes_table.printstd();
-        tables_table.printstd();
+        let mut file = File::create(filename).expect("Unable to create file");
+        _ = opcodes_table.print(&mut file);
+        _ = tables_table.print(&mut file);
     }
 }
