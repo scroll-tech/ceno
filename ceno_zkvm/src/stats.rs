@@ -179,7 +179,7 @@ impl CircuitStatsTrace {
 pub type TraceReport = Report<CircuitStatsTrace>;
 
 impl Report<CircuitStatsTrace> {
-    pub fn new<E: ExtensionField>(
+    pub fn new(
         static_report: &Report<CircuitStats>,
         num_instances: BTreeMap<String, usize>,
         program_name: &str,
@@ -231,7 +231,7 @@ impl Report<CircuitStatsTrace> {
             .into_iter_sorted()
             .map(|(key, value)| (key, value.num_instances()))
             .collect::<BTreeMap<_, _>>();
-        Self::new::<E>(static_report, num_instances, program_name)
+        Self::new(static_report, num_instances, program_name)
     }
 
     pub fn save_table(&self, filename: &str) {
