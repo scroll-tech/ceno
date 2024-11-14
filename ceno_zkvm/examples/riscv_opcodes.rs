@@ -178,7 +178,7 @@ fn main() {
         let exit_code = halt_record.rs2().unwrap().value;
         let pi = PublicValues::new(
             exit_code,
-            CENO_PLATFORM.rom_start(),
+            vm.program().entry,
             Tracer::SUBCYCLES_PER_INSN as u32,
             EXIT_PC as u32,
             end_cycle,
