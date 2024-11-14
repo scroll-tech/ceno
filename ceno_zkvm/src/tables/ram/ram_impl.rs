@@ -22,29 +22,30 @@ use super::{
 
 /// define a non-volatile memory with init value
 #[derive(Clone, Debug)]
-pub struct NonVolatileTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
+pub struct NonVolatileTableConfig {
     init_v: Vec<Fixed>,
     addr: Fixed,
 
     final_v: Option<Vec<WitIn>>,
     final_cycle: WitIn,
 
-    phantom: PhantomData<NVRAM>,
+    nvt: NonVolatileTable,
 }
 
-impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM> {
+impl NonVolatileTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
+        nvt: NonVolatileTable,
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        let init_v = (0..NVRAM::V_LIMBS)
+        let init_v = (0..nvt.v_limbs())
             .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
             .collect::<Result<Vec<Fixed>, ZKVMError>>()?;
         let addr = cb.create_fixed(|| "addr")?;
 
         let final_cycle = cb.create_witin(|| "final_cycle");
-        let final_v = if NVRAM::WRITABLE {
+        let final_v = if nvt.writable() {
             Some(
-                (0..NVRAM::V_LIMBS)
+                (0..nvt.v_limbs())
                     .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
                     .collect::<Vec<WitIn>>(),
             )
@@ -53,7 +54,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         };
 
         let init_table = [
-            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![(nvt.ram_type as usize).into()],
             vec![Expression::Fixed(addr)],
             init_v.iter().map(|v| v.expr()).collect_vec(),
             vec![Expression::ZERO], // Initial cycle.
@@ -62,7 +63,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
 
         let final_table = [
             // a v t
-            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![(nvt.ram_type() as usize).into()],
             vec![Expression::Fixed(addr)],
             final_v
                 .as_ref()
@@ -74,23 +75,23 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
 
         cb.w_table_record(
             || "init_table",
-            NVRAM::RAM_TYPE,
+            nvt.ram_type(),
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
-                len: NVRAM::len(),
+                offset: nvt.offset_addr(),
+                len: nvt.len(),
             },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
-            NVRAM::RAM_TYPE,
+            nvt.ram_type(),
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
-                len: NVRAM::len(),
+                offset: nvt.offset_addr(),
+                len: nvt.len(),
             },
             final_table,
         )?;
@@ -100,7 +101,8 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             final_v,
             addr,
             final_cycle,
-            phantom: PhantomData,
+            // phantom: PhantomData,
+            nvt,
         })
     }
 
@@ -111,11 +113,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         num_fixed: usize,
         init_mem: &[MemInitRecord],
     ) -> RowMajorMatrix<F> {
-        assert!(NVRAM::len().is_power_of_two());
-        assert!(init_mem.len() <= NVRAM::len());
+        assert!(self.nvt.len().is_power_of_two());
+        assert!(init_mem.len() <= self.nvt.len());
 
         // for ram in memory offline check
-        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_fixed);
+        let mut init_table = RowMajorMatrix::<F>::new(self.nvt.len(), num_fixed);
         assert_eq!(init_table.num_padding_instances(), 0);
 
         init_table
@@ -137,7 +139,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             });
 
         // set padding with well-form address with 0 value
-        if NVRAM::len() - init_mem.len() > 0 {
+        if self.nvt.len() - init_mem.len() > 0 {
             let paddin_entry_start = init_mem.len();
             init_table
                 .par_iter_mut()
@@ -152,7 +154,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                     set_fixed_val!(
                         row,
                         self.addr,
-                        (NVRAM::addr(paddin_entry_start + i) as u64).into()
+                        (self.nvt.addr(paddin_entry_start + i) as u64).into()
                     );
                 });
         }
@@ -165,8 +167,8 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= NVRAM::len());
-        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
+        assert!(final_mem.len() <= self.nvt.len());
+        let mut final_table = RowMajorMatrix::<F>::new(self.nvt.len(), num_witness);
 
         final_table
             .par_iter_mut()
@@ -188,7 +190,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                 set_val!(row, self.final_cycle, rec.cycle);
             });
 
-        if NVRAM::len() - final_mem.len() > 0 {
+        if self.nvt.len() - final_mem.len() > 0 {
             final_table
                 .par_iter_mut()
                 .skip(final_mem.len())
@@ -206,26 +208,28 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
 /// define public io
 /// init value set by instance
 #[derive(Clone, Debug)]
-pub struct PubIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
+pub struct PubIOTableConfig {
     addr: Fixed,
 
     final_cycle: WitIn,
 
-    phantom: PhantomData<NVRAM>,
+    // phantom: PhantomData<NVRAM>,
+    nvt: NonVolatileTable,
 }
 
-impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
+impl PubIOTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
+        nvt: NonVolatileTable,
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        assert!(!NVRAM::WRITABLE);
+        assert!(!nvt.writable());
         let init_v = cb.query_public_io()?;
         let addr = cb.create_fixed(|| "addr")?;
 
         let final_cycle = cb.create_witin(|| "final_cycle");
 
         let init_table = [
-            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![(nvt.ram_type() as usize).into()],
             vec![Expression::Fixed(addr)],
             vec![init_v.expr()],
             vec![Expression::ZERO], // Initial cycle.
@@ -234,7 +238,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
 
         let final_table = [
             // a v t
-            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![(nvt.ram_type() as usize).into()],
             vec![Expression::Fixed(addr)],
             vec![init_v.expr()],
             vec![final_cycle.expr()],
@@ -243,23 +247,23 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
 
         cb.w_table_record(
             || "init_table",
-            NVRAM::RAM_TYPE,
+            nvt.ram_type(),
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
-                len: NVRAM::len(),
+                offset: nvt.offset_addr(),
+                len: nvt.len(),
             },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
-            NVRAM::RAM_TYPE,
+            nvt.ram_type(),
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
                 addr_witin_id: None,
-                offset: NVRAM::OFFSET_ADDR,
-                len: NVRAM::len(),
+                offset: nvt.offset_addr(),
+                len: nvt.len(),
             },
             final_table,
         )?;
@@ -267,16 +271,17 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         Ok(Self {
             addr,
             final_cycle,
-            phantom: PhantomData,
+            // phantom: PhantomData,
+            nvt,
         })
     }
 
     /// assign to fixed address
     pub fn gen_init_state<F: SmallField>(&self, num_fixed: usize) -> RowMajorMatrix<F> {
-        assert!(NVRAM::len().is_power_of_two());
+        assert!(self.nvt.len().is_power_of_two());
 
         // for ram in memory offline check
-        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_fixed);
+        let mut init_table = RowMajorMatrix::<F>::new(self.nvt.len(), num_fixed);
         assert_eq!(init_table.num_padding_instances(), 0);
 
         init_table
@@ -284,7 +289,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             .enumerate()
             .with_min_len(MIN_PAR_SIZE)
             .for_each(|(i, row)| {
-                set_fixed_val!(row, self.addr, (NVRAM::addr(i) as u64).into());
+                set_fixed_val!(row, self.addr, (self.nvt.addr(i) as u64).into());
             });
         init_table
     }
@@ -295,8 +300,8 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() == NVRAM::len());
-        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
+        assert!(final_mem.len() == self.nvt.len());
+        let mut final_table = RowMajorMatrix::<F>::new(self.nvt.len(), num_witness);
 
         final_table
             .par_iter_mut()

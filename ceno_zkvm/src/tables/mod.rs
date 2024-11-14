@@ -26,7 +26,7 @@ where
     type FixedInput: Send + Sync + ?Sized;
     type WitnessInput: Send + Sync + ?Sized;
 
-    fn name() -> String;
+    fn name(&self) -> String;
 
     fn construct_circuit(
         &self,

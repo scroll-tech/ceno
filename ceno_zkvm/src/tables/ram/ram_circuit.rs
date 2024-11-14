@@ -28,27 +28,66 @@ pub struct MemFinalRecord {
 /// Setting `WRITABLE = false` does not strictly enforce immutability in this protocol.
 /// it only guarantees that the initial and final values remain invariant,
 /// allowing for temporary modifications within the lifecycle.
-pub trait NonVolatileTable {
-    const RAM_TYPE: RAMType;
-    const V_LIMBS: usize;
-    const WRITABLE: bool;
-    const OFFSET_ADDR: Addr;
-    const END_ADDR: Addr;
+// pub trait NonVolatileTable: Default + Sized {
+//     // const RAM_TYPE: RAMType;
+//     // const V_LIMBS: usize;
+//     // const WRITABLE: bool;
+//     // const OFFSET_ADDR: Addr;
+//     // const END_ADDR: Addr;
 
-    fn name() -> &'static str;
+//     fn ram_type(&self) -> RAMType;
+//     fn v_limbs(&self) -> usize;
+//     fn writable(&self) -> bool;
+//     fn offset_addr(&self) -> Addr;
+//     fn end_addr(&self) -> Addr;
 
-    fn len() -> usize {
-        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+//     fn name(&self) -> &'static str;
+
+//     fn len(&self) -> usize {
+//         //(Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+//         (self.end_addr() - self.offset_addr()) as usize / WORD_SIZE
+//     }
+
+//     fn addr(&self, entry_index: usize) -> Addr {
+//         // Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+//         self.offset_addr() + (entry_index * WORD_SIZE) as Addr
+//     }
+
+//     fn init_state(&self) -> Vec<MemInitRecord> {
+//         (0..self.len())
+//             .map(|i| MemInitRecord {
+//                 addr: self.addr(i),
+//                 value: 0,
+//             })
+//             .collect()
+//     }
+// }
+
+#[derive(Clone)]
+pub struct NonVolatileTable {
+    pub ram_type: RAMType,
+    pub v_limbs: usize,
+    pub writable: bool,
+    pub offset_addr: Addr,
+    pub end_addr: Addr,
+    pub name: &'static str,
+}
+
+impl NonVolatileTable {
+    pub fn len(&self) -> usize {
+        //(Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+        (self.end_addr() - self.offset_addr()) as usize / WORD_SIZE
     }
 
-    fn addr(entry_index: usize) -> Addr {
-        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+    pub fn addr(&self, entry_index: usize) -> Addr {
+        // Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+        self.offset_addr() + (entry_index * WORD_SIZE) as Addr
     }
 
-    fn init_state() -> Vec<MemInitRecord> {
-        (0..Self::len())
+    pub fn init_state(&self) -> Vec<MemInitRecord> {
+        (0..self.len())
             .map(|i| MemInitRecord {
-                addr: Self::addr(i),
+                addr: self.addr(i),
                 value: 0,
             })
             .collect()
@@ -57,17 +96,19 @@ pub trait NonVolatileTable {
 
 /// non-volatile indicates initial value is configurable
 #[derive(Default)]
-pub struct NonVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct NonVolatileRamCircuit {
+    nvram: NonVolatileTable
+};
 
-impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone + Default> TableCircuit<E>
-    for NonVolatileRamCircuit<E, NVRAM>
+impl<E: ExtensionField> TableCircuit<E>
+    for NonVolatileRamCircuit
 {
-    type TableConfig = NonVolatileTableConfig<NVRAM>;
+    type TableConfig = NonVolatileTableConfig;
     type FixedInput = [MemInitRecord];
     type WitnessInput = [MemFinalRecord];
 
-    fn name() -> String {
-        format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
+    fn name(&self) -> String {
+        format!("RAM_{:?}_{}", self.nvram.ram_type(), self.nvram.name())
     }
 
     fn construct_circuit(
@@ -75,8 +116,8 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone + Default>
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
+            || self.name(),
+            |cb| Self::TableConfig::construct_circuit(self, cb),
         )
     }
 
@@ -102,12 +143,15 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone + Default>
 }
 
 #[derive(Default)]
-pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct PubIORamCircuit<E> {
+    phantom: PhantomData<(E)>,
+    nvt: NonVolatileTable,
+}
 
-impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone + Default> TableCircuit<E>
-    for PubIORamCircuit<E, NVRAM>
+impl<E: ExtensionField> TableCircuit<E>
+    for PubIORamCircuit<E>
 {
-    type TableConfig = PubIOTableConfig<NVRAM>;
+    type TableConfig = PubIOTableConfig;
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
