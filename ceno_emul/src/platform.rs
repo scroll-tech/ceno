@@ -16,11 +16,11 @@ pub struct Platform {
 }
 
 pub const CENO_PLATFORM: Platform = Platform {
-    //rom_start: 0x2000_0000,
-    //rom_end: 0x3000_0000 - 1,
-    //ram_start: 0x0020_0000,
-    //ram_end: 0x0040_0000 - 1,
-    //unsafe_ecall_nop: false,
+    // rom_start: 0x2000_0000,
+    // rom_end: 0x3000_0000 - 1,
+    // ram_start: 0x0020_0000,
+    // ram_end: 0x0040_0000 - 1,
+    // unsafe_ecall_nop: false,
 
     // SP1
     rom_start: 0x0020_0800,
@@ -29,7 +29,6 @@ pub const CENO_PLATFORM: Platform = Platform {
     ram_end: 0x8001_0000 - 1,
     unsafe_ecall_nop: true,
 };
-
 
 impl Platform {
     // Virtual memory layout.
