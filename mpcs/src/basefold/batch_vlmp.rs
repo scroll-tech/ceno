@@ -1,11 +1,17 @@
-use super::{Basefold, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec};
+use super::{
+    Basefold, BasefoldCommitment, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec,
+    BasefoldVerifierParams,
+};
 use crate::{
     Error, Evaluation,
     basefold::{
         SumCheck,
         commit_phase::batch_commit_phase,
         inner_product_three,
-        query_phase::{BatchedQueriesResultWithMerklePath, batch_prover_query_phase},
+        query_phase::{
+            BatchedQueriesResultWithMerklePath, batch_prover_query_phase,
+            batch_verifier_query_phase,
+        },
         structure::{BasefoldProof, ProofQueriesResultWithMerklePath},
     },
     sum_check::{SumCheck as _, VirtualPolynomial, eq_xy_eval},
@@ -13,7 +19,9 @@ use crate::{
         add_polynomial_with_coeff,
         arithmetic::inner_product,
         expression::{Expression, Query, Rotation},
-        field_type_to_ext_vec, log2_strict, multiply_poly, poly_index_ext, poly_iter_ext,
+        ext_to_usize, field_type_to_ext_vec,
+        hash::write_digest_to_transcript,
+        log2_strict, multiply_poly, poly_index_ext, poly_iter_ext,
     },
     validate_input,
 };
@@ -25,6 +33,7 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
 };
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -258,5 +267,132 @@ where
             sumcheck_proof: Some(sumcheck_proof),
             trivial_proof: vec![],
         })
+    }
+
+    pub(crate) fn batch_vlmp_verify(
+        vp: &BasefoldVerifierParams<E, Spec>,
+        comms: &[BasefoldCommitment<E>],
+        points: &[Vec<E>],
+        evals: &[Evaluation<E>],
+        proof: &BasefoldProof<E>,
+        transcript: &mut Transcript<E>,
+    ) -> Result<(), Error> {
+        let timer = start_timer!(|| "Basefold::batch_verify");
+        // 	let key = "RAYON_NUM_THREADS";
+        // 	env::set_var(key, "32");
+        let comms = comms.iter().collect_vec();
+        let num_vars = points.iter().map(|point| point.len()).max().unwrap();
+        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
+        validate_input("batch verify", num_vars, &[], points)?;
+        let poly_num_vars = comms.iter().map(|c| c.num_vars().unwrap()).collect_vec();
+        evals.iter().for_each(|eval| {
+            assert_eq!(
+                points[eval.point()].len(),
+                comms[eval.poly()].num_vars().unwrap()
+            );
+        });
+        assert!(poly_num_vars.iter().min().unwrap() >= &Spec::get_basecode_msg_size_log());
+        assert!(!proof.is_trivial());
+
+        let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
+        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
+        let t = (0..batch_size_log)
+            .map(|_| {
+                transcript
+                    .get_and_append_challenge(b"batch coeffs")
+                    .elements
+            })
+            .collect::<Vec<_>>();
+
+        let eq_xt =
+            DenseMultilinearExtension::from_evaluations_ext_vec(t.len(), build_eq_x_r_vec(&t));
+        let target_sum = inner_product_three(
+            evals.iter().map(Evaluation::value),
+            &evals
+                .iter()
+                .map(|eval| E::from(1 << (num_vars - points[eval.point()].len())))
+                .collect_vec(),
+            &poly_iter_ext(&eq_xt).take(evals.len()).collect_vec(),
+        );
+
+        let (new_target_sum, verify_point) = SumCheck::verify(
+            &(),
+            num_vars,
+            2,
+            target_sum,
+            proof.sumcheck_proof.as_ref().unwrap(),
+            transcript,
+        )?;
+        end_timer!(sumcheck_timer);
+
+        // Now the goal is to use the BaseFold to check the new target sum. Note that this time
+        // we only have one eq polynomial in the sum-check.
+        let eq_xy_evals = points
+            .iter()
+            .map(|point| eq_xy_eval(&verify_point[..point.len()], point))
+            .collect_vec();
+        let mut coeffs = vec![E::ZERO; comms.len()];
+        evals.iter().enumerate().for_each(|(i, eval)| {
+            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&eq_xt, i)
+        });
+
+        let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
+        let roots = &proof.roots;
+        let sumcheck_messages = &proof.sumcheck_messages;
+        for i in 0..num_rounds {
+            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
+            fold_challenges.push(
+                transcript
+                    .get_and_append_challenge(b"commit round")
+                    .elements,
+            );
+            if i < num_rounds - 1 {
+                write_digest_to_transcript(&roots[i], transcript);
+            }
+        }
+        let final_message = &proof.final_message;
+        transcript.append_field_element_exts(final_message.as_slice());
+
+        let queries: Vec<_> = (0..Spec::get_number_queries())
+            .map(|_| {
+                ext_to_usize(
+                    &transcript
+                        .get_and_append_challenge(b"query indices")
+                        .elements,
+                ) % (1 << (num_vars + Spec::get_rate_log()))
+            })
+            .collect();
+        let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
+
+        // coeff is the eq polynomial evaluated at the last challenge.len() variables
+        // in reverse order.
+        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
+        let coeff = eq_xy_eval(
+            &verify_point.as_slice()[verify_point.len() - fold_challenges.len()..],
+            &rev_challenges,
+        );
+        // Compute eq as the partially evaluated eq polynomial
+        let mut eq = build_eq_x_r_vec(
+            &verify_point.as_slice()[..verify_point.len() - fold_challenges.len()],
+        );
+        eq.par_iter_mut().for_each(|e| *e *= coeff);
+
+        batch_verifier_query_phase::<E, Spec>(
+            queries.as_slice(),
+            &vp.encoding_params,
+            query_result_with_merkle_path,
+            sumcheck_messages,
+            &fold_challenges,
+            num_rounds,
+            num_vars,
+            final_message,
+            roots,
+            &comms,
+            &coeffs,
+            eq.as_slice(),
+            &new_target_sum,
+        );
+        end_timer!(timer);
+        Ok(())
     }
 }
