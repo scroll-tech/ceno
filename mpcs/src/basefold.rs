@@ -1,12 +1,8 @@
 use crate::{
     Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
-    sum_check::{
-        classic::{ClassicSumCheck, CoefficientsProver},
-        eq_xy_eval,
-    },
+    sum_check::classic::{ClassicSumCheck, CoefficientsProver},
     util::{
         arithmetic::{inner_product_three, interpolate_field_type_over_boolean_hypercube},
-        ext_to_usize,
         hash::{Digest, write_digest_to_transcript},
         log2_strict,
         merkle_tree::MerkleTree,
@@ -19,22 +15,17 @@ pub use encoding::{
     RSCodeDefaultSpec,
 };
 use ff_ext::ExtensionField;
-use query_phase::simple_batch_verifier_query_phase;
 use structure::BasefoldProof;
 pub use structure::BasefoldSpec;
 use transcript::Transcript;
 
-use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
 
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, FieldType},
-    virtual_poly::build_eq_x_r_vec,
-};
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 
 use rayon::{
     iter::IntoParallelIterator,
-    prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
+    prelude::{IntoParallelRefIterator, ParallelIterator},
 };
 pub use sumcheck::{one_level_eval_hc, one_level_interp_hc};
 
@@ -524,97 +515,7 @@ where
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
-        let timer = start_timer!(|| "Basefold::simple batch verify");
-        let batch_size = evals.len();
-        if let Some(num_polys) = comm.num_polys {
-            assert_eq!(num_polys, batch_size);
-        }
-
-        if proof.is_trivial() {
-            let trivial_proof = &proof.trivial_proof;
-            let merkle_tree = MerkleTree::from_batch_leaves(trivial_proof.clone());
-            if comm.root() == merkle_tree.root() {
-                return Ok(());
-            } else {
-                return Err(Error::MerkleRootMismatch);
-            }
-        }
-
-        let num_vars = point.len();
-        if let Some(comm_num_vars) = comm.num_vars() {
-            assert_eq!(num_vars, comm_num_vars);
-            assert!(num_vars >= Spec::get_basecode_msg_size_log());
-        }
-        let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
-
-        // evals.len() is the batch size, i.e., how many polynomials are being opened together
-        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = (0..batch_size_log)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-        let eq_xt = build_eq_x_r_vec(&t)[..evals.len()].to_vec();
-
-        let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
-        let roots = &proof.roots;
-        let sumcheck_messages = &proof.sumcheck_messages;
-        for i in 0..num_rounds {
-            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
-            fold_challenges.push(
-                transcript
-                    .get_and_append_challenge(b"commit round")
-                    .elements,
-            );
-            if i < num_rounds - 1 {
-                write_digest_to_transcript(&roots[i], transcript);
-            }
-        }
-        let final_message = &proof.final_message;
-        transcript.append_field_element_exts(final_message.as_slice());
-
-        let queries: Vec<_> = (0..Spec::get_number_queries())
-            .map(|_| {
-                ext_to_usize(
-                    &transcript
-                        .get_and_append_challenge(b"query indices")
-                        .elements,
-                ) % (1 << (num_vars + Spec::get_rate_log()))
-            })
-            .collect();
-        let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
-
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
-        // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
-        eq.par_iter_mut().for_each(|e| *e *= coeff);
-
-        simple_batch_verifier_query_phase::<E, Spec>(
-            queries.as_slice(),
-            &vp.encoding_params,
-            query_result_with_merkle_path,
-            sumcheck_messages,
-            &fold_challenges,
-            &eq_xt,
-            num_rounds,
-            num_vars,
-            final_message,
-            roots,
-            comm,
-            eq.as_slice(),
-            evals,
-        );
-        end_timer!(timer);
-
-        Ok(())
+        Self::simple_batch_verify_inner(vp, comm, point, evals, proof, transcript)
     }
 }
 
