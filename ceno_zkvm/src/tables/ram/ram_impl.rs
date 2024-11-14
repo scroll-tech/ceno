@@ -198,16 +198,20 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                 set_val!(row, self.final_cycle, rec.cycle);
             });
 
-        if NVRAM::len() - final_mem.len() > 0 {
-            final_table
-                .par_iter_mut()
-                .skip(final_mem.len())
-                .with_min_len(MIN_PAR_SIZE)
-                .for_each(|row| {
-                    // set cycle to 0
-                    set_val!(row, self.final_cycle, 0u64);
-                });
-        }
+        final_table
+            .par_iter_mut()
+            .skip(final_mem.len())
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|row| {
+                // Assign value limbs.
+                if let Some(final_v) = &self.final_v {
+                    final_v.iter().for_each(|limb| {
+                        set_val!(row, limb, 0_u64);
+                    });
+                }
+                // set cycle to 0
+                set_val!(row, self.final_cycle, 0u64);
+            });
 
         Ok(final_table)
     }
