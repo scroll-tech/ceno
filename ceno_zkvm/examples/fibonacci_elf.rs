@@ -96,8 +96,13 @@ fn main() {
     };
 
     let reg_init = initial_registers();
-    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init);
-    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &program_data_init);
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+    mmu_config.generate_fixed_traces(
+        &zkvm_cs,
+        &mut zkvm_fixed_traces,
+        &reg_init,
+        &program_data_init,
+    );
     dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
     let pk = zkvm_cs
@@ -218,10 +223,16 @@ fn main() {
 
     // assign table circuits
     config
-        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &[])
+        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
         .unwrap();
     mmu_config
-        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &program_data_final)
+        .assign_table_circuit(
+            &zkvm_cs,
+            &mut zkvm_witness,
+            &reg_final,
+            &program_data_final,
+            &[],
+        )
         .unwrap();
     // assign program circuit
     zkvm_witness
