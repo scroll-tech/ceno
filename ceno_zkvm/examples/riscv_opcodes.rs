@@ -6,8 +6,8 @@ use ceno_zkvm::{
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
     tables::{
-        DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_program_data,
-        init_public_io, initial_registers,
+        DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_public_io,
+        initial_registers,
     },
 };
 use clap::Parser;
@@ -121,16 +121,8 @@ fn main() {
     );
 
     let reg_init = initial_registers();
-    // Define program constant here
-    let program_data: &[u32] = &[];
-    let program_data_init = init_program_data(program_data);
 
-    config.generate_fixed_traces(
-        &zkvm_cs,
-        &mut zkvm_fixed_traces,
-        &reg_init,
-        &program_data_init,
-    );
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init);
 
     let pk = zkvm_cs
         .clone()
@@ -154,7 +146,7 @@ fn main() {
         let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
         // init mmio
-        for record in program_data_init.iter().chain(public_io_init.iter()) {
+        for record in &public_io_init {
             vm.init_memory(record.addr.into(), record.value);
         }
 
@@ -215,19 +207,6 @@ fn main() {
             })
             .collect_vec();
 
-        // Find the final program_data cycles.
-        let program_data_final = program_data_init
-            .iter()
-            .map(|rec| {
-                let vma: WordAddr = rec.addr.into();
-                MemFinalRecord {
-                    addr: rec.addr,
-                    value: rec.value,
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
-                }
-            })
-            .collect_vec();
-
         // Find the final public io cycles.
         let public_io_final = public_io_init
             .iter()
@@ -264,7 +243,6 @@ fn main() {
                 &mut zkvm_witness,
                 &reg_final,
                 &mem_final,
-                &program_data_final,
                 &public_io_final,
             )
             .unwrap();

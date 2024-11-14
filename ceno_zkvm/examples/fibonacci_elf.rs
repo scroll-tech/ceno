@@ -3,7 +3,7 @@ use ceno_emul::{
     WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::{DummyExtraConfig, Rv32imConfig},
+    instructions::riscv::{DummyExtraConfig, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
         verifier::ZKVMVerifier,
@@ -71,6 +71,7 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
@@ -101,12 +102,8 @@ fn main() {
     };
 
     let reg_init = initial_registers();
-    config.generate_fixed_traces(
-        &zkvm_cs,
-        &mut zkvm_fixed_traces,
-        &reg_init,
-        &program_data_init,
-    );
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init);
+    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &program_data_init);
     dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
     let pk = zkvm_cs
@@ -198,18 +195,12 @@ fn main() {
         })
         .collect_vec();
 
-    let mem_final = vec![];
-
     // assign table circuits
     config
-        .assign_table_circuit(
-            &zkvm_cs,
-            &mut zkvm_witness,
-            &reg_final,
-            &mem_final,
-            &program_data_final,
-            &[],
-        )
+        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &[], &[])
+        .unwrap();
+    mmu_config
+        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &program_data_final)
         .unwrap();
     // assign program circuit
     zkvm_witness
