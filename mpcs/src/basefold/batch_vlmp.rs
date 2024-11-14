@@ -1,3 +1,4 @@
+use super::{Basefold, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec};
 use crate::{
     Error, Evaluation,
     basefold::{
@@ -27,7 +28,6 @@ use multilinear_extensions::{
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
-use super::{Basefold, BasefoldCommitmentWithData, BasefoldProverParams, BasefoldSpec};
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
