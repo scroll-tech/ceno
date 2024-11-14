@@ -1,5 +1,5 @@
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState,
+    CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState, WORD_SIZE,
     WordAddr,
 };
 use ceno_zkvm::{
@@ -15,7 +15,7 @@ use ceno_zkvm::{
 use clap::Parser;
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{panic, time::Instant};
 use tracing_flame::FlameLayer;
@@ -59,6 +59,9 @@ fn main() {
         ram_end: 0xffff_ffff,
         unsafe_ecall_nop: true,
     };
+    const STACK_TOP: u32 = 0x0020_0400;
+    const STACK_SIZE: u32 = 1;
+
     let elf_bytes = include_bytes!(r"fibonacci.elf");
     let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
 
@@ -80,15 +83,22 @@ fn main() {
         vm.program(),
     );
 
-    let program_data_init = vm
-        .program()
-        .image
-        .iter()
-        .map(|(addr, value)| MemInitRecord {
-            addr: *addr,
-            value: *value,
-        })
-        .collect_vec();
+    let program_data_init = {
+        let program_addrs = vm
+            .program()
+            .image
+            .iter()
+            .map(|(addr, value)| MemInitRecord {
+                addr: *addr,
+                value: *value,
+            });
+
+        let stack_addrs = (1..=STACK_SIZE)
+            .map(|i| STACK_TOP - i * WORD_SIZE as u32)
+            .map(|addr| MemInitRecord { addr, value: 0 });
+
+        chain!(program_addrs, stack_addrs).collect_vec()
+    };
 
     let reg_init = initial_registers();
     config.generate_fixed_traces(
@@ -188,22 +198,7 @@ fn main() {
         })
         .collect_vec();
 
-    let mem_final = vm
-        .tracer()
-        .final_accesses()
-        .iter()
-        .filter_map(|(&addr, &cycle)| {
-            if addr >= ByteAddr::from(sp1_platform.ram_start()).waddr() {
-                Some(MemFinalRecord {
-                    addr: addr.into(),
-                    value: vm.peek_memory(addr),
-                    cycle,
-                })
-            } else {
-                None
-            }
-        })
-        .collect_vec();
+    let mem_final = vec![];
 
     // assign table circuits
     config
