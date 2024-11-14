@@ -155,16 +155,16 @@ impl<E: ExtensionField> TableCircuit<E>
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
-    fn name() -> String {
-        format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
+    fn name(&self) -> String {
+        format!("RAM_{:?}_{}", self.nvt.ram_type(), self.nvt.name())
     }
 
     fn construct_circuit(
-        &self,
+        nvt: NonVolatileTable,
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
-            || Self::name(),
+            || self.name(),
             |cb| Self::TableConfig::construct_circuit(cb),
         )
     }
@@ -193,35 +193,59 @@ impl<E: ExtensionField> TableCircuit<E>
 /// - **Dynamic**: The address space is bounded within a specific range,
 ///   though the range itself may be dynamically determined per proof.
 /// - **Volatile**: The initial values are set to `0`
-pub trait DynVolatileRamTable {
-    const RAM_TYPE: RAMType;
-    const V_LIMBS: usize;
+// pub trait DynVolatileRamTable {
+//     const RAM_TYPE: RAMType;
+//     const V_LIMBS: usize;
 
-    const OFFSET_ADDR: Addr;
-    const END_ADDR: Addr;
+//     const OFFSET_ADDR: Addr;
+//     const END_ADDR: Addr;
 
-    fn name() -> &'static str;
+//     fn name() -> &'static str;
 
-    fn max_len() -> usize {
-        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
-    }
+//     fn max_len() -> usize {
+//         (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+//     }
 
-    fn addr(entry_index: usize) -> Addr {
-        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
-    }
+//     fn addr(entry_index: usize) -> Addr {
+//         Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+//     }
+// }
+
+pub struct DynVolatileRamTable {
+        ram_type: RAMType,
+        v_limbs: usize,
+    
+        offset_addr: Addr,
+        end_addr: Addr,
+    
+        name: &'static str
 }
 
-#[derive(Default)]
-pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
+impl DynVolatileRamTable {
+        pub fn max_len() -> usize {
+            (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+        }
+    
+        pub fn addr(entry_index: usize) -> Addr {
+            Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+        }
+    }
 
-impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone + Default> TableCircuit<E>
-    for DynVolatileRamCircuit<E, DVRAM>
+
+#[derive(Default)]
+pub struct DynVolatileRamCircuit<E> {
+    phantom: PhantomData<E>,
+    dvram: DynVolatileRamTable
+}
+
+impl<E: ExtensionField> TableCircuit<E>
+    for DynVolatileRamCircuit<E>
 {
     type TableConfig = DynVolatileRamTableConfig<DVRAM>;
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
-    fn name() -> String {
+    fn name(&self) -> String {
         format!("RAM_{:?}", DVRAM::RAM_TYPE)
     }
 

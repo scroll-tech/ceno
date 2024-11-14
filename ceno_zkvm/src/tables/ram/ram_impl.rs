@@ -318,28 +318,30 @@ impl PubIOTableConfig {
 /// volatile with all init value as 0
 /// dynamic address as witin, relied on augment of knowledge to prove address form
 #[derive(Clone, Debug)]
-pub struct DynVolatileRamTableConfig<DVRAM: DynVolatileRamTable + Send + Sync + Clone> {
+pub struct DynVolatileRamTableConfig {
     addr: WitIn,
 
     final_v: Vec<WitIn>,
     final_cycle: WitIn,
 
-    phantom: PhantomData<DVRAM>,
+    // phantom: PhantomData<DVRAM>,
+    dvram: DynVolatileRamTable,
 }
 
-impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig<DVRAM> {
+impl DynVolatileRamTableConfig {
     pub fn construct_circuit<E: ExtensionField>(
+        dvram: DynVolatileRamTable,
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
         let addr = cb.create_witin(|| "addr");
 
-        let final_v = (0..DVRAM::V_LIMBS)
+        let final_v = (0..dvram.v_limbs())
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
             .collect::<Vec<WitIn>>();
         let final_cycle = cb.create_witin(|| "final_cycle");
 
         let init_table = [
-            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![(dvram.ram_type() as usize).into()],
             vec![addr.expr()],
             vec![Expression::ZERO],
             vec![Expression::ZERO], // Initial cycle.
@@ -348,7 +350,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
         let final_table = [
             // a v t
-            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![(dvram.ram_type() as usize).into()],
             vec![addr.expr()],
             final_v.iter().map(|v| v.expr()).collect_vec(),
             vec![final_cycle.expr()],
@@ -357,23 +359,23 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
         cb.w_table_record(
             || "init_table",
-            DVRAM::RAM_TYPE,
+            dvram.ram_type(),
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
                 addr_witin_id: Some(addr.id.into()),
-                offset: DVRAM::OFFSET_ADDR,
-                len: DVRAM::max_len(),
+                offset: dvram.offset_addr(),
+                len: dvram.max_len(),
             },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
-            DVRAM::RAM_TYPE,
+            dvram.ram_type(),
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr,
                 addr_witin_id: Some(addr.id.into()),
-                offset: DVRAM::OFFSET_ADDR,
-                len: DVRAM::max_len(),
+                offset: dvram.offset_addr(),
+                len: dvram.max_len(),
             },
             final_table,
         )?;
@@ -382,7 +384,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             addr,
             final_v,
             final_cycle,
-            phantom: PhantomData,
+            // phantom: PhantomData,
+            dvram,
         })
     }
 
@@ -392,8 +395,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= DVRAM::max_len());
-        assert!(DVRAM::max_len().is_power_of_two());
+        assert!(final_mem.len() <= self.dvram().max_len());
+        assert!(self.dvram.max_len().is_power_of_two());
         let mut final_table =
             RowMajorMatrix::<F>::new(final_mem.len().next_power_of_two(), num_witness);
 
@@ -429,7 +432,11 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     self.final_v.iter().for_each(|limb| {
                         set_val!(row, limb, 0u64);
                     });
-                    set_val!(row, self.addr, DVRAM::addr(paddin_entry_start + i) as u64);
+                    set_val!(
+                        row,
+                        self.addr,
+                        self.dvram.addr(paddin_entry_start + i) as u64
+                    );
                 });
         }
 
@@ -443,7 +450,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 /// do not check init_value
 /// TODO implement DynUnConstrainRamTableConfig
 #[derive(Clone, Debug)]
-pub struct DynUnConstrainRamTableConfig<RAM: DynVolatileRamTable + Send + Sync + Clone> {
+pub struct DynUnConstrainRamTableConfig {
     addr: WitIn,
 
     init_v: Vec<WitIn>,
@@ -451,5 +458,6 @@ pub struct DynUnConstrainRamTableConfig<RAM: DynVolatileRamTable + Send + Sync +
     final_v: Vec<WitIn>,
     final_cycle: WitIn,
 
-    phantom: PhantomData<RAM>,
+    // phantom: PhantomData<RAM>,
+    dvram: DynVolatileRamTable,
 }
