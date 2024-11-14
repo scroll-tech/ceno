@@ -347,7 +347,7 @@ pub mod test_util {
     ) -> (Pcs::ProverParam, Pcs::VerifierParam) {
         let poly_size = 1 << num_vars;
         let param = Pcs::setup(poly_size).unwrap();
-        Pcs::trim(&param, poly_size).unwrap()
+        Pcs::trim(param, poly_size).unwrap()
     }
 
     pub fn gen_rand_poly<E: ExtensionField>(
