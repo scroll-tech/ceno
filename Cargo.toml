@@ -44,6 +44,7 @@ tracing = { version = "0.1", features = [
 ] }
 tracing-flame = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+prettytable-rs = "^0.10"
 
 [profile.release]
 lto = "thin"

@@ -4,19 +4,52 @@ use crate::{
     structs::{ZKVMConstraintSystem, ZKVMWitnesses},
 };
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, join};
+use prettytable::{Table, row};
 use serde_json::json;
-use std::{collections::BTreeMap, fs::File, io::Write};
-
-#[derive(Clone, Debug, serde::Serialize)]
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Display,
+    fs::File,
+    io::Write,
+};
+#[derive(Clone, Debug, serde::Serialize, Default)]
 pub struct OpCodeStats {
     namespace: NameSpace,
     witnesses: usize,
     reads: usize,
     writes: usize,
     lookups: usize,
-    assert_zero_expr_degrees: Vec<usize>,
-    assert_zero_sumcheck_expr_degrees: Vec<usize>,
+    // store degrees as frequency maps
+    assert_zero_expr_degrees: HashMap<usize, usize>,
+    assert_zero_sumcheck_expr_degrees: HashMap<usize, usize>,
+}
+
+impl std::ops::Add for OpCodeStats {
+    type Output = OpCodeStats;
+    fn add(self, rhs: Self) -> Self::Output {
+        OpCodeStats {
+            namespace: NameSpace::default(),
+            witnesses: self.witnesses + rhs.witnesses,
+            reads: self.reads + rhs.reads,
+            writes: self.writes + rhs.writes,
+            lookups: self.lookups + rhs.lookups,
+            assert_zero_expr_degrees: {
+                let mut merged = self.assert_zero_expr_degrees;
+                for (key, value) in rhs.assert_zero_expr_degrees {
+                    *merged.entry(key).or_insert(0) += value;
+                }
+                merged
+            },
+            assert_zero_sumcheck_expr_degrees: {
+                let mut merged = self.assert_zero_sumcheck_expr_degrees;
+                for (key, value) in rhs.assert_zero_sumcheck_expr_degrees {
+                    *merged.entry(key).or_insert(0) += value;
+                }
+                merged
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -30,10 +63,38 @@ pub enum CircuitStats {
     Table(TableStats),
 }
 
+impl Default for CircuitStats {
+    fn default() -> Self {
+        CircuitStats::OpCode(OpCodeStats::default())
+    }
+}
+
+// logic to aggregate two circuit stats; ignore tables
+impl std::ops::Add for CircuitStats {
+    type Output = CircuitStats;
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (CircuitStats::Table(_), CircuitStats::Table(_)) => {
+                CircuitStats::OpCode(OpCodeStats::default())
+            }
+            (CircuitStats::Table(_), rhs) => rhs,
+            (lhs, CircuitStats::Table(_)) => lhs,
+            (CircuitStats::OpCode(lhs), CircuitStats::OpCode(rhs)) => {
+                CircuitStats::OpCode(lhs + rhs)
+            }
+        }
+    }
+}
+
 impl CircuitStats {
     pub fn new<E: ExtensionField>(system: &ConstraintSystem<E>) -> Self {
-        let just_degrees =
-            |exprs: &Vec<Expression<E>>| exprs.iter().map(|e| e.degree()).collect_vec();
+        let just_degrees_grouped = |exprs: &Vec<Expression<E>>| {
+            let mut counter = HashMap::new();
+            for expr in exprs {
+                *counter.entry(expr.degree()).or_insert(0) += 1;
+            }
+            counter
+        };
         let is_opcode = system.lk_table_expressions.is_empty()
             && system.r_table_expressions.is_empty()
             && system.w_table_expressions.is_empty();
@@ -45,8 +106,8 @@ impl CircuitStats {
                 reads: system.r_expressions.len(),
                 writes: system.w_expressions.len(),
                 lookups: system.lk_expressions.len(),
-                assert_zero_expr_degrees: just_degrees(&system.assert_zero_expressions),
-                assert_zero_sumcheck_expr_degrees: just_degrees(
+                assert_zero_expr_degrees: just_degrees_grouped(&system.assert_zero_expressions),
+                assert_zero_sumcheck_expr_degrees: just_degrees_grouped(
                     &system.assert_zero_sumcheck_expressions,
                 ),
             })
@@ -106,7 +167,7 @@ impl Report<CircuitStats> {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, Default)]
 pub struct CircuitStatsTrace {
     static_stats: CircuitStats,
     num_instances: usize,
@@ -139,7 +200,7 @@ impl Report<CircuitStatsTrace> {
         });
 
         // Stitch num instances to corresponding entries. Sort by num instances
-        let circuits = static_report
+        let mut circuits = static_report
             .circuits
             .iter()
             .map(|(key, value)| {
@@ -150,6 +211,18 @@ impl Report<CircuitStatsTrace> {
             })
             .sorted_by(|lhs, rhs| rhs.1.num_instances.cmp(&lhs.1.num_instances))
             .collect_vec();
+
+        // aggregate results (for opcode circuits only)
+        let mut total = CircuitStatsTrace::default();
+        for (_, circuit) in &circuits {
+            if let CircuitStats::OpCode(_) = &circuit.static_stats {
+                total = CircuitStatsTrace {
+                    num_instances: total.num_instances + circuit.num_instances,
+                    static_stats: total.static_stats + circuit.static_stats.clone(),
+                }
+            }
+        }
+        circuits.insert(0, ("OPCODES TOTAL".to_owned(), total));
         Report { metadata, circuits }
     }
 
@@ -166,4 +239,53 @@ impl Report<CircuitStatsTrace> {
             .collect::<BTreeMap<_, _>>();
         Self::new::<E>(static_report, num_instances, program_name)
     }
+
+    fn display_vec<T: Display>(vec: &Vec<T>) -> String {
+        format!("[{}]", vec.iter().map(|e| format!("{}", e)).join(","))
+    }
+
+    // pub fn save_table(&self) {
+    //     let add = self.get("ADD").unwrap();
+    //     if let CircuitStats::OpCode(opstats) = &add.static_stats {
+    //         let header = row![
+    //             "opcode_name",
+    //             "num_instances",
+    //             "lookups",
+    //             "reads",
+    //             "witnesses",
+    //             "writes",
+    //             "0_expr_deg",
+    //             "0_expr_sumcheck_deg"
+    //         ];
+
+    //         let row = row![
+    //             "ADD",
+    //             add.num_instances,
+    //             opstats.lookups,
+    //             opstats.reads,
+    //             opstats.witnesses,
+    //             opstats.writes,
+    //             Self::display_vec(&opstats.assert_zero_expr_degrees.iter().collect_vec()),
+    //             Self::display_vec(
+    //                 &opstats
+    //                     .assert_zero_sumcheck_expr_degrees
+    //                     .iter()
+    //                     .collect_vec()
+    //             )
+    //         ];
+    //         let mut table = Table::new();
+    //         table.add_row(header);
+    //         table.add_row(row);
+    //         table.printstd();
+    //     }
+    //     let ops_and = self.get("OPS_And").unwrap();
+    //     if let CircuitStats::Table(tablestats) = &ops_and.static_stats {
+    //         let header = row!["table_name", "num_instances", "table_len"];
+    //         let row = row!["OPS_And", ops_and.num_instances, tablestats.table_len];
+    //         let mut table = Table::new();
+    //         table.add_row(header);
+    //         table.add_row(row);
+    //         table.printstd();
+    //     }
+    //}
 }

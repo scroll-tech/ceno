@@ -299,6 +299,7 @@ fn main() {
         );
 
         trace_report.save_json("report.json");
+        // trace_report.save_table();
 
         MockProver::assert_satisfied_full(
             zkvm_cs.clone(),
