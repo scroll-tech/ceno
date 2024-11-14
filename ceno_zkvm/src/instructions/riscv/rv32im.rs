@@ -20,9 +20,9 @@ use crate::{
     },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, MemCircuit, MemFinalRecord, MemInitRecord,
-        OrTableCircuit, PowTableCircuit, PubIOCircuit, RegTableCircuit, TableCircuit,
-        U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, XorTableCircuit,
+        AndTableCircuit, LtuTableCircuit, MemFinalRecord, MemInitRecord, OrTableCircuit,
+        PowTableCircuit, PubIOCircuit, RegTableCircuit, TableCircuit, U5TableCircuit,
+        U8TableCircuit, U14TableCircuit, U16TableCircuit, XorTableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind, InsnKind::*, StepRecord};
@@ -115,8 +115,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // RW tables.
     pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
-    //  pub mem_config: <MemCircuit<E> as TableCircuit<E>>::TableConfig,
-    //  pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 
 impl<E: ExtensionField> Rv32imConfig<E> {
@@ -189,10 +188,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // RW tables
         let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
-        //  let mem_config = cs.register_table_circuit::<MemCircuit<E>>();
 
         // RO tables
-        //   let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
+        let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
 
         Self {
             // alu opcodes
@@ -256,8 +254,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             pow_config,
 
             reg_config,
-            //  mem_config,
-            //  public_io_config,
+            public_io_config,
         }
     }
 
@@ -329,7 +326,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
 
-        //  fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, &());
+        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, &());
     }
 
     pub fn assign_opcode_circuit(
@@ -444,7 +441,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
         reg_final: &[MemFinalRecord],
-        mem_final: &[MemFinalRecord],
         public_io_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
@@ -461,14 +457,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness
             .assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)
             .unwrap();
-        // assign memory finalization.
-        // witness
-        //   .assign_table_circuit::<MemCircuit<E>>(cs, &self.mem_config, mem_final)
-        // .unwrap();
 
-        //   witness
-        //      .assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, public_io_final)
-        //      .unwrap();
+        witness
+            .assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, public_io_final)
+            .unwrap();
 
         Ok(())
     }

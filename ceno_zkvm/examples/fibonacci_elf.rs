@@ -218,7 +218,7 @@ fn main() {
 
     // assign table circuits
     config
-        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &[], &[])
+        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &[])
         .unwrap();
     mmu_config
         .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &program_data_final)

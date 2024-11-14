@@ -5,15 +5,12 @@ use ceno_zkvm::{
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
-    tables::{
-        DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_public_io,
-        initial_registers,
-    },
+    tables::{MemFinalRecord, ProgramTableCircuit, init_public_io, initial_registers},
 };
 use clap::Parser;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext,
+    CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, LUI, LW},
     PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
@@ -220,31 +217,9 @@ fn main() {
             })
             .collect_vec();
 
-        // Find the final mem data and cycles.
-        // TODO retrieve max address access
-        // as we already support non-uniform proving of memory
-        let num_entry = 1 << 12;
-        let mem_final = (0..num_entry)
-            .map(|entry_index| {
-                let byte_addr = ByteAddr::from(MemTable::addr(entry_index));
-                let vma = byte_addr.waddr();
-                MemFinalRecord {
-                    addr: byte_addr.0,
-                    value: vm.peek_memory(vma),
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
-                }
-            })
-            .collect_vec();
-
         // assign table circuits
         config
-            .assign_table_circuit(
-                &zkvm_cs,
-                &mut zkvm_witness,
-                &reg_final,
-                &mem_final,
-                &public_io_final,
-            )
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &public_io_final)
             .unwrap();
 
         // assign program circuit
