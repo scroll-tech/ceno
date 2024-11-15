@@ -47,11 +47,11 @@ impl Platform {
 
     // TODO figure out proper region for program_data
     pub const fn program_data_start(&self) -> Addr {
-        self.ram_start()
+        self.ram_start
     }
 
     pub const fn program_data_end(&self) -> Addr {
-        self.ram_end()
+        self.ram_end
     }
 
     // TODO figure out a proper region for public io

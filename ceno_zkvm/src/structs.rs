@@ -170,6 +170,10 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
     }
 
+    pub fn get_css(&self) -> &BTreeMap<String, ConstraintSystem<E>> {
+        &self.circuit_css
+    }
+
     pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
         self.circuit_css.get(name)
     }

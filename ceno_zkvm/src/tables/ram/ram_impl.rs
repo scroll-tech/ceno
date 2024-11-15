@@ -4,7 +4,7 @@ use std::{
     mem::MaybeUninit,
 };
 
-use ceno_emul::Addr;
+use ceno_emul::{Addr, WORD_SIZE};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -148,6 +148,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             .map(|record| record.addr)
             .collect::<HashSet<Addr>>();
         let unused_addrs = (NVRAM::OFFSET_ADDR..NVRAM::END_ADDR)
+            .step_by(WORD_SIZE)
             .filter(|&addr| !accessed_addrs.contains(&addr))
             .take(NVRAM::len() - init_mem.len())
             .collect_vec();
