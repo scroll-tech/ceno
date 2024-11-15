@@ -44,6 +44,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     }
 
     /// Verify a trace from start to halt.
+    #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
