@@ -2,6 +2,7 @@ mod div;
 mod is_lt;
 mod is_zero;
 mod signed_ext;
+mod signed;
 
 pub use div::DivConfig;
 pub use is_lt::{
@@ -9,3 +10,4 @@ pub use is_lt::{
 };
 pub use is_zero::{IsEqualConfig, IsZeroConfig};
 pub use signed_ext::SignedExtendConfig;
+pub use signed::Signed;
