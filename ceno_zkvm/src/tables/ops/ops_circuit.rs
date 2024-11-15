@@ -36,13 +36,13 @@ impl<E: ExtensionField, OP: OpsTable + Default> TableCircuit<E> for OpsTableCirc
     type FixedInput = ();
     type WitnessInput = ();
 
-    fn name() -> String {
+    fn name(&self) -> String {
         format!("OPS_{:?}", OP::ROM_TYPE)
     }
 
     fn construct_circuit(&self, cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
         cb.namespace(
-            || Self::name(),
+            || self.name(),
             |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len()),
         )
     }

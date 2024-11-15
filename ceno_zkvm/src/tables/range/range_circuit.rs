@@ -31,13 +31,13 @@ impl<E: ExtensionField, RANGE: RangeTable + Default> TableCircuit<E>
     type FixedInput = ();
     type WitnessInput = ();
 
-    fn name() -> String {
+    fn name(&self) -> String {
         format!("RANGE_{:?}", RANGE::ROM_TYPE)
     }
 
     fn construct_circuit(&self, cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
         cb.namespace(
-            || Self::name(),
+            || self.name(),
             |cb| RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE, RANGE::len()),
         )
     }

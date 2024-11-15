@@ -97,12 +97,10 @@ impl NonVolatileTable {
 /// non-volatile indicates initial value is configurable
 #[derive(Default)]
 pub struct NonVolatileRamCircuit {
-    nvram: NonVolatileTable
-};
+    nvram: NonVolatileTable,
+}
 
-impl<E: ExtensionField> TableCircuit<E>
-    for NonVolatileRamCircuit
-{
+impl<E: ExtensionField> TableCircuit<E> for NonVolatileRamCircuit {
     type TableConfig = NonVolatileTableConfig;
     type FixedInput = [MemInitRecord];
     type WitnessInput = [MemFinalRecord];
@@ -148,9 +146,7 @@ pub struct PubIORamCircuit<E> {
     nvt: NonVolatileTable,
 }
 
-impl<E: ExtensionField> TableCircuit<E>
-    for PubIORamCircuit<E>
-{
+impl<E: ExtensionField> TableCircuit<E> for PubIORamCircuit<E> {
     type TableConfig = PubIOTableConfig;
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
@@ -160,12 +156,12 @@ impl<E: ExtensionField> TableCircuit<E>
     }
 
     fn construct_circuit(
-        nvt: NonVolatileTable,
+        &self,
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
             || self.name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
+            |cb| Self::TableConfig::construct_circuit(self.nvt, cb),
         )
     }
 
@@ -212,41 +208,38 @@ impl<E: ExtensionField> TableCircuit<E>
 // }
 
 pub struct DynVolatileRamTable {
-        ram_type: RAMType,
-        v_limbs: usize,
-    
-        offset_addr: Addr,
-        end_addr: Addr,
-    
-        name: &'static str
+    pub ram_type: RAMType,
+    pub v_limbs: usize,
+
+    pub offset_addr: Addr,
+    pub end_addr: Addr,
+
+    pub name: &'static str,
 }
 
 impl DynVolatileRamTable {
-        pub fn max_len() -> usize {
-            (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
-        }
-    
-        pub fn addr(entry_index: usize) -> Addr {
-            Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
-        }
+    pub fn max_len() -> usize {
+        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
     }
 
+    pub fn addr(entry_index: usize) -> Addr {
+        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+    }
+}
 
 #[derive(Default)]
 pub struct DynVolatileRamCircuit<E> {
     phantom: PhantomData<E>,
-    dvram: DynVolatileRamTable
+    dvram: DynVolatileRamTable,
 }
 
-impl<E: ExtensionField> TableCircuit<E>
-    for DynVolatileRamCircuit<E>
-{
-    type TableConfig = DynVolatileRamTableConfig<DVRAM>;
+impl<E: ExtensionField> TableCircuit<E> for DynVolatileRamCircuit<E> {
+    type TableConfig = DynVolatileRamTableConfig;
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
     fn name(&self) -> String {
-        format!("RAM_{:?}", DVRAM::RAM_TYPE)
+        format!("RAM_{:?}", self.dvram.ram_type())
     }
 
     fn construct_circuit(
@@ -254,8 +247,8 @@ impl<E: ExtensionField> TableCircuit<E>
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self::TableConfig, ZKVMError> {
         cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
+            || self.name(),
+            |cb| Self::TableConfig::construct_circuit(self.dvram, cb),
         )
     }
 

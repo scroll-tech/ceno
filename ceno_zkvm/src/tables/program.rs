@@ -124,7 +124,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     type FixedInput = Program;
     type WitnessInput = Program;
 
-    fn name() -> String {
+    fn name(&self) -> String {
         "PROGRAM".into()
     }
 
