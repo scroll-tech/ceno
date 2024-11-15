@@ -64,7 +64,7 @@ fn main() {
         unsafe_ecall_nop: true,
     };
     const STACK_TOP: u32 = 0x0020_0400;
-    const STACK_SIZE: u32 = 1;
+    const STACK_SIZE: u32 = 256;
 
     let elf_bytes = include_bytes!(r"fibonacci.elf");
     let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
