@@ -18,8 +18,8 @@ pub struct Platform {
 pub const CENO_PLATFORM: Platform = Platform {
     rom_start: 0x2000_0000,
     rom_end: 0x3000_0000 - 1,
-    ram_start: 0x0020_0000,
-    ram_end: 0x0040_0000 - 1,
+    ram_start: 0x8000_0000,
+    ram_end: 0xFFFF_FFFF,
     unsafe_ecall_nop: false,
 };
 
@@ -40,11 +40,11 @@ impl Platform {
 
     // TODO figure out proper region for program_data
     pub const fn program_data_start(&self) -> Addr {
-        self.ram_start
+        0x4000_0000
     }
 
     pub const fn program_data_end(&self) -> Addr {
-        self.ram_end
+        0x5000_0000 - 1
     }
 
     // TODO figure out a proper region for public io
