@@ -1,6 +1,6 @@
 use ceno_emul::{
-    CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState, WORD_SIZE,
-    WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState,
+    WORD_SIZE, WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::{DummyExtraConfig, MmuConfig, Rv32imConfig},
@@ -15,9 +15,13 @@ use ceno_zkvm::{
 use clap::Parser;
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::{Itertools, chain};
+use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use std::{panic, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    panic,
+    time::Instant,
+};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -199,6 +203,7 @@ fn main() {
             }
         })
         .collect_vec();
+    debug_memory_ranges(&vm, &program_data_final);
 
     // assign table circuits
     config
@@ -277,4 +282,52 @@ fn main() {
             };
         }
     };
+}
+
+fn debug_memory_ranges(vm: &VMState, program_data_final: &[MemFinalRecord]) {
+    let accessed_addrs = vm
+        .tracer()
+        .final_accesses()
+        .iter()
+        .filter(|(_, &cycle)| (cycle != 0))
+        .map(|(&addr, _)| addr.baddr())
+        .filter(|addr| vm.platform().can_read(addr.0))
+        .collect_vec();
+
+    let handled_addrs = program_data_final
+        .iter()
+        .filter(|rec| rec.cycle != 0)
+        .map(|rec| ByteAddr(rec.addr))
+        .collect::<HashSet<_>>();
+
+    tracing::debug!(
+        "Memory range (accessed): {:?}",
+        format_segments(vm.platform(), accessed_addrs.iter().copied())
+    );
+    tracing::debug!(
+        "Memory range (handled):  {:?}",
+        format_segments(vm.platform(), handled_addrs.iter().copied())
+    );
+
+    for addr in &accessed_addrs {
+        assert!(handled_addrs.contains(addr), "unhandled addr: {:?}", addr);
+    }
+}
+
+fn format_segments(
+    platform: &Platform,
+    addrs: impl Iterator<Item = ByteAddr>,
+) -> HashMap<String, MinMaxResult<ByteAddr>> {
+    addrs
+        .into_grouping_map_by(|addr| format_segment(platform, addr.0))
+        .minmax()
+}
+
+fn format_segment(platform: &Platform, addr: u32) -> String {
+    format!(
+        "{}{}{}",
+        if platform.can_read(addr) { "R" } else { "-" },
+        if platform.can_write(addr) { "W" } else { "-" },
+        if platform.can_execute(addr) { "X" } else { "-" },
+    )
 }

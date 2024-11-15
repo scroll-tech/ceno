@@ -40,11 +40,11 @@ impl Platform {
 
     // TODO figure out proper region for program_data
     pub const fn program_data_start(&self) -> Addr {
-        0
+        self.ram_start
     }
 
     pub const fn program_data_end(&self) -> Addr {
-        0x0040_0000 - 1
+        self.ram_end
     }
 
     // TODO figure out a proper region for public io

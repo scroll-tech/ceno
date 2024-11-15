@@ -64,6 +64,10 @@ impl VMState {
         &self.tracer
     }
 
+    pub fn platform(&self) -> &Platform {
+        &self.platform
+    }
+
     pub fn program(&self) -> &Program {
         self.program.deref()
     }
