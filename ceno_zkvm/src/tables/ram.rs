@@ -68,7 +68,7 @@ impl NonVolatileTable for ProgramDataTable {
 
     fn len() -> usize {
         // TODO: take as program parameter.
-        1 << 16 // 128KB
+        1 << 16 // words - 256KiB
     }
 
     fn name() -> &'static str {
