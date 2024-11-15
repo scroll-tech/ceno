@@ -1,4 +1,4 @@
-use std::{default, marker::PhantomData, mem::MaybeUninit};
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 use ceno_emul::{
     CENO_PLATFORM,

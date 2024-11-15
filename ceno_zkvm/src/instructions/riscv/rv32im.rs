@@ -175,7 +175,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // ecall opcodes
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
         // tables
-        // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
         let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
