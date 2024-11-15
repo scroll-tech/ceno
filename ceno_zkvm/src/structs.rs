@@ -143,6 +143,12 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
 }
 
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
+    pub fn register_table_circuit<TC: TableCircuit<E> + Default>(&mut self) -> TC::TableConfig {
+        self.register_table_circuit_param(TC::default())
+    }
+}
+
+impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
@@ -152,7 +158,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         config
     }
 
-    pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self, tc: TC) -> TC::TableConfig {
+    pub fn register_table_circuit_param<TC: TableCircuit<E>>(&mut self, tc: TC) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = tc.construct_circuit(&mut circuit_builder).unwrap();
@@ -181,11 +187,22 @@ pub struct ZKVMFixedTraces<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZKVMFixedTraces<E> {
+    pub fn register_table_circuit<TC: TableCircuit<E> + Default>(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        config: &TC::TableConfig,
+        input: &TC::FixedInput,
+    ) {
+        self.register_table_circuit_param(cs, config, input, TC::default());
+    }
+}
+
+impl<E: ExtensionField> ZKVMFixedTraces<E> {
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self, _cs: &ZKVMConstraintSystem<E>) {
         assert!(self.circuit_fixed_traces.insert(OC::name(), None).is_none());
     }
 
-    pub fn register_table_circuit<TC: TableCircuit<E>>(
+    pub fn register_table_circuit_param<TC: TableCircuit<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,

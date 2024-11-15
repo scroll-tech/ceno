@@ -124,12 +124,12 @@ fn main() {
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let ptc_with_size = ProgramTableCircuit::new(PROGRAM_SIZE);
     let prog_config =
-        zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>(ptc_with_size.clone());
+        zkvm_cs.register_table_circuit_param::<ProgramTableCircuit<E>>(ptc_with_size.clone());
     zkvm_cs.register_global_state::<GlobalState>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
 
-    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit_param::<ExampleProgramTableCircuit<E>>(
         &zkvm_cs,
         &prog_config,
         &program,

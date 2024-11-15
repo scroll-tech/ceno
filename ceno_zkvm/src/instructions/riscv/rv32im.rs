@@ -175,34 +175,24 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // ecall opcodes
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
         // tables
-        let u16_range_config =
-            cs.register_table_circuit::<U16TableCircuit<E>>(U16TableCircuit::default());
-        let u14_range_config =
-            cs.register_table_circuit::<U14TableCircuit<E>>(U14TableCircuit::default());
-        let u8_range_config =
-            cs.register_table_circuit::<U8TableCircuit<E>>(U8TableCircuit::default());
-        let u5_range_config =
-            cs.register_table_circuit::<U5TableCircuit<E>>(U5TableCircuit::default());
-        let and_table_config =
-            cs.register_table_circuit::<AndTableCircuit<E>>(AndTableCircuit::default());
-        let or_table_config =
-            cs.register_table_circuit::<OrTableCircuit<E>>(OrTableCircuit::default());
-        let xor_table_config =
-            cs.register_table_circuit::<XorTableCircuit<E>>(XorTableCircuit::default());
-        let ltu_config =
-            cs.register_table_circuit::<LtuTableCircuit<E>>(LtuTableCircuit::default());
-        let pow_config =
-            cs.register_table_circuit::<PowTableCircuit<E>>(PowTableCircuit::default());
+        // tables
+        let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
+        let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
+        let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
+        let u5_range_config = cs.register_table_circuit::<U5TableCircuit<E>>();
+        let and_table_config = cs.register_table_circuit::<AndTableCircuit<E>>();
+        let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
+        let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
+        let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
+        let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
+
         // RW tables
-        let reg_config =
-            cs.register_table_circuit::<RegTableCircuit<E>>(RegTableCircuit::default());
-        let mem_config = cs.register_table_circuit::<MemCircuit<E>>(MemCircuit::default());
+        let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
+        let mem_config = cs.register_table_circuit::<MemCircuit<E>>();
 
         // RO tables
-        let program_data_config =
-            cs.register_table_circuit::<ProgramDataCircuit<E>>(ProgramDataCircuit::default());
-        let public_io_config =
-            cs.register_table_circuit::<PubIOCircuit<E>>(PubIOCircuit::default());
+        let program_data_config = cs.register_table_circuit::<ProgramDataCircuit<E>>();
+        let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
 
         Self {
             // alu opcodes
@@ -329,85 +319,23 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs);
 
-        fixed.register_table_circuit::<MemCircuit<E>>(
-            cs,
-            &self.mem_config,
-            &(),
-            MemCircuit::default(),
-        );
-        fixed.register_table_circuit::<U16TableCircuit<E>>(
-            cs,
-            &self.u16_range_config,
-            &(),
-            U16TableCircuit::default(),
-        );
-        fixed.register_table_circuit::<U14TableCircuit<E>>(
-            cs,
-            &self.u14_range_config,
-            &(),
-            U14TableCircuit::default(),
-        );
-        fixed.register_table_circuit::<U8TableCircuit<E>>(
-            cs,
-            &self.u8_range_config,
-            &(),
-            U8TableCircuit::default(),
-        );
-        fixed.register_table_circuit::<U5TableCircuit<E>>(
-            cs,
-            &self.u5_range_config,
-            &(),
-            U5TableCircuit::default(),
-        );
-        fixed.register_table_circuit::<AndTableCircuit<E>>(
-            cs,
-            &self.and_table_config,
-            &(),
-            AndTableCircuit::default(),
-        );
-        fixed.register_table_circuit::<OrTableCircuit<E>>(
-            cs,
-            &self.or_table_config,
-            &(),
-            OrTableCircuit::default(),
-        );
-        fixed.register_table_circuit::<XorTableCircuit<E>>(
-            cs,
-            &self.xor_table_config,
-            &(),
-            XorTableCircuit::default(),
-        );
-        fixed.register_table_circuit::<LtuTableCircuit<E>>(
-            cs,
-            &self.ltu_config,
-            &(),
-            LtuTableCircuit::default(),
-        );
-        fixed.register_table_circuit::<PowTableCircuit<E>>(
-            cs,
-            &self.pow_config,
-            &(),
-            PowTableCircuit::default(),
-        );
+        fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
+        fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
+        fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
+        fixed.register_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &());
+        fixed.register_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &());
+        fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
+        fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
+        fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
+        fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
 
-        fixed.register_table_circuit::<RegTableCircuit<E>>(
-            cs,
-            &self.reg_config,
-            reg_init,
-            RegTableCircuit::default(),
-        );
+        fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
         fixed.register_table_circuit::<ProgramDataCircuit<E>>(
             cs,
             &self.program_data_config,
             program_data_init,
-            ProgramDataCircuit::default(),
         );
-        fixed.register_table_circuit::<PubIOCircuit<E>>(
-            cs,
-            &self.public_io_config,
-            &(),
-            PubIOCircuit::default(),
-        );
+        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, &());
     }
 
     pub fn assign_opcode_circuit(

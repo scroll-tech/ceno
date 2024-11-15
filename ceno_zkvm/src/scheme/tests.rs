@@ -229,10 +229,11 @@ fn test_single_add_instance_e2e() {
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     let u16_range_config =
-        zkvm_cs.register_table_circuit::<U16TableCircuit<E>>(U16TableCircuit::default());
+        zkvm_cs.register_table_circuit_param::<U16TableCircuit<E>>(U16TableCircuit::default());
 
-    let prog_config = zkvm_cs
-        .register_table_circuit::<ProgramTableCircuit<E>>(ProgramTableCircuit::new(PROGRAM_SIZE));
+    let prog_config = zkvm_cs.register_table_circuit_param::<ProgramTableCircuit<E>>(
+        ProgramTableCircuit::new(PROGRAM_SIZE),
+    );
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
@@ -242,10 +243,9 @@ fn test_single_add_instance_e2e() {
         &zkvm_cs,
         &u16_range_config,
         &(),
-        U16TableCircuit::default(),
     );
 
-    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit_param::<ProgramTableCircuit<E>>(
         &zkvm_cs,
         &prog_config,
         &program,
