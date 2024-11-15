@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// namespace used for annotation, preserve meta info during circuit construction
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct NameSpace {
     namespace: Vec<String>,
 }

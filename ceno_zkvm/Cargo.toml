@@ -23,11 +23,13 @@ transcript = { path = "../transcript" }
 
 itertools.workspace = true
 paste.workspace = true
+prettytable-rs.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 tracing.workspace = true
 tracing-flame.workspace = true
 tracing-subscriber.workspace = true
+
 
 clap = { version = "4.5", features = ["derive"] }
 generic_static = "0.2"

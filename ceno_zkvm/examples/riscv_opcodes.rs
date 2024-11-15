@@ -19,6 +19,7 @@ use ceno_emul::{
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    stats::{StaticReport, TraceReport},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
@@ -29,7 +30,6 @@ use sumcheck::{entered_span, exit_span};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::Transcript;
-
 const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
@@ -135,6 +135,8 @@ fn main() {
         &program,
         ptc_with_size.clone(),
     );
+
+    let static_report = StaticReport::new(&zkvm_cs);
 
     let reg_init = initial_registers();
     // Define program constant here
@@ -290,6 +292,16 @@ fn main() {
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
+
+        // get instance counts from witness matrices
+        let trace_report = TraceReport::new_via_witnesses(
+            &static_report,
+            &zkvm_witness,
+            "EXAMPLE_PROGRAM in riscv_opcodes.rs",
+        );
+
+        trace_report.save_json("report.json");
+        trace_report.save_table("report.txt");
 
         MockProver::assert_satisfied_full(
             zkvm_cs.clone(),
