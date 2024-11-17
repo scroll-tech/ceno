@@ -104,7 +104,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
 {
     type TableConfig = PubIOTableConfig<NVRAM>;
     type FixedInput = [Addr];
-    type WitnessInput = [MemFinalRecord];
+    type WitnessInput = [Cycle];
 
     fn name() -> String {
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
@@ -130,10 +130,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         config: &Self::TableConfig,
         num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
+        final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        config.assign_instances(num_witin, final_v)
+        config.assign_instances(num_witin, final_cycles)
     }
 }
 

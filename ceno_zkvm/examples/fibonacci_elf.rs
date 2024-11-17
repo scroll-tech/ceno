@@ -112,7 +112,7 @@ fn main() {
         mem_init
     };
 
-    let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();
+    let io_init = init_public_io(&[]);
 
     let reg_init = initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
@@ -121,7 +121,7 @@ fn main() {
         &mut zkvm_fixed_traces,
         &reg_init,
         &mem_init,
-        &io_addrs,
+        &io_init.iter().map(|rec| rec.addr).collect_vec(),
     );
     dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
@@ -165,7 +165,7 @@ fn main() {
         Tracer::SUBCYCLES_PER_INSN as u32,
         vm.get_pc().into(),
         end_cycle,
-        vec![],
+        io_init.iter().map(|rec| rec.value).collect_vec(),
     );
 
     let mut zkvm_witness = ZKVMWitnesses::default();
@@ -215,13 +215,10 @@ fn main() {
         .collect_vec();
     debug_memory_ranges(&vm, &mem_final);
 
-    let io_final = io_addrs
+    // Find the final public IO cycles.
+    let io_final = io_init
         .iter()
-        .map(|&addr| MemFinalRecord {
-            addr,
-            value: 0,
-            cycle: 0, // IO was not used.
-        })
+        .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
         .collect_vec();
 
     // assign table circuits

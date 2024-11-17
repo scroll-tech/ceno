@@ -1,6 +1,6 @@
 use std::{collections::HashSet, ops::RangeInclusive};
 
-use ceno_emul::{Addr, WORD_SIZE};
+use ceno_emul::{Addr, Cycle, WORD_SIZE};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -41,7 +41,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
         reg_init: &[MemInitRecord],
-        static_mem: &[MemInitRecord],
+        static_mem_init: &[MemInitRecord],
         io_addrs: &[Addr],
     ) {
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
@@ -49,7 +49,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         fixed.register_table_circuit::<StaticMemCircuit<E>>(
             cs,
             &self.static_mem_config,
-            static_mem,
+            static_mem_init,
         );
 
         fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_addrs);
@@ -60,22 +60,18 @@ impl<E: ExtensionField> MmuConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
         reg_final: &[MemFinalRecord],
-        program_data_final: &[MemFinalRecord],
-        public_io_final: &[MemFinalRecord],
+        static_mem_final: &[MemFinalRecord],
+        io_cycles: &[Cycle],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)?;
 
         witness.assign_table_circuit::<StaticMemCircuit<E>>(
             cs,
             &self.static_mem_config,
-            program_data_final,
+            static_mem_final,
         )?;
 
-        witness.assign_table_circuit::<PubIOCircuit<E>>(
-            cs,
-            &self.public_io_config,
-            public_io_final,
-        )?;
+        witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
 
         Ok(())
     }

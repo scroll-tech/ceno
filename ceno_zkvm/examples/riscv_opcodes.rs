@@ -227,14 +227,7 @@ fn main() {
         // Find the final public io cycles.
         let public_io_final = public_io_init
             .iter()
-            .map(|rec| {
-                let vma: WordAddr = rec.addr.into();
-                MemFinalRecord {
-                    addr: rec.addr,
-                    value: rec.value,
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
-                }
-            })
+            .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
             .collect_vec();
 
         // assign table circuits

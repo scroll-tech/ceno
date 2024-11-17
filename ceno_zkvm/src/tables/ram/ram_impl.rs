@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
-use ceno_emul::Addr;
+use ceno_emul::{Addr, Cycle};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -243,7 +243,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     ) -> RowMajorMatrix<F> {
         assert!(NVRAM::len().is_power_of_two());
 
-        // for ram in memory offline check
         let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_fixed);
         assert_eq!(init_table.num_padding_instances(), 0);
 
@@ -261,26 +260,16 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     pub fn assign_instances<F: SmallField>(
         &self,
         num_witness: usize,
-        final_mem: &[MemFinalRecord],
+        final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= NVRAM::len());
         let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
 
         final_table
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip(final_mem.into_par_iter())
-            .for_each(|(row, rec)| {
-                set_val!(row, self.final_cycle, rec.cycle);
-            });
-
-        // set padding with well-form address
-        final_table
-            .par_iter_mut()
-            .skip(final_mem.len())
-            .with_min_len(MIN_PAR_SIZE)
-            .for_each(|row| {
-                set_val!(row, self.final_cycle, 0_u64);
+            .zip_eq(final_cycles.into_par_iter())
+            .for_each(|(row, &cycle)| {
+                set_val!(row, self.final_cycle, cycle);
             });
 
         Ok(final_table)
