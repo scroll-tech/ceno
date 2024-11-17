@@ -3,7 +3,7 @@ use ceno_emul::{
     WORD_SIZE, WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::{DummyExtraConfig, MmuConfig, Rv32imConfig},
+    instructions::riscv::{AddressPadder, DummyExtraConfig, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
         verifier::ZKVMVerifier,
@@ -65,6 +65,7 @@ fn main() {
     };
     const STACK_TOP: u32 = 0x0020_0400;
     const STACK_SIZE: u32 = 256;
+    let mut address_padder = AddressPadder::new(sp1_platform.ram_start()..=sp1_platform.ram_end());
 
     let elf_bytes = include_bytes!(r"fibonacci.elf");
     let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
@@ -102,7 +103,11 @@ fn main() {
             .map(|i| STACK_TOP - i * WORD_SIZE as u32)
             .map(|addr| MemInitRecord { addr, value: 0 });
 
-        chain!(program_addrs, stack_addrs).collect_vec()
+        let mut mem_init = chain!(program_addrs, stack_addrs).collect_vec();
+
+        address_padder.pad(&mut mem_init, MmuConfig::<E>::static_mem_size());
+
+        mem_init
     };
 
     let reg_init = initial_registers();

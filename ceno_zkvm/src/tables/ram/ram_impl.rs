@@ -1,10 +1,5 @@
-use std::{
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-    mem::MaybeUninit,
-};
+use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
-use ceno_emul::{Addr, WORD_SIZE};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -118,16 +113,14 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::name(),
             NVRAM::len()
         );
-        assert!(init_mem.len() <= NVRAM::len());
 
-        // for ram in memory offline check
         let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_fixed);
         assert_eq!(init_table.num_padding_instances(), 0);
 
         init_table
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip(init_mem.into_par_iter())
+            .zip_eq(init_mem.into_par_iter())
             .for_each(|(row, rec)| {
                 if self.init_v.len() == 1 {
                     // Assign value directly.
@@ -142,31 +135,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                 set_fixed_val!(row, self.addr, (rec.addr as u64).into());
             });
 
-        // Select addresses from the range as padding.
-        let accessed_addrs = init_mem
-            .iter()
-            .map(|record| record.addr)
-            .collect::<HashSet<Addr>>();
-        let unused_addrs = (NVRAM::OFFSET_ADDR..NVRAM::END_ADDR)
-            .step_by(WORD_SIZE)
-            .filter(|&addr| !accessed_addrs.contains(&addr))
-            .take(NVRAM::len() - init_mem.len())
-            .collect_vec();
-
-        // set padding with well-form address with 0 value
-        init_table
-            .par_iter_mut()
-            .skip(init_mem.len())
-            .zip_eq(unused_addrs)
-            .with_min_len(MIN_PAR_SIZE)
-            .for_each(|(row, addr): (&mut [MaybeUninit<F>], Addr)| {
-                // set value limb to 0
-                self.init_v.iter().for_each(|limb| {
-                    set_fixed_val!(row, limb, 0u64.into());
-                });
-                set_fixed_val!(row, self.addr, (addr as u64).into());
-            });
-
         init_table
     }
 
@@ -176,13 +144,12 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= NVRAM::len());
         let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
 
         final_table
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .zip(final_mem.into_par_iter())
+            .zip_eq(final_mem.into_par_iter())
             .for_each(|(row, rec)| {
                 if let Some(final_v) = &self.final_v {
                     if final_v.len() == 1 {
@@ -197,21 +164,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                     }
                 }
                 set_val!(row, self.final_cycle, rec.cycle);
-            });
-
-        final_table
-            .par_iter_mut()
-            .skip(final_mem.len())
-            .with_min_len(MIN_PAR_SIZE)
-            .for_each(|row| {
-                // Assign value limbs.
-                if let Some(final_v) = &self.final_v {
-                    final_v.iter().for_each(|limb| {
-                        set_val!(row, limb, 0_u64);
-                    });
-                }
-                // set cycle to 0
-                set_val!(row, self.final_cycle, 0u64);
             });
 
         Ok(final_table)

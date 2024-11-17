@@ -1,13 +1,11 @@
 use ceno_emul::{Addr, CENO_PLATFORM, VMState, WORD_SIZE, Word};
-use ram_circuit::{
-    DynVolatileRamCircuit, NonVolatileRamCircuit, NonVolatileTable, PubIORamCircuit,
-};
+use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamCircuit};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
 
 mod ram_circuit;
 mod ram_impl;
-pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord};
+pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
 #[derive(Clone)]
 pub struct MemTable;
@@ -63,8 +61,8 @@ impl NonVolatileTable for ProgramDataTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = true;
-    const OFFSET_ADDR: Addr = CENO_PLATFORM.program_data_start();
-    const END_ADDR: Addr = CENO_PLATFORM.program_data_end() + 1;
+    const OFFSET_ADDR: Addr = CENO_PLATFORM.program_data_start(); // TODO: remove.
+    const END_ADDR: Addr = CENO_PLATFORM.program_data_end() + 1; // TODO: remove.
 
     fn len() -> usize {
         // TODO: take as program parameter.
