@@ -97,7 +97,3 @@ impl NonVolatileTable for PubIOTable {
 }
 
 pub type PubIOCircuit<E> = PubIORamCircuit<E, PubIOTable>;
-
-pub fn initial_registers() -> Vec<MemInitRecord> {
-    RegTable::init_state()
-}

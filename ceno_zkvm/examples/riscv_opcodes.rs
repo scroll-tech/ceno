@@ -5,7 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
-    tables::{MemFinalRecord, ProgramTableCircuit, initial_registers},
+    tables::{MemFinalRecord, ProgramTableCircuit},
 };
 use clap::Parser;
 
@@ -136,7 +136,7 @@ fn main() {
 
     let static_report = StaticReport::new(&zkvm_cs);
 
-    let reg_init = initial_registers();
+    let reg_init = MmuConfig::<E>::initial_registers();
 
     let mem_init = MemPadder::init_mem(mem_addresses, MmuConfig::<E>::static_mem_len(), &[]);
 

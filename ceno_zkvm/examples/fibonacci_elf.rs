@@ -10,7 +10,7 @@ use ceno_zkvm::{
     },
     state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, initial_registers},
+    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit},
 };
 use clap::Parser;
 use ff_ext::ff::Field;
@@ -110,7 +110,7 @@ fn main() {
     // IO is not used in this program, but it must have a particular size at the moment.
     let io_init = mem_padder.pad_records(MmuConfig::<E>::public_io_len(), vec![]);
 
-    let reg_init = initial_registers();
+    let reg_init = MmuConfig::<E>::initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
     mmu_config.generate_fixed_traces(
         &zkvm_cs,

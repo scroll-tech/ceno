@@ -7,8 +7,8 @@ use crate::{
     error::ZKVMError,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RegTableCircuit,
-        StaticMemCircuit, StaticMemTable, TableCircuit,
+        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RegTable,
+        RegTableCircuit, StaticMemCircuit, StaticMemTable, TableCircuit,
     },
 };
 
@@ -74,6 +74,15 @@ impl<E: ExtensionField> MmuConfig<E> {
         witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
 
         Ok(())
+    }
+
+    pub fn initial_registers() -> Vec<MemInitRecord> {
+        (0..<RegTable as NonVolatileTable>::len())
+            .map(|index| MemInitRecord {
+                addr: index as Addr,
+                value: 0,
+            })
+            .collect()
     }
 
     pub fn static_mem_len() -> usize {
