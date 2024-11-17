@@ -1,5 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
 
+use ceno_emul::Addr;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
@@ -235,7 +236,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     }
 
     /// assign to fixed address
-    pub fn gen_init_state<F: SmallField>(&self, num_fixed: usize) -> RowMajorMatrix<F> {
+    pub fn gen_init_state<F: SmallField>(
+        &self,
+        num_fixed: usize,
+        io_addrs: &[Addr],
+    ) -> RowMajorMatrix<F> {
         assert!(NVRAM::len().is_power_of_two());
 
         // for ram in memory offline check
@@ -244,10 +249,10 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
 
         init_table
             .par_iter_mut()
-            .enumerate()
             .with_min_len(MIN_PAR_SIZE)
-            .for_each(|(i, row)| {
-                set_fixed_val!(row, self.addr, (NVRAM::addr(i) as u64).into());
+            .zip_eq(io_addrs.into_par_iter())
+            .for_each(|(row, addr)| {
+                set_fixed_val!(row, self.addr, (*addr as u64).into());
             });
         init_table
     }

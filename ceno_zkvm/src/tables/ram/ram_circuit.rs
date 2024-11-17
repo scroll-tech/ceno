@@ -103,7 +103,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     for PubIORamCircuit<E, NVRAM>
 {
     type TableConfig = PubIOTableConfig<NVRAM>;
-    type FixedInput = ();
+    type FixedInput = [Addr];
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
@@ -120,10 +120,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
-        _init_v: &Self::FixedInput,
+        io_addrs: &[Addr],
     ) -> RowMajorMatrix<E::BaseField> {
         // assume returned table is well-formed include padding
-        config.gen_init_state(num_fixed)
+        config.gen_init_state(num_fixed, io_addrs)
     }
 
     fn assign_instances(

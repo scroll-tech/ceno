@@ -7,7 +7,7 @@ use crate::{
     error::ZKVMError,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, RegTableCircuit,
+        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RegTableCircuit,
         StaticMemCircuit, StaticMemTable, TableCircuit,
     },
 };
@@ -42,6 +42,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
         reg_init: &[MemInitRecord],
         static_mem: &[MemInitRecord],
+        io_addrs: &[Addr],
     ) {
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
 
@@ -51,7 +52,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             static_mem,
         );
 
-        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, &());
+        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_addrs);
     }
 
     pub fn assign_table_circuit(
@@ -82,6 +83,10 @@ impl<E: ExtensionField> MmuConfig<E> {
     pub fn static_mem_size() -> usize {
         <StaticMemTable as NonVolatileTable>::len()
     }
+
+    pub fn public_io_size() -> usize {
+        <PubIOTable as NonVolatileTable>::len()
+    }
 }
 
 pub struct AddressPadder {
@@ -99,7 +104,7 @@ impl AddressPadder {
 
     /// Pad `records` to `new_len` with valid records.
     /// No addresses will be used more than once.
-    pub fn pad(&mut self, records: &mut Vec<MemInitRecord>, new_len: usize) {
+    pub fn pad_records(&mut self, records: &mut Vec<MemInitRecord>, new_len: usize) {
         let old_len = records.len();
         assert!(
             old_len <= new_len,
@@ -124,6 +129,34 @@ impl AddressPadder {
             records.len(),
             new_len,
             "not enough addresses to pad memory records from {old_len} to {new_len}"
+        );
+    }
+
+    /// Pad `addresses` to `new_len` with valid records.
+    /// No addresses will be used more than once.
+    pub fn pad_addresses(&mut self, addresses: &mut Vec<Addr>, new_len: usize) {
+        let old_len = addresses.len();
+        assert!(
+            old_len <= new_len,
+            "cannot fit {old_len} memory addresses in {new_len} space"
+        );
+
+        // Keep track of addresses that were explicitly used.
+        self.used_addresses.extend(addresses.iter());
+
+        addresses.extend(
+            // Search for some addresses in the given range.
+            (&mut self.valid_addresses)
+                .step_by(WORD_SIZE)
+                // Exclude addresses already used.
+                .filter(|addr| !self.used_addresses.contains(addr))
+                // Create the padding.
+                .take(new_len - old_len),
+        );
+        assert_eq!(
+            addresses.len(),
+            new_len,
+            "not enough addresses to pad from {old_len} to {new_len}"
         );
     }
 }

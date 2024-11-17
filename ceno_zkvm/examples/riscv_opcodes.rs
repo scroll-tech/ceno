@@ -135,8 +135,10 @@ fn main() {
 
     let reg_init = initial_registers();
 
+    let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();
+
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
-    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[]);
+    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[], &io_addrs);
 
     let pk = zkvm_cs
         .clone()

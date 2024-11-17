@@ -83,8 +83,13 @@ impl NonVolatileTable for PubIOTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = false;
-    const OFFSET_ADDR: Addr = CENO_PLATFORM.public_io_start();
-    const END_ADDR: Addr = CENO_PLATFORM.public_io_end() + 1;
+    const OFFSET_ADDR: Addr = CENO_PLATFORM.public_io_start(); // TODO: remove.
+    const END_ADDR: Addr = CENO_PLATFORM.public_io_end() + 1; // TODO: remove.
+
+    fn len() -> usize {
+        // TODO: take as program parameter.
+        1 << 2 // words
+    }
 
     fn name() -> &'static str {
         "PubIOTable"

@@ -10,7 +10,9 @@ use ceno_zkvm::{
     },
     state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, initial_registers},
+    tables::{
+        MemFinalRecord, MemInitRecord, ProgramTableCircuit, init_public_io, initial_registers,
+    },
 };
 use clap::Parser;
 use ff_ext::ff::Field;
@@ -105,14 +107,22 @@ fn main() {
 
         let mut mem_init = chain!(program_addrs, stack_addrs).collect_vec();
 
-        address_padder.pad(&mut mem_init, MmuConfig::<E>::static_mem_size());
+        address_padder.pad_records(&mut mem_init, MmuConfig::<E>::static_mem_size());
 
         mem_init
     };
 
+    let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();
+
     let reg_init = initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
-    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
+    mmu_config.generate_fixed_traces(
+        &zkvm_cs,
+        &mut zkvm_fixed_traces,
+        &reg_init,
+        &mem_init,
+        &io_addrs,
+    );
     dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
     let pk = zkvm_cs
@@ -205,12 +215,27 @@ fn main() {
         .collect_vec();
     debug_memory_ranges(&vm, &mem_final);
 
+    let io_final = io_addrs
+        .iter()
+        .map(|&addr| MemFinalRecord {
+            addr,
+            value: 0,
+            cycle: 0, // IO was not used.
+        })
+        .collect_vec();
+
     // assign table circuits
     config
         .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
         .unwrap();
     mmu_config
-        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final, &[])
+        .assign_table_circuit(
+            &zkvm_cs,
+            &mut zkvm_witness,
+            &reg_final,
+            &mem_final,
+            &io_final,
+        )
         .unwrap();
     // assign program circuit
     zkvm_witness
