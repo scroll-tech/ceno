@@ -100,7 +100,11 @@ impl AddressPadder {
 
     /// Pad `records` to `new_len` with valid records.
     /// No addresses will be used more than once.
-    pub fn pad_records(&mut self, records: &mut Vec<MemInitRecord>, new_len: usize) {
+    pub fn pad_records(
+        &mut self,
+        mut records: Vec<MemInitRecord>,
+        new_len: usize,
+    ) -> Vec<MemInitRecord> {
         let old_len = records.len();
         assert!(
             old_len <= new_len,
@@ -126,11 +130,12 @@ impl AddressPadder {
             new_len,
             "not enough addresses to pad memory records from {old_len} to {new_len}"
         );
+        records
     }
 
     /// Pad `addresses` to `new_len` with valid records.
     /// No addresses will be used more than once.
-    pub fn pad_addresses(&mut self, addresses: &mut Vec<Addr>, new_len: usize) {
+    pub fn pad_addresses(&mut self, mut addresses: Vec<Addr>, new_len: usize) -> Vec<Addr> {
         let old_len = addresses.len();
         assert!(
             old_len <= new_len,
@@ -154,5 +159,6 @@ impl AddressPadder {
             new_len,
             "not enough addresses to pad from {old_len} to {new_len}"
         );
+        addresses
     }
 }

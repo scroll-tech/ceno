@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, VMState, WORD_SIZE, Word};
+use ceno_emul::{Addr, CENO_PLATFORM, VMState, WORD_SIZE};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamCircuit};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
@@ -100,20 +100,4 @@ pub type PubIOCircuit<E> = PubIORamCircuit<E, PubIOTable>;
 
 pub fn initial_registers() -> Vec<MemInitRecord> {
     RegTable::init_state()
-}
-
-pub fn init_program_data(program_data_content: &[Word]) -> Vec<MemInitRecord> {
-    let mut program_data_init = StaticMemTable::init_state();
-    for (i, value) in program_data_content.iter().enumerate() {
-        program_data_init[i].value = *value;
-    }
-    program_data_init
-}
-
-pub fn init_public_io(init_public_io: &[Word]) -> Vec<MemInitRecord> {
-    let mut pubio_table = PubIOTable::init_state();
-    for (i, value) in init_public_io.iter().enumerate() {
-        pubio_table[i].value = *value;
-    }
-    pubio_table
 }

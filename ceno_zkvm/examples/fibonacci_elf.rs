@@ -10,9 +10,7 @@ use ceno_zkvm::{
     },
     state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{
-        MemFinalRecord, MemInitRecord, ProgramTableCircuit, init_public_io, initial_registers,
-    },
+    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, initial_registers},
 };
 use clap::Parser;
 use ff_ext::ff::Field;
@@ -105,14 +103,12 @@ fn main() {
             .map(|i| STACK_TOP - i * WORD_SIZE as u32)
             .map(|addr| MemInitRecord { addr, value: 0 });
 
-        let mut mem_init = chain!(program_addrs, stack_addrs).collect_vec();
-
-        address_padder.pad_records(&mut mem_init, MmuConfig::<E>::static_mem_size());
-
-        mem_init
+        let mem_init = chain!(program_addrs, stack_addrs).collect_vec();
+        address_padder.pad_records(mem_init, MmuConfig::<E>::static_mem_size())
     };
 
-    let io_init = init_public_io(&[]);
+    // IO is not used in this program, but it must have a particular size at the moment.
+    let io_init = address_padder.pad_records(vec![], MmuConfig::<E>::public_io_size());
 
     let reg_init = initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);

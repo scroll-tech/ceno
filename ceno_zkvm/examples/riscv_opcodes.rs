@@ -1,11 +1,11 @@
-use std::{panic, time::Instant};
+use std::{iter::zip, panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
-    instructions::riscv::{MmuConfig, Rv32imConfig, constants::EXIT_PC},
+    instructions::riscv::{AddressPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
-    tables::{MemFinalRecord, ProgramTableCircuit, init_public_io, initial_registers},
+    tables::{MemFinalRecord, ProgramTableCircuit, initial_registers},
 };
 use clap::Parser;
 
@@ -89,6 +89,9 @@ fn main() {
             })
             .collect(),
     );
+    let mem_addresses = CENO_PLATFORM.ram_start()..=CENO_PLATFORM.ram_end();
+    let io_addresses = CENO_PLATFORM.public_io_start()..=CENO_PLATFORM.public_io_end();
+
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let mut fmt_layer = fmt::layer()
         .compact()
@@ -135,10 +138,28 @@ fn main() {
 
     let reg_init = initial_registers();
 
+    let mem_init =
+        AddressPadder::new(mem_addresses).pad_records(vec![], MmuConfig::<E>::static_mem_size());
+
+    let init_public_io = |values: &[u32]| {
+        let mut records = AddressPadder::new(io_addresses.clone())
+            .pad_records(vec![], MmuConfig::<E>::public_io_size());
+        for (record, &value) in zip(&mut records, values) {
+            record.value = value;
+        }
+        records
+    };
+
     let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();
 
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
-    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &[], &io_addrs);
+    mmu_config.generate_fixed_traces(
+        &zkvm_cs,
+        &mut zkvm_fixed_traces,
+        &reg_init,
+        &mem_init,
+        &io_addrs,
+    );
 
     let pk = zkvm_cs
         .clone()
@@ -224,6 +245,19 @@ fn main() {
             })
             .collect_vec();
 
+        // Find the final memory values and cycles.
+        let mem_final = mem_init
+            .iter()
+            .map(|rec| {
+                let vma: WordAddr = rec.addr.into();
+                MemFinalRecord {
+                    addr: rec.addr,
+                    value: vm.peek_memory(vma),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec();
+
         // Find the final public io cycles.
         let public_io_final = public_io_init
             .iter()
@@ -239,7 +273,7 @@ fn main() {
                 &zkvm_cs,
                 &mut zkvm_witness,
                 &reg_final,
-                &[],
+                &mem_final,
                 &public_io_final,
             )
             .unwrap();
