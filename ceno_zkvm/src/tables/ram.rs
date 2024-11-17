@@ -36,8 +36,6 @@ impl NonVolatileTable for RegTable {
     const RAM_TYPE: RAMType = RAMType::Register;
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
     const WRITABLE: bool = true;
-    const OFFSET_ADDR: Addr = 0;
-    const END_ADDR: Addr = 0;
 
     fn name() -> &'static str {
         "RegTable"
@@ -45,10 +43,6 @@ impl NonVolatileTable for RegTable {
 
     fn len() -> usize {
         VMState::REG_COUNT.next_power_of_two()
-    }
-
-    fn addr(entry_index: usize) -> Addr {
-        entry_index as Addr
     }
 }
 
@@ -61,8 +55,6 @@ impl NonVolatileTable for StaticMemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = true;
-    const OFFSET_ADDR: Addr = CENO_PLATFORM.program_data_start(); // TODO: remove.
-    const END_ADDR: Addr = CENO_PLATFORM.program_data_end() + 1; // TODO: remove.
 
     fn len() -> usize {
         // TODO: take as program parameter.
@@ -83,8 +75,6 @@ impl NonVolatileTable for PubIOTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = false;
-    const OFFSET_ADDR: Addr = CENO_PLATFORM.public_io_start(); // TODO: remove.
-    const END_ADDR: Addr = CENO_PLATFORM.public_io_end() + 1; // TODO: remove.
 
     fn len() -> usize {
         // TODO: take as program parameter.

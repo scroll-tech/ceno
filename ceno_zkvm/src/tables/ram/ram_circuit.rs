@@ -33,27 +33,11 @@ pub trait NonVolatileTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
     const WRITABLE: bool;
-    const OFFSET_ADDR: Addr;
-    const END_ADDR: Addr;
 
     fn name() -> &'static str;
 
-    fn len() -> usize {
-        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
-    }
-
-    fn addr(entry_index: usize) -> Addr {
-        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
-    }
-
-    fn init_state() -> Vec<MemInitRecord> {
-        (0..Self::len())
-            .map(|i| MemInitRecord {
-                addr: Self::addr(i),
-                value: 0,
-            })
-            .collect()
-    }
+    /// Maximum number of words in the table.
+    fn len() -> usize;
 }
 
 /// non-volatile indicates initial value is configurable
