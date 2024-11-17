@@ -7,14 +7,17 @@ use crate::{
     error::ZKVMError,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        MemFinalRecord, MemInitRecord, NonVolatileTable, ProgramDataCircuit, ProgramDataTable,
-        PubIOCircuit, RegTableCircuit, TableCircuit,
+        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, RegTableCircuit,
+        StaticMemCircuit, StaticMemTable, TableCircuit,
     },
 };
 
 pub struct MmuConfig<E: ExtensionField> {
+    /// Initialization of registers.
     pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub program_data_config: <ProgramDataCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// Initialization of memory with static addresses.
+    pub static_mem_config: <StaticMemCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// Initialization of public IO.
     pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 
@@ -22,13 +25,13 @@ impl<E: ExtensionField> MmuConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
 
-        let program_data_config = cs.register_table_circuit::<ProgramDataCircuit<E>>();
+        let static_mem_config = cs.register_table_circuit::<StaticMemCircuit<E>>();
 
         let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
 
         Self {
             reg_config,
-            program_data_config,
+            static_mem_config,
             public_io_config,
         }
     }
@@ -38,14 +41,14 @@ impl<E: ExtensionField> MmuConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
         reg_init: &[MemInitRecord],
-        program_data_init: &[MemInitRecord],
+        static_mem: &[MemInitRecord],
     ) {
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
 
-        fixed.register_table_circuit::<ProgramDataCircuit<E>>(
+        fixed.register_table_circuit::<StaticMemCircuit<E>>(
             cs,
-            &self.program_data_config,
-            program_data_init,
+            &self.static_mem_config,
+            static_mem,
         );
 
         fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, &());
@@ -61,9 +64,9 @@ impl<E: ExtensionField> MmuConfig<E> {
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)?;
 
-        witness.assign_table_circuit::<ProgramDataCircuit<E>>(
+        witness.assign_table_circuit::<StaticMemCircuit<E>>(
             cs,
-            &self.program_data_config,
+            &self.static_mem_config,
             program_data_final,
         )?;
 
@@ -77,7 +80,7 @@ impl<E: ExtensionField> MmuConfig<E> {
     }
 
     pub fn static_mem_size() -> usize {
-        <ProgramDataTable as NonVolatileTable>::len()
+        <StaticMemTable as NonVolatileTable>::len()
     }
 }
 

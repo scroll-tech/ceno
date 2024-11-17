@@ -89,7 +89,7 @@ fn main() {
         vm.program(),
     );
 
-    let program_data_init = {
+    let mem_init = {
         let program_addrs = vm
             .program()
             .image
@@ -112,12 +112,7 @@ fn main() {
 
     let reg_init = initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
-    mmu_config.generate_fixed_traces(
-        &zkvm_cs,
-        &mut zkvm_fixed_traces,
-        &reg_init,
-        &program_data_init,
-    );
+    mmu_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces, &reg_init, &mem_init);
     dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
 
     let pk = zkvm_cs
@@ -197,7 +192,7 @@ fn main() {
         .collect_vec();
 
     // Find the final memory values and cycles.
-    let program_data_final = program_data_init
+    let mem_final = mem_init
         .iter()
         .map(|rec| {
             let vma: WordAddr = rec.addr.into();
@@ -208,20 +203,14 @@ fn main() {
             }
         })
         .collect_vec();
-    debug_memory_ranges(&vm, &program_data_final);
+    debug_memory_ranges(&vm, &mem_final);
 
     // assign table circuits
     config
         .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
         .unwrap();
     mmu_config
-        .assign_table_circuit(
-            &zkvm_cs,
-            &mut zkvm_witness,
-            &reg_final,
-            &program_data_final,
-            &[],
-        )
+        .assign_table_circuit(&zkvm_cs, &mut zkvm_witness, &reg_final, &mem_final, &[])
         .unwrap();
     // assign program circuit
     zkvm_witness
@@ -289,7 +278,7 @@ fn main() {
     };
 }
 
-fn debug_memory_ranges(vm: &VMState, program_data_final: &[MemFinalRecord]) {
+fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
     let accessed_addrs = vm
         .tracer()
         .final_accesses()
@@ -299,7 +288,7 @@ fn debug_memory_ranges(vm: &VMState, program_data_final: &[MemFinalRecord]) {
         .filter(|addr| vm.platform().can_read(addr.0))
         .collect_vec();
 
-    let handled_addrs = program_data_final
+    let handled_addrs = mem_final
         .iter()
         .filter(|rec| rec.cycle != 0)
         .map(|rec| ByteAddr(rec.addr))

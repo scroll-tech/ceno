@@ -55,9 +55,9 @@ impl NonVolatileTable for RegTable {
 pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
 
 #[derive(Clone)]
-pub struct ProgramDataTable;
+pub struct StaticMemTable;
 
-impl NonVolatileTable for ProgramDataTable {
+impl NonVolatileTable for StaticMemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = true;
@@ -70,11 +70,11 @@ impl NonVolatileTable for ProgramDataTable {
     }
 
     fn name() -> &'static str {
-        "ProgramDataTable"
+        "StaticMemTable"
     }
 }
 
-pub type ProgramDataCircuit<E> = NonVolatileRamCircuit<E, ProgramDataTable>;
+pub type StaticMemCircuit<E> = NonVolatileRamCircuit<E, StaticMemTable>;
 
 #[derive(Clone)]
 pub struct PubIOTable;
@@ -98,7 +98,7 @@ pub fn initial_registers() -> Vec<MemInitRecord> {
 }
 
 pub fn init_program_data(program_data_content: &[Word]) -> Vec<MemInitRecord> {
-    let mut program_data_init = ProgramDataTable::init_state();
+    let mut program_data_init = StaticMemTable::init_state();
     for (i, value) in program_data_content.iter().enumerate() {
         program_data_init[i].value = *value;
     }
