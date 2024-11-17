@@ -18,6 +18,7 @@ use crate::{
 
 use super::SignedExtendConfig;
 
+// TODO rename to AssertLtConfig (LT -> Lt) to fit naming conventions
 #[derive(Debug, Clone)]
 pub struct AssertLTConfig(InnerLtConfig);
 
