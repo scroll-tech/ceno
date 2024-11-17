@@ -1,8 +1,8 @@
-use std::{iter::zip, panic, time::Instant};
+use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
-    instructions::riscv::{AddressPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
+    instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
     tables::{MemFinalRecord, ProgramTableCircuit, initial_registers},
@@ -12,7 +12,7 @@ use clap::Parser;
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, LUI, LW},
-    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
+    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -138,16 +138,14 @@ fn main() {
 
     let reg_init = initial_registers();
 
-    let mem_init =
-        AddressPadder::new(mem_addresses).pad_records(vec![], MmuConfig::<E>::static_mem_size());
+    let mem_init = MemPadder::init_mem(mem_addresses, MmuConfig::<E>::static_mem_len(), &[]);
 
-    let init_public_io = |values: &[u32]| {
-        let mut records = AddressPadder::new(io_addresses.clone())
-            .pad_records(vec![], MmuConfig::<E>::public_io_size());
-        for (record, &value) in zip(&mut records, values) {
-            record.value = value;
-        }
-        records
+    let init_public_io = |values: &[Word]| {
+        MemPadder::init_mem(
+            io_addresses.clone(),
+            MmuConfig::<E>::public_io_len(),
+            values,
+        )
     };
 
     let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();

@@ -1,6 +1,6 @@
-use std::{collections::HashSet, ops::RangeInclusive};
+use std::{collections::HashSet, iter::zip, ops::RangeInclusive};
 
-use ceno_emul::{Addr, Cycle, WORD_SIZE};
+use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -76,21 +76,38 @@ impl<E: ExtensionField> MmuConfig<E> {
         Ok(())
     }
 
-    pub fn static_mem_size() -> usize {
+    pub fn static_mem_len() -> usize {
         <StaticMemTable as NonVolatileTable>::len()
     }
 
-    pub fn public_io_size() -> usize {
+    pub fn public_io_len() -> usize {
         <PubIOTable as NonVolatileTable>::len()
     }
 }
 
-pub struct AddressPadder {
+pub struct MemPadder {
     valid_addresses: RangeInclusive<Addr>,
     used_addresses: HashSet<Addr>,
 }
 
-impl AddressPadder {
+impl MemPadder {
+    /// Create initial memory records.
+    /// Store `values` at the start of `address_range`, in order.
+    /// Pad with zero values up to `padded_len`.
+    ///
+    /// Require: `values.len() <= padded_len <= address_range.len()`
+    pub fn init_mem(
+        address_range: RangeInclusive<Addr>,
+        padded_len: usize,
+        values: &[Word],
+    ) -> Vec<MemInitRecord> {
+        let mut records = Self::new(address_range).pad_records(padded_len, vec![]);
+        for (record, &value) in zip(&mut records, values) {
+            record.value = value;
+        }
+        records
+    }
+
     pub fn new(valid_addresses: RangeInclusive<Addr>) -> Self {
         Self {
             valid_addresses,
@@ -102,8 +119,8 @@ impl AddressPadder {
     /// No addresses will be used more than once.
     pub fn pad_records(
         &mut self,
-        mut records: Vec<MemInitRecord>,
         new_len: usize,
+        mut records: Vec<MemInitRecord>,
     ) -> Vec<MemInitRecord> {
         let old_len = records.len();
         assert!(
@@ -135,7 +152,7 @@ impl AddressPadder {
 
     /// Pad `addresses` to `new_len` with valid records.
     /// No addresses will be used more than once.
-    pub fn pad_addresses(&mut self, mut addresses: Vec<Addr>, new_len: usize) -> Vec<Addr> {
+    pub fn pad_addresses(&mut self, new_len: usize, mut addresses: Vec<Addr>) -> Vec<Addr> {
         let old_len = addresses.len();
         assert!(
             old_len <= new_len,

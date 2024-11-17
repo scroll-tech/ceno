@@ -3,7 +3,7 @@ use ceno_emul::{
     WORD_SIZE, WordAddr,
 };
 use ceno_zkvm::{
-    instructions::riscv::{AddressPadder, DummyExtraConfig, MmuConfig, Rv32imConfig},
+    instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
         verifier::ZKVMVerifier,
@@ -65,7 +65,7 @@ fn main() {
     };
     const STACK_TOP: u32 = 0x0020_0400;
     const STACK_SIZE: u32 = 256;
-    let mut address_padder = AddressPadder::new(sp1_platform.ram_start()..=sp1_platform.ram_end());
+    let mut mem_padder = MemPadder::new(sp1_platform.ram_start()..=sp1_platform.ram_end());
 
     let elf_bytes = include_bytes!(r"fibonacci.elf");
     let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
@@ -104,11 +104,11 @@ fn main() {
             .map(|addr| MemInitRecord { addr, value: 0 });
 
         let mem_init = chain!(program_addrs, stack_addrs).collect_vec();
-        address_padder.pad_records(mem_init, MmuConfig::<E>::static_mem_size())
+        mem_padder.pad_records(MmuConfig::<E>::static_mem_len(), mem_init)
     };
 
     // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = address_padder.pad_records(vec![], MmuConfig::<E>::public_io_size());
+    let io_init = mem_padder.pad_records(MmuConfig::<E>::public_io_len(), vec![]);
 
     let reg_init = initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
