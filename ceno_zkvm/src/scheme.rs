@@ -17,7 +17,7 @@ pub mod mock_prover;
 mod tests;
 
 #[derive(Clone)]
-pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+pub struct ZKVMOpcodeProof<E: ExtensionField> {
     // TODO support >1 opcodes
     pub num_instances: usize,
 
@@ -39,8 +39,8 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     pub w_records_in_evals: Vec<E>,
     pub lk_records_in_evals: Vec<E>,
 
-    pub wits_commit: PCS::Commitment,
-    pub wits_opening_proof: PCS::Proof,
+    // pub wits_commit: PCS::Commitment,
+    // pub wits_opening_proof: PCS::Proof,
     pub wits_in_evals: Vec<E>,
 }
 
@@ -62,9 +62,9 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
     pub fixed_in_evals: Vec<E>,
     pub fixed_opening_proof: Option<PCS::Proof>,
-    pub wits_commit: PCS::Commitment,
+    // pub wits_commit: PCS::Commitment,
     pub wits_in_evals: Vec<E>,
-    pub wits_opening_proof: PCS::Proof,
+    // pub wits_opening_proof: PCS::Proof,
 }
 
 /// each field will be interpret to (constant) polynomial
@@ -122,7 +122,7 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub raw_pi: Vec<Vec<E::BaseField>>,
     // the evaluation of raw_pi.
     pub pi_evals: Vec<E>,
-    opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
+    opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E>)>,
     table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E, PCS>)>,
 }
 

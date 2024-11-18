@@ -4,6 +4,7 @@ use crate::{
 };
 use ff::Field;
 use ff_ext::ExtensionField;
+use multilinear_extensions::util::max_usable_threads;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::{collections::HashMap, mem::MaybeUninit};
 mod range;
@@ -49,8 +50,7 @@ pub trait TableCircuit<E: ExtensionField> {
         // Fill the padding with zeros, if any.
         let num_padding_instances = table.num_padding_instances();
         if num_padding_instances > 0 {
-            let nthreads =
-                std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+            let nthreads = max_usable_threads();
             let padding_instance = vec![MaybeUninit::new(E::BaseField::ZERO); num_witin];
             let num_padding_instance_per_batch = if num_padding_instances > 256 {
                 num_padding_instances.div_ceil(nthreads)

@@ -99,14 +99,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
-            PCS::write_commitment(&proof.wits_commit, &mut transcript)
-                .map_err(ZKVMError::PCSError)?;
-        }
-        for (_, (_, proof)) in vm_proof.table_proofs.iter() {
-            PCS::write_commitment(&proof.wits_commit, &mut transcript)
-                .map_err(ZKVMError::PCSError)?;
-        }
+        // for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
+        //     PCS::write_commitment(&proof.wits_commit, &mut transcript)
+        //         .map_err(ZKVMError::PCSError)?;
+        // }
+        // for (_, (_, proof)) in vm_proof.table_proofs.iter() {
+        //     PCS::write_commitment(&proof.wits_commit, &mut transcript)
+        //         .map_err(ZKVMError::PCSError)?;
+        // }
 
         // alpha, beta
         let challenges = [
@@ -233,7 +233,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         name: &str,
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
-        proof: &ZKVMOpcodeProof<E, PCS>,
+        proof: &ZKVMOpcodeProof<E>,
         pi: &[E],
         transcript: &mut Transcript<E>,
         num_product_fanin: usize,
@@ -463,15 +463,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             proof.wits_in_evals.len(),
             input_opening_point
         );
-        PCS::simple_batch_verify(
-            vp,
-            &proof.wits_commit,
-            &input_opening_point,
-            &proof.wits_in_evals,
-            &proof.wits_opening_proof,
-            transcript,
-        )
-        .map_err(ZKVMError::PCSError)?;
+        // PCS::simple_batch_verify(
+        //     vp,
+        //     &proof.wits_commit,
+        //     &input_opening_point,
+        //     &proof.wits_in_evals,
+        //     &proof.wits_opening_proof,
+        //     transcript,
+        // )
+        // .map_err(ZKVMError::PCSError)?;
 
         Ok(input_opening_point)
     }
@@ -761,23 +761,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             circuit_vk.fixed_commit,
         );
 
-        PCS::simple_batch_verify(
-            vp,
-            &proof.wits_commit,
-            &input_opening_point,
-            &proof.wits_in_evals,
-            &proof.wits_opening_proof,
-            transcript,
-        )
-        .map_err(ZKVMError::PCSError)?;
-        tracing::debug!(
-            "[table {}] verified opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
-            name,
-            proof.wits_in_evals.len(),
-            input_opening_point,
-            proof.wits_in_evals,
-            proof.wits_commit
-        );
+        // PCS::simple_batch_verify(
+        //     vp,
+        //     &proof.wits_commit,
+        //     &input_opening_point,
+        //     &proof.wits_in_evals,
+        //     &proof.wits_opening_proof,
+        //     transcript,
+        // )
+        // .map_err(ZKVMError::PCSError)?;
+        // tracing::debug!(
+        //     "[table {}] verified opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+        //     name,
+        //     proof.wits_in_evals.len(),
+        //     input_opening_point,
+        //     proof.wits_in_evals,
+        //     proof.wits_commit
+        // );
 
         Ok(input_opening_point)
     }

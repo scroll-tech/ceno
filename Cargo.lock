@@ -1060,6 +1060,9 @@ dependencies = [
  "rand_chacha",
  "rayon",
  "serde",
+ "tracing",
+ "tracing-flame",
+ "tracing-subscriber",
  "transcript",
 ]
 

@@ -2,6 +2,7 @@ use std::mem::MaybeUninit;
 
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
+use multilinear_extensions::util::max_usable_threads;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -47,8 +48,7 @@ pub trait Instruction<E: ExtensionField> {
         num_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
-        let nthreads =
-            std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+        let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
         } else {
