@@ -101,8 +101,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         })
     }
 
-    /// assign to fixed instance
-    /// assume init_mem sorted by address in increasing order
     pub fn gen_init_state<F: SmallField>(
         &self,
         num_fixed: usize,

@@ -138,6 +138,7 @@ fn main() {
 
     let reg_init = MmuConfig::<E>::initial_registers();
 
+    // RAM is not used in this program, but it must have a particular size at the moment.
     let mem_init = MemPadder::init_mem(mem_addresses, MmuConfig::<E>::static_mem_len(), &[]);
 
     let init_public_io = |values: &[Word]| {

@@ -63,6 +63,7 @@ fn main() {
         ram_end: 0xffff_ffff,
         unsafe_ecall_nop: true,
     };
+    // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
     const STACK_TOP: u32 = 0x0020_0400;
     const STACK_SIZE: u32 = 256;
     let mut mem_padder = MemPadder::new(sp1_platform.ram_start()..=sp1_platform.ram_end());
