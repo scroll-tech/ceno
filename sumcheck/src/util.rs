@@ -167,7 +167,7 @@ pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
         // Since F does not implement extension field, can't print out the basefields
         // Instead, process the string directly
         let str_seg: Vec<&str> = inv.split(&['(', ')']).collect();
-        println!("{} {}", str_seg[2], str_seg[4]);
+        // println!("{} {}", str_seg[2], str_seg[4]);
         res += p_i[i] * prod * denom_down * (denom_up * evals[i]).invert().unwrap();
 
         // compute denom for the next step is current_denom * (len-i)/i

@@ -79,6 +79,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut transcripts = transcript.fork(vm_proof.num_circuits());
 
         for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
+            println!("NAME: {}", name);
+
             let transcript = &mut transcripts[i];
 
             let circuit_vk = self
@@ -172,6 +174,43 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
+        println!("\n\n--\nINPUT:");
+        print!("self^vk^circuit_vks_name: [");
+        for (key, _) in &self.vk.circuit_vks {
+            print!(" {}", key);
+        }
+        println!(" ]");
+        print!("self^vk^circuit_vks_key^cs^num_witin: [");
+        for (_, val) in &self.vk.circuit_vks {
+            print!(" {:?}", val.cs.num_witin);
+        }
+        println!(" ]");
+        print!("self^vk^circuit_vks_key^cs^witin_namespace_map: [");
+        for (_, val) in &self.vk.circuit_vks {
+            print!(" {:?}", val.cs.witin_namespace_map);
+        }
+        println!(" ]");
+        print!("self^vk^circuit_vks_key^cs^num_fixed: [");
+        for (_, val) in &self.vk.circuit_vks {
+            print!(" {:?}", val.cs.num_fixed);
+        }
+        println!(" ]");
+        print!("self^vk^circuit_vks_key^cs^fixed_namespace_map: [");
+        for (_, val) in &self.vk.circuit_vks {
+            print!(" {:?}", val.cs.fixed_namespace_map);
+        }
+        println!(" ]");
+        // print!("self^vk^circuit_vks_key^cs^r_expressions: [");
+        // for (_, val) in &self.vk.circuit_vks {
+            // print!(" {:?}", val.cs.r_expressions);
+        // }
+        // println!(" ]");
+        println!("R_EXPRS:");
+        for (_, val) in &self.vk.circuit_vks {
+            crate::expression::expr_as_list(&val.cs.r_expressions, "self^vk^circuit_vks_key^cs^r_expressions".to_string());
+        }
+
+
         let cs = circuit_vk.get_cs();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len(),
@@ -588,6 +627,7 @@ impl TowerVerify {
         num_fanin: usize,
         transcript: &mut Transcript<E>,
     ) -> TowerVerifyResult<E> {
+        /*
         println!("\n\n--\nINPUT:");
         println!("prod_spec_size: {}", prod_out_evals.len());
         println!("logup_spec_size: {}", logup_out_evals.len());
@@ -640,6 +680,7 @@ impl TowerVerify {
         }
         println!("]");
         println!("\nWITNESS:");
+        */
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
@@ -834,12 +875,14 @@ impl TowerVerify {
             },
         )?;
 
+        /*
         println!("\nOUTPUT:");
         println!("NEXT_RT: {:?}", next_rt.point);
         println!("PROD_SPEC_ILE: {:?}", prod_spec_input_layer_eval);
         println!("LOGUP_SPEC_P_ILE: {:?}", logup_spec_p_input_layer_eval);
         println!("LOGUP_SPEC_Q_ILE: {:?}", logup_spec_q_input_layer_eval);
         println!("--\n\n");
+        */
         Ok((
             next_rt.point,
             prod_spec_input_layer_eval,

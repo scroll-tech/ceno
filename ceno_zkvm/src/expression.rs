@@ -10,6 +10,7 @@ use std::{
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
+use std::collections::VecDeque;
 
 #[cfg(test)]
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
@@ -35,6 +36,145 @@ pub enum Expression<E: ExtensionField> {
     /// This is x, a, b expr to represent ax + b polynomial
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
     Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
+}
+
+pub fn expr_as_list<E: ExtensionField>(old_expr_list: &Vec<Expression<E>>, expr_name: String) {
+    // Print out the expression as a list (unroll all recursion) of form:
+    #[derive(Debug)]
+    struct ExpressionEntry<E: ExtensionField> {
+        expr_ty: u8,
+        id: u16, // wit_id or challenge_id
+        fixed: usize, // fixed or power
+        constant: E::BaseField,
+        scalar: E,
+        offset: E,
+        l0: usize, // limbs point to the indices of subexpressions
+        l1: usize,
+        l2: usize,
+    }
+
+    let mut sp = 0;
+    let mut expr_list: Vec<ExpressionEntry<E>> = Vec::new();
+    let mut queue: VecDeque<Expression<E>> = VecDeque::new();
+    for old_expr in old_expr_list {
+        queue.push_back(old_expr.clone());
+    }
+    // Assume no recursion, etc.
+    while queue.len() > 0 {
+        let next_expr = queue.pop_front().unwrap();
+        sp += 1;
+        expr_list.push(match next_expr {
+            Expression::WitIn(wit_id) => ExpressionEntry {
+                expr_ty: 0,
+                id: wit_id,
+                fixed: 0,
+                constant: E::BaseField::from(0),
+                scalar: E::from(0),
+                offset: E::from(0),
+                l0: 0,
+                l1: 0,
+                l2: 0,
+            },
+            Expression::Fixed(fixed) => ExpressionEntry {
+                expr_ty: 1,
+                id: 0,
+                fixed: fixed.0,
+                constant: E::BaseField::from(0),
+                scalar: E::from(0),
+                offset: E::from(0),
+                l0: 0,
+                l1: 0,
+                l2: 0,
+            },
+            Expression::Constant(cnst) => ExpressionEntry {
+                expr_ty: 2,
+                id: 0,
+                fixed: 0,
+                constant: cnst.clone(),
+                scalar: E::from(0),
+                offset: E::from(0),
+                l0: 0,
+                l1: 0,
+                l2: 0,
+            },
+            Expression::Sum(a, b) => {
+                // Allocated entry would be indexed sp + queue.len()
+                queue.push_back(*a);
+                queue.push_back(*b);
+                ExpressionEntry {
+                    expr_ty: 3,
+                    id: 0,
+                    fixed: 0,
+                    constant: E::BaseField::from(0),
+                    scalar: E::from(0),
+                    offset: E::from(0),
+                    l0: sp + queue.len() - 2,
+                    l1: sp + queue.len() - 1,
+                    l2: 0,
+                }
+            },
+            Expression::Product(a, b) => {
+                // Allocated entry would be indexed sp + queue.len()
+                queue.push_back(*a);
+                queue.push_back(*b);
+                ExpressionEntry {
+                    expr_ty: 4,
+                    id: 0,
+                    fixed: 0,
+                    constant: E::BaseField::from(0),
+                    scalar: E::from(0),
+                    offset: E::from(0),
+                    l0: sp + queue.len() - 2,
+                    l1: sp + queue.len() - 1,
+                    l2: 0,
+                }
+            },
+            Expression::ScaledSum(a, b, c) => {
+                // Allocated entry would be indexed sp + queue.len()
+                queue.push_back(*a);
+                queue.push_back(*b);
+                queue.push_back(*c);
+                ExpressionEntry {
+                    expr_ty: 5,
+                    id: 0,
+                    fixed: 0,
+                    constant: E::BaseField::from(0),
+                    scalar: E::from(0),
+                    offset: E::from(0),
+                    l0: sp + queue.len() - 3,
+                    l1: sp + queue.len() - 2,
+                    l2: sp + queue.len() - 1,
+                }
+            },
+            Expression::Challenge(challenge_id, power, scalar, offset) => ExpressionEntry {
+                expr_ty: 6,
+                id: challenge_id,
+                fixed: power,
+                constant: E::BaseField::from(0),
+                scalar: scalar.clone(),
+                offset: offset.clone(),
+                l0: 0,
+                l1: 0,
+                l2: 0,
+            },
+        });
+    }
+    println!("{}_len: {}", expr_name, expr_list.len());
+    print!("{}: [", expr_name);
+    for expr in expr_list {
+        print!(" {} {} {}", expr.expr_ty, expr.id, expr.fixed);
+        let const_str = format!("{:?}", expr.constant);
+        let str_seg: Vec<&str> = const_str.split(&['(', ')']).collect();
+        print!(" {}", str_seg[1]);
+        let scalar_str = format!("{:?}", expr.scalar);
+        let str_seg: Vec<&str> = scalar_str.split(&['(', ')']).collect();
+        print!(" {} {}", str_seg[2], str_seg[4]);
+        let offset_str = format!("{:?}", expr.offset);
+        let str_seg: Vec<&str> = offset_str.split(&['(', ')']).collect();
+        print!(" {} {}", str_seg[2], str_seg[4]);
+        print!(" {} {} {}", expr.l0, expr.l1, expr.l2);
+    }
+    println!(" ]");
 }
 
 /// this is used as finite state machine state

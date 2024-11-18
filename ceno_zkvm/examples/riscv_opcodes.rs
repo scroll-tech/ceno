@@ -26,7 +26,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 use transcript::Transcript;
 
 #[from_env]
-const RAYON_NUM_THREADS: usize = 8;
+const RAYON_NUM_THREADS: usize = 1;
 
 // For now, we assume registers
 //  - x0 is not touched,
