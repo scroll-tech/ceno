@@ -60,5 +60,5 @@ jobs:
 
       - name: Run fibonacci
         env:
-          RAYON_NUM_THREADS: 2
+          RAYON_NUM_THREADS: 8
         run: cargo run --package ceno_zkvm --example fibonacci_elf --target ${{ matrix.target }} -- 
