@@ -3,7 +3,7 @@ use std::{panic, time::Instant};
 use ceno_zkvm::{
     declare_program,
     instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
-    scheme::prover::ZKVMProver,
+    scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
     tables::{
         DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_program_data,
@@ -14,22 +14,22 @@ use clap::Parser;
 
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext,
-    InsnKind::{ADD, BLTU, EANY, JAL, LUI, LW},
+    InsnKind::{ADD, BLTU, EANY, LUI, LW},
     PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    stats::{StaticReport, TraceReport},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use rand_chacha::ChaCha8Rng;
+use sumcheck::{entered_span, exit_span};
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::Transcript;
-
 const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
@@ -53,8 +53,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
         encode_rv32(ADD, 2, 3, 3, 0),              // add x3, x2, x3
         encode_rv32(BLTU, 0, 3, 0, -8_i32 as u32), // bltu x0, x3, -8
         // End.
-        encode_rv32(JAL, 0, 0, 1, 4), // jal x1, 4
-        ECALL_HALT,                   // ecall halt
+        ECALL_HALT, // ecall halt
     );
     program
 };
@@ -76,7 +75,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     let program = Program::new(
         CENO_PLATFORM.pc_base(),
@@ -94,23 +93,36 @@ fn main() {
             .collect(),
     );
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+    let mut fmt_layer = fmt::layer()
+        .compact()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_thread_ids(false)
+        .with_thread_names(false);
+    fmt_layer.set_ansi(false);
+
+    // Take filtering directives from RUST_LOG env_var
+    // Directive syntax: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+    // Example: RUST_LOG="info" cargo run.. to get spans/events at info level; profiling spans are info
+    // Example: RUST_LOG="[sumcheck]" cargo run.. to get only events under the "sumcheck" span
+    let filter = EnvFilter::from_default_env();
+
     let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
-        )
-        .with(EnvFilter::from_default_env())
+        .with(fmt_layer)
+        .with(filter)
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    let top_level = entered_span!("TOPLEVEL");
+
+    let keygen = entered_span!("KEYGEN");
+
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(&pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -121,6 +133,8 @@ fn main() {
         &prog_config,
         &program,
     );
+
+    let static_report = StaticReport::new(&zkvm_cs);
 
     let reg_init = initial_registers();
     // Define program constant here
@@ -136,10 +150,11 @@ fn main() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
 
+    exit_span!(keygen);
     // proving
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
@@ -276,9 +291,27 @@ fn main() {
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
 
+        // get instance counts from witness matrices
+        let trace_report = TraceReport::new_via_witnesses(
+            &static_report,
+            &zkvm_witness,
+            "EXAMPLE_PROGRAM in riscv_opcodes.rs",
+        );
+
+        trace_report.save_json("report.json");
+        trace_report.save_table("report.txt");
+
+        MockProver::assert_satisfied_full(
+            zkvm_cs.clone(),
+            zkvm_fixed_traces.clone(),
+            &zkvm_witness,
+            &pi,
+        );
+
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
+
         let mut zkvm_proof = prover
             .create_proof(zkvm_witness, pi, transcript)
             .expect("create_proof failed");
@@ -286,7 +319,7 @@ fn main() {
         println!(
             "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
-            timer.elapsed().as_secs_f64()
+            timer.elapsed().as_secs()
         );
 
         let transcript = Transcript::new(b"riscv");
@@ -331,4 +364,5 @@ fn main() {
             }
         };
     }
+    exit_span!(top_level);
 }

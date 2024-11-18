@@ -9,7 +9,7 @@ use crate::{
 };
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
@@ -43,7 +43,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
@@ -57,7 +57,7 @@ pub enum ROMType {
     Instruction, // Decoded instruction from the fixed program.
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum RAMType {
     GlobalState,
     Register,
@@ -170,12 +170,16 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
     }
 
+    pub fn get_css(&self) -> &BTreeMap<String, ConstraintSystem<E>> {
+        &self.circuit_css
+    }
+
     pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
         self.circuit_css.get(name)
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMFixedTraces<E: ExtensionField> {
     pub circuit_fixed_traces: BTreeMap<String, Option<RowMajorMatrix<E::BaseField>>>,
 }
@@ -203,14 +207,23 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    pub witnesses: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
+    pub fn get_opcode_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_opcodes.get(name).cloned()
+    }
+
+    pub fn get_table_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_tables.get(name).cloned()
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
@@ -222,7 +235,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
             OC::assign_instances(config, cs.num_witin as usize, records)?;
-        assert!(self.witnesses.insert(OC::name(), witness).is_none());
+        assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
+        assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
@@ -273,9 +287,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        assert!(self.witnesses.insert(TC::name(), witness).is_none());
+        assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
+        assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
         Ok(())
+    }
+
+    /// Iterate opcode circuits, then table circuits, sorted by name.
+    pub fn into_iter_sorted(self) -> impl Iterator<Item = (String, RowMajorMatrix<E::BaseField>)> {
+        chain(self.witnesses_opcodes, self.witnesses_tables)
     }
 }
 

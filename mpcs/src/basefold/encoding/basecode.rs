@@ -117,7 +117,7 @@ where
     }
 
     fn trim(
-        pp: &Self::PublicParameters,
+        mut pp: Self::PublicParameters,
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
         if pp.table.len() < Spec::get_rate_log() + max_msg_size_log {
@@ -127,6 +127,9 @@ where
                 max_msg_size_log,
             )));
         }
+        pp.table_w_weights
+            .truncate(Spec::get_rate_log() + max_msg_size_log);
+        pp.table.truncate(Spec::get_rate_log() + max_msg_size_log);
         let mut key: [u8; 16] = [0u8; 16];
         let mut iv: [u8; 16] = [0u8; 16];
         let mut rng = ChaCha8Rng::from_seed(pp.rng_seed);
@@ -135,8 +138,8 @@ where
         rng.fill_bytes(&mut iv);
         Ok((
             Self::ProverParameters {
-                table_w_weights: pp.table_w_weights.clone(),
-                table: pp.table.clone(),
+                table_w_weights: pp.table_w_weights,
+                table: pp.table,
                 rng_seed: pp.rng_seed,
                 _phantom: PhantomData,
             },
@@ -430,7 +433,7 @@ mod tests {
     fn prover_verifier_consistency() {
         type Code = Basecode<BasecodeDefaultSpec>;
         let pp: BasecodeParameters<GoldilocksExt2> = Code::setup(10);
-        let (pp, vp) = Code::trim(&pp, 10).unwrap();
+        let (pp, vp) = Code::trim(pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
             for index in 0..(1 << level) {
                 assert_eq!(

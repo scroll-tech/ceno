@@ -42,7 +42,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
         ZKVMVerifier { vk }
     }
-
+    #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
@@ -118,7 +118,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
         let point_eval = PointAndEval::default();
-        let mut transcripts = transcript.fork(vm_proof.num_circuits());
+        let mut transcripts = transcript.fork(self.vk.circuit_vks.len());
 
         for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
             let transcript = &mut transcripts[i];
