@@ -2,7 +2,7 @@ use std::{collections::HashSet, iter::zip, ops::RangeInclusive};
 
 use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 
 use crate::{
     error::ZKVMError,
@@ -45,6 +45,15 @@ impl<E: ExtensionField> MmuConfig<E> {
         static_mem_init: &[MemInitRecord],
         io_addrs: &[Addr],
     ) {
+        assert!(
+            chain(
+                static_mem_init.iter().map(|record| record.addr),
+                io_addrs.iter().copied(),
+            )
+            .all_unique(),
+            "memory addresses must be unique"
+        );
+
         fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
 
         fixed.register_table_circuit::<StaticMemCircuit<E>>(
