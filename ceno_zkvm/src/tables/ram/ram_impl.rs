@@ -367,8 +367,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .enumerate()
             .for_each(|(i, row)| {
                 let addr = DVRAM::addr(i);
+                set_val!(row, self.addr, addr as u64);
                 if let Some(rec) = accessed_addrs.get(&addr) {
-                    set_val!(row, self.addr, rec.addr as u64);
                     if self.final_v.len() == 1 {
                         // Assign value directly.
                         set_val!(row, self.final_v[0], rec.value as u64);
@@ -385,7 +385,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     self.final_v.iter().for_each(|limb| {
                         set_val!(row, limb, 0u64);
                     });
-                    set_val!(row, self.addr, addr as u64);
+                    set_val!(row, self.final_cycle, 0_u64);
                 }
             });
 
