@@ -15,7 +15,7 @@ use ceno_zkvm::{
 use clap::Parser;
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::{Itertools, MinMaxResult, chain};
+use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
@@ -140,8 +140,9 @@ fn main() {
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
 
-    for step in all_records.iter().take(20) {
-        tracing::trace!("{:?} - {:?}\n", step.insn().codes().kind, step);
+    tracing::info!("Proving {} execution steps", all_records.len());
+    for (i, step) in enumerate(&all_records).rev().take(5).rev() {
+        tracing::trace!("Step {i}: {:?} - {:?}\n", step.insn().codes().kind, step);
     }
 
     // Find the exit code from the HALT step, if halting at all.
@@ -240,6 +241,7 @@ fn main() {
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(zkvm_cs, zkvm_fixed_traces, &zkvm_witness, &pi);
+        tracing::info!("Mock proving passed");
     }
     let timer = Instant::now();
 
