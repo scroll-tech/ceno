@@ -128,6 +128,7 @@ fn main() {
     let vk = pk.get_vk();
 
     // proving
+    let e2e_start = Instant::now();
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
@@ -235,7 +236,9 @@ fn main() {
         .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, vm.program())
         .unwrap();
 
-    MockProver::assert_satisfied_full(zkvm_cs, zkvm_fixed_traces, &zkvm_witness, &pi);
+    if std::env::var("MOCK_PROVING").is_ok() {
+        MockProver::assert_satisfied_full(zkvm_cs, zkvm_fixed_traces, &zkvm_witness, &pi);
+    }
     let timer = Instant::now();
 
     let transcript = Transcript::new(b"riscv");
@@ -244,8 +247,9 @@ fn main() {
         .expect("create_proof failed");
 
     println!(
-        "riscv_opcodes::create_proof, time = {}",
-        timer.elapsed().as_secs_f64()
+        "fibonacci create_proof, time = {}, e2e = {:?}",
+        timer.elapsed().as_secs_f64(),
+        e2e_start.elapsed(),
     );
 
     let transcript = Transcript::new(b"riscv");
