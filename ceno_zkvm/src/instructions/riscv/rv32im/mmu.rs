@@ -2,6 +2,7 @@ use std::{collections::HashSet, iter::zip, ops::RangeInclusive};
 
 use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use crate::{
     error::ZKVMError,
@@ -110,7 +111,7 @@ impl MemPadder {
         padded_len: usize,
         values: &[Word],
     ) -> Vec<MemInitRecord> {
-        let mut records = Self::new(address_range).pad_records(padded_len, vec![]);
+        let mut records = Self::new(address_range).padded_sorted(padded_len, vec![]);
         for (record, &value) in zip(&mut records, values) {
             record.value = value;
         }
@@ -125,12 +126,25 @@ impl MemPadder {
     }
 
     /// Pad `records` to `new_len` with valid records.
-    /// No addresses will be used more than once.
-    pub fn pad_records(
+    /// The padding uses fresh addresses not yet seen by this `MemPadder`.
+    /// Sort the records by address.
+    pub fn padded_sorted(
         &mut self,
         new_len: usize,
-        mut records: Vec<MemInitRecord>,
+        records: Vec<MemInitRecord>,
     ) -> Vec<MemInitRecord> {
+        if records.is_empty() {
+            self.padded(new_len, records)
+        } else {
+            self.padded(new_len, records)
+                .into_iter()
+                .sorted_by_key(|record| record.addr)
+                .collect()
+        }
+    }
+
+    /// Pad `records` to `new_len` using unused addresses.
+    fn padded(&mut self, new_len: usize, mut records: Vec<MemInitRecord>) -> Vec<MemInitRecord> {
         let old_len = records.len();
         assert!(
             old_len <= new_len,
@@ -157,34 +171,5 @@ impl MemPadder {
             "not enough addresses to pad memory records from {old_len} to {new_len}"
         );
         records
-    }
-
-    /// Pad `addresses` to `new_len` with valid records.
-    /// No addresses will be used more than once.
-    pub fn pad_addresses(&mut self, new_len: usize, mut addresses: Vec<Addr>) -> Vec<Addr> {
-        let old_len = addresses.len();
-        assert!(
-            old_len <= new_len,
-            "cannot fit {old_len} memory addresses in {new_len} space"
-        );
-
-        // Keep track of addresses that were explicitly used.
-        self.used_addresses.extend(addresses.iter());
-
-        addresses.extend(
-            // Search for some addresses in the given range.
-            (&mut self.valid_addresses)
-                .step_by(WORD_SIZE)
-                // Exclude addresses already used.
-                .filter(|addr| !self.used_addresses.contains(addr))
-                // Create the padding.
-                .take(new_len - old_len),
-        );
-        assert_eq!(
-            addresses.len(),
-            new_len,
-            "not enough addresses to pad from {old_len} to {new_len}"
-        );
-        addresses
     }
 }

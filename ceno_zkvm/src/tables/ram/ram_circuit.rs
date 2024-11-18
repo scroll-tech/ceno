@@ -18,7 +18,7 @@ pub struct MemInitRecord {
 
 #[derive(Clone, Debug)]
 pub struct MemFinalRecord {
-    pub addr: Addr, // TODO: remove this field.
+    pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
 }
