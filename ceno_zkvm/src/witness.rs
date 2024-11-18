@@ -47,17 +47,39 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     num_col: usize,
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy + From<u64> + Eq> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
         let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
-        RowMajorMatrix {
+        let mut x = RowMajorMatrix {
             values: create_uninit_vec(num_total_rows * num_col),
             num_padding_rows,
             num_col,
-        }
+        };
+
+        let c = Self::canary();
+        x.values.iter_mut().for_each(|v| *v = MaybeUninit::new(c));
+        x
     }
 
+    pub fn all_assigned(&self) -> bool {
+        let c = Self::canary();
+        self.values
+            .iter()
+            .map(|v| {
+                let v = unsafe { v.assume_init() };
+                v != c
+            })
+            .all(|ok| ok)
+    }
+
+    /// Some random value that must be overwritten.
+    fn canary() -> T {
+        T::from(8979837498374919_u64)
+    }
+}
+
+impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     pub fn num_instances(&self) -> usize {
         self.values.len() / self.num_col - self.num_padding_rows
     }

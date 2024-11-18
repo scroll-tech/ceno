@@ -196,12 +196,18 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
         input: &TC::FixedInput,
     ) {
         let cs = cs.get_cs(&TC::name()).expect("cs not found");
+        let fixed = TC::generate_fixed_traces(config, cs.num_fixed, input);
+
+        assert!(
+            fixed.all_assigned(),
+            "not all assigned in table fixed {}",
+            TC::name()
+        );
+        tracing::trace!("All assigned in table fixed {}.", TC::name());
+
         assert!(
             self.circuit_fixed_traces
-                .insert(
-                    TC::name(),
-                    Some(TC::generate_fixed_traces(config, cs.num_fixed, input)),
-                )
+                .insert(TC::name(), Some(fixed))
                 .is_none()
         );
     }
@@ -235,6 +241,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
             OC::assign_instances(config, cs.num_witin as usize, records)?;
+
+        assert!(
+            witness.all_assigned(),
+            "not all assigned in opcode witness {}",
+            OC::name()
+        );
+        tracing::trace!("All assigned in opcode witness {}.", OC::name());
+
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
@@ -287,6 +301,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
+
+        assert!(
+            witness.all_assigned(),
+            "not all assigned in table witness {}",
+            TC::name()
+        );
+        tracing::trace!("All assigned in table witness {}.", TC::name());
+
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
