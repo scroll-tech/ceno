@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use anyhow::{Result, anyhow};
+use num_derive::ToPrimitive;
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
@@ -132,7 +133,7 @@ pub enum InsnFormat {
 }
 use InsnFormat::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, EnumIter)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter, ToPrimitive)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {
     INVALID,

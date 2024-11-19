@@ -214,6 +214,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
+        Self::padding_zero(&mut witness, num_witin).expect("padding error");
         Ok(witness)
     }
 }

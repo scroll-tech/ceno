@@ -53,16 +53,7 @@ impl VMState {
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         let program = Program::load_elf(elf, u32::MAX)?;
-        let state = Self::new(platform, program);
-
-        if state.program.base_address != state.platform.rom_start() {
-            return Err(anyhow!(
-                "Invalid base_address {:x}",
-                state.program.base_address
-            ));
-        }
-
-        Ok(state)
+        Ok(Self::new(platform, program))
     }
 
     pub fn halted(&self) -> bool {
@@ -71,6 +62,10 @@ impl VMState {
 
     pub fn tracer(&self) -> &Tracer {
         &self.tracer
+    }
+
+    pub fn platform(&self) -> &Platform {
+        &self.platform
     }
 
     pub fn program(&self) -> &Program {
