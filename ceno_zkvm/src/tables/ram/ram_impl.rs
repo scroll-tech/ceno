@@ -391,6 +391,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                         set_val!(row, limb, 0u64);
                     });
                     set_val!(row, self.addr, DVRAM::addr(paddin_entry_start + i) as u64);
+                    set_val!(row, self.final_cycle, 0_u64);
                 });
         }
 
