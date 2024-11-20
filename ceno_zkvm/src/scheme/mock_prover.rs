@@ -970,12 +970,12 @@ Hints:
                         .w_expressions
                         .iter()
                         .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
-                    .zip(
+                    .zip_eq(
                         cs.w_expressions_namespace_map
                             .iter()
                             .chain(cs.w_table_expressions_namespace_map.iter()),
                     )
-                    .zip(cs.w_ram_types.iter())
+                    .zip_eq(cs.w_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
                         let write_rlc_records =
@@ -1032,12 +1032,12 @@ Hints:
                         .r_expressions
                         .iter()
                         .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
-                    .zip(
+                    .zip_eq(
                         cs.r_expressions_namespace_map
                             .iter()
                             .chain(cs.r_table_expressions_namespace_map.iter()),
                     )
-                    .zip(cs.r_ram_types.iter())
+                    .zip_eq(cs.r_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
                         let read_records =
@@ -1046,6 +1046,7 @@ Hints:
                                 .to_vec();
                         let mut records = vec![];
                         for (row, record) in enumerate(read_records) {
+                            // TODO: return error
                             assert_eq!(reads.insert(record), true);
                             records.push((record, row));
                         }

@@ -16,6 +16,7 @@ pub struct MemInitRecord {
     pub value: Word,
 }
 
+#[derive(Clone, Debug)]
 pub struct MemFinalRecord {
     pub addr: Addr,
     pub cycle: Cycle,
@@ -32,27 +33,11 @@ pub trait NonVolatileTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
     const WRITABLE: bool;
-    const OFFSET_ADDR: Addr;
-    const END_ADDR: Addr;
 
     fn name() -> &'static str;
 
-    fn len() -> usize {
-        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
-    }
-
-    fn addr(entry_index: usize) -> Addr {
-        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
-    }
-
-    fn init_state() -> Vec<MemInitRecord> {
-        (0..Self::len())
-            .map(|i| MemInitRecord {
-                addr: Self::addr(i),
-                value: 0,
-            })
-            .collect()
-    }
+    /// Maximum number of words in the table.
+    fn len() -> usize;
 }
 
 /// non-volatile indicates initial value is configurable
@@ -102,8 +87,8 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     for PubIORamCircuit<E, NVRAM>
 {
     type TableConfig = PubIOTableConfig<NVRAM>;
-    type FixedInput = ();
-    type WitnessInput = [MemFinalRecord];
+    type FixedInput = [Addr];
+    type WitnessInput = [Cycle];
 
     fn name() -> String {
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
@@ -119,20 +104,20 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
-        _init_v: &Self::FixedInput,
+        io_addrs: &[Addr],
     ) -> RowMajorMatrix<E::BaseField> {
         // assume returned table is well-formed include padding
-        config.gen_init_state(num_fixed)
+        config.gen_init_state(num_fixed, io_addrs)
     }
 
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
+        final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        config.assign_instances(num_witin, final_v)
+        config.assign_instances(num_witin, final_cycles)
     }
 }
 

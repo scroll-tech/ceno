@@ -20,13 +20,13 @@ use crate::{
     },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, MemCircuit, MemFinalRecord, MemInitRecord,
-        OrTableCircuit, PowTableCircuit, ProgramDataCircuit, PubIOCircuit, RegTableCircuit,
-        TableCircuit, U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit,
-        XorTableCircuit,
+        AndTableCircuit, LtuTableCircuit, OrTableCircuit, PowTableCircuit, TableCircuit,
+        U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, XorTableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind, InsnKind::*, StepRecord};
+use divu::{DivDummy, RemDummy, RemuDummy};
+use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mulh::{MulhInstruction, MulhsuInstruction};
@@ -43,6 +43,8 @@ use super::{
     jump::{JalInstruction, LuiInstruction},
     memory::LwInstruction,
 };
+
+pub mod mmu;
 
 pub struct Rv32imConfig<E: ExtensionField> {
     // ALU Opcodes.
@@ -109,12 +111,6 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub pow_config: <PowTableCircuit<E> as TableCircuit<E>>::TableConfig,
-
-    // RW tables.
-    pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub mem_config: <MemCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub program_data_config: <ProgramDataCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 
 impl<E: ExtensionField> Rv32imConfig<E> {
@@ -185,14 +181,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
         let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
 
-        // RW tables
-        let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
-        let mem_config = cs.register_table_circuit::<MemCircuit<E>>();
-
-        // RO tables
-        let program_data_config = cs.register_table_circuit::<ProgramDataCircuit<E>>();
-        let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
-
         Self {
             // alu opcodes
             add_config,
@@ -253,11 +241,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             xor_table_config,
             ltu_config,
             pow_config,
-
-            reg_config,
-            mem_config,
-            program_data_config,
-            public_io_config,
         }
     }
 
@@ -265,8 +248,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         &self,
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
-        reg_init: &[MemInitRecord],
-        program_data_init: &[MemInitRecord],
     ) {
         // alu
         fixed.register_opcode_circuit::<AddInstruction<E>>(cs);
@@ -327,14 +308,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
         fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
-
-        fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
-        fixed.register_table_circuit::<ProgramDataCircuit<E>>(
-            cs,
-            &self.program_data_config,
-            program_data_init,
-        );
-        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, &());
     }
 
     pub fn assign_opcode_circuit(
@@ -342,7 +315,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
         steps: Vec<StepRecord>,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<GroupedSteps, ZKVMError> {
         let mut all_records: BTreeMap<usize, Vec<StepRecord>> = InsnKind::iter()
             .map(|insn_kind| ((insn_kind as usize), Vec::new()))
             .collect();
@@ -350,10 +323,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         steps.into_iter().for_each(|record| {
             let insn_kind = record.insn().codes().kind;
             match insn_kind {
-                // ecall
+                // ecall / halt
                 EANY if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() => {
                     halt_records.push(record);
                 }
+                // other type of ecalls are handled by dummy ecall instruction
                 _ => {
                     let insn_kind = insn_kind as usize;
                     // it's safe to unwrap as all_records are initialized with Vec::new()
@@ -371,7 +345,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
             }
         }
-        assert_eq!(halt_records.len(), 1);
 
         macro_rules! assign_opcode {
             ($insn_kind:ident,$instruction:ty,$config:ident) => {
@@ -441,17 +414,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .map(|insn_kind| insn_kind as usize)
                 .collect::<BTreeSet<_>>(),
         );
-        Ok(())
+        Ok(GroupedSteps(all_records))
     }
 
     pub fn assign_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
-        reg_final: &[MemFinalRecord],
-        mem_final: &[MemFinalRecord],
-        program_data_final: &[MemFinalRecord],
-        public_io_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
         witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
@@ -463,27 +432,71 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
         witness.assign_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &())?;
 
-        // assign register finalization.
-        witness
-            .assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)
-            .unwrap();
-        // assign memory finalization.
-        witness
-            .assign_table_circuit::<MemCircuit<E>>(cs, &self.mem_config, mem_final)
-            .unwrap();
-        // assign program_data finalization.
-        witness
-            .assign_table_circuit::<ProgramDataCircuit<E>>(
-                cs,
-                &self.program_data_config,
-                program_data_final,
-            )
-            .unwrap();
+        Ok(())
+    }
+}
 
-        witness
-            .assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, public_io_final)
-            .unwrap();
+/// Opaque type to pass unimplemented instructions from Rv32imConfig to DummyExtraConfig.
+pub struct GroupedSteps(BTreeMap<usize, Vec<StepRecord>>);
 
+/// Fake version of what is missing in Rv32imConfig, for some tests.
+pub struct DummyExtraConfig<E: ExtensionField> {
+    ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
+    div_config: <DivDummy<E> as Instruction<E>>::InstructionConfig,
+    rem_config: <RemDummy<E> as Instruction<E>>::InstructionConfig,
+    remu_config: <RemuDummy<E> as Instruction<E>>::InstructionConfig,
+}
+
+impl<E: ExtensionField> DummyExtraConfig<E> {
+    pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
+        let div_config = cs.register_opcode_circuit::<DivDummy<E>>();
+        let rem_config = cs.register_opcode_circuit::<RemDummy<E>>();
+        let remu_config = cs.register_opcode_circuit::<RemuDummy<E>>();
+        let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
+        Self {
+            div_config,
+            rem_config,
+            remu_config,
+            ecall_config,
+        }
+    }
+
+    pub fn generate_fixed_traces(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        fixed: &mut ZKVMFixedTraces<E>,
+    ) {
+        fixed.register_opcode_circuit::<DivDummy<E>>(cs);
+        fixed.register_opcode_circuit::<RemDummy<E>>(cs);
+        fixed.register_opcode_circuit::<RemuDummy<E>>(cs);
+        fixed.register_opcode_circuit::<EcallDummy<E>>(cs);
+    }
+
+    pub fn assign_opcode_circuit(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        witness: &mut ZKVMWitnesses<E>,
+        steps: GroupedSteps,
+    ) -> Result<(), ZKVMError> {
+        let mut steps = steps.0;
+
+        macro_rules! assign_opcode {
+            ($insn_kind:ident,$instruction:ty,$config:ident) => {
+                witness.assign_opcode_circuit::<$instruction>(
+                    cs,
+                    &self.$config,
+                    steps.remove(&($insn_kind as usize)).unwrap(),
+                )?;
+            };
+        }
+
+        assign_opcode!(DIV, DivDummy<E>, div_config);
+        assign_opcode!(REM, RemDummy<E>, rem_config);
+        assign_opcode!(REMU, RemuDummy<E>, remu_config);
+        assign_opcode!(EANY, EcallDummy<E>, ecall_config);
+
+        let _ = steps.remove(&(INVALID as usize));
+        assert!(steps.is_empty());
         Ok(())
     }
 }

@@ -38,15 +38,6 @@ impl Platform {
         (self.rom_start()..=self.rom_end()).contains(&addr)
     }
 
-    // TODO figure out proper region for program_data
-    pub const fn program_data_start(&self) -> Addr {
-        0x3000_0000
-    }
-
-    pub const fn program_data_end(&self) -> Addr {
-        0x3000_1000 - 1
-    }
-
     // TODO figure out a proper region for public io
     pub const fn public_io_start(&self) -> Addr {
         0x3000_1000
@@ -86,10 +77,6 @@ impl Platform {
         (self.public_io_start()..=self.public_io_end()).contains(&addr)
     }
 
-    pub fn is_program_data(&self, addr: Addr) -> bool {
-        (self.program_data_start()..=self.program_data_end()).contains(&addr)
-    }
-
     /// Virtual address of a register.
     pub const fn register_vma(&self, index: RegIdx) -> Addr {
         // Register VMAs are aligned, cannot be confused with indices, and readable in hex.
@@ -110,7 +97,7 @@ impl Platform {
     // Permissions.
 
     pub fn can_read(&self, addr: Addr) -> bool {
-        self.is_rom(addr) || self.is_ram(addr) || self.is_pub_io(addr) || self.is_program_data(addr)
+        self.is_rom(addr) || self.is_ram(addr) || self.is_pub_io(addr)
     }
 
     pub fn can_write(&self, addr: Addr) -> bool {

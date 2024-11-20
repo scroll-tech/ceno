@@ -241,6 +241,8 @@ dependencies = [
  "anyhow",
  "ceno-examples",
  "elf",
+ "num-derive",
+ "num-traits",
  "strum",
  "strum_macros",
  "tracing",
@@ -271,6 +273,7 @@ dependencies = [
  "itertools 0.13.0",
  "mpcs",
  "multilinear_extensions",
+ "num-traits",
  "paste",
  "pprof",
  "prettytable-rs",
@@ -1133,6 +1136,17 @@ checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "num-traits",
  "rand",
+]
+
+[[package]]
+name = "num-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.82",
 ]
 
 [[package]]
