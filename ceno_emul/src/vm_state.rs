@@ -79,13 +79,7 @@ impl VMState {
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
         let emu = Emulator::new();
-        from_fn(move || {
-            if self.halted() {
-                None
-            } else {
-                Some(self.step(&emu))
-            }
-        })
+        from_fn(move || self.halted().then(|| self.step(&emu)))
     }
 
     fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {

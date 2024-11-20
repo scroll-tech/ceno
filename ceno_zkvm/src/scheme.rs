@@ -1,5 +1,4 @@
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fmt::Debug};
@@ -133,15 +132,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
             .iter()
             .map(|pv| {
                 if pv.len() == 1 {
-                    // this is constant poly, and always evaluate to same constant value
+                    // this is constant poly, and always evaluates to same constant value
                     E::from(pv[0])
                 } else {
-                    // set 0 as placeholder. will be evaluate lazily
+                    // set 0 as placeholder. will be evaluated lazily
                     // Or the vector is empty, i.e. the constant 0 polynomial.
                     E::ZERO
                 }
             })
-            .collect_vec();
+            .collect();
         Self {
             raw_pi,
             pi_evals,

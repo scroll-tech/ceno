@@ -60,12 +60,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         transcript: Transcript<E>,
         does_halt: bool,
     ) -> Result<bool, ZKVMError> {
-        // require ecall/halt proof to exist, depending whether we expect a halt.
+        // require ecall/halt proof to exist, depending on whether we expect a halt.
         let num_instances = vm_proof
             .opcode_proofs
             .get(&HaltInstruction::<E>::name())
             .map(|(_, p)| p.num_instances)
-            .unwrap_or(0);
+            .unwrap_or_default();
         if num_instances != (does_halt as usize) {
             return Err(ZKVMError::VerifyError(format!(
                 "ecall/halt num_instances={}, expected={}",
@@ -117,12 +117,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {
+        for (name, (_, proof)) in &vm_proof.opcode_proofs {
             tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
         }
-        for (name, (_, proof)) in vm_proof.table_proofs.iter() {
+        for (name, (_, proof)) in &vm_proof.table_proofs {
             tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
