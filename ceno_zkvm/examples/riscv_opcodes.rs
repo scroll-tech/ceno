@@ -5,6 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
+    structs::ProgramParams,
     tables::{MemFinalRecord, ProgramTableCircuit},
 };
 use clap::Parser;
@@ -119,7 +120,11 @@ fn main() {
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let program_params = ProgramParams {
+        program_size: PROGRAM_SIZE,
+        ..Default::default()
+    };
+    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
