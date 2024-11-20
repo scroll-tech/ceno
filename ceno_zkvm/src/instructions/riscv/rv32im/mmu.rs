@@ -17,6 +17,8 @@ pub struct MmuConfig<E: ExtensionField> {
     /// Initialization of registers.
     pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of memory with static addresses.
+    ///
+    /// This is a generalisation of 'program data'.
     pub static_mem_config: <StaticMemCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of public IO.
     pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
