@@ -136,17 +136,13 @@ fn main() {
 
     let static_report = StaticReport::new(&zkvm_cs);
 
-    let reg_init = MmuConfig::<E>::initial_registers();
+    let reg_init = mmu_config.initial_registers();
 
     // RAM is not used in this program, but it must have a particular size at the moment.
-    let mem_init = MemPadder::init_mem(mem_addresses, MmuConfig::<E>::static_mem_len(), &[]);
+    let mem_init = MemPadder::init_mem(mem_addresses, mmu_config.static_mem_len(), &[]);
 
     let init_public_io = |values: &[Word]| {
-        MemPadder::init_mem(
-            io_addresses.clone(),
-            MmuConfig::<E>::public_io_len(),
-            values,
-        )
+        MemPadder::init_mem(io_addresses.clone(), mmu_config.public_io_len(), values)
     };
 
     let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();

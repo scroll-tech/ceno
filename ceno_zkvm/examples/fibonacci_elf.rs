@@ -106,13 +106,13 @@ fn main() {
 
         let mem_init = chain!(program_addrs, stack_addrs).collect_vec();
 
-        mem_padder.padded_sorted(MmuConfig::<E>::static_mem_len(), mem_init)
+        mem_padder.padded_sorted(mmu_config.static_mem_len(), mem_init)
     };
 
     // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = mem_padder.padded_sorted(MmuConfig::<E>::public_io_len(), vec![]);
+    let io_init = mem_padder.padded_sorted(mmu_config.public_io_len(), vec![]);
 
-    let reg_init = MmuConfig::<E>::initial_registers();
+    let reg_init = mmu_config.initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
     mmu_config.generate_fixed_traces(
         &zkvm_cs,

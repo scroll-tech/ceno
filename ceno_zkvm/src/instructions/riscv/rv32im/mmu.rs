@@ -1,6 +1,6 @@
 use std::{collections::HashSet, iter::zip, ops::RangeInclusive};
 
-use ceno_emul::{Addr, CENO_PLATFORM, Cycle, WORD_SIZE, Word};
+use ceno_emul::{Addr, Cycle, Platform, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 
@@ -20,6 +20,7 @@ pub struct MmuConfig<E: ExtensionField> {
     pub static_mem_config: <StaticMemCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of public IO.
     pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub platform: Platform,
 }
 
 impl<E: ExtensionField> MmuConfig<E> {
@@ -34,6 +35,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             reg_config,
             static_mem_config,
             public_io_config,
+            platform: cs.platform,
         }
     }
 
@@ -86,8 +88,8 @@ impl<E: ExtensionField> MmuConfig<E> {
         Ok(())
     }
 
-    pub fn initial_registers() -> Vec<MemInitRecord> {
-        (0..<RegTable as NonVolatileTable>::len(&CENO_PLATFORM))
+    pub fn initial_registers(&self) -> Vec<MemInitRecord> {
+        (0..<RegTable as NonVolatileTable>::len(&self.platform))
             .map(|index| MemInitRecord {
                 addr: index as Addr,
                 value: 0,
@@ -95,12 +97,12 @@ impl<E: ExtensionField> MmuConfig<E> {
             .collect()
     }
 
-    pub fn static_mem_len() -> usize {
-        <StaticMemTable as NonVolatileTable>::len(&CENO_PLATFORM)
+    pub fn static_mem_len(&self) -> usize {
+        <StaticMemTable as NonVolatileTable>::len(&self.platform)
     }
 
-    pub fn public_io_len() -> usize {
-        <PubIOTable as NonVolatileTable>::len(&CENO_PLATFORM)
+    pub fn public_io_len(&self) -> usize {
+        <PubIOTable as NonVolatileTable>::len(&self.platform)
     }
 }
 
