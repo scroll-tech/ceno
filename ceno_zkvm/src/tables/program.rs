@@ -155,7 +155,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
         let pc_base = program.base_address;
         assert!(num_instructions <= PROGRAM_SIZE);
 
-        let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
+        let mut fixed = RowMajorMatrix::<E::BaseField>::new(PROGRAM_SIZE, num_fixed);
 
         fixed
             .par_iter_mut()
@@ -172,6 +172,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 }
             });
 
+        assert_eq!(INVALID as u64, 0, "cannot use 0 as program padding");
         Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
