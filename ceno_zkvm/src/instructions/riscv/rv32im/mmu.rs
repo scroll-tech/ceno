@@ -46,11 +46,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         io_addrs: &[Addr],
     ) {
         assert!(
-            chain(
-                static_mem_init.iter().map(|record| record.addr),
-                io_addrs.iter().copied(),
-            )
-            .all_unique(),
+            chain(static_mem_init.iter().map(|record| &record.addr), io_addrs,).all_unique(),
             "memory addresses must be unique"
         );
 
@@ -142,14 +138,9 @@ impl MemPadder {
         new_len: usize,
         records: Vec<MemInitRecord>,
     ) -> Vec<MemInitRecord> {
-        if records.is_empty() {
-            self.padded(new_len, records)
-        } else {
-            self.padded(new_len, records)
-                .into_iter()
-                .sorted_by_key(|record| record.addr)
-                .collect()
-        }
+        let mut padded = self.padded(new_len, records);
+        padded.sort_by_key(|record| record.addr);
+        padded
     }
 
     /// Pad `records` to `new_len` using unused addresses.

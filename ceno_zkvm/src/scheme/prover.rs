@@ -1241,7 +1241,7 @@ impl TowerProver {
                         virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
                     }
                 }
-                tracing::debug!("generated tower proof at round {}/{}", round, max_round_index);
+                tracing::debug!("generated tower proof at round {round}/{max_round_index}");
 
                 let wrap_batch_span = entered_span!("wrap_batch");
                 // NOTE: at the time of adding this span, visualizing it with the flamegraph layer

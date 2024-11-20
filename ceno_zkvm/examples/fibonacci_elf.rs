@@ -19,7 +19,7 @@ use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
-    panic,
+    panic::{self, PanicHookInfo},
     time::Instant,
 };
 use tracing_flame::FlameLayer;
@@ -33,6 +33,27 @@ struct Args {
     /// The maximum number of steps to execute the program.
     #[arg(short, long)]
     max_steps: Option<usize>,
+}
+
+/// Temporarily override the panic hook
+///
+/// We restore the original hook after we are done.
+fn with_panic_hook<F, R>(hook: Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    // Save the current panic hook
+    let original_hook = panic::take_hook();
+
+    // Set the new panic hook
+    panic::set_hook(hook);
+
+    let result = f();
+
+    // Restore the original panic hook
+    panic::set_hook(original_hook);
+
+    result
 }
 
 fn main() {
@@ -125,7 +146,7 @@ fn main() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
+        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
 
@@ -153,14 +174,14 @@ fn main() {
             record.insn().codes().kind == EANY
                 && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
         })
-        .and_then(|halt_record| halt_record.rs2())
+        .and_then(StepRecord::rs2)
         .map(|rs2| rs2.value);
 
     let final_access = vm.tracer().final_accesses();
     let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
 
     let pi = PublicValues::new(
-        exit_code.unwrap_or(0),
+        exit_code.unwrap_or_default(),
         vm.program().entry,
         Tracer::SUBCYCLES_PER_INSN as u32,
         vm.get_pc().into(),
@@ -188,7 +209,7 @@ fn main() {
                 MemFinalRecord {
                     addr: rec.addr,
                     value: vm.peek_register(index),
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                    cycle: final_access.get(&vma).copied().unwrap_or_default(),
                 }
             } else {
                 // The table is padded beyond the number of registers.
@@ -209,7 +230,7 @@ fn main() {
             MemFinalRecord {
                 addr: rec.addr,
                 value: vm.peek_memory(vma),
-                cycle: *final_access.get(&vma).unwrap_or(&0),
+                cycle: final_access.get(&vma).copied().unwrap_or_default(),
             }
         })
         .collect_vec();
@@ -218,7 +239,12 @@ fn main() {
     // Find the final public IO cycles.
     let io_final = io_init
         .iter()
-        .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
+        .map(|rec| {
+            final_access
+                .get(&rec.addr.into())
+                .copied()
+                .unwrap_or_default()
+        })
         .collect_vec();
 
     // assign table circuits
@@ -269,18 +295,16 @@ fn main() {
     }
 
     let transcript = Transcript::new(b"riscv");
-    // change public input maliciously should cause verifier to reject proof
+    // Maliciously changing the public input should cause the verifier to reject the proof.
     zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
     zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
 
-    // capture panic message, if have
-    let default_hook = panic::take_hook();
-    panic::set_hook(Box::new(|_info| {
-        // by default it will print msg to stdout/stderr
-        // we override it to avoid print msg since we will capture the msg by our own
-    }));
-    let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-    panic::set_hook(default_hook);
+    // capture panic message, if any
+    // by default it will print msg to stdout/stderr
+    // we override it to avoid print msg since we will capture the msg by ourselves
+    let result = with_panic_hook(Box::new(|_info| ()), || {
+        panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+    });
     match result {
         Ok(res) => {
             res.expect_err("verify proof should return with error");
@@ -322,11 +346,11 @@ fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
 
     tracing::debug!(
         "Memory range (accessed): {:?}",
-        format_segments(vm.platform(), accessed_addrs.iter().copied())
+        format_segments(vm.platform(), &accessed_addrs)
     );
     tracing::debug!(
         "Memory range (handled):  {:?}",
-        format_segments(vm.platform(), handled_addrs.iter().copied())
+        format_segments(vm.platform(), &handled_addrs)
     );
 
     for addr in &accessed_addrs {
@@ -334,11 +358,12 @@ fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
     }
 }
 
-fn format_segments(
+fn format_segments<'a>(
     platform: &Platform,
-    addrs: impl Iterator<Item = ByteAddr>,
-) -> HashMap<String, MinMaxResult<ByteAddr>> {
+    addrs: impl IntoIterator<Item = &'a ByteAddr>,
+) -> HashMap<String, MinMaxResult<&'a ByteAddr>> {
     addrs
+        .into_iter()
         .into_grouping_map_by(|addr| format_segment(platform, addr.0))
         .minmax()
 }
