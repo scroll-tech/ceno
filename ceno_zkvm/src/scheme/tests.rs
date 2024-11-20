@@ -3,7 +3,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 use ceno_emul::{
     CENO_PLATFORM,
     InsnKind::{ADD, EANY},
-    PC_WORD_SIZE, Program, StepRecord, VMState,
+    PC_WORD_SIZE, Platform, Program, StepRecord, VMState,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -269,7 +269,7 @@ fn test_single_add_instance_e2e() {
         match kind {
             ADD => add_records.push(record),
             EANY => {
-                if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
+                if record.rs1().unwrap().value == Platform::ecall_halt() {
                     halt_records.push(record);
                 }
             }

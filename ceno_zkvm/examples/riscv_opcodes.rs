@@ -12,7 +12,7 @@ use clap::Parser;
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, LUI, LW},
-    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
+    PC_WORD_SIZE, Platform, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -197,7 +197,7 @@ fn main() {
             .rev()
             .find(|record| {
                 record.insn().codes().kind == EANY
-                    && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
+                    && record.rs1().unwrap().value == Platform::ecall_halt()
             })
             .expect("halt record not found");
 
@@ -227,7 +227,7 @@ fn main() {
             .map(|rec| {
                 let index = rec.addr as usize;
                 if index < VMState::REG_COUNT {
-                    let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                    let vma: WordAddr = Platform::register_vma(index).into();
                     MemFinalRecord {
                         addr: rec.addr,
                         value: vm.peek_register(index),

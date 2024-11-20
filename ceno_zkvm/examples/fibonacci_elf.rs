@@ -151,7 +151,7 @@ fn main() {
         .rev()
         .find(|record| {
             record.insn().codes().kind == EANY
-                && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
+                && record.rs1().unwrap().value == Platform::ecall_halt()
         })
         .and_then(|halt_record| halt_record.rs2())
         .map(|rs2| rs2.value);
@@ -184,7 +184,7 @@ fn main() {
         .map(|rec| {
             let index = rec.addr as usize;
             if index < VMState::REG_COUNT {
-                let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
                     addr: rec.addr,
                     value: vm.peek_register(index),
