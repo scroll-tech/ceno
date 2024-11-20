@@ -128,17 +128,16 @@ pub trait DynVolatileRamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
 
-    // const OFFSET_ADDR: Addr;
-    // const END_ADDR: Addr;
-
     fn offset_addr(platform: &Platform) -> Addr;
     fn end_addr(platform: &Platform) -> Addr;
 
     fn name() -> &'static str;
 
-    fn max_len(platform: &Platform) -> usize {
-        (Self::end_addr(platform) - Self::offset_addr(platform)) as usize / WORD_SIZE
-    }
+    fn max_len(platform: &Platform) -> usize;
+
+    // fn max_len(platform: &Platform) -> usize {
+    //     (Self::end_addr(platform) - Self::offset_addr(platform)) as usize / WORD_SIZE
+    // }
 
     fn addr(platform: &Platform, entry_index: usize) -> Addr {
         Self::offset_addr(platform) + (entry_index * WORD_SIZE) as Addr

@@ -99,7 +99,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             addr,
             final_cycle,
             phantom: PhantomData,
-            platform: cb.cs.platform,
+            platform: cb.cs.platform.clone(),
         })
     }
 
@@ -233,7 +233,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             addr,
             final_cycle,
             phantom: PhantomData,
-            platform: cb.cs.platform,
+            platform: cb.cs.platform.clone(),
         })
     }
 
@@ -349,7 +349,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             final_v,
             final_cycle,
             phantom: PhantomData,
-            platform: cb.cs.platform,
+            platform: cb.cs.platform.clone(),
         })
     }
 

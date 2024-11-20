@@ -27,7 +27,8 @@ impl DynVolatileRamTable for MemTable {
     }
 
     fn max_len(platform: &Platform) -> usize {
-        let max_size = (Self::end_addr(platform) - Self::offset_addr(platform)) / WORD_SIZE as Addr;
+        let max_size = (Self::end_addr(platform) - Self::offset_addr(platform))
+            .div_ceil(WORD_SIZE as u32) as Addr;
         1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 }

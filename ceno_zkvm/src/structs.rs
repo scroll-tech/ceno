@@ -154,7 +154,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new_with_platform(
             || format!("riscv_opcode/{}", OC::name()),
-            self.platform,
+            self.platform.clone(),
         );
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
@@ -166,7 +166,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new_with_platform(
             || format!("riscv_table/{}", TC::name()),
-            self.platform,
+            self.platform.clone(),
         );
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();

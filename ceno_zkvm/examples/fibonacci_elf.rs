@@ -69,7 +69,7 @@ fn main() {
     let mut mem_padder = MemPadder::new(sp1_platform.ram_start()..=sp1_platform.ram_end());
 
     let elf_bytes = include_bytes!(r"fibonacci.elf");
-    let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
+    let mut vm = VMState::new_from_elf(sp1_platform.clone(), elf_bytes).unwrap();
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
