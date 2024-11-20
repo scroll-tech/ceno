@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
+use ceno_emul::{Addr, Cycle, Platform, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -128,17 +128,20 @@ pub trait DynVolatileRamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
 
-    const OFFSET_ADDR: Addr;
-    const END_ADDR: Addr;
+    // const OFFSET_ADDR: Addr;
+    // const END_ADDR: Addr;
+
+    fn offset_addr(platform: &Platform) -> Addr;
+    fn end_addr(platform: &Platform) -> Addr;
 
     fn name() -> &'static str;
 
-    fn max_len() -> usize {
-        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+    fn max_len(platform: &Platform) -> usize {
+        (Self::end_addr(platform) - Self::offset_addr(platform)) as usize / WORD_SIZE
     }
 
-    fn addr(entry_index: usize) -> Addr {
-        Self::OFFSET_ADDR + (entry_index * WORD_SIZE) as Addr
+    fn addr(platform: &Platform, entry_index: usize) -> Addr {
+        Self::offset_addr(platform) + (entry_index * WORD_SIZE) as Addr
     }
 }
 
