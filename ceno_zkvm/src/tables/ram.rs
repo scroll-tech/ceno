@@ -13,8 +13,6 @@ pub struct MemTable;
 impl DynVolatileRamTable for MemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
-    // const OFFSET_ADDR: Addr = CENO_PLATFORM.ram_start();
-    // const END_ADDR: Addr = CENO_PLATFORM.ram_end() + 1;
 
     fn offset_addr(platform: &Platform) -> Addr {
         platform.ram_start()
