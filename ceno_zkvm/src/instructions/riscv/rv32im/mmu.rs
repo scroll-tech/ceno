@@ -35,7 +35,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             reg_config,
             static_mem_config,
             public_io_config,
-            platform: cs.platform.clone(),
+            platform: cs.params.platform.clone(),
         }
     }
 

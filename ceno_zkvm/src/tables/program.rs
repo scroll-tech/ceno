@@ -102,13 +102,12 @@ pub struct ProgramTableConfig {
 
     /// Multiplicity of the record - how many times an instruction is visited.
     mlt: WitIn,
+    program_size: usize,
 }
 
-pub struct ProgramTableCircuit<E, const PROGRAM_SIZE: usize>(PhantomData<E>);
+pub struct ProgramTableCircuit<E>(PhantomData<E>);
 
-impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
-    for ProgramTableCircuit<E, PROGRAM_SIZE>
-{
+impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     type TableConfig = ProgramTableConfig;
     type FixedInput = Program;
     type WitnessInput = Program;
@@ -137,13 +136,17 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 
         cb.lk_table_record(
             || "prog table",
-            PROGRAM_SIZE,
+            cb.params.program_size,
             ROMType::Instruction,
             record_exprs,
             mlt.expr(),
         )?;
 
-        Ok(ProgramTableConfig { record, mlt })
+        Ok(ProgramTableConfig {
+            record,
+            mlt,
+            program_size: cb.params.program_size,
+        })
     }
 
     fn generate_fixed_traces(
@@ -153,7 +156,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     ) -> RowMajorMatrix<E::BaseField> {
         let num_instructions = program.instructions.len();
         let pc_base = program.base_address;
-        assert!(num_instructions <= PROGRAM_SIZE);
+        assert!(num_instructions <= config.program_size);
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(num_instructions, num_fixed);
 

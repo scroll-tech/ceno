@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, Platform};
+use ceno_emul::Addr;
 use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -10,7 +10,7 @@ use crate::{
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
-    structs::{ProvingKey, RAMType, VerifyingKey, WitnessId},
+    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
 
@@ -498,5 +498,5 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 #[derive(Debug)]
 pub struct CircuitBuilder<'a, E: ExtensionField> {
     pub(crate) cs: &'a mut ConstraintSystem<E>,
-    pub platform: Platform,
+    pub params: ProgramParams,
 }

@@ -135,10 +135,6 @@ pub trait DynVolatileRamTable {
 
     fn max_len(platform: &Platform) -> usize;
 
-    // fn max_len(platform: &Platform) -> usize {
-    //     (Self::end_addr(platform) - Self::offset_addr(platform)) as usize / WORD_SIZE
-    // }
-
     fn addr(platform: &Platform, entry_index: usize) -> Addr {
         Self::offset_addr(platform) + (entry_index * WORD_SIZE) as Addr
     }

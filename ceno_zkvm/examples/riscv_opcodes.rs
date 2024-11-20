@@ -54,7 +54,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     );
     program
 };
-type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
+type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]

@@ -125,12 +125,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ProgramParams {
+    pub platform: Platform,
+    pub program_size: usize,
+}
+
+impl Default for ProgramParams {
+    fn default() -> Self {
+        ProgramParams {
+            platform: CENO_PLATFORM,
+            program_size: (1 << 14),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
     pub(crate) initial_global_state_expr: Expression<E>,
     pub(crate) finalize_global_state_expr: Expression<E>,
-    pub platform: Platform,
+    pub params: ProgramParams,
 }
 
 impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
@@ -139,22 +154,22 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
             circuit_css: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
-            platform: CENO_PLATFORM,
+            params: ProgramParams::default(),
         }
     }
 }
 
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
-    pub fn new_with_platform(platform: Platform) -> Self {
+    pub fn new_with_platform(params: ProgramParams) -> Self {
         ZKVMConstraintSystem {
-            platform,
+            params,
             ..Default::default()
         }
     }
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder =
-            CircuitBuilder::<E>::new_with_platform(&mut cs, self.platform.clone());
+            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
         assert!(self.circuit_css.insert(OC::name(), cs).is_none());
 
@@ -164,7 +179,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder =
-            CircuitBuilder::<E>::new_with_platform(&mut cs, self.platform.clone());
+            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
 
@@ -174,7 +189,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
         let mut cs = ConstraintSystem::new(|| "riscv_state");
         let mut circuit_builder =
-            CircuitBuilder::<E>::new_with_platform(&mut cs, self.platform.clone());
+            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         self.initial_global_state_expr =
             SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
         self.finalize_global_state_expr =

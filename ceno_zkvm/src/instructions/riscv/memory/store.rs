@@ -79,8 +79,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             const MAX_RAM_ADDR: u32 = u32::MAX - 0x7FF; // max positive imm is 0x7FF
             const MIN_RAM_ADDR: u32 = 0x800; // min negative imm is -0x800
             assert!(
-                !circuit_builder.platform.can_write(MAX_RAM_ADDR + 1)
-                    && !circuit_builder.platform.can_write(MIN_RAM_ADDR - 1)
+                !circuit_builder.params.platform.can_write(MAX_RAM_ADDR + 1)
+                    && !circuit_builder.params.platform.can_write(MIN_RAM_ADDR - 1)
             );
         }
         circuit_builder.require_equal(

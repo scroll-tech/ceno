@@ -9,7 +9,7 @@ use ceno_zkvm::{
         verifier::ZKVMVerifier,
     },
     state::GlobalState,
-    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit},
 };
 use clap::Parser;
@@ -41,7 +41,7 @@ fn main() {
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
     const PROGRAM_SIZE: usize = 1 << 14;
-    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
+    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
     // set up logger
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
@@ -74,7 +74,11 @@ fn main() {
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(sp1_platform);
+    let program_params = ProgramParams {
+        platform: sp1_platform,
+        program_size: PROGRAM_SIZE,
+    };
+    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
