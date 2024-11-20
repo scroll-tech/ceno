@@ -173,7 +173,16 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             });
 
         assert_eq!(INVALID as u64, 0, "cannot use 0 as program padding");
-        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
+        fixed
+            .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
+            .skip(num_instructions)
+            .for_each(|row| {
+                for col in config.record.as_slice() {
+                    set_fixed_val!(row, *col, 0_u64.into());
+                }
+            });
+
         fixed
     }
 
@@ -191,7 +200,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             prog_mlt[i] = *mlt;
         }
 
-        let mut witness = RowMajorMatrix::<E::BaseField>::new(prog_mlt.len(), num_witin);
+        let mut witness = RowMajorMatrix::<E::BaseField>::new(PROGRAM_SIZE, num_witin);
         witness
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
@@ -200,7 +209,14 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        Self::padding_zero(&mut witness, num_witin).expect("padding error");
+        witness
+            .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
+            .skip(program.instructions.len())
+            .for_each(|row| {
+                set_val!(row, config.mlt, 0_u64);
+            });
+
         Ok(witness)
     }
 }
