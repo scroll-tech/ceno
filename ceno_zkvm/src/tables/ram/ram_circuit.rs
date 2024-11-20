@@ -40,7 +40,11 @@ pub trait NonVolatileTable {
     fn len() -> usize;
 }
 
-/// non-volatile indicates initial value is configurable
+/// NonVolatileRamCircuit initializes and finalizes memory
+/// - at fixed addresses,
+/// - with fixed initial content,
+/// - with witnessed final content that the program wrote, if WRITABLE,
+/// - or final content equal to initial content, if not WRITABLE.
 pub struct NonVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
@@ -81,6 +85,13 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 }
 
+/// PubIORamCircuit initializes and finalizes memory
+/// - at fixed addresses,
+/// - with content from the public input of proofs.
+///
+/// This circuit does not and cannot decide whether the memory is mutable or not.
+/// It supports LOAD where the program reads the public input,
+/// or STORE where the memory content must equal the public input after execution.
 pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
@@ -142,6 +153,10 @@ pub trait DynVolatileRamTable {
     }
 }
 
+/// DynVolatileRamCircuit initializes and finalizes memory with
+/// - at witnessed addresses, in a contiguous range chosen by the prover.
+/// - with zeros as initial content,
+/// - with witnessed final content that the program wrote.
 pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableCircuit<E>
