@@ -35,6 +35,9 @@ struct Args {
     max_steps: Option<usize>,
 }
 
+/// Temporarily override the panic hook
+///
+/// We restore the original hook after we are done.
 fn with_panic_hook<F, R>(hook: Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>, f: F) -> R
 where
     F: FnOnce() -> R,
