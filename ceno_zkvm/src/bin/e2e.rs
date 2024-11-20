@@ -77,17 +77,17 @@ fn main() {
     let platform = match args.platform {
         Preset::Ceno => CENO_PLATFORM,
         Preset::Sp1 => Platform {
+            // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
+            stack_top: 0x0020_0400,
             rom_start: 0x0020_0800,
             rom_end: 0x003f_ffff,
             ram_start: 0x0020_0000,
-            ram_end: 0xffff_ffff,
+            ram_end: 0xFFFF_0000 - 1,
             unsafe_ecall_nop: true,
         },
     };
     tracing::info!("Running on platform {:?}", args.platform);
 
-    // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
-    const STACK_TOP: u32 = 0x0020_0400;
     const STACK_SIZE: u32 = 256;
     let mut mem_padder = MemPadder::new(platform.ram_start()..=platform.ram_end());
 
@@ -125,7 +125,7 @@ fn main() {
             });
 
         let stack_addrs = (1..=STACK_SIZE)
-            .map(|i| STACK_TOP - i * WORD_SIZE as u32)
+            .map(|i| platform.stack_top - i * WORD_SIZE as u32)
             .map(|addr| MemInitRecord { addr, value: 0 });
 
         let mem_init = chain!(program_addrs, stack_addrs).collect_vec();
