@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, Platform};
+use ceno_emul::{Addr, Platform};
 use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -106,7 +106,7 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
-    pub platform: Platform,
+    // pub platform: Platform,
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
 
@@ -162,15 +162,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
 impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(root_name_fn: N) -> Self {
-        Self::new_with_platform(root_name_fn, CENO_PLATFORM)
-    }
-    pub fn new_with_platform<NR: Into<String>, N: FnOnce() -> NR>(
-        root_name_fn: N,
-        platform: Platform,
-    ) -> Self {
         Self {
             num_witin: 0,
-            platform,
+            // platform,
             witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
@@ -504,4 +498,5 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 #[derive(Debug)]
 pub struct CircuitBuilder<'a, E: ExtensionField> {
     pub(crate) cs: &'a mut ConstraintSystem<E>,
+    pub platform: Platform,
 }
