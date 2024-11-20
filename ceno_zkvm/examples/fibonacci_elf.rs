@@ -1,6 +1,6 @@
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState,
-    WORD_SIZE, WordAddr,
+    ByteAddr, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState, WORD_SIZE,
+    WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},

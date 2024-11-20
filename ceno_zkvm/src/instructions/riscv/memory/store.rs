@@ -15,7 +15,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind, StepRecord};
+use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 

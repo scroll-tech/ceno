@@ -10,7 +10,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, InsnKind::EANY, PC_STEP_SIZE, Platform, StepRecord, Tracer};
+use ceno_emul::{InsnKind::EANY, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 

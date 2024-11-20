@@ -25,7 +25,6 @@ use crate::{
     },
 };
 use ceno_emul::{
-    CENO_PLATFORM,
     InsnKind::{self, *},
     Platform, StepRecord,
 };

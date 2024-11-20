@@ -1,4 +1,3 @@
-use ceno_emul::{CENO_PLATFORM, Platform};
 use ff_ext::ExtensionField;
 
 use crate::{
