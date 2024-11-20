@@ -66,9 +66,8 @@ impl NonVolatileTable for StaticMemTable {
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = true;
 
-    fn len(_params: &ProgramParams) -> usize {
-        // TODO: take as program parameter.
-        1 << 16 // words - 256KiB
+    fn len(params: &ProgramParams) -> usize {
+        params.static_memory_len
     }
 
     fn name() -> &'static str {
@@ -86,9 +85,8 @@ impl NonVolatileTable for PubIOTable {
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = false;
 
-    fn len(_params: &ProgramParams) -> usize {
-        // TODO: take as program parameter.
-        1 << 2 // words
+    fn len(params: &ProgramParams) -> usize {
+        params.pub_io_len
     }
 
     fn name() -> &'static str {
