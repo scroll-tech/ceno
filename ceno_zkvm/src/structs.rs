@@ -7,7 +7,7 @@ use crate::{
     tables::TableCircuit,
     witness::{LkMultiplicity, RowMajorMatrix},
 };
-use ceno_emul::StepRecord;
+use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
@@ -130,6 +130,7 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
     pub(crate) initial_global_state_expr: Expression<E>,
     pub(crate) finalize_global_state_expr: Expression<E>,
+    pub platform: Platform,
 }
 
 impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
@@ -138,13 +139,23 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
             circuit_css: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
+            platform: CENO_PLATFORM,
         }
     }
 }
 
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
+    pub fn new_with_platform(platform: Platform) -> Self {
+        ZKVMConstraintSystem {
+            platform,
+            ..Default::default()
+        }
+    }
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
-        let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
+        let mut cs = ConstraintSystem::new_with_platform(
+            || format!("riscv_opcode/{}", OC::name()),
+            self.platform,
+        );
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
         assert!(self.circuit_css.insert(OC::name(), cs).is_none());
@@ -153,7 +164,10 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
-        let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
+        let mut cs = ConstraintSystem::new_with_platform(
+            || format!("riscv_table/{}", TC::name()),
+            self.platform,
+        );
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
