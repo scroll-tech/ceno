@@ -646,6 +646,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut cb = CircuitBuilder::new_with_params(&mut cs, ProgramParams {
             platform: CENO_PLATFORM,
             program_size: MOCK_PROGRAM_SIZE,
+            ..ProgramParams::default()
         });
         let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
         let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);

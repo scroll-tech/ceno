@@ -129,6 +129,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
 pub struct ProgramParams {
     pub platform: Platform,
     pub program_size: usize,
+    pub pub_io_len: usize,
+    pub static_memory_len: usize,
 }
 
 impl Default for ProgramParams {
@@ -136,6 +138,8 @@ impl Default for ProgramParams {
         ProgramParams {
             platform: CENO_PLATFORM,
             program_size: (1 << 14),
+            pub_io_len: (1 << 2),
+            static_memory_len: (1 << 16),
         }
     }
 }

@@ -77,6 +77,7 @@ fn main() {
     let program_params = ProgramParams {
         platform: sp1_platform,
         program_size: PROGRAM_SIZE,
+        ..ProgramParams::default()
     };
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 

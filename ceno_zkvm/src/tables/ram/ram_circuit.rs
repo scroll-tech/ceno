@@ -1,10 +1,13 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Addr, Cycle, Platform, WORD_SIZE, Word};
+use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::RAMType, tables::TableCircuit,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    structs::{ProgramParams, RAMType},
+    tables::TableCircuit,
     witness::RowMajorMatrix,
 };
 
@@ -37,7 +40,7 @@ pub trait NonVolatileTable {
     fn name() -> &'static str;
 
     /// Maximum number of words in the table.
-    fn len(platform: &Platform) -> usize;
+    fn len(params: &ProgramParams) -> usize;
 }
 
 /// non-volatile indicates initial value is configurable
@@ -128,15 +131,15 @@ pub trait DynVolatileRamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
 
-    fn offset_addr(platform: &Platform) -> Addr;
-    fn end_addr(platform: &Platform) -> Addr;
+    fn offset_addr(params: &ProgramParams) -> Addr;
+    fn end_addr(params: &ProgramParams) -> Addr;
 
     fn name() -> &'static str;
 
-    fn max_len(platform: &Platform) -> usize;
+    fn max_len(params: &ProgramParams) -> usize;
 
-    fn addr(platform: &Platform, entry_index: usize) -> Addr {
-        Self::offset_addr(platform) + (entry_index * WORD_SIZE) as Addr
+    fn addr(params: &ProgramParams, entry_index: usize) -> Addr {
+        Self::offset_addr(params) + (entry_index * WORD_SIZE) as Addr
     }
 }
 
