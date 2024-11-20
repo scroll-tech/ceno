@@ -79,7 +79,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(&cb.platform),
+                len: NVRAM::len(&cb.cs.platform),
             },
             init_table,
         )?;
@@ -88,7 +88,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(&cb.platform),
+                len: NVRAM::len(&cb.cs.platform),
             },
             final_table,
         )?;
@@ -99,7 +99,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             addr,
             final_cycle,
             phantom: PhantomData,
-            platform: cb.platform,
+            platform: cb.cs.platform,
         })
     }
 
@@ -215,7 +215,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(&cb.platform),
+                len: NVRAM::len(&cb.cs.platform),
             },
             init_table,
         )?;
@@ -224,7 +224,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(&cb.platform),
+                len: NVRAM::len(&cb.cs.platform),
             },
             final_table,
         )?;
@@ -233,7 +233,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             addr,
             final_cycle,
             phantom: PhantomData,
-            platform: cb.platform,
+            platform: cb.cs.platform,
         })
     }
 
@@ -325,9 +325,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
                     addr_witin_id: addr.id.into(),
-                    offset: DVRAM::offset_addr(&cb.platform),
+                    offset: DVRAM::offset_addr(&cb.cs.platform),
                 }),
-                len: DVRAM::max_len(&cb.platform),
+                len: DVRAM::max_len(&cb.cs.platform),
             },
             init_table,
         )?;
@@ -337,9 +337,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
                     addr_witin_id: addr.id.into(),
-                    offset: DVRAM::offset_addr(&cb.platform),
+                    offset: DVRAM::offset_addr(&cb.cs.platform),
                 }),
-                len: DVRAM::max_len(&cb.platform),
+                len: DVRAM::max_len(&cb.cs.platform),
             },
             final_table,
         )?;
@@ -349,7 +349,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             final_v,
             final_cycle,
             phantom: PhantomData,
-            platform: cb.platform,
+            platform: cb.cs.platform,
         })
     }
 

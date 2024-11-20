@@ -15,14 +15,7 @@ use crate::{
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
-        Self {
-            cs,
-            platform: CENO_PLATFORM,
-        }
-    }
-
-    pub fn new_with_platform(cs: &'a mut ConstraintSystem<E>, platform: Platform) -> Self {
-        Self { cs, platform }
+        Self { cs }
     }
 
     pub fn create_witin<NR, N>(&mut self, name_fn: N) -> WitIn
@@ -329,7 +322,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         cb: impl FnOnce(&mut CircuitBuilder<E>) -> Result<T, ZKVMError>,
     ) -> Result<T, ZKVMError> {
         self.cs.namespace(name_fn, |cs| {
-            let mut inner_circuit_builder = CircuitBuilder::new_with_platform(cs, self.platform);
+            let mut inner_circuit_builder = CircuitBuilder::new(cs);
             cb(&mut inner_circuit_builder)
         })
     }
