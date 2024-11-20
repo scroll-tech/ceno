@@ -19,9 +19,10 @@ use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
-    panic,
+    fs, panic,
     time::Instant,
 };
+use tracing::level_filters::LevelFilter;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -30,6 +31,9 @@ use transcript::Transcript;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// The path to the ELF file to execute.
+    elf: String,
+
     /// The maximum number of steps to execute the program.
     #[arg(short, long)]
     max_steps: Option<usize>,
@@ -52,7 +56,11 @@ fn main() {
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
-        .with(EnvFilter::from_default_env())
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::DEBUG.into())
+                .from_env_lossy(),
+        )
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
@@ -68,8 +76,9 @@ fn main() {
     const STACK_SIZE: u32 = 256;
     let mut mem_padder = MemPadder::new(sp1_platform.ram_start()..=sp1_platform.ram_end());
 
-    let elf_bytes = include_bytes!(r"fibonacci.elf");
-    let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
+    tracing::info!("Loading ELF file: {}", args.elf);
+    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let mut vm = VMState::new_from_elf(sp1_platform, &elf_bytes).unwrap();
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
