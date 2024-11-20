@@ -1,4 +1,4 @@
-use ceno_emul::Addr;
+use ceno_emul::{Addr, Platform};
 use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -496,4 +496,5 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 #[derive(Debug)]
 pub struct CircuitBuilder<'a, E: ExtensionField> {
     pub(crate) cs: &'a mut ConstraintSystem<E>,
+    pub platform: Platform,
 }

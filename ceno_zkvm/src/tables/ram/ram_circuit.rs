@@ -37,7 +37,7 @@ pub trait NonVolatileTable {
     fn name() -> &'static str;
 
     /// Maximum number of words in the table.
-    fn len() -> usize;
+    fn len(platform: &Platform) -> usize;
 }
 
 /// non-volatile indicates initial value is configurable

@@ -1,6 +1,6 @@
 use std::{collections::HashSet, iter::zip, ops::RangeInclusive};
 
-use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
+use ceno_emul::{Addr, CENO_PLATFORM, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 
@@ -87,7 +87,7 @@ impl<E: ExtensionField> MmuConfig<E> {
     }
 
     pub fn initial_registers() -> Vec<MemInitRecord> {
-        (0..<RegTable as NonVolatileTable>::len())
+        (0..<RegTable as NonVolatileTable>::len(&CENO_PLATFORM))
             .map(|index| MemInitRecord {
                 addr: index as Addr,
                 value: 0,
@@ -96,11 +96,11 @@ impl<E: ExtensionField> MmuConfig<E> {
     }
 
     pub fn static_mem_len() -> usize {
-        <StaticMemTable as NonVolatileTable>::len()
+        <StaticMemTable as NonVolatileTable>::len(&CENO_PLATFORM)
     }
 
     pub fn public_io_len() -> usize {
-        <PubIOTable as NonVolatileTable>::len()
+        <PubIOTable as NonVolatileTable>::len(&CENO_PLATFORM)
     }
 }
 

@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, VMState, WORD_SIZE};
+use ceno_emul::{Addr, Platform, VMState, WORD_SIZE};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamCircuit};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
@@ -13,15 +13,23 @@ pub struct MemTable;
 impl DynVolatileRamTable for MemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
-    const OFFSET_ADDR: Addr = CENO_PLATFORM.ram_start();
-    const END_ADDR: Addr = CENO_PLATFORM.ram_end() + 1;
+    // const OFFSET_ADDR: Addr = CENO_PLATFORM.ram_start();
+    // const END_ADDR: Addr = CENO_PLATFORM.ram_end() + 1;
+
+    fn offset_addr(platform: &Platform) -> Addr {
+        platform.ram_start()
+    }
+
+    fn end_addr(platform: &Platform) -> Addr {
+        platform.ram_end()
+    }
 
     fn name() -> &'static str {
         "MemTable"
     }
 
-    fn max_len() -> usize {
-        let max_size = (Self::END_ADDR - Self::OFFSET_ADDR) / WORD_SIZE as Addr;
+    fn max_len(platform: &Platform) -> usize {
+        let max_size = (Self::end_addr(platform) - Self::offset_addr(platform)) / WORD_SIZE as Addr;
         1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 }
@@ -41,7 +49,7 @@ impl NonVolatileTable for RegTable {
         "RegTable"
     }
 
-    fn len() -> usize {
+    fn len(_platform: &Platform) -> usize {
         VMState::REG_COUNT.next_power_of_two()
     }
 }
@@ -56,7 +64,7 @@ impl NonVolatileTable for StaticMemTable {
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = true;
 
-    fn len() -> usize {
+    fn len(_platform: &Platform) -> usize {
         // TODO: take as program parameter.
         1 << 16 // words - 256KiB
     }
@@ -76,7 +84,7 @@ impl NonVolatileTable for PubIOTable {
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const WRITABLE: bool = false;
 
-    fn len() -> usize {
+    fn len(_platform: &Platform) -> usize {
         // TODO: take as program parameter.
         1 << 2 // words
     }

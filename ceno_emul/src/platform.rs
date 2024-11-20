@@ -5,7 +5,7 @@ use crate::addr::{Addr, RegIdx};
 /// - the layout of virtual memory,
 /// - special addresses, such as the initial PC,
 /// - codes of environment calls.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Platform {
     pub rom_start: Addr,
     pub rom_end: Addr,
