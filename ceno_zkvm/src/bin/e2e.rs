@@ -79,17 +79,16 @@ fn main() {
         Preset::Sp1 => Platform {
             // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
             stack_top: 0x0020_0400,
-            rom_start: 0x0020_0800,
-            rom_end: 0x0040_0000,
-            ram_start: 0x0020_0000,
-            ram_end: 0xFFFF_0000,
+            rom: 0x0020_0800..0x0040_0000,
+            ram: 0x0020_0000..0xFFFF_0000,
             unsafe_ecall_nop: true,
+            ..CENO_PLATFORM
         },
     };
     tracing::info!("Running on platform {:?}", args.platform);
 
     const STACK_SIZE: u32 = 256;
-    let mut mem_padder = MemPadder::new(platform.ram_start()..platform.ram_end());
+    let mut mem_padder = MemPadder::new(platform.ram.clone());
 
     tracing::info!("Loading ELF file: {}", args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");

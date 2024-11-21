@@ -123,7 +123,7 @@ impl EmuContext for VMState {
             // Read two registers, write one register, write one memory word, and branch.
             tracing::warn!("ecall ignored: syscall_id={}", function);
             self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
-            let addr = self.platform.ram_start().into();
+            let addr = self.platform.ram.start.into();
             self.store_memory(addr, self.peek_memory(addr))?;
             self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
