@@ -405,20 +405,3 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         Ok(final_table)
     }
 }
-
-#[allow(dead_code)]
-/// DynUnConstrainRamTableConfig with unconstrain init value and final value
-/// dynamic address as witin, relied on augment of knowledge to prove address form
-/// do not check init_value
-/// TODO implement DynUnConstrainRamTableConfig
-#[derive(Clone, Debug)]
-pub struct DynUnConstrainRamTableConfig<RAM: DynVolatileRamTable + Send + Sync + Clone> {
-    addr: WitIn,
-
-    init_v: Vec<WitIn>,
-
-    final_v: Vec<WitIn>,
-    final_cycle: WitIn,
-
-    phantom: PhantomData<RAM>,
-}
