@@ -654,7 +654,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
-                // let row = row.iter().map(|v| *v.into()).collect::<Vec<_>>();
+                let row = row.iter().map(|v| (*v).into()).collect::<Vec<E>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
