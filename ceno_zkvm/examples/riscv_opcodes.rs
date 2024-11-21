@@ -5,6 +5,7 @@ use ceno_zkvm::{
     instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
+    structs::ProgramParams,
     tables::{MemFinalRecord, ProgramTableCircuit},
 };
 use clap::Parser;
@@ -12,7 +13,7 @@ use clap::Parser;
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, LUI, LW},
-    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
+    PC_WORD_SIZE, Platform, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -54,7 +55,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     );
     program
 };
-type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
+type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -119,7 +120,11 @@ fn main() {
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let program_params = ProgramParams {
+        program_size: PROGRAM_SIZE,
+        ..Default::default()
+    };
+    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
@@ -136,17 +141,13 @@ fn main() {
 
     let static_report = StaticReport::new(&zkvm_cs);
 
-    let reg_init = MmuConfig::<E>::initial_registers();
+    let reg_init = mmu_config.initial_registers();
 
     // RAM is not used in this program, but it must have a particular size at the moment.
-    let mem_init = MemPadder::init_mem(mem_addresses, MmuConfig::<E>::static_mem_len(), &[]);
+    let mem_init = MemPadder::init_mem(mem_addresses, mmu_config.static_mem_len(), &[]);
 
     let init_public_io = |values: &[Word]| {
-        MemPadder::init_mem(
-            io_addresses.clone(),
-            MmuConfig::<E>::public_io_len(),
-            values,
-        )
+        MemPadder::init_mem(io_addresses.clone(), mmu_config.public_io_len(), values)
     };
 
     let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();
@@ -197,7 +198,7 @@ fn main() {
             .rev()
             .find(|record| {
                 record.insn().codes().kind == EANY
-                    && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
+                    && record.rs1().unwrap().value == Platform::ecall_halt()
             })
             .expect("halt record not found");
 
@@ -227,7 +228,7 @@ fn main() {
             .map(|rec| {
                 let index = rec.addr as usize;
                 if index < VMState::REG_COUNT {
-                    let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                    let vma: WordAddr = Platform::register_vma(index).into();
                     MemFinalRecord {
                         addr: rec.addr,
                         value: vm.peek_register(index),

@@ -7,7 +7,7 @@ use crate::{
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
-    tables::TableCircuit,
+    tables::{TableCircuit, padding_zero},
     utils::i64_to_base,
     witness::RowMajorMatrix,
 };
@@ -102,13 +102,12 @@ pub struct ProgramTableConfig {
 
     /// Multiplicity of the record - how many times an instruction is visited.
     mlt: WitIn,
+    program_size: usize,
 }
 
-pub struct ProgramTableCircuit<E, const PROGRAM_SIZE: usize>(PhantomData<E>);
+pub struct ProgramTableCircuit<E>(PhantomData<E>);
 
-impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
-    for ProgramTableCircuit<E, PROGRAM_SIZE>
-{
+impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     type TableConfig = ProgramTableConfig;
     type FixedInput = Program;
     type WitnessInput = Program;
@@ -137,13 +136,17 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
 
         cb.lk_table_record(
             || "prog table",
-            PROGRAM_SIZE,
+            cb.params.program_size,
             ROMType::Instruction,
             record_exprs,
             mlt.expr(),
         )?;
 
-        Ok(ProgramTableConfig { record, mlt })
+        Ok(ProgramTableConfig {
+            record,
+            mlt,
+            program_size: cb.params.program_size,
+        })
     }
 
     fn generate_fixed_traces(
@@ -153,9 +156,9 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
     ) -> RowMajorMatrix<E::BaseField> {
         let num_instructions = program.instructions.len();
         let pc_base = program.base_address;
-        assert!(num_instructions <= PROGRAM_SIZE);
+        assert!(num_instructions <= config.program_size);
 
-        let mut fixed = RowMajorMatrix::<E::BaseField>::new(PROGRAM_SIZE, num_fixed);
+        let mut fixed = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_fixed);
 
         fixed
             .par_iter_mut()
@@ -172,16 +175,8 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 }
             });
 
-        assert_eq!(INVALID as u64, 0, "cannot use 0 as program padding");
-        fixed
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .skip(num_instructions)
-            .for_each(|row| {
-                for col in config.record.as_slice() {
-                    set_fixed_val!(row, *col, 0_u64.into());
-                }
-            });
+        assert_eq!(INVALID as u64, 0, "0 padding must be invalid instructions");
+        padding_zero(&mut fixed, num_fixed, Some(num_instructions));
 
         fixed
     }
@@ -200,7 +195,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             prog_mlt[i] = *mlt;
         }
 
-        let mut witness = RowMajorMatrix::<E::BaseField>::new(PROGRAM_SIZE, num_witin);
+        let mut witness = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_witin);
         witness
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
@@ -209,13 +204,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        witness
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .skip(program.instructions.len())
-            .for_each(|row| {
-                set_val!(row, config.mlt, 0_u64);
-            });
+        padding_zero(&mut witness, num_witin, Some(program.instructions.len()));
 
         Ok(witness)
     }

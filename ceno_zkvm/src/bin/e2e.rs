@@ -9,7 +9,7 @@ use ceno_zkvm::{
         verifier::ZKVMVerifier,
     },
     state::GlobalState,
-    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit},
 };
 use clap::{Parser, ValueEnum};
@@ -55,7 +55,7 @@ fn main() {
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
     const PROGRAM_SIZE: usize = 1 << 14;
-    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
+    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
     // set up logger
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
@@ -93,12 +93,17 @@ fn main() {
 
     tracing::info!("Loading ELF file: {}", args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
-    let mut vm = VMState::new_from_elf(platform, &elf_bytes).unwrap();
+    let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let program_params = ProgramParams {
+        platform: platform.clone(),
+        program_size: PROGRAM_SIZE,
+        ..ProgramParams::default()
+    };
+    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
@@ -130,13 +135,13 @@ fn main() {
 
         let mem_init = chain!(program_addrs, stack_addrs).collect_vec();
 
-        mem_padder.padded_sorted(MmuConfig::<E>::static_mem_len(), mem_init)
+        mem_padder.padded_sorted(mmu_config.static_mem_len(), mem_init)
     };
 
     // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = mem_padder.padded_sorted(MmuConfig::<E>::public_io_len(), vec![]);
+    let io_init = mem_padder.padded_sorted(mmu_config.public_io_len(), vec![]);
 
-    let reg_init = MmuConfig::<E>::initial_registers();
+    let reg_init = mmu_config.initial_registers();
     config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
     mmu_config.generate_fixed_traces(
         &zkvm_cs,
@@ -175,7 +180,7 @@ fn main() {
         .rev()
         .find(|record| {
             record.insn().codes().kind == EANY
-                && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
+                && record.rs1().unwrap().value == Platform::ecall_halt()
         })
         .and_then(|halt_record| halt_record.rs2())
         .map(|rs2| rs2.value);
@@ -208,7 +213,7 @@ fn main() {
         .map(|rec| {
             let index = rec.addr as usize;
             if index < VMState::REG_COUNT {
-                let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
                     addr: rec.addr,
                     value: vm.peek_register(index),

@@ -15,7 +15,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind, StepRecord};
+use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -80,8 +80,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             const MAX_RAM_ADDR: u32 = u32::MAX - 0x7FF; // max positive imm is 0x7FF
             const MIN_RAM_ADDR: u32 = 0x800; // min negative imm is -0x800
             assert!(
-                !CENO_PLATFORM.can_write(MAX_RAM_ADDR + 1)
-                    && !CENO_PLATFORM.can_write(MIN_RAM_ADDR - 1)
+                !circuit_builder.params.platform.can_write(MAX_RAM_ADDR + 1)
+                    && !circuit_builder.params.platform.can_write(MIN_RAM_ADDR - 1)
             );
         }
         circuit_builder.require_equal(

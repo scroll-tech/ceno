@@ -94,7 +94,7 @@ pub trait Instruction<E: ExtensionField> {
                 num_padding_instances
             };
             raw_witin
-                .par_batch_iter_padding_mut(num_padding_instance_per_batch)
+                .par_batch_iter_padding_mut(None, num_padding_instance_per_batch)
                 .with_min_len(MIN_PAR_SIZE)
                 .for_each(|row| {
                     row.chunks_mut(num_witin)

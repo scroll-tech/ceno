@@ -5,7 +5,7 @@ use crate::addr::{Addr, RegIdx};
 /// - the layout of virtual memory,
 /// - special addresses, such as the initial PC,
 /// - codes of environment calls.
-#[derive(Copy, Clone)]
+#[derive(Clone, Debug)]
 pub struct Platform {
     pub rom_start: Addr,
     pub rom_end: Addr,
@@ -78,13 +78,13 @@ impl Platform {
     }
 
     /// Virtual address of a register.
-    pub const fn register_vma(&self, index: RegIdx) -> Addr {
+    pub const fn register_vma(index: RegIdx) -> Addr {
         // Register VMAs are aligned, cannot be confused with indices, and readable in hex.
         (index << 8) as Addr
     }
 
     /// Register index from a virtual address (unchecked).
-    pub const fn register_index(&self, vma: Addr) -> RegIdx {
+    pub const fn register_index(vma: Addr) -> RegIdx {
         (vma >> 8) as RegIdx
     }
 
@@ -111,27 +111,27 @@ impl Platform {
     // Environment calls.
 
     /// Register containing the ecall function code. (x5, t0)
-    pub const fn reg_ecall(&self) -> RegIdx {
+    pub const fn reg_ecall() -> RegIdx {
         5
     }
 
     /// Register containing the first function argument. (x10, a0)
-    pub const fn reg_arg0(&self) -> RegIdx {
+    pub const fn reg_arg0() -> RegIdx {
         10
     }
 
     /// Register containing the 2nd function argument. (x11, a1)
-    pub const fn reg_arg1(&self) -> RegIdx {
+    pub const fn reg_arg1() -> RegIdx {
         11
     }
 
     /// The code of ecall HALT.
-    pub const fn ecall_halt(&self) -> u32 {
+    pub const fn ecall_halt() -> u32 {
         0
     }
 
     /// The code of success.
-    pub const fn code_success(&self) -> u32 {
+    pub const fn code_success() -> u32 {
         0
     }
 }
@@ -151,7 +151,10 @@ mod tests {
         assert!(!p.is_ram(p.rom_start()));
         assert!(!p.is_ram(p.rom_end()));
         // Registers do not overlap with ROM or RAM.
-        for reg in [p.register_vma(0), p.register_vma(VMState::REG_COUNT - 1)] {
+        for reg in [
+            Platform::register_vma(0),
+            Platform::register_vma(VMState::REG_COUNT - 1),
+        ] {
             assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));
         }
