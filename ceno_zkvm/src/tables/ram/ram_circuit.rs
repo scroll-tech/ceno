@@ -117,7 +117,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_fixed: usize,
         io_addrs: &[Addr],
     ) -> RowMajorMatrix<E::BaseField> {
-        // assume returned table is well-formed include padding
+        // assume returned table is well-formed including padding
         config.gen_init_state(num_fixed, io_addrs)
     }
 
@@ -127,7 +127,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         _multiplicity: &[HashMap<u64, usize>],
         final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        // assume returned table is well-formed include padding
+        // assume returned table is well-formed including padding
         config.assign_instances(num_witin, final_cycles)
     }
 }
@@ -153,8 +153,8 @@ pub trait DynVolatileRamTable {
     }
 }
 
-/// DynVolatileRamCircuit initializes and finalizes memory with
-/// - at witnessed addresses, in a contiguous range chosen by the prover.
+/// DynVolatileRamCircuit initializes and finalizes memory
+/// - at witnessed addresses, in a contiguous range chosen by the prover,
 /// - with zeros as initial content,
 /// - with witnessed final content that the program wrote.
 pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
