@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::fmt::Display;
+use std::fmt::{Display, Debug};
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
@@ -33,6 +33,20 @@ use super::{
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
+}
+
+fn print_list_as_input<I: Display>(name: &str, entries: &Vec<I>) {
+    print!("{}: [", name);
+    for e in entries {
+        print!(" {}", e);
+    }
+    println!(" ]");
+}
+
+fn ext_field_as_limbs_no_trait<T: Debug>(scalar: &T) -> [String; 2] {
+    let scalar_str = format!("{:?}", scalar);
+    let str_seg: Vec<&str> = scalar_str.split(&['(', ')']).collect();
+    [str_seg[2].to_string(), str_seg[4].to_string()]
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
@@ -160,14 +174,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         Ok(true)
-    }
-
-    fn print_list_as_input<I: Display>(name: String, entries: &Vec<I>) {
-        print!("{}: [", name);
-        for e in entries {
-            print!(" {}", e);
-        }
-        println!(" ]");
     }
 
     /// verify proof and return input opening point
@@ -299,20 +305,150 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         cs_pointer_list = cs_pointer_list.into_iter().map(|i| mem_offset + i).collect();
 
         // Print everything in self out
-        Self::print_list_as_input("expr_concat".to_string(), &expr_concat_list);
-        Self::print_list_as_input("expr_pointer".to_string(), &expr_pointer_list);
-        Self::print_list_as_input("cs_concat".to_string(), &cs_concat_list);
-        Self::print_list_as_input("cs_pointer".to_string(), &cs_pointer_list);
+        print_list_as_input("expr_concat", &expr_concat_list);
+        print_list_as_input("expr_pointer", &expr_pointer_list);
+        print_list_as_input("cs_concat", &cs_concat_list);
         let circuit_vks_len = cs_pointer_list.len();
-        let circuit_vks_key_pointer = mem_offset;
         println!("self^vk^circuit_vks_len: {}", circuit_vks_len);
-        println!("self^vk^circuit_vks_key: {}", circuit_vks_key_pointer);
+        print_list_as_input("self^vk^circuit_vks_key", &cs_pointer_list);
         mem_offset += cs_pointer_list.len();
 
         // proof
-        println!("circuit_vk: {:?}", circuit_vk);
-        println!("proof: {:?}", proof);
+        println!("proof^num_instances: {}", proof.num_instances);
+        // record_r_out_evals, record_w_out_evals
+        let mut record_r_out_evals = Vec::new();
+        let mut record_w_out_evals = Vec::new();
+        for r in &proof.record_r_out_evals {
+            record_r_out_evals.extend(ext_field_as_limbs_no_trait(r));
+        }
+        for w in &proof.record_w_out_evals {
+            record_w_out_evals.extend(ext_field_as_limbs_no_trait(w));
+        }
+        print_list_as_input("proof^record_r_out_evals", &record_r_out_evals);
+        mem_offset += record_r_out_evals.len();
+        print_list_as_input("proof^record_w_out_evals", &record_w_out_evals);
+        mem_offset += record_w_out_evals.len();
+        // lk_p1_out_eval, lk_p2_out_eval, lk_q1_out_eval, lk_q2_out_eval
+        let lk_p1_out_eval = ext_field_as_limbs_no_trait(&proof.lk_p1_out_eval);
+        let lk_p2_out_eval = ext_field_as_limbs_no_trait(&proof.lk_p2_out_eval);
+        let lk_q1_out_eval = ext_field_as_limbs_no_trait(&proof.lk_q1_out_eval);
+        let lk_q2_out_eval = ext_field_as_limbs_no_trait(&proof.lk_q2_out_eval);
+        println!("proof^lk_p1_out_eval^b0: {}", lk_p1_out_eval[0]);
+        println!("proof^lk_p1_out_eval^b1: {}", lk_p1_out_eval[1]);
+        println!("proof^lk_p2_out_eval^b0: {}", lk_p2_out_eval[0]);
+        println!("proof^lk_p2_out_eval^b1: {}", lk_p2_out_eval[1]);
+        println!("proof^lk_q1_out_eval^b0: {}", lk_q1_out_eval[0]);
+        println!("proof^lk_q1_out_eval^b1: {}", lk_q1_out_eval[1]);
+        println!("proof^lk_q2_out_eval^b0: {}", lk_q2_out_eval[0]);
+        println!("proof^lk_q2_out_eval^b1: {}", lk_q2_out_eval[1]);
+        // tower_proof
+        println!("proof^tower_proof^prod_spec_size: {}", proof.tower_proof.prod_spec_size());
+        println!("proof^tower_proof^logup_spec_size: {}", proof.tower_proof.logup_spec_size());
+        // proofs
+        let mut proof_entries_concat = Vec::new();
+        let mut next_proof_pointer = 0;
+        let mut proof_pointers_mat = Vec::new();
+        let mut head_pointers_list = vec![Vec::new(); 3];
+        // proofs
+        for t0 in &proof.tower_proof.proofs {
+            head_pointers_list[0].push(next_proof_pointer);
+            for t1 in t0 {
+                proof_pointers_mat.push(mem_offset + proof_entries_concat.len());
+                next_proof_pointer += 1;
+                for e in &t1.evaluations {
+                    proof_entries_concat.extend(ext_field_as_limbs_no_trait(&e));
+                }
+            }
+        }
+        // prod_specs_eval
+        for t0 in &proof.tower_proof.prod_specs_eval {
+            head_pointers_list[1].push(next_proof_pointer);
+            for t1 in t0 {
+                proof_pointers_mat.push(mem_offset + proof_entries_concat.len());
+                next_proof_pointer += 1;
+                for e in t1 {
+                    proof_entries_concat.extend(ext_field_as_limbs_no_trait(&e));
+                }
+            }
+        }
+        // logup_specs_eval
+        for t0 in &proof.tower_proof.logup_specs_eval {
+            head_pointers_list[2].push(next_proof_pointer);
+            for t1 in t0 {
+                proof_pointers_mat.push(mem_offset + proof_entries_concat.len());
+                next_proof_pointer += 1;
+                for e in t1 {
+                    proof_entries_concat.extend(ext_field_as_limbs_no_trait(&e));
+                }
+            }
+        }
+        mem_offset += proof_entries_concat.len();
+        print_list_as_input("proof_entries_concat", &proof_entries_concat);
+        print_list_as_input("proof_pointers_mat", &proof_pointers_mat);
+        head_pointers_list[0] = head_pointers_list[0].iter().map(|i| mem_offset + i).collect();
+        head_pointers_list[1] = head_pointers_list[1].iter().map(|i| mem_offset + i).collect();
+        head_pointers_list[2] = head_pointers_list[2].iter().map(|i| mem_offset + i).collect();
+        print_list_as_input("proof^tower_proof^proofs", &head_pointers_list[0]);
+        print_list_as_input("proof^tower_proof^prod_specs_eval", &head_pointers_list[1]);
+        print_list_as_input("proof^tower_proof^logup_specs_eval", &head_pointers_list[2]);
+        mem_offset += head_pointers_list[0].len() + head_pointers_list[1].len() + head_pointers_list[2].len();
 
+        // main_sel_sumcheck_proofs
+        let mut mssp_concat = Vec::new();
+        let mut mssp_offset = 0;
+        let mut mssp_pointers = Vec::new();
+        for m in &proof.main_sel_sumcheck_proofs {
+            mssp_pointers.push(mssp_offset);
+            for e in &m.evaluations {
+                mssp_concat.extend(ext_field_as_limbs_no_trait(e));
+            }
+            mssp_offset += m.evaluations.len();
+        }
+        println!("proof^main_sel_sumcheck_proofs_len: {}", proof.main_sel_sumcheck_proofs.len());
+        print_list_as_input("main_sel_sumcheck_proofs_concat", &mssp_concat);
+        mem_offset += mssp_concat.len();
+        mssp_pointers = mssp_pointers.iter().map(|i| mem_offset + i).collect();
+        print_list_as_input("proof^main_sel_sumcheck_proofs", &mssp_pointers);
+        mem_offset += mssp_pointers.len();
+
+        // r_records_in_evals, w_records_in_evals, lk_records_in_evals
+        println!("proof^r_records_in_evals_len: {}", proof.r_records_in_evals.len());
+        let mut r_records_in_evals = Vec::new();
+        for r in &proof.r_records_in_evals {
+            r_records_in_evals.extend(ext_field_as_limbs_no_trait(r));
+        }
+        print_list_as_input("proof^r_records_in_evals", &r_records_in_evals);
+        mem_offset += r_records_in_evals.len();
+        // w
+        println!("proof^w_records_in_evals_len: {}", proof.w_records_in_evals.len());
+        let mut w_records_in_evals = Vec::new();
+        for w in &proof.w_records_in_evals {
+            w_records_in_evals.extend(ext_field_as_limbs_no_trait(w));
+        }
+        print_list_as_input("proof^w_records_in_evals", &w_records_in_evals);
+        mem_offset += w_records_in_evals.len();
+        // lk
+        println!("proof^lk_records_in_evals_len: {}", proof.lk_records_in_evals.len());
+        let mut lk_records_in_evals = Vec::new();
+        for lk in &proof.lk_records_in_evals {
+            lk_records_in_evals.extend(ext_field_as_limbs_no_trait(lk));
+        }
+        print_list_as_input("proof^lk_records_in_evals", &lk_records_in_evals);
+        mem_offset += lk_records_in_evals.len();
+
+        // wits_in_evals
+        println!("proof^wits_in_evals_len: {}", proof.wits_in_evals.len());
+        let mut wits_in_evals = Vec::new();
+        for w in &proof.wits_in_evals {
+            wits_in_evals.extend(ext_field_as_limbs_no_trait(w));
+        }
+        print_list_as_input("proof^wits_in_evals", &wits_in_evals);
+        mem_offset += wits_in_evals.len();
+
+
+        // --
+        // END PRINT
+        // --
 
         let cs = circuit_vk.get_cs();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (

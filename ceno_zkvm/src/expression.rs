@@ -2,7 +2,7 @@ mod monomial;
 
 use std::{
     cmp::max,
-    fmt::Display,
+    fmt::{Display, Debug},
     mem::MaybeUninit,
     ops::{Add, Deref, Mul, Neg, Sub},
 };
@@ -36,6 +36,12 @@ pub enum Expression<E: ExtensionField> {
     /// This is x, a, b expr to represent ax + b polynomial
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
     Challenge(ChallengeId, usize, E, E), // (challenge_id, power, scalar, offset)
+}
+
+fn ext_field_as_limbs_no_trait<T: Debug>(scalar: &T) -> [String; 2] {
+    let scalar_str = format!("{:?}", scalar);
+    let str_seg: Vec<&str> = scalar_str.split(&['(', ')']).collect();
+    [str_seg[2].to_string(), str_seg[4].to_string()]
 }
 
 impl<E: ExtensionField> Expression<E> {
@@ -165,12 +171,8 @@ impl<E: ExtensionField> Expression<E> {
             let const_str = format!("{:?}", expr.constant);
             let str_seg: Vec<&str> = const_str.split(&['(', ')']).collect();
             expr_entries.push(str_seg[1].to_string());
-            let scalar_str = format!("{:?}", expr.scalar);
-            let str_seg: Vec<&str> = scalar_str.split(&['(', ')']).collect();
-            expr_entries.extend([str_seg[2].to_string(), str_seg[4].to_string()]);
-            let offset_str = format!("{:?}", expr.offset);
-            let str_seg: Vec<&str> = offset_str.split(&['(', ')']).collect();
-            expr_entries.extend([str_seg[2].to_string(), str_seg[4].to_string()]);
+            expr_entries.extend(ext_field_as_limbs_no_trait(&expr.scalar));
+            expr_entries.extend(ext_field_as_limbs_no_trait(&expr.offset));
             expr_entries.extend([expr.l0.to_string(), expr.l1.to_string(), expr.l2.to_string()]);
         }
         (expr_len, expr_entries)
