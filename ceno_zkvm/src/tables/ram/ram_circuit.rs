@@ -138,6 +138,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
 pub trait DynVolatileRamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
+    const ZERO_INIT: bool;
 
     const OFFSET_ADDR: Addr;
     const END_ADDR: Addr;
@@ -145,7 +146,8 @@ pub trait DynVolatileRamTable {
     fn name() -> &'static str;
 
     fn max_len() -> usize {
-        (Self::END_ADDR - Self::OFFSET_ADDR) as usize / WORD_SIZE
+        let max_size = (Self::END_ADDR - Self::OFFSET_ADDR) / WORD_SIZE as Addr;
+        1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 
     fn addr(entry_index: usize) -> Addr {
@@ -155,8 +157,12 @@ pub trait DynVolatileRamTable {
 
 /// DynVolatileRamCircuit initializes and finalizes memory
 /// - at witnessed addresses, in a contiguous range chosen by the prover,
-/// - with zeros as initial content,
+/// - with zeros as initial content if ZERO_INIT,
 /// - with witnessed final content that the program wrote.
+///
+/// If not ZERO_INIT:
+/// - The initial content is an unconstrained prover hint.
+/// - The final content is equal to this initial content.
 pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableCircuit<E>

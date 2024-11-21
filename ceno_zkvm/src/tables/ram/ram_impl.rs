@@ -297,10 +297,17 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .collect::<Vec<WitIn>>();
         let final_cycle = cb.create_witin(|| "final_cycle");
 
+        let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
+        let init_expr = if DVRAM::ZERO_INIT {
+            vec![Expression::ZERO; DVRAM::V_LIMBS]
+        } else {
+            final_expr.clone()
+        };
+
         let init_table = [
             vec![(DVRAM::RAM_TYPE as usize).into()],
             vec![addr.expr()],
-            vec![Expression::ZERO],
+            init_expr,
             vec![Expression::ZERO], // Initial cycle.
         ]
         .concat();
@@ -309,7 +316,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             // a v t
             vec![(DVRAM::RAM_TYPE as usize).into()],
             vec![addr.expr()],
-            final_v.iter().map(|v| v.expr()).collect_vec(),
+            final_expr,
             vec![final_cycle.expr()],
         ]
         .concat();

@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, CENO_PLATFORM, VMState, WORD_SIZE};
+use ceno_emul::{Addr, CENO_PLATFORM, VMState};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamCircuit};
 
 use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
@@ -8,25 +8,36 @@ mod ram_impl;
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
 #[derive(Clone)]
-pub struct MemTable;
+pub struct DynMemTable;
 
-impl DynVolatileRamTable for MemTable {
+impl DynVolatileRamTable for DynMemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const OFFSET_ADDR: Addr = CENO_PLATFORM.ram_start();
     const END_ADDR: Addr = CENO_PLATFORM.ram_end() + 1;
+    const ZERO_INIT: bool = true;
 
     fn name() -> &'static str {
-        "MemTable"
-    }
-
-    fn max_len() -> usize {
-        let max_size = (Self::END_ADDR - Self::OFFSET_ADDR) / WORD_SIZE as Addr;
-        1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
+        "DynMemTable"
     }
 }
 
-pub type MemCircuit<E> = DynVolatileRamCircuit<E, MemTable>;
+pub type DynMemCircuit<E> = DynVolatileRamCircuit<E, DynMemTable>;
+
+#[derive(Clone)]
+pub struct PrivateMemTable;
+impl DynVolatileRamTable for PrivateMemTable {
+    const RAM_TYPE: RAMType = RAMType::Memory;
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const OFFSET_ADDR: Addr = CENO_PLATFORM.ram_start();
+    const END_ADDR: Addr = CENO_PLATFORM.ram_end() + 1;
+    const ZERO_INIT: bool = false;
+
+    fn name() -> &'static str {
+        "PrivateMemTable"
+    }
+}
+pub type PrivateMemCircuit<E> = DynVolatileRamCircuit<E, PrivateMemTable>;
 
 /// RegTable, fix size without offset
 #[derive(Clone)]
