@@ -1,6 +1,5 @@
 //! The circuit implementation of logic instructions.
 
-use core::mem::MaybeUninit;
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
 

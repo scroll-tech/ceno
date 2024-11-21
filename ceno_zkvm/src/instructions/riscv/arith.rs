@@ -11,7 +11,6 @@ use crate::{
     uint::{Value, ValueMul},
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]

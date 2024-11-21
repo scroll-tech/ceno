@@ -18,7 +18,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::Tracer;
-use core::mem::MaybeUninit;
 use std::{iter, marker::PhantomData};
 
 #[derive(Debug)]

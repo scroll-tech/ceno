@@ -19,7 +19,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
 pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);

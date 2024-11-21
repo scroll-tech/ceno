@@ -1,4 +1,3 @@
-use std::mem::MaybeUninit;
 
 /// Decompose an integer into a binary vector in little endian.
 pub fn bit_decompose(input: u64, num_var: usize) -> Vec<bool> {

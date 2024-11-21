@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem::MaybeUninit};
+use std::fmt::Display;
 
 use ceno_emul::{SWord, Word};
 use ff_ext::ExtensionField;

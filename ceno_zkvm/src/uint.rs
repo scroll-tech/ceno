@@ -20,7 +20,7 @@ use goldilocks::SmallField;
 use itertools::Itertools;
 use std::{
     borrow::Cow,
-    mem::{self, MaybeUninit},
+    mem::{self},
     ops::Index,
 };
 pub use strum::IntoEnumIterator;

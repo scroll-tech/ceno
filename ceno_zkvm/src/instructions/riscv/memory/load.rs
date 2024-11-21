@@ -19,7 +19,7 @@ use crate::{
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::izip;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
     im_insn: IMInstructionConfig<E>,

@@ -16,7 +16,6 @@ use crate::{
     uint::Value,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
 pub struct ArithConfig<E: ExtensionField> {

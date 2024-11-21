@@ -15,7 +15,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct ShiftImmConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,

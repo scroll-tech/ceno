@@ -17,7 +17,7 @@ use crate::{
 };
 use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     s_insn: SInstructionConfig<E>,

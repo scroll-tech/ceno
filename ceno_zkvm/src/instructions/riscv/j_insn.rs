@@ -10,7 +10,6 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 // Opcode: 1101111
 

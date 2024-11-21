@@ -1,4 +1,3 @@
-use std::mem::MaybeUninit;
 
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;

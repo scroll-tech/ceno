@@ -20,7 +20,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {

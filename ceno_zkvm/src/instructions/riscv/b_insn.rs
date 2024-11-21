@@ -13,7 +13,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 // Opcode: 1100011
 // Funct3:

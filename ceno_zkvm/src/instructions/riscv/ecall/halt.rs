@@ -16,7 +16,7 @@ use crate::{
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,

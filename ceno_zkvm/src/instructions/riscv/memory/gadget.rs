@@ -11,7 +11,6 @@ use ceno_emul::StepRecord;
 use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::izip;
-use std::mem::MaybeUninit;
 
 pub struct MemWordChange<const N_ZEROS: usize> {
     prev_limb_bytes: Vec<WitIn>,

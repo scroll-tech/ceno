@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;

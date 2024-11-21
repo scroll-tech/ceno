@@ -1,4 +1,3 @@
-use std::mem::MaybeUninit;
 
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;

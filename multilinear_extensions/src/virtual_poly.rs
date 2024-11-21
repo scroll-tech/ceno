@@ -1,4 +1,4 @@
-use std::{cmp::max, collections::HashMap, marker::PhantomData, mem::MaybeUninit, sync::Arc};
+use std::{cmp::max, collections::HashMap, marker::PhantomData, sync::Arc};
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
@@ -383,7 +383,7 @@ pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
 
-    let mut evals = vec![E::ZERO; (1 << r.len())];
+    let mut evals = vec![E::ZERO; 1 << r.len()];
     build_eq_x_r_helper_sequential(r, &mut evals, E::ONE);
 
     evals
@@ -454,7 +454,7 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
         build_eq_x_r_vec_sequential(r)
     } else {
         let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
-        let mut ret = vec![E::ZERO; (1 << r.len())];
+        let mut ret = vec![E::ZERO; 1 << r.len()];
 
         // eq(x, r) = eq(x_lo, r_lo) * eq(x_hi, r_hi)
         // where rlen = r.len(), x_lo = x[0..rlen-nbits], x_hi = x[rlen-nbits..]

@@ -101,7 +101,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 

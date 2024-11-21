@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
+use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
     circuit_builder::CircuitBuilder,

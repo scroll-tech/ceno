@@ -4,7 +4,6 @@ use std::{
     cmp::max,
     fmt::Display,
     iter::{Product, Sum},
-    mem::MaybeUninit,
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 

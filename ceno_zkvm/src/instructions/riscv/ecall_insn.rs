@@ -12,7 +12,6 @@ use crate::{
 };
 use ceno_emul::{CENO_PLATFORM, InsnKind::EANY, PC_STEP_SIZE, StepRecord, Tracer};
 use ff_ext::ExtensionField;
-use std::mem::MaybeUninit;
 
 pub struct EcallInstructionConfig {
     pub pc: WitIn,

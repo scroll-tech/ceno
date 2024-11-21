@@ -9,7 +9,6 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use std::mem::MaybeUninit;
 
 /// This config handles the common part of S-type instructions:
 /// - PC, cycle, fetch.

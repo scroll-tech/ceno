@@ -10,7 +10,6 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 /// This config handles the common part of the U-type instruction:
 /// - PC, cycle, fetch

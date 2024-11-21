@@ -4,7 +4,7 @@ use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use std::{collections::HashMap, mem::MaybeUninit};
+use std::collections::HashMap;
 
 use crate::{
     circuit_builder::CircuitBuilder,

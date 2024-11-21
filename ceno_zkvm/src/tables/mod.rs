@@ -5,7 +5,7 @@ use crate::{
 use ff::Field;
 use ff_ext::ExtensionField;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::{collections::HashMap, mem::MaybeUninit};
+use std::collections::HashMap;
 mod range;
 pub use range::*;
 

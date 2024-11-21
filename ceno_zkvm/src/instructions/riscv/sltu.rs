@@ -12,7 +12,6 @@ use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::IsLtConfig,
     instructions::Instruction, uint::Value, witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
