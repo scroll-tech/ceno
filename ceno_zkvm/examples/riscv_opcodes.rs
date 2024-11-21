@@ -90,8 +90,8 @@ fn main() {
             })
             .collect(),
     );
-    let mem_addresses = CENO_PLATFORM.ram_start()..=CENO_PLATFORM.ram_end();
-    let io_addresses = CENO_PLATFORM.public_io_start()..=CENO_PLATFORM.public_io_end();
+    let mem_addresses = CENO_PLATFORM.ram_start()..CENO_PLATFORM.ram_end();
+    let io_addresses = CENO_PLATFORM.public_io_start()..CENO_PLATFORM.public_io_end();
 
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let mut fmt_layer = fmt::layer()

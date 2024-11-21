@@ -1,4 +1,4 @@
-use std::{collections::HashSet, iter::zip, ops::RangeInclusive};
+use std::{collections::HashSet, iter::zip, ops::Range};
 
 use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
@@ -107,7 +107,7 @@ impl<E: ExtensionField> MmuConfig<E> {
 }
 
 pub struct MemPadder {
-    valid_addresses: RangeInclusive<Addr>,
+    valid_addresses: Range<Addr>,
     used_addresses: HashSet<Addr>,
 }
 
@@ -118,7 +118,7 @@ impl MemPadder {
     ///
     /// Require: `values.len() <= padded_len <= address_range.len()`
     pub fn init_mem(
-        address_range: RangeInclusive<Addr>,
+        address_range: Range<Addr>,
         padded_len: usize,
         values: &[Word],
     ) -> Vec<MemInitRecord> {
@@ -129,7 +129,7 @@ impl MemPadder {
         records
     }
 
-    pub fn new(valid_addresses: RangeInclusive<Addr>) -> Self {
+    pub fn new(valid_addresses: Range<Addr>) -> Self {
         Self {
             valid_addresses,
             used_addresses: HashSet::new(),

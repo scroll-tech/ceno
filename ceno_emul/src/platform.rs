@@ -18,9 +18,9 @@ pub struct Platform {
 
 pub const CENO_PLATFORM: Platform = Platform {
     rom_start: 0x2000_0000,
-    rom_end: 0x3000_0000 - 1,
+    rom_end: 0x3000_0000,
     ram_start: 0x8000_0000,
-    ram_end: 0xFFFF_0000 - 1,
+    ram_end: 0xFFFF_0000,
     stack_top: 0xC0000000,
     unsafe_ecall_nop: false,
 };
@@ -37,7 +37,7 @@ impl Platform {
     }
 
     pub fn is_rom(&self, addr: Addr) -> bool {
-        (self.rom_start()..=self.rom_end()).contains(&addr)
+        (self.rom_start()..self.rom_end()).contains(&addr)
     }
 
     // TODO figure out a proper region for public io
@@ -46,7 +46,7 @@ impl Platform {
     }
 
     pub const fn public_io_end(&self) -> Addr {
-        0x3000_2000 - 1
+        0x3000_2000
     }
 
     pub const fn ram_start(&self) -> Addr {
@@ -70,11 +70,11 @@ impl Platform {
     }
 
     pub fn is_ram(&self, addr: Addr) -> bool {
-        (self.ram_start()..=self.ram_end()).contains(&addr)
+        (self.ram_start()..self.ram_end()).contains(&addr)
     }
 
     pub fn is_pub_io(&self, addr: Addr) -> bool {
-        (self.public_io_start()..=self.public_io_end()).contains(&addr)
+        (self.public_io_start()..self.public_io_end()).contains(&addr)
     }
 
     /// Virtual address of a register.
@@ -139,7 +139,7 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::VMState;
+    use crate::{VMState, WORD_SIZE};
 
     #[test]
     fn test_no_overlap() {
@@ -147,9 +147,9 @@ mod tests {
         assert!(p.can_execute(p.pc_base()));
         // ROM and RAM do not overlap.
         assert!(!p.is_rom(p.ram_start()));
-        assert!(!p.is_rom(p.ram_end()));
+        assert!(!p.is_rom(p.ram_end() - WORD_SIZE as Addr));
         assert!(!p.is_ram(p.rom_start()));
-        assert!(!p.is_ram(p.rom_end()));
+        assert!(!p.is_ram(p.rom_end() - WORD_SIZE as Addr));
         // Registers do not overlap with ROM or RAM.
         for reg in [
             Platform::register_vma(0),
