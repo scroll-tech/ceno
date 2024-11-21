@@ -84,7 +84,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         val: u64,
     ) -> Result<(), ZKVMError> {

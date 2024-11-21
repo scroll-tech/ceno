@@ -2,7 +2,7 @@ use std::{cmp::max, collections::HashMap, marker::PhantomData, mem::MaybeUninit,
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
-    util::{bit_decompose, create_uninit_vec, max_usable_threads},
+    util::{bit_decompose, max_usable_threads},
 };
 use ark_std::{end_timer, iterable::Iterable, rand::Rng, start_timer};
 use ff::{Field, PrimeField};
@@ -313,7 +313,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
         let mut flattened_ml_extensions = vec![];
         let mut hm = HashMap::new();
         for mle in self.flattened_ml_extensions.iter() {
-            let mle_ptr = Arc::as_ptr(mle) as usize;
+            let mle_ptr = Arc::as_ptr(&mle) as usize;
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
 
             let mle_ext_field = mle.as_ref().to_ext_field();
@@ -383,16 +383,16 @@ pub fn build_eq_x_r_vec_sequential<E: ExtensionField>(r: &[E]) -> Vec<E> {
     //  1 1 1 1 -> r0       * r1        * r2        * r3
     // we will need 2^num_var evaluations
 
-    let mut evals = create_uninit_vec(1 << r.len());
+    let mut evals = vec![E::ZERO; (1 << r.len())];
     build_eq_x_r_helper_sequential(r, &mut evals, E::ONE);
 
-    unsafe { std::mem::transmute(evals) }
+    evals
 }
 
 /// A helper function to build eq(x, r)*init via dynamic programing tricks.
 /// This function takes 2^num_var iterations, and per iteration with 1 multiplication.
-fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [MaybeUninit<E>], init: E) {
-    buf[0] = MaybeUninit::new(init);
+fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [E], init: E) {
+    buf[0] = init;
 
     for (i, r) in r.iter().rev().enumerate() {
         let next_size = 1 << (i + 1);
@@ -402,10 +402,10 @@ fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [MaybeUn
         // buf[2*j + 1] = r * buf[j]
         // buf[2*j] = (1 - r) * buf[j]
         (0..next_size).step_by(2).rev().for_each(|index| {
-            let prev_val = unsafe { buf[index >> 1].assume_init() };
+            let prev_val = buf[index >> 1];
             let tmp = *r * prev_val;
-            buf[index + 1] = MaybeUninit::new(tmp);
-            buf[index] = MaybeUninit::new(prev_val - tmp);
+            buf[index + 1] = tmp;
+            buf[index] = prev_val - tmp;
         });
     }
 }
@@ -454,7 +454,7 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
         build_eq_x_r_vec_sequential(r)
     } else {
         let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
-        let mut ret = create_uninit_vec(1 << r.len());
+        let mut ret = vec![E::ZERO; (1 << r.len())];
 
         // eq(x, r) = eq(x_lo, r_lo) * eq(x_hi, r_hi)
         // where rlen = r.len(), x_lo = x[0..rlen-nbits], x_hi = x[rlen-nbits..]
@@ -468,7 +468,7 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
 
                 build_eq_x_r_helper_sequential(&r[..(r.len() - nbits)], chunks, eq_t);
             });
-        unsafe { std::mem::transmute::<Vec<MaybeUninit<E>>, Vec<E>>(ret) }
+        ret
     }
 }
 

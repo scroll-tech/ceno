@@ -51,7 +51,7 @@ pub trait TableCircuit<E: ExtensionField> {
         if num_padding_instances > 0 {
             let nthreads =
                 std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
-            let padding_instance = vec![MaybeUninit::new(E::BaseField::ZERO); num_witin];
+            let padding_instance = vec![E::BaseField::ZERO; num_witin];
             let num_padding_instance_per_batch = if num_padding_instances > 256 {
                 num_padding_instances.div_ceil(nthreads)
             } else {

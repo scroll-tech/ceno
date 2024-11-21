@@ -37,7 +37,7 @@ pub trait Instruction<E: ExtensionField> {
     // assign single instance giving step from trace
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError>;
@@ -79,11 +79,11 @@ pub trait Instruction<E: ExtensionField> {
 
             let padding_instance = match Self::padding_strategy() {
                 InstancePaddingStrategy::Zero => {
-                    vec![MaybeUninit::new(E::BaseField::ZERO); num_witin]
+                    vec![E::BaseField::ZERO; num_witin]
                 }
                 InstancePaddingStrategy::RepeatLast if steps.is_empty() => {
                     tracing::debug!("No {} steps to repeat, using zero padding", Self::name());
-                    vec![MaybeUninit::new(E::BaseField::ZERO); num_witin]
+                    vec![E::BaseField::ZERO; num_witin]
                 }
                 InstancePaddingStrategy::RepeatLast => raw_witin[steps.len() - 1].to_vec(),
             };

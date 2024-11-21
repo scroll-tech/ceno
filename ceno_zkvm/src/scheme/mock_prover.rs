@@ -654,10 +654,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
-                let row = row
-                    .iter()
-                    .map(|v| unsafe { (*v).assume_init() }.into())
-                    .collect::<Vec<_>>();
+                // let row = row.iter().map(|v| *v.into()).collect::<Vec<_>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
@@ -1378,7 +1375,7 @@ mod tests {
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: AssertLtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
@@ -1492,7 +1489,7 @@ mod tests {
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: LtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {

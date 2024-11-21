@@ -756,12 +756,8 @@ impl WitIn {
         )
     }
 
-    pub fn assign<E: ExtensionField>(
-        &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
-        value: E::BaseField,
-    ) {
-        instance[self.id as usize] = MaybeUninit::new(value);
+    pub fn assign<E: ExtensionField>(&self, instance: &mut [E::BaseField], value: E::BaseField) {
+        instance[self.id as usize] = value;
     }
 }
 

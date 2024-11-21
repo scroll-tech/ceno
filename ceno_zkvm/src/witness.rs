@@ -9,10 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLEs},
-    util::create_uninit_vec,
-};
+use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLEs};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -28,31 +25,31 @@ use crate::{
 #[macro_export]
 macro_rules! set_val {
     ($ins:ident, $field:expr, $val:expr) => {
-        $ins[$field.id as usize] = MaybeUninit::new($val.into());
+        $ins[$field.id as usize] = $val.into();
     };
 }
 
 #[macro_export]
 macro_rules! set_fixed_val {
     ($ins:ident, $field:expr, $val:expr) => {
-        $ins[$field.0] = MaybeUninit::new($val);
+        $ins[$field.0] = $val;
     };
 }
 
 #[derive(Clone)]
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
-    values: Vec<MaybeUninit<T>>,
+    values: Vec<T>,
     num_padding_rows: usize,
     num_col: usize,
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
         let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
         RowMajorMatrix {
-            values: create_uninit_vec(num_total_rows * num_col),
+            values: vec![T::default(); num_total_rows * num_col],
             num_padding_rows,
             num_col,
         }
@@ -66,29 +63,26 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         self.num_padding_rows
     }
 
-    pub fn iter_rows(&self) -> Chunks<MaybeUninit<T>> {
+    pub fn iter_rows(&self) -> Chunks<T> {
         self.values.chunks(self.num_col)
     }
 
-    pub fn iter_mut(&mut self) -> ChunksMut<MaybeUninit<T>> {
+    pub fn iter_mut(&mut self) -> ChunksMut<T> {
         self.values.chunks_mut(self.num_col)
     }
 
-    pub fn par_iter_mut(&mut self) -> rayon::slice::ChunksMut<MaybeUninit<T>> {
+    pub fn par_iter_mut(&mut self) -> rayon::slice::ChunksMut<T> {
         self.values.par_chunks_mut(self.num_col)
     }
 
-    pub fn par_batch_iter_mut(
-        &mut self,
-        num_rows: usize,
-    ) -> rayon::slice::ChunksMut<MaybeUninit<T>> {
+    pub fn par_batch_iter_mut(&mut self, num_rows: usize) -> rayon::slice::ChunksMut<T> {
         self.values.par_chunks_mut(num_rows * self.num_col)
     }
 
     pub fn par_batch_iter_padding_mut(
         &mut self,
         num_rows: usize,
-    ) -> rayon::slice::ChunksMut<'_, MaybeUninit<T>> {
+    ) -> rayon::slice::ChunksMut<'_, T> {
         let valid_instance = self.num_instances();
         self.values[valid_instance * self.num_col..]
             .as_mut()
@@ -102,7 +96,8 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
                     .par_iter_mut()
                     .skip(i)
                     .step_by(self.num_col)
-                    .map(|v| unsafe { mem::replace(v, mem::MaybeUninit::uninit()).assume_init() })
+                    //.map(|v| unsafe { mem::replace(v, mem::MaybeUninit::uninit()).assume_init() })
+                    .map(|v| *v)
                     .collect::<Vec<T>>()
             })
             .collect()
@@ -118,7 +113,7 @@ impl<F: Field> RowMajorMatrix<F> {
 }
 
 impl<F: Field> Index<usize> for RowMajorMatrix<F> {
-    type Output = [MaybeUninit<F>];
+    type Output = [F];
 
     fn index(&self, idx: usize) -> &Self::Output {
         &self.values[self.num_col * idx..][..self.num_col]
