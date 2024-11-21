@@ -158,7 +158,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let pc_base = program.base_address;
         assert!(num_instructions <= config.program_size);
 
-        let mut fixed = RowMajorMatrix::<E::BaseField>::new(PROGRAM_SIZE, num_fixed);
+        let mut fixed = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_fixed);
 
         fixed
             .par_iter_mut()
@@ -195,7 +195,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             prog_mlt[i] = *mlt;
         }
 
-        let mut witness = RowMajorMatrix::<E::BaseField>::new(PROGRAM_SIZE, num_witin);
+        let mut witness = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_witin);
         witness
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
