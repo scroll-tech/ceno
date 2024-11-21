@@ -260,6 +260,7 @@ fn main() {
             &reg_final,
             &mem_final,
             &io_final,
+            &[],
         )
         .unwrap();
     // assign program circuit
