@@ -12,16 +12,17 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit},
 };
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
-    panic,
+    fs, panic,
     time::Instant,
 };
+use tracing::level_filters::LevelFilter;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
@@ -30,9 +31,22 @@ use transcript::Transcript;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// The path to the ELF file to execute.
+    elf: String,
+
     /// The maximum number of steps to execute the program.
     #[arg(short, long)]
     max_steps: Option<usize>,
+
+    /// The preset configuration to use.
+    #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
+    platform: Preset,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Preset {
+    Ceno,
+    Sp1,
 }
 
 fn main() {
@@ -52,24 +66,34 @@ fn main() {
                 .with_thread_ids(false)
                 .with_thread_names(false),
         )
-        .with(EnvFilter::from_default_env())
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::DEBUG.into())
+                .from_env_lossy(),
+        )
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    let sp1_platform = Platform {
-        rom_start: 0x0020_0800,
-        rom_end: 0x003f_ffff,
-        ram_start: 0x0020_0000,
-        ram_end: 0xffff_ffff,
-        unsafe_ecall_nop: true,
+    let platform = match args.platform {
+        Preset::Ceno => CENO_PLATFORM,
+        Preset::Sp1 => Platform {
+            // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
+            stack_top: 0x0020_0400,
+            rom_start: 0x0020_0800,
+            rom_end: 0x003f_ffff,
+            ram_start: 0x0020_0000,
+            ram_end: 0xFFFF_0000 - 1,
+            unsafe_ecall_nop: true,
+        },
     };
-    // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
-    const STACK_TOP: u32 = 0x0020_0400;
-    const STACK_SIZE: u32 = 256;
-    let mut mem_padder = MemPadder::new(sp1_platform.ram_start()..=sp1_platform.ram_end());
+    tracing::info!("Running on platform {:?}", args.platform);
 
-    let elf_bytes = include_bytes!(r"fibonacci.elf");
-    let mut vm = VMState::new_from_elf(sp1_platform, elf_bytes).unwrap();
+    const STACK_SIZE: u32 = 256;
+    let mut mem_padder = MemPadder::new(platform.ram_start()..=platform.ram_end());
+
+    tracing::info!("Loading ELF file: {}", args.elf);
+    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let mut vm = VMState::new_from_elf(platform, &elf_bytes).unwrap();
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
@@ -101,7 +125,7 @@ fn main() {
             });
 
         let stack_addrs = (1..=STACK_SIZE)
-            .map(|i| STACK_TOP - i * WORD_SIZE as u32)
+            .map(|i| platform.stack_top - i * WORD_SIZE as u32)
             .map(|addr| MemInitRecord { addr, value: 0 });
 
         let mem_init = chain!(program_addrs, stack_addrs).collect_vec();

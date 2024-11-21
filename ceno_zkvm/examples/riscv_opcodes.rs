@@ -182,7 +182,7 @@ fn main() {
 
         let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
-        // init mmio
+        // init memory mapped IO
         for record in &public_io_init {
             vm.init_memory(record.addr.into(), record.value);
         }

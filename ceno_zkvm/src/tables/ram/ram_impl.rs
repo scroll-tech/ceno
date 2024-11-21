@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 use ceno_emul::{Addr, Cycle};
 use ff_ext::ExtensionField;
@@ -353,41 +353,47 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let accessed_addrs = final_mem
-            .iter()
-            .cloned()
-            .map(|record| (record.addr, record))
-            .collect::<HashMap<_, _>>();
+        assert!(final_mem.len() <= DVRAM::max_len());
         assert!(DVRAM::max_len().is_power_of_two());
-        let mut final_table = RowMajorMatrix::<F>::new(DVRAM::max_len(), num_witness);
+        let mut final_table =
+            RowMajorMatrix::<F>::new(final_mem.len().next_power_of_two(), num_witness);
 
         final_table
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
-            .enumerate()
-            .for_each(|(i, row)| {
-                let addr = DVRAM::addr(i);
-                set_val!(row, self.addr, addr as u64);
-                if let Some(rec) = accessed_addrs.get(&addr) {
-                    if self.final_v.len() == 1 {
-                        // Assign value directly.
-                        set_val!(row, self.final_v[0], rec.value as u64);
-                    } else {
-                        // Assign value limbs.
-                        self.final_v.iter().enumerate().for_each(|(l, limb)| {
-                            let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                            set_val!(row, limb, val as u64);
-                        });
-                    }
-                    set_val!(row, self.final_cycle, rec.cycle);
+            .zip(final_mem.into_par_iter())
+            .for_each(|(row, rec)| {
+                set_val!(row, self.addr, rec.addr as u64);
+                if self.final_v.len() == 1 {
+                    // Assign value directly.
+                    set_val!(row, self.final_v[0], rec.value as u64);
                 } else {
+                    // Assign value limbs.
+                    self.final_v.iter().enumerate().for_each(|(l, limb)| {
+                        let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                        set_val!(row, limb, val as u64);
+                    });
+                }
+                set_val!(row, self.final_cycle, rec.cycle);
+            });
+
+        // set padding with well-form address
+        if final_mem.len().next_power_of_two() - final_mem.len() > 0 {
+            let paddin_entry_start = final_mem.len();
+            final_table
+                .par_iter_mut()
+                .skip(final_mem.len())
+                .enumerate()
+                .with_min_len(MIN_PAR_SIZE)
+                .for_each(|(i, row)| {
                     // Assign value limbs.
                     self.final_v.iter().for_each(|limb| {
                         set_val!(row, limb, 0u64);
                     });
+                    set_val!(row, self.addr, DVRAM::addr(paddin_entry_start + i) as u64);
                     set_val!(row, self.final_cycle, 0_u64);
-                }
-            });
+                });
+        }
 
         Ok(final_table)
     }
