@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::fmt::Display;
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
@@ -161,6 +162,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         Ok(true)
     }
 
+    fn print_list_as_input<I: Display>(name: String, entries: &Vec<I>) {
+        print!("{}: [", name);
+        for e in entries {
+            print!(" {}", e);
+        }
+        println!(" ]");
+    }
+
     /// verify proof and return input opening point
     #[allow(clippy::too_many_arguments)]
     pub fn verify_opcode_proof(
@@ -174,41 +183,135 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
+        // Number of mem cells required to express each struct in Zok
+        const EXT_FIELD_WIDTH: usize = 2;
+        const EXPRESSION_WIDTH: usize = 7 + 2 * EXT_FIELD_WIDTH;
+        const CONSTRAINT_SYSTEM_WIDTH: usize = 22 + 2 * EXPRESSION_WIDTH;
+        const VERIFYING_KEY_WIDTH: usize = CONSTRAINT_SYSTEM_WIDTH;
+
         println!("\n\n--\nINPUT:");
-        print!("self^vk^circuit_vks_name: [");
-        for (key, _) in &self.vk.circuit_vks {
-            print!(" {}", key);
-        }
-        println!(" ]");
-        print!("self^vk^circuit_vks_key^cs^num_witin: [");
+        // Divide memory into three regions
+        // 1. All entries of all expressions: expr_concat_list
+        // 2. All pointers to head of expressions: expr_pointer_list
+        // 3. Pointers to head of r_expr, w_expr, etc. pointers: head_pointer_list
+        let mut expr_concat_list = Vec::new();
+        let mut expr_offset = 0;
+        let mut expr_pointer_list = Vec::new();
+        let mut head_offset = 0;
+        let mut head_pointer_mat = Vec::new();
+        let mut vk_count = 0;
         for (_, val) in &self.vk.circuit_vks {
-            print!(" {:?}", val.cs.num_witin);
+            head_pointer_mat.push(Vec::new());
+            // r_expr
+            head_pointer_mat[vk_count].push(head_offset);
+            for r_expr in &val.cs.r_expressions {
+                let (r_len, r_list) = r_expr.expr_as_list();
+                expr_pointer_list.push(expr_offset);
+                expr_offset += r_len;
+                expr_concat_list.extend(r_list);
+            }
+            head_offset += val.cs.r_expressions.len();
+            // w_expr
+            head_pointer_mat[vk_count].push(head_offset);
+            for w_expr in &val.cs.w_expressions {
+                let (w_len, w_list) = w_expr.expr_as_list();
+                expr_pointer_list.push(expr_offset);
+                expr_offset += w_len;
+                expr_concat_list.extend(w_list);
+            }
+            head_offset += val.cs.w_expressions.len();
+            // lk_expr
+            head_pointer_mat[vk_count].push(head_offset);
+            for lk_expr in &val.cs.lk_expressions {
+                let (lk_len, lk_list) = lk_expr.expr_as_list();
+                expr_pointer_list.push(expr_offset);
+                expr_offset += lk_len;
+                expr_concat_list.extend(lk_list);
+            }
+            head_offset += val.cs.lk_expressions.len();
+            // lk_table_expr
+            head_pointer_mat[vk_count].push(head_offset);
+            for lk_table_expr in &val.cs.lk_table_expressions {
+                let (mul_len, mul_list) = lk_table_expr.multiplicity.expr_as_list();
+                expr_pointer_list.push(expr_offset);
+                expr_offset += mul_len;
+                expr_concat_list.extend(mul_list);
+                let (val_len, val_list) = lk_table_expr.values.expr_as_list();
+                expr_pointer_list.push(expr_offset);
+                expr_offset += val_len;
+                expr_concat_list.extend(val_list);
+            }
+            head_offset += 2 * val.cs.lk_table_expressions.len();
+            // assert_zero_expr
+            head_pointer_mat[vk_count].push(head_offset);
+            for assert_zero_expr in &val.cs.assert_zero_expressions {
+                let (assert_zero_len, assert_zero_list) = assert_zero_expr.expr_as_list();
+                expr_pointer_list.push(expr_offset);
+                expr_offset += assert_zero_len;
+                expr_concat_list.extend(assert_zero_list);
+            }
+            head_offset += val.cs.assert_zero_expressions.len();
+            // assert_zero_sumcheck_expr
+            head_pointer_mat[vk_count].push(head_offset);
+            for assert_zero_sumcheck_expr in &val.cs.assert_zero_sumcheck_expressions {
+                let (assert_zero_sumcheck_len, assert_zero_sumcheck_list) = assert_zero_sumcheck_expr.expr_as_list();
+                expr_pointer_list.push(expr_offset);
+                expr_offset += assert_zero_sumcheck_len;
+                expr_concat_list.extend(assert_zero_sumcheck_list);
+            }
+            head_offset += val.cs.assert_zero_sumcheck_expressions.len();
+            // Record the last head_offset to obtain length from difference
+            head_pointer_mat[vk_count].push(head_offset);
+            // chip_record_alpha, single entry, push expr_offset directly to head_pointer
+            head_pointer_mat[vk_count].push(expr_offset);
+            let (cr_alpha_len, cr_alpha_list) = val.cs.chip_record_alpha.expr_as_list();
+            expr_offset += cr_alpha_len;
+            expr_concat_list.extend(cr_alpha_list);
+            // chip_record_beta, single entry, push expr_offset directly to head_pointer
+            head_pointer_mat[vk_count].push(expr_offset);
+            let (cr_beta_len, cr_beta_list) = val.cs.chip_record_beta.expr_as_list();
+            expr_offset += cr_beta_len;
+            expr_concat_list.extend(cr_beta_list);
+
+            vk_count += 1;
         }
-        println!(" ]");
-        print!("self^vk^circuit_vks_key^cs^witin_namespace_map: [");
-        for (_, val) in &self.vk.circuit_vks {
-            print!(" {:?}", val.cs.witin_namespace_map);
+
+        // Construct ConstraintSystem using the entries above
+        let mut mem_offset = expr_concat_list.len() + expr_pointer_list.len();
+        let mut cs_concat_list = Vec::new();
+        let mut cs_pointer_list = Vec::new();
+        for i in 0..self.vk.circuit_vks.len() {
+            cs_pointer_list.push(cs_concat_list.len());
+            // r_expr, w_expr, lk_expr, az_expr
+            for j in 0..head_pointer_mat[i].len() - 3 {
+                // len
+                cs_concat_list.push(head_pointer_mat[i][j + 1] - head_pointer_mat[i][j]);
+                // pointer
+                cs_concat_list.push(mem_offset + head_pointer_mat[i][j]);
+            }
+            // max_non_lc_degree
+            cs_concat_list.push(self.vk.circuit_vks.iter().nth(i).unwrap().1.cs.max_non_lc_degree);
+            // chip_record_alpha, chip_record_beta
+            cs_concat_list.push(head_pointer_mat[i][head_pointer_mat[i].len() - 2]);
+            cs_concat_list.push(head_pointer_mat[i][head_pointer_mat[i].len() - 1]);
         }
-        println!(" ]");
-        print!("self^vk^circuit_vks_key^cs^num_fixed: [");
-        for (_, val) in &self.vk.circuit_vks {
-            print!(" {:?}", val.cs.num_fixed);
-        }
-        println!(" ]");
-        print!("self^vk^circuit_vks_key^cs^fixed_namespace_map: [");
-        for (_, val) in &self.vk.circuit_vks {
-            print!(" {:?}", val.cs.fixed_namespace_map);
-        }
-        println!(" ]");
-        // print!("self^vk^circuit_vks_key^cs^r_expressions: [");
-        // for (_, val) in &self.vk.circuit_vks {
-            // print!(" {:?}", val.cs.r_expressions);
-        // }
-        // println!(" ]");
-        println!("R_EXPRS:");
-        for (_, val) in &self.vk.circuit_vks {
-            crate::expression::expr_as_list(&val.cs.r_expressions, "self^vk^circuit_vks_key^cs^r_expressions".to_string());
-        }
+        mem_offset += cs_concat_list.len();
+        cs_pointer_list = cs_pointer_list.into_iter().map(|i| mem_offset + i).collect();
+
+        // Print everything in self out
+        Self::print_list_as_input("expr_concat".to_string(), &expr_concat_list);
+        Self::print_list_as_input("expr_pointer".to_string(), &expr_pointer_list);
+        Self::print_list_as_input("cs_concat".to_string(), &cs_concat_list);
+        Self::print_list_as_input("cs_pointer".to_string(), &cs_pointer_list);
+        let circuit_vks_len = cs_pointer_list.len();
+        let circuit_vks_key_pointer = mem_offset;
+        println!("self^vk^circuit_vks_len: {}", circuit_vks_len);
+        println!("self^vk^circuit_vks_key: {}", circuit_vks_key_pointer);
+        mem_offset += cs_pointer_list.len();
+
+        // proof
+        println!("circuit_vk: {:?}", circuit_vk);
+        println!("proof: {:?}", proof);
 
 
         let cs = circuit_vk.get_cs();

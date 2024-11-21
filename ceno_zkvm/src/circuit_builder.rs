@@ -69,6 +69,8 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub values: Expression<E>,
 }
 
+
+
 #[derive(Clone, Debug)]
 pub struct ConstraintSystem<E: ExtensionField> {
     pub ns: NameSpace,

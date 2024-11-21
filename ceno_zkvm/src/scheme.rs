@@ -15,7 +15,7 @@ pub mod mock_prover;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // TODO support >1 opcodes
     pub num_instances: usize,
