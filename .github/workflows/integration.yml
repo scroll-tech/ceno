@@ -62,4 +62,4 @@ jobs:
         env:
           RAYON_NUM_THREADS: 8
           RUST_LOG: debug
-        run: cargo run --release --package ceno_zkvm --example fibonacci_elf --target ${{ matrix.target }} -- 
+        run: cargo run --release --package ceno_zkvm --bin e2e --target ${{ matrix.target }} -- --platform=sp1 ceno_zkvm/examples/fibonacci.elf

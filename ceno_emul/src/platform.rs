@@ -11,6 +11,7 @@ pub struct Platform {
     pub rom_end: Addr,
     pub ram_start: Addr,
     pub ram_end: Addr,
+    pub stack_top: Addr,
     /// If true, ecall instructions are no-op instead of trap. Testing only.
     pub unsafe_ecall_nop: bool,
 }
@@ -19,7 +20,8 @@ pub const CENO_PLATFORM: Platform = Platform {
     rom_start: 0x2000_0000,
     rom_end: 0x3000_0000 - 1,
     ram_start: 0x8000_0000,
-    ram_end: 0xFFFF_FFFF,
+    ram_end: 0xFFFF_0000 - 1,
+    stack_top: 0xC0000000,
     unsafe_ecall_nop: false,
 };
 
@@ -58,15 +60,13 @@ impl Platform {
     }
 
     pub const fn ram_end(&self) -> Addr {
+        if cfg!(feature = "forbid_overflow") {
+            // (1<<11) - 1 == 0x7ff is the largest positive 'immediate'
+            // offset we can have in memory instructions.
+            // So if we stay away from it, we are safe.
+            assert!(self.ram_end < -(1_i32 << 11) as u32)
+        }
         self.ram_end
-            - if cfg!(feature = "forbid_overflow") {
-                // (1<<11) - 1 == 0x7ff is the largest positive 'immediate'
-                // offset we can have in memory instructions.
-                // So if we stay away from it, we are safe.
-                0x7FF
-            } else {
-                0
-            }
     }
 
     pub fn is_ram(&self, addr: Addr) -> bool {
