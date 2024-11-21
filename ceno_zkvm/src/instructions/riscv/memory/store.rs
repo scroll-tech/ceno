@@ -65,7 +65,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        // Memory initialization is not guaranteed to contain u32. Decompose in [u16; 2] here.
+        // Memory initialization is not guaranteed to contain u32. Range-check it here.
         let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
 
