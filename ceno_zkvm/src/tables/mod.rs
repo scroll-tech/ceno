@@ -46,12 +46,17 @@ pub trait TableCircuit<E: ExtensionField> {
         table: &mut RowMajorMatrix<E::BaseField>,
         num_witin: usize,
     ) -> Result<(), ZKVMError> {
-        padding_zero(table, num_witin, table.num_instances());
+        padding_zero(table, num_witin, None);
         Ok(())
     }
 }
 
-pub fn padding_zero<F: SmallField>(table: &mut RowMajorMatrix<F>, num_cols: usize, start: usize) {
+/// Fill the padding with zeros. Start after the given `num_instances`, or detect it from the table.
+pub fn padding_zero<F: SmallField>(
+    table: &mut RowMajorMatrix<F>,
+    num_cols: usize,
+    num_instances: Option<usize>,
+) {
     // Fill the padding with zeros, if any.
     let num_padding_instances = table.num_padding_instances();
     if num_padding_instances > 0 {
@@ -64,7 +69,7 @@ pub fn padding_zero<F: SmallField>(table: &mut RowMajorMatrix<F>, num_cols: usiz
             num_padding_instances
         };
         table
-            .par_batch_iter_padding_mut(start, num_padding_instance_per_batch)
+            .par_batch_iter_padding_mut(num_instances, num_padding_instance_per_batch)
             .with_min_len(MIN_PAR_SIZE)
             .for_each(|row| {
                 row.chunks_mut(num_cols)

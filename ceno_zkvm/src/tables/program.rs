@@ -173,7 +173,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
             });
 
         assert_eq!(INVALID as u64, 0, "0 padding must be invalid instructions");
-        padding_zero(&mut fixed, num_fixed, num_instructions);
+        padding_zero(&mut fixed, num_fixed, Some(num_instructions));
 
         fixed
     }
@@ -201,7 +201,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        padding_zero(&mut witness, num_witin, program.instructions.len());
+        padding_zero(&mut witness, num_witin, Some(program.instructions.len()));
 
         Ok(witness)
     }
