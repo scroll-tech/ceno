@@ -93,13 +93,13 @@ fn main() {
 
     tracing::info!("Loading ELF file: {}", args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
-    let mut vm = VMState::new_from_elf(platform, &elf_bytes).unwrap();
+    let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let program_params = ProgramParams {
-        platform: sp1_platform,
+        platform: platform.clone(),
         program_size: PROGRAM_SIZE,
         ..ProgramParams::default()
     };
