@@ -15,6 +15,7 @@ use ff::Field;
 
 pub mod riscv;
 
+#[derive(Clone)]
 pub enum InstancePaddingStrategy {
     Zero,
     RepeatLast,
@@ -54,7 +55,8 @@ pub trait Instruction<E: ExtensionField> {
         }
         .max(1);
         let lk_multiplicity = LkMultiplicity::default();
-        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin);
+        let mut raw_witin =
+            RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
         raw_witin_iter
@@ -70,45 +72,6 @@ pub trait Instruction<E: ExtensionField> {
                     .collect::<Vec<_>>()
             })
             .collect::<Result<(), ZKVMError>>()?;
-
-        let num_padding_instances = raw_witin.num_padding_instances();
-        if num_padding_instances > 0 {
-            // Fill the padding based on strategy
-
-            let padding_instance = match Self::padding_strategy() {
-                InstancePaddingStrategy::Zero => {
-                    vec![E::BaseField::ZERO; num_witin]
-                }
-                InstancePaddingStrategy::RepeatLast if steps.is_empty() => {
-                    tracing::debug!("No {} steps to repeat, using zero padding", Self::name());
-                    vec![E::BaseField::ZERO; num_witin]
-                }
-                InstancePaddingStrategy::RepeatLast => raw_witin[steps.len() - 1].to_vec(),
-            };
-
-            if let InstancePaddingStrategy::RepeatLast = Self::padding_strategy() {
-                let num_padding_instance_per_batch = if num_padding_instances > 256 {
-                    num_padding_instances.div_ceil(nthreads)
-                } else {
-                    num_padding_instances
-                };
-
-                // for row in 0..raw_witin.num_padding_instances() {
-                //     let start = raw_witin.len() - (row + 1) * num_witin;
-                //     let end = raw_witin.len() - row * num_witin;
-                //     let slice = &mut raw_witin.values()[start..end];
-                //     slice.copy_from_slice(padding_instance.as_slice());
-                // }
-                raw_witin
-                    .par_batch_iter_padding_mut(None, num_padding_instance_per_batch)
-                    .with_min_len(MIN_PAR_SIZE)
-                    .for_each(|row| {
-                        row.chunks_mut(num_witin).for_each(|instance| {
-                            instance.copy_from_slice(padding_instance.as_slice())
-                        });
-                    });
-            }
-        }
 
         Ok((raw_witin, lk_multiplicity))
     }

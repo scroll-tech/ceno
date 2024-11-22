@@ -106,7 +106,7 @@ impl<F: Field, E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<
     fn into_mle(mut self) -> DenseMultilinearExtension<E> {
         let next_pow2 = self.len().next_power_of_two();
         // self.resize(next_pow2, F::ZERO);
-        assert!(self.len().is_power_of_two());
+        assert!(self.len().is_power_of_two(), "{}", self.len());
         DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
     }
 }

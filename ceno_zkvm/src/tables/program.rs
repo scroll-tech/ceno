@@ -4,6 +4,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
+    instructions::InstancePaddingStrategy,
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
@@ -158,7 +159,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let pc_base = program.base_address;
         assert!(num_instructions <= config.program_size);
 
-        let mut fixed = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_fixed);
+        let mut fixed = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            num_fixed,
+            InstancePaddingStrategy::Zero,
+        );
 
         fixed
             .par_iter_mut()
@@ -193,7 +198,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             prog_mlt[i] = *mlt;
         }
 
-        let mut witness = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_witin);
+        let mut witness = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            num_witin,
+            InstancePaddingStrategy::Zero,
+        );
         witness
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)

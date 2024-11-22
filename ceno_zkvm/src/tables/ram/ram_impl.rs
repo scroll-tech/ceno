@@ -10,7 +10,10 @@ use crate::{
     circuit_builder::{CircuitBuilder, DynamicAddr, SetTableAddrType, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
-    instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
+    instructions::{
+        InstancePaddingStrategy,
+        riscv::constants::{LIMB_BITS, LIMB_MASK},
+    },
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ProgramParams,
@@ -116,7 +119,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::len(&self.params)
         );
 
-        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_fixed);
+        let mut init_table = RowMajorMatrix::<F>::new(
+            NVRAM::len(&self.params),
+            num_fixed,
+            InstancePaddingStrategy::Zero,
+        );
         assert_eq!(init_table.num_padding_instances(), 0);
 
         init_table
@@ -146,7 +153,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_witness);
+        let mut final_table = RowMajorMatrix::<F>::new(
+            NVRAM::len(&self.params),
+            num_witness,
+            InstancePaddingStrategy::Zero,
+        );
 
         final_table
             .par_iter_mut()
@@ -246,7 +257,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     ) -> RowMajorMatrix<F> {
         assert!(NVRAM::len(&self.params).is_power_of_two());
 
-        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_fixed);
+        let mut init_table = RowMajorMatrix::<F>::new(
+            NVRAM::len(&self.params),
+            num_fixed,
+            InstancePaddingStrategy::Zero,
+        );
         assert_eq!(init_table.num_padding_instances(), 0);
 
         init_table
@@ -265,7 +280,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_witness: usize,
         final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_witness);
+        let mut final_table = RowMajorMatrix::<F>::new(
+            NVRAM::len(&self.params),
+            num_witness,
+            InstancePaddingStrategy::Zero,
+        );
 
         final_table
             .par_iter_mut()
@@ -370,7 +389,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
         let mut final_table =
-            RowMajorMatrix::<F>::new(final_mem.len().next_power_of_two(), num_witness);
+            RowMajorMatrix::<F>::new(final_mem.len(), num_witness, InstancePaddingStrategy::Zero);
 
         final_table
             .par_iter_mut()
@@ -390,28 +409,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                 }
                 set_val!(row, self.final_cycle, rec.cycle);
             });
-
-        // set padding with well-form address
-        if final_mem.len().next_power_of_two() - final_mem.len() > 0 {
-            let paddin_entry_start = final_mem.len();
-            final_table
-                .par_iter_mut()
-                .skip(final_mem.len())
-                .enumerate()
-                .with_min_len(MIN_PAR_SIZE)
-                .for_each(|(i, row)| {
-                    // Assign value limbs.
-                    self.final_v.iter().for_each(|limb| {
-                        set_val!(row, limb, 0u64);
-                    });
-                    set_val!(
-                        row,
-                        self.addr,
-                        DVRAM::addr(&self.params, paddin_entry_start + i) as u64
-                    );
-                    set_val!(row, self.final_cycle, 0_u64);
-                });
-        }
 
         Ok(final_table)
     }

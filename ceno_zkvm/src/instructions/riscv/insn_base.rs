@@ -476,6 +476,7 @@ mod test {
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
+        instructions::InstancePaddingStrategy,
         scheme::mock_prover::MockProver,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -515,7 +516,11 @@ mod test {
 
         let mut lkm = LkMultiplicity::default();
         let num_rows = 2;
-        let mut raw_witin = RowMajorMatrix::<F>::new(num_rows, cb.cs.num_witin as usize);
+        let mut raw_witin = RowMajorMatrix::<F>::new(
+            num_rows,
+            cb.cs.num_witin as usize,
+            InstancePaddingStrategy::Zero,
+        );
         for instance in raw_witin.iter_mut() {
             mem_addr.assign_instance(instance, &mut lkm, addr)?;
         }
