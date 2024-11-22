@@ -8,7 +8,7 @@ use crate::{
     expression::{Expression, fmt},
     scheme::utils::{eval_by_expr_with_fixed, eval_by_expr_with_instance},
     state::{GlobalState, StateCircuit},
-    structs::{RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
         TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
@@ -643,14 +643,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
     fn load_program_table(t_vec: &mut Vec<Vec<u64>>, program: &Program, challenge: [E; 2]) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            ProgramTableCircuit::<_, MOCK_PROGRAM_SIZE>::construct_circuit(&mut cb).unwrap();
-        let fixed = ProgramTableCircuit::<E, MOCK_PROGRAM_SIZE>::generate_fixed_traces(
-            &config,
-            cs.num_fixed,
-            program,
-        );
+        let mut cb = CircuitBuilder::new_with_params(&mut cs, ProgramParams {
+            platform: CENO_PLATFORM,
+            program_size: MOCK_PROGRAM_SIZE,
+            ..ProgramParams::default()
+        });
+        let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
+        let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.

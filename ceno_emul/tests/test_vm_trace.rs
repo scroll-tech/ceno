@@ -3,8 +3,8 @@ use anyhow::Result;
 use std::collections::{BTreeMap, HashMap};
 
 use ceno_emul::{
-    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Program, StepRecord, Tracer, VMState, WORD_SIZE,
-    WordAddr,
+    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Platform, Program, StepRecord, Tracer, VMState,
+    WORD_SIZE, WordAddr,
 };
 
 #[test]
@@ -119,7 +119,7 @@ fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
 /// Reconstruct the last access of each register.
 fn expected_final_accesses_fibonacci_20() -> HashMap<WordAddr, Cycle> {
     let mut accesses = HashMap::new();
-    let x = |i| WordAddr::from(CENO_PLATFORM.register_vma(i));
+    let x = |i| WordAddr::from(Platform::register_vma(i));
     const C: Cycle = Tracer::SUBCYCLES_PER_INSN;
 
     let mut cycle = C; // First cycle.
@@ -141,8 +141,8 @@ fn expected_final_accesses_fibonacci_20() -> HashMap<WordAddr, Cycle> {
     cycle += C;
 
     // Now at the final ECALL cycle.
-    accesses.insert(x(CENO_PLATFORM.reg_ecall()), cycle + Tracer::SUBCYCLE_RS1);
-    accesses.insert(x(CENO_PLATFORM.reg_arg0()), cycle + Tracer::SUBCYCLE_RS2);
+    accesses.insert(x(Platform::reg_ecall()), cycle + Tracer::SUBCYCLE_RS1);
+    accesses.insert(x(Platform::reg_arg0()), cycle + Tracer::SUBCYCLE_RS2);
 
     accesses
 }

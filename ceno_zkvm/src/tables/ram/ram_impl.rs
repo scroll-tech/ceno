@@ -13,6 +13,7 @@ use crate::{
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
+    structs::ProgramParams,
     witness::RowMajorMatrix,
 };
 
@@ -31,6 +32,7 @@ pub struct NonVolatileTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone>
     final_cycle: WitIn,
 
     phantom: PhantomData<NVRAM>,
+    params: ProgramParams,
 }
 
 impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM> {
@@ -78,7 +80,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(),
+                len: NVRAM::len(&cb.params),
             },
             init_table,
         )?;
@@ -87,7 +89,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(),
+                len: NVRAM::len(&cb.params),
             },
             final_table,
         )?;
@@ -98,6 +100,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             addr,
             final_cycle,
             phantom: PhantomData,
+            params: cb.params.clone(),
         })
     }
 
@@ -107,13 +110,13 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         init_mem: &[MemInitRecord],
     ) -> RowMajorMatrix<F> {
         assert!(
-            NVRAM::len().is_power_of_two(),
+            NVRAM::len(&self.params).is_power_of_two(),
             "{} len {} must be a power of 2",
             NVRAM::name(),
-            NVRAM::len()
+            NVRAM::len(&self.params)
         );
 
-        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_fixed);
+        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_fixed);
         assert_eq!(init_table.num_padding_instances(), 0);
 
         init_table
@@ -143,7 +146,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
+        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_witness);
 
         final_table
             .par_iter_mut()
@@ -178,6 +181,7 @@ pub struct PubIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
     final_cycle: WitIn,
 
     phantom: PhantomData<NVRAM>,
+    params: ProgramParams,
 }
 
 impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
@@ -212,7 +216,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(),
+                len: NVRAM::len(&cb.params),
             },
             init_table,
         )?;
@@ -221,7 +225,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
-                len: NVRAM::len(),
+                len: NVRAM::len(&cb.params),
             },
             final_table,
         )?;
@@ -230,6 +234,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             addr,
             final_cycle,
             phantom: PhantomData,
+            params: cb.params.clone(),
         })
     }
 
@@ -239,9 +244,9 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_fixed: usize,
         io_addrs: &[Addr],
     ) -> RowMajorMatrix<F> {
-        assert!(NVRAM::len().is_power_of_two());
+        assert!(NVRAM::len(&self.params).is_power_of_two());
 
-        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_fixed);
+        let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_fixed);
         assert_eq!(init_table.num_padding_instances(), 0);
 
         init_table
@@ -260,7 +265,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_witness: usize,
         final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(), num_witness);
+        let mut final_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_witness);
 
         final_table
             .par_iter_mut()
@@ -284,6 +289,7 @@ pub struct DynVolatileRamTableConfig<DVRAM: DynVolatileRamTable + Send + Sync + 
     final_cycle: WitIn,
 
     phantom: PhantomData<DVRAM>,
+    params: ProgramParams,
 }
 
 impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig<DVRAM> {
@@ -297,10 +303,17 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .collect::<Vec<WitIn>>();
         let final_cycle = cb.create_witin(|| "final_cycle");
 
+        let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
+        let init_expr = if DVRAM::ZERO_INIT {
+            vec![Expression::ZERO; DVRAM::V_LIMBS]
+        } else {
+            final_expr.clone()
+        };
+
         let init_table = [
             vec![(DVRAM::RAM_TYPE as usize).into()],
             vec![addr.expr()],
-            vec![Expression::ZERO],
+            init_expr,
             vec![Expression::ZERO], // Initial cycle.
         ]
         .concat();
@@ -309,7 +322,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             // a v t
             vec![(DVRAM::RAM_TYPE as usize).into()],
             vec![addr.expr()],
-            final_v.iter().map(|v| v.expr()).collect_vec(),
+            final_expr,
             vec![final_cycle.expr()],
         ]
         .concat();
@@ -320,9 +333,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
                     addr_witin_id: addr.id.into(),
-                    offset: DVRAM::OFFSET_ADDR,
+                    offset: DVRAM::offset_addr(&cb.params),
                 }),
-                len: DVRAM::max_len(),
+                len: DVRAM::max_len(&cb.params),
             },
             init_table,
         )?;
@@ -332,9 +345,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
                     addr_witin_id: addr.id.into(),
-                    offset: DVRAM::OFFSET_ADDR,
+                    offset: DVRAM::offset_addr(&cb.params),
                 }),
-                len: DVRAM::max_len(),
+                len: DVRAM::max_len(&cb.params),
             },
             final_table,
         )?;
@@ -344,6 +357,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             final_v,
             final_cycle,
             phantom: PhantomData,
+            params: cb.params.clone(),
         })
     }
 
@@ -353,8 +367,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= DVRAM::max_len());
-        assert!(DVRAM::max_len().is_power_of_two());
+        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
+        assert!(DVRAM::max_len(&self.params).is_power_of_two());
         let mut final_table =
             RowMajorMatrix::<F>::new(final_mem.len().next_power_of_two(), num_witness);
 
@@ -390,28 +404,15 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     self.final_v.iter().for_each(|limb| {
                         set_val!(row, limb, 0u64);
                     });
-                    set_val!(row, self.addr, DVRAM::addr(paddin_entry_start + i) as u64);
+                    set_val!(
+                        row,
+                        self.addr,
+                        DVRAM::addr(&self.params, paddin_entry_start + i) as u64
+                    );
                     set_val!(row, self.final_cycle, 0_u64);
                 });
         }
 
         Ok(final_table)
     }
-}
-
-#[allow(dead_code)]
-/// DynUnConstrainRamTableConfig with unconstrain init value and final value
-/// dynamic address as witin, relied on augment of knowledge to prove address form
-/// do not check init_value
-/// TODO implement DynUnConstrainRamTableConfig
-#[derive(Clone, Debug)]
-pub struct DynUnConstrainRamTableConfig<RAM: DynVolatileRamTable + Send + Sync + Clone> {
-    addr: WitIn,
-
-    init_v: Vec<WitIn>,
-
-    final_v: Vec<WitIn>,
-    final_cycle: WitIn,
-
-    phantom: PhantomData<RAM>,
 }

@@ -111,9 +111,9 @@ impl VMState {
 impl EmuContext for VMState {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
-        let function = self.load_register(self.platform.reg_ecall())?;
-        let arg0 = self.load_register(self.platform.reg_arg0())?;
-        if function == self.platform.ecall_halt() {
+        let function = self.load_register(Platform::reg_ecall())?;
+        let arg0 = self.load_register(Platform::reg_arg0())?;
+        if function == Platform::ecall_halt() {
             tracing::debug!("halt with exit_code={}", arg0);
 
             self.halt();

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, StepRecord, VMState};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, Platform, StepRecord, VMState};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -16,7 +16,7 @@ fn test_ceno_rt_panic() -> Result<()> {
     let steps = run(&mut state)?;
     let last = steps.last().unwrap();
     assert_eq!(last.insn().codes().kind, InsnKind::EANY);
-    assert_eq!(last.rs1().unwrap().value, CENO_PLATFORM.ecall_halt());
+    assert_eq!(last.rs1().unwrap().value, Platform::ecall_halt());
     assert_eq!(last.rs2().unwrap().value, 1); // panic / halt(1)
     Ok(())
 }
