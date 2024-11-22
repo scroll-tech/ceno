@@ -1,6 +1,6 @@
 use std::{collections::HashSet, iter::zip, ops::Range};
 
-use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
+use ceno_emul::{Addr, Cycle, IterAddresses, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 
@@ -53,10 +53,10 @@ impl<E: ExtensionField> MmuConfig<E> {
     ) {
         assert!(
             chain!(
-                static_mem_init.iter().map(|record| record.addr),
-                io_addrs.iter().copied(),
+                static_mem_init.iter_addresses(),
+                io_addrs.iter_addresses(),
                 // TODO: optimize with min_max and Range.
-                self.params.platform.private_io.clone(),
+                self.params.platform.private_io.iter_addresses(),
             )
             .all_unique(),
             "memory addresses must be unique"
