@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
+bytemuck.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
 rand_chacha.workspace = true

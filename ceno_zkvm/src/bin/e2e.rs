@@ -1,6 +1,7 @@
+use bytemuck::checked::cast_slice;
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, StepRecord,
-    Tracer, VMState, WORD_SIZE, WordAddr,
+    Tracer, VMState, WORD_SIZE, Word, WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
@@ -43,6 +44,10 @@ struct Args {
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
+
+    /// The private input or hints. This is a raw file mounted as a memory segment.
+    #[arg(long)]
+    private_input: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -92,11 +97,18 @@ fn main() {
     const STACK_SIZE: u32 = 256;
     let mut mem_padder = MemPadder::new(platform.ram.clone());
 
-    let priv_io = &[];
-
     tracing::info!("Loading ELF file: {}", args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
+
+    let priv_io = args.private_input.as_ref().map(|path| {
+        tracing::info!("Loading private input file: {}", path);
+        let mut buf = fs::read(path).expect("could not read private input");
+        buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
+        buf
+    });
+
+    let priv_io: &[Word] = priv_io.as_deref().map(cast_slice).unwrap_or(&[]);
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
