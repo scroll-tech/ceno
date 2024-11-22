@@ -102,6 +102,9 @@ fn main() {
 
     tracing::info!("Loading private input file: {:?}", args.private_input);
     let priv_io = memory_from_file(&args.private_input);
+    for (addr, value) in zip(platform.private_io.iter_addresses(), &priv_io) {
+        vm.init_memory(addr.into(), *value);
+    }
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
