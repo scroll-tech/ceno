@@ -1,4 +1,3 @@
-use bytemuck::checked::cast_slice;
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, StepRecord,
     Tracer, VMState, WORD_SIZE, Word, WordAddr,
@@ -101,14 +100,18 @@ fn main() {
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
 
-    let priv_io = args.private_input.as_ref().map(|path| {
-        tracing::info!("Loading private input file: {}", path);
-        let mut buf = fs::read(path).expect("could not read private input");
-        buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
-        buf
-    });
-
-    let priv_io: &[Word] = priv_io.as_deref().map(cast_slice).unwrap_or(&[]);
+    let priv_io = args
+        .private_input
+        .as_ref()
+        .map(|path| {
+            tracing::info!("Loading private input file: {}", path);
+            let mut buf = fs::read(path).expect("could not read private input");
+            buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
+            buf.chunks_exact(WORD_SIZE)
+                .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
+                .collect_vec()
+        })
+        .unwrap_or_default();
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
@@ -265,7 +268,7 @@ fn main() {
         .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
         .collect_vec();
 
-    let priv_io_final = zip(platform.private_io.iter_addresses(), priv_io)
+    let priv_io_final = zip(platform.private_io.iter_addresses(), &priv_io)
         .map(|(addr, &value)| MemFinalRecord {
             addr,
             value,

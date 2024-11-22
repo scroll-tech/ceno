@@ -20,7 +20,6 @@ version = "0.1.0"
 
 [workspace.dependencies]
 ark-std = "0.4"
-bytemuck = "1.19"
 cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"

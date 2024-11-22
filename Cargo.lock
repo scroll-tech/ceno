@@ -261,7 +261,6 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "base64",
- "bytemuck",
  "ceno_emul",
  "cfg-if",
  "clap",
