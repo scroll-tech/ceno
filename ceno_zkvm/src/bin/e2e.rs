@@ -100,18 +100,8 @@ fn main() {
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
 
-    let priv_io = args
-        .private_input
-        .as_ref()
-        .map(|path| {
-            tracing::info!("Loading private input file: {}", path);
-            let mut buf = fs::read(path).expect("could not read private input");
-            buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
-            buf.chunks_exact(WORD_SIZE)
-                .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
-                .collect_vec()
-        })
-        .unwrap_or_default();
+    tracing::info!("Loading private input file: {:?}", args.private_input);
+    let priv_io = memory_from_file(&args.private_input);
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
@@ -358,6 +348,18 @@ fn main() {
             };
         }
     };
+}
+
+fn memory_from_file(path: &Option<String>) -> Vec<u32> {
+    path.as_ref()
+        .map(|path| {
+            let mut buf = fs::read(path).expect("could not read file");
+            buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
+            buf.chunks_exact(WORD_SIZE)
+                .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
+                .collect_vec()
+        })
+        .unwrap_or_default()
 }
 
 fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
