@@ -54,9 +54,6 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
 
 impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
-        // let num_total_rows = next_pow2_instance_padding(num_rows);
-        // let num_padding_rows = num_total_rows - num_rows;
-        // println!("{}, {}", num_total_rows, num_col);
         RowMajorMatrix {
             values: vec![T::default(); num_rows * num_col],
             num_col,
@@ -95,31 +92,6 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     pub fn par_batch_iter_mut(&mut self, num_rows: usize) -> rayon::slice::ChunksMut<T> {
         self.values.par_chunks_mut(num_rows * self.num_col)
     }
-
-    // pub fn par_batch_iter_padding_mut(
-    //     &mut self,
-    //     num_instances: Option<usize>,
-    //     batch_size: usize,
-    // ) -> rayon::slice::ChunksMut<'_, T> {
-    //     let num_instances = num_instances.unwrap_or(self.num_instances());
-    //     self.values[num_instances * self.num_col..]
-    //         .as_mut()
-    //         .par_chunks_mut(batch_size * self.num_col)
-    // }
-
-    // fn de_interleaving(mut self) -> Vec<Vec<T>> {
-    //     (0..self.num_col)
-    //         .map(|i| {
-    //             self.values
-    //                 .par_iter_mut()
-    //                 .skip(i)
-    //                 .step_by(self.num_col)
-    //                 //.map(|v| unsafe { mem::replace(v, mem::MaybeUninit::uninit()).assume_init() })
-    //                 .map(|v| *v)
-    //                 .collect::<Vec<T>>()
-    //         })
-    //         .collect()
-    //}
 }
 
 impl<F: Field> RowMajorMatrix<F> {
