@@ -1,6 +1,6 @@
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState,
-    WORD_SIZE, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, StepRecord,
+    Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
@@ -19,7 +19,9 @@ use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
-    fs, panic,
+    fs,
+    iter::zip,
+    panic,
     time::Instant,
 };
 use tracing::level_filters::LevelFilter;
@@ -89,6 +91,8 @@ fn main() {
 
     const STACK_SIZE: u32 = 256;
     let mut mem_padder = MemPadder::new(platform.ram.clone());
+
+    let priv_io = &[];
 
     tracing::info!("Loading ELF file: {}", args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
@@ -249,6 +253,14 @@ fn main() {
         .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
         .collect_vec();
 
+    let priv_io_final = zip(platform.private_io.iter_addresses(), priv_io)
+        .map(|(addr, &value)| MemFinalRecord {
+            addr,
+            value,
+            cycle: *final_access.get(&addr.into()).unwrap_or(&0),
+        })
+        .collect_vec();
+
     // assign table circuits
     config
         .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
@@ -260,7 +272,7 @@ fn main() {
             &reg_final,
             &mem_final,
             &io_final,
-            &[],
+            &priv_io_final,
         )
         .unwrap();
     // assign program circuit
