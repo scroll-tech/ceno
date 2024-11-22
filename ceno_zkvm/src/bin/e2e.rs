@@ -45,6 +45,7 @@ struct Args {
     platform: Preset,
 
     /// The private input or hints. This is a raw file mounted as a memory segment.
+    /// Zero-padded to the next power-of-two size.
     #[arg(long)]
     private_input: Option<String>,
 }
@@ -102,6 +103,11 @@ fn main() {
 
     tracing::info!("Loading private input file: {:?}", args.private_input);
     let priv_io = memory_from_file(&args.private_input);
+    assert!(
+        priv_io.len() <= platform.private_io.iter_addresses().len(),
+        "private input must fit in {} bytes",
+        platform.private_io.len()
+    );
     for (addr, value) in zip(platform.private_io.iter_addresses(), &priv_io) {
         vm.init_memory(addr.into(), *value);
     }
