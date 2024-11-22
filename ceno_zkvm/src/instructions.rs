@@ -1,4 +1,3 @@
-
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use rayon::{
@@ -87,18 +86,28 @@ pub trait Instruction<E: ExtensionField> {
                 InstancePaddingStrategy::RepeatLast => raw_witin[steps.len() - 1].to_vec(),
             };
 
-            let num_padding_instance_per_batch = if num_padding_instances > 256 {
-                num_padding_instances.div_ceil(nthreads)
-            } else {
-                num_padding_instances
-            };
-            raw_witin
-                .par_batch_iter_padding_mut(None, num_padding_instance_per_batch)
-                .with_min_len(MIN_PAR_SIZE)
-                .for_each(|row| {
-                    row.chunks_mut(num_witin)
-                        .for_each(|instance| instance.copy_from_slice(padding_instance.as_slice()));
-                });
+            if let InstancePaddingStrategy::RepeatLast = Self::padding_strategy() {
+                let num_padding_instance_per_batch = if num_padding_instances > 256 {
+                    num_padding_instances.div_ceil(nthreads)
+                } else {
+                    num_padding_instances
+                };
+
+                // for row in 0..raw_witin.num_padding_instances() {
+                //     let start = raw_witin.len() - (row + 1) * num_witin;
+                //     let end = raw_witin.len() - row * num_witin;
+                //     let slice = &mut raw_witin.values()[start..end];
+                //     slice.copy_from_slice(padding_instance.as_slice());
+                // }
+                raw_witin
+                    .par_batch_iter_padding_mut(None, num_padding_instance_per_batch)
+                    .with_min_len(MIN_PAR_SIZE)
+                    .for_each(|row| {
+                        row.chunks_mut(num_witin).for_each(|instance| {
+                            instance.copy_from_slice(padding_instance.as_slice())
+                        });
+                    });
+            }
         }
 
         Ok((raw_witin, lk_multiplicity))

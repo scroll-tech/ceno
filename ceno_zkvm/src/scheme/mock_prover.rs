@@ -724,7 +724,6 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         let wits_in = raw_witin
-            .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
@@ -1203,7 +1202,6 @@ Hints:
 
 #[cfg(test)]
 mod tests {
-    
 
     use super::*;
     use crate::{

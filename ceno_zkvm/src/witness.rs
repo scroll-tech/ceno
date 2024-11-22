@@ -1,4 +1,5 @@
 use ff::Field;
+use itertools::Itertools;
 use std::{
     array,
     cell::RefCell,
@@ -7,12 +8,16 @@ use std::{
     ops::Index,
     slice::{Chunks, ChunksMut},
     sync::Arc,
+    time::Instant,
 };
 
-use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLEs};
+use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE, IntoMLEs};
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
-    slice::ParallelSliceMut,
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+        IntoParallelRefMutIterator, ParallelIterator,
+    },
+    slice::{ParallelSlice, ParallelSliceMut},
 };
 use thread_local::ThreadLocal;
 
@@ -48,11 +53,20 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
         let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
+        println!("{}, {}", num_total_rows, num_col);
         RowMajorMatrix {
             values: vec![T::default(); num_total_rows * num_col],
             num_padding_rows,
             num_col,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn values(&mut self) -> &mut Vec<T> {
+        &mut self.values
     }
 
     pub fn num_instances(&self) -> usize {
@@ -90,7 +104,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
             .par_chunks_mut(batch_size * self.num_col)
     }
 
-    pub fn de_interleaving(mut self) -> Vec<Vec<T>> {
+    fn de_interleaving(mut self) -> Vec<Vec<T>> {
         (0..self.num_col)
             .map(|i| {
                 self.values
@@ -109,7 +123,26 @@ impl<F: Field> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
-        self.de_interleaving().into_mles()
+        let start = Instant::now();
+        let result = (0..self.num_col)
+            .collect_vec()
+            .par_iter()
+            .map(|i| {
+                self.values
+                    .iter()
+                    .skip(*i)
+                    .step_by(self.num_col)
+                    .map(|val| *val)
+                    .collect::<Vec<_>>()
+                    .into_mle()
+            })
+            .collect();
+        let size = self.num_col * self.len();
+        if size > 1000 * 1000 {
+            let duration = start.elapsed().as_secs_f64();
+            println!("Time taken: {:?}, size: {:?}", duration, size);
+        }
+        result
     }
 }
 

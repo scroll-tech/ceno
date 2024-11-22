@@ -105,7 +105,8 @@ pub trait IntoMLE<T>: Sized {
 impl<F: Field, E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<F> {
     fn into_mle(mut self) -> DenseMultilinearExtension<E> {
         let next_pow2 = self.len().next_power_of_two();
-        self.resize(next_pow2, F::ZERO);
+        // self.resize(next_pow2, F::ZERO);
+        assert!(self.len().is_power_of_two());
         DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
     }
 }
@@ -118,6 +119,8 @@ impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtens
     for Vec<Vec<F>>
 {
     fn into_mles(self) -> Vec<DenseMultilinearExtension<E>> {
+        // TODO: figure out correct place to test
+        // assert!(self.len().is_power_of_two(), "{}", self.len());
         self.into_iter().map(|v| v.into_mle()).collect()
     }
 }

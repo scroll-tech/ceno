@@ -7,7 +7,7 @@ use crate::{
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
-    tables::{TableCircuit, padding_zero},
+    tables::TableCircuit,
     utils::i64_to_base,
     witness::RowMajorMatrix,
 };
