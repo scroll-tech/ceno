@@ -172,7 +172,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 }
             });
 
-        Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
+        // Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
 
@@ -199,7 +199,7 @@ impl<E: ExtensionField, const PROGRAM_SIZE: usize> TableCircuit<E>
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        Self::padding_zero(&mut witness, num_witin).expect("padding error");
+        // Self::padding_zero(&mut witness, num_witin).expect("padding error");
         Ok(witness)
     }
 }

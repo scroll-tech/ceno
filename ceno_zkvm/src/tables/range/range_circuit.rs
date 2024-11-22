@@ -45,7 +45,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
         let mut table = config.generate_fixed_traces(num_fixed, RANGE::content());
-        Self::padding_zero(&mut table, num_fixed).expect("padding error");
+        // Self::padding_zero(&mut table, num_fixed).expect("padding error");
         table
     }
 
@@ -57,7 +57,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
         let mut table = config.assign_instances(num_witin, multiplicity, RANGE::len())?;
-        Self::padding_zero(&mut table, num_witin).expect("padding error");
+        // Self::padding_zero(&mut table, num_witin).expect("padding error");
         Ok(table)
     }
 }
