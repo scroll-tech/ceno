@@ -27,7 +27,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
-    let value = state.peek_memory(CENO_PLATFORM.ram_start().into());
+    let value = state.peek_memory(CENO_PLATFORM.ram.start.into());
     assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
     Ok(())
 }
