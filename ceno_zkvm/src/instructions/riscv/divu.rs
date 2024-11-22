@@ -172,7 +172,6 @@ mod test {
         use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
-        use multilinear_extensions::mle::IntoMLEs;
         use rand::Rng;
 
         use crate::{

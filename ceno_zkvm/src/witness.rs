@@ -1,4 +1,3 @@
-use ark_std::iterable::Iterable;
 use ff::Field;
 use itertools::Itertools;
 use std::{
@@ -13,13 +12,10 @@ use std::{
     time::Instant,
 };
 
-use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE, IntoMLEs};
+use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-        IntoParallelRefMutIterator, ParallelIterator,
-    },
-    slice::{ParallelSlice, ParallelSliceMut},
+    iter::{IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSliceMut,
 };
 use thread_local::ThreadLocal;
 
