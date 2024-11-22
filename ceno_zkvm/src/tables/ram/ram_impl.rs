@@ -392,26 +392,19 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             });
 
         // set padding with well-form address
-        if final_mem.len().next_power_of_two() - final_mem.len() > 0 {
-            let paddin_entry_start = final_mem.len();
-            final_table
-                .par_iter_mut()
-                .skip(final_mem.len())
-                .enumerate()
-                .with_min_len(MIN_PAR_SIZE)
-                .for_each(|(i, row)| {
-                    // Assign value limbs.
-                    self.final_v.iter().for_each(|limb| {
-                        set_val!(row, limb, 0u64);
-                    });
-                    set_val!(
-                        row,
-                        self.addr,
-                        DVRAM::addr(&self.params, paddin_entry_start + i) as u64
-                    );
-                    set_val!(row, self.final_cycle, 0_u64);
+        final_table
+            .par_iter_mut()
+            .enumerate()
+            .skip(final_mem.len())
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|(i, row)| {
+                // Assign value limbs.
+                self.final_v.iter().for_each(|limb| {
+                    set_val!(row, limb, 0u64);
                 });
-        }
+                set_val!(row, self.addr, DVRAM::addr(&self.params, i) as u64);
+                set_val!(row, self.final_cycle, 0_u64);
+            });
 
         Ok(final_table)
     }
