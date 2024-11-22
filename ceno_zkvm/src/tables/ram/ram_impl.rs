@@ -7,7 +7,7 @@ use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    circuit_builder::{CircuitBuilder, DynamicAddr, SetTableAddrType, SetTableSpec},
+    circuit_builder::{CircuitBuilder, SetTableAddrType, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
@@ -331,10 +331,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             || "init_table",
             DVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
-                    addr_witin_id: addr.id.into(),
-                    offset: DVRAM::offset_addr(&cb.params),
-                }),
+                // TODO: Restore DynamicAddr
+                addr_type: SetTableAddrType::FixedAddr,
                 len: DVRAM::max_len(&cb.params),
             },
             init_table,
@@ -343,10 +341,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             || "final_table",
             DVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
-                    addr_witin_id: addr.id.into(),
-                    offset: DVRAM::offset_addr(&cb.params),
-                }),
+                // TODO: Restore DynamicAddr
+                addr_type: SetTableAddrType::FixedAddr,
                 len: DVRAM::max_len(&cb.params),
             },
             final_table,
@@ -367,10 +363,11 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
-        assert!(DVRAM::max_len(&self.params).is_power_of_two());
-        let mut final_table =
-            RowMajorMatrix::<F>::new(final_mem.len().next_power_of_two(), num_witness);
+        let max_len = DVRAM::max_len(&self.params);
+        assert!(final_mem.len() <= max_len);
+        assert!(max_len.is_power_of_two());
+        // TODO: Restore DynamicAddr and use final_mem.len().
+        let mut final_table = RowMajorMatrix::<F>::new(max_len, num_witness);
 
         final_table
             .par_iter_mut()

@@ -22,7 +22,7 @@ pub const CENO_PLATFORM: Platform = Platform {
     rom: 0x2000_0000..0x3000_0000,
     ram: 0x8000_0000..0xFFFF_0000,
     public_io: 0x3000_1000..0x3000_2000,
-    private_io: 0x4000_0000..0x5000_0000,
+    private_io: 0x4000_0000..0x4000_1000,
     stack_top: 0xC0000000,
     unsafe_ecall_nop: false,
 };
