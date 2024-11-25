@@ -369,8 +369,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
-        let mut final_table =
-            RowMajorMatrix::<F>::new(final_mem.len().next_power_of_two(), num_witness);
+        let mut final_table = RowMajorMatrix::<F>::new(final_mem.len(), num_witness);
 
         final_table
             .par_iter_mut()
