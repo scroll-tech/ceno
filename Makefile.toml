@@ -53,6 +53,11 @@ args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 command = "cargo"
 workspace = false
 
+[tasks.riscv_stats]
+args = ["run", "--bin", "riscv_stats"]
+command = "cargo"
+workspace = false
+
 [tasks.clippy]
 args = [
   "clippy",

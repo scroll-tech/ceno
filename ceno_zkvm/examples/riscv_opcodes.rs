@@ -2,33 +2,32 @@ use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
-    instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
+    instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
-    tables::{
-        DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_program_data,
-        init_public_io, initial_registers,
-    },
+    structs::ProgramParams,
+    tables::{MemFinalRecord, ProgramTableCircuit},
 };
 use clap::Parser;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext,
+    CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, LUI, LW},
-    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
+    PC_WORD_SIZE, Platform, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    stats::{StaticReport, TraceReport},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::{Itertools, chain};
+use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use sumcheck::{entered_span, exit_span};
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::Transcript;
-
 const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
@@ -43,10 +42,10 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
     declare_program!(
         program,
-        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io_start()), // lui x10, public_io
-        encode_rv32(LW, 10, 0, 1, 0),                                // lw x1, 0(x10)
-        encode_rv32(LW, 10, 0, 2, 4),                                // lw x2, 4(x10)
-        encode_rv32(LW, 10, 0, 3, 8),                                // lw x3, 8(x10)
+        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io.start), // lui x10, public_io
+        encode_rv32(LW, 10, 0, 1, 0),                              // lw x1, 0(x10)
+        encode_rv32(LW, 10, 0, 2, 4),                              // lw x2, 4(x10)
+        encode_rv32(LW, 10, 0, 3, 8),                              // lw x3, 8(x10)
         // Main loop.
         encode_rv32(ADD, 1, 4, 4, 0),              // add x4, x1, x4
         encode_rv32(ADD, 2, 3, 3, 0),              // add x3, x2, x3
@@ -56,7 +55,7 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     );
     program
 };
-type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E, PROGRAM_SIZE>;
+type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -91,24 +90,44 @@ fn main() {
             })
             .collect(),
     );
+    let mem_addresses = CENO_PLATFORM.ram.clone();
+    let io_addresses = CENO_PLATFORM.public_io.clone();
+
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+    let mut fmt_layer = fmt::layer()
+        .compact()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_thread_ids(false)
+        .with_thread_names(false);
+    fmt_layer.set_ansi(false);
+
+    // Take filtering directives from RUST_LOG env_var
+    // Directive syntax: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+    // Example: RUST_LOG="info" cargo run.. to get spans/events at info level; profiling spans are info
+    // Example: RUST_LOG="[sumcheck]" cargo run.. to get only events under the "sumcheck" span
+    let filter = EnvFilter::from_default_env();
+
     let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
-        )
-        .with(EnvFilter::from_default_env())
+        .with(fmt_layer)
+        .with(filter)
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let top_level = entered_span!("TOPLEVEL");
+
+    let keygen = entered_span!("KEYGEN");
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let program_params = ProgramParams {
+        program_size: PROGRAM_SIZE,
+        ..Default::default()
+    };
+    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -120,16 +139,26 @@ fn main() {
         &program,
     );
 
-    let reg_init = initial_registers();
-    // Define program constant here
-    let program_data: &[u32] = &[];
-    let program_data_init = init_program_data(program_data);
+    let static_report = StaticReport::new(&zkvm_cs);
 
-    config.generate_fixed_traces(
+    let reg_init = mmu_config.initial_registers();
+
+    // RAM is not used in this program, but it must have a particular size at the moment.
+    let mem_init = MemPadder::init_mem(mem_addresses, mmu_config.static_mem_len(), &[]);
+
+    let init_public_io = |values: &[Word]| {
+        MemPadder::init_mem(io_addresses.clone(), mmu_config.public_io_len(), values)
+    };
+
+    let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();
+
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+    mmu_config.generate_fixed_traces(
         &zkvm_cs,
         &mut zkvm_fixed_traces,
         &reg_init,
-        &program_data_init,
+        &mem_init,
+        &io_addrs,
     );
 
     let pk = zkvm_cs
@@ -138,6 +167,7 @@ fn main() {
         .expect("keygen failed");
     let vk = pk.get_vk();
 
+    exit_span!(keygen);
     // proving
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
@@ -153,8 +183,8 @@ fn main() {
 
         let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
-        // init mmio
-        for record in chain!(&program_data_init, &public_io_init) {
+        // init memory mapped IO
+        for record in &public_io_init {
             vm.init_memory(record.addr.into(), record.value);
         }
 
@@ -168,7 +198,7 @@ fn main() {
             .rev()
             .find(|record| {
                 record.insn().codes().kind == EANY
-                    && record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt()
+                    && record.rs1().unwrap().value == Platform::ecall_halt()
             })
             .expect("halt record not found");
 
@@ -178,7 +208,7 @@ fn main() {
         let exit_code = halt_record.rs2().unwrap().value;
         let pi = PublicValues::new(
             exit_code,
-            CENO_PLATFORM.rom_start(),
+            vm.program().entry,
             Tracer::SUBCYCLES_PER_INSN as u32,
             EXIT_PC as u32,
             end_cycle,
@@ -198,7 +228,7 @@ fn main() {
             .map(|rec| {
                 let index = rec.addr as usize;
                 if index < VMState::REG_COUNT {
-                    let vma: WordAddr = CENO_PLATFORM.register_vma(index).into();
+                    let vma: WordAddr = Platform::register_vma(index).into();
                     MemFinalRecord {
                         addr: rec.addr,
                         value: vm.peek_register(index),
@@ -215,14 +245,14 @@ fn main() {
             })
             .collect_vec();
 
-        // Find the final program_data cycles.
-        let program_data_final = program_data_init
+        // Find the final memory values and cycles.
+        let mem_final = mem_init
             .iter()
             .map(|rec| {
                 let vma: WordAddr = rec.addr.into();
                 MemFinalRecord {
                     addr: rec.addr,
-                    value: rec.value,
+                    value: vm.peek_memory(vma),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             })
@@ -231,40 +261,19 @@ fn main() {
         // Find the final public io cycles.
         let public_io_final = public_io_init
             .iter()
-            .map(|rec| {
-                let vma: WordAddr = rec.addr.into();
-                MemFinalRecord {
-                    addr: rec.addr,
-                    value: rec.value,
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
-                }
-            })
-            .collect_vec();
-
-        // Find the final mem data and cycles.
-        // TODO retrieve max address access
-        // as we already support non-uniform proving of memory
-        let num_entry = 1 << 12;
-        let mem_final = (0..num_entry)
-            .map(|entry_index| {
-                let byte_addr = ByteAddr::from(MemTable::addr(entry_index));
-                let vma = byte_addr.waddr();
-                MemFinalRecord {
-                    addr: byte_addr.0,
-                    value: vm.peek_memory(vma),
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
-                }
-            })
+            .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
             .collect_vec();
 
         // assign table circuits
         config
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
+            .unwrap();
+        mmu_config
             .assign_table_circuit(
                 &zkvm_cs,
                 &mut zkvm_witness,
                 &reg_final,
                 &mem_final,
-                &program_data_final,
                 &public_io_final,
             )
             .unwrap();
@@ -273,6 +282,16 @@ fn main() {
         zkvm_witness
             .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
             .unwrap();
+
+        // get instance counts from witness matrices
+        let trace_report = TraceReport::new_via_witnesses(
+            &static_report,
+            &zkvm_witness,
+            "EXAMPLE_PROGRAM in riscv_opcodes.rs",
+        );
+
+        trace_report.save_json("report.json");
+        trace_report.save_table("report.txt");
 
         MockProver::assert_satisfied_full(
             zkvm_cs.clone(),
@@ -284,6 +303,7 @@ fn main() {
         let timer = Instant::now();
 
         let transcript = Transcript::new(b"riscv");
+
         let mut zkvm_proof = prover
             .create_proof(zkvm_witness, pi, transcript)
             .expect("create_proof failed");
@@ -291,7 +311,7 @@ fn main() {
         println!(
             "riscv_opcodes::create_proof, instance_num_vars = {}, time = {}",
             instance_num_vars,
-            timer.elapsed().as_secs_f64()
+            timer.elapsed().as_secs()
         );
 
         let transcript = Transcript::new(b"riscv");
@@ -336,4 +356,5 @@ fn main() {
             }
         };
     }
+    exit_span!(top_level);
 }

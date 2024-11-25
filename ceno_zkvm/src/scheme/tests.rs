@@ -3,7 +3,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 use ceno_emul::{
     CENO_PLATFORM,
     InsnKind::{ADD, EANY},
-    PC_WORD_SIZE, Program, StepRecord, VMState,
+    PC_WORD_SIZE, Platform, Program, StepRecord, VMState,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -230,7 +230,7 @@ fn test_single_add_instance_e2e() {
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
 
-    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>();
+    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
@@ -242,7 +242,7 @@ fn test_single_add_instance_e2e() {
         &(),
     );
 
-    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
+    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &zkvm_cs,
         &prog_config,
         &program,
@@ -269,7 +269,7 @@ fn test_single_add_instance_e2e() {
         match kind {
             ADD => add_records.push(record),
             EANY => {
-                if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
+                if record.rs1().unwrap().value == Platform::ecall_halt() {
                     halt_records.push(record);
                 }
             }
@@ -295,11 +295,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
         .unwrap();
     zkvm_witness
-        .assign_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
-            &zkvm_cs,
-            &prog_config,
-            &program,
-        )
+        .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
     let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
