@@ -36,3 +36,12 @@ cargo clippy
 ```
 
 Alas, `cargo build` doesn't work. That's a known problem and we're working on it.  Please use `cargo make build` instead for now.
+
+### Setting up self-hosted CI docker container
+
+To set up docker container for CI, you can run the following command:
+
+```sh
+docker build -t ceno-runner scripts/ci/
+docker run -d ceno-runner
+```

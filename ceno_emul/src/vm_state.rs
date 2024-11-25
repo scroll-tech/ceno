@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    Program,
+    PC_STEP_SIZE, Program,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
@@ -53,16 +53,7 @@ impl VMState {
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         let program = Program::load_elf(elf, u32::MAX)?;
-        let state = Self::new(platform, program);
-
-        if state.program.base_address != state.platform.rom_start() {
-            return Err(anyhow!(
-                "Invalid base_address {:x}",
-                state.program.base_address
-            ));
-        }
-
-        Ok(state)
+        Ok(Self::new(platform, program))
     }
 
     pub fn halted(&self) -> bool {
@@ -71,6 +62,10 @@ impl VMState {
 
     pub fn tracer(&self) -> &Tracer {
         &self.tracer
+    }
+
+    pub fn platform(&self) -> &Platform {
+        &self.platform
     }
 
     pub fn program(&self) -> &Program {
@@ -116,12 +111,21 @@ impl VMState {
 impl EmuContext for VMState {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
-        let function = self.load_register(self.platform.reg_ecall())?;
-        if function == self.platform.ecall_halt() {
-            let exit_code = self.load_register(self.platform.reg_arg0())?;
-            tracing::debug!("halt with exit_code={}", exit_code);
+        let function = self.load_register(Platform::reg_ecall())?;
+        let arg0 = self.load_register(Platform::reg_arg0())?;
+        if function == Platform::ecall_halt() {
+            tracing::debug!("halt with exit_code={}", arg0);
 
             self.halt();
+            Ok(true)
+        } else if self.platform.unsafe_ecall_nop {
+            // Treat unknown ecalls as all powerful instructions:
+            // Read two registers, write one register, write one memory word, and branch.
+            tracing::warn!("ecall ignored: syscall_id={}", function);
+            self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
+            let addr = self.platform.ram.start.into();
+            self.store_memory(addr, self.peek_memory(addr))?;
+            self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
         } else {
             self.trap(TrapCause::EcallError)

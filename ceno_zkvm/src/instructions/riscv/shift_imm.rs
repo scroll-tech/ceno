@@ -36,16 +36,19 @@ pub struct SlliOp;
 impl RIVInstruction for SlliOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLLI;
 }
+pub type SlliInstruction<E> = ShiftImmInstruction<E, SlliOp>;
 
 pub struct SraiOp;
 impl RIVInstruction for SraiOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SRAI;
 }
+pub type SraiInstruction<E> = ShiftImmInstruction<E, SraiOp>;
 
 pub struct SrliOp;
 impl RIVInstruction for SrliOp {
     const INST_KIND: ceno_emul::InsnKind = InsnKind::SRLI;
 }
+pub type SrliInstruction<E> = ShiftImmInstruction<E, SrliOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;

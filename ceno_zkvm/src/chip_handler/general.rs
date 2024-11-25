@@ -8,13 +8,16 @@ use crate::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
         UINT_LIMBS,
     },
-    structs::ROMType,
+    structs::{ProgramParams, RAMType, ROMType},
     tables::InsnRecord,
 };
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
-        Self { cs }
+        Self::new_with_params(cs, ProgramParams::default())
+    }
+    pub fn new_with_params(cs: &'a mut ConstraintSystem<E>, params: ProgramParams) -> Self {
+        Self { cs, params }
     }
 
     pub fn create_witin<NR, N>(&mut self, name_fn: N) -> WitIn
@@ -78,7 +81,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         &mut self,
         name_fn: N,
         table_len: usize,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
@@ -86,33 +90,37 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs
-            .lk_table_record(name_fn, table_len, rlc_record, multiplicity)
+            .lk_table_record(name_fn, table_len, rom_type, record, multiplicity)
     }
 
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        ram_type: RAMType,
         table_spec: SetTableSpec,
-        rlc_record: Expression<E>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.r_table_record(name_fn, table_spec, rlc_record)
+        self.cs
+            .r_table_record(name_fn, ram_type, table_spec, record)
     }
 
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
+        ram_type: RAMType,
         table_spec: SetTableSpec,
-        rlc_record: Expression<E>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.w_table_record(name_fn, table_spec, rlc_record)
+        self.cs
+            .w_table_record(name_fn, ram_type, table_spec, record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
@@ -123,25 +131,27 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn read_record<NR, N>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.read_record(name_fn, rlc_record)
+        self.cs.read_record(name_fn, ram_type, record)
     }
 
     pub fn write_record<NR, N>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.write_record(name_fn, rlc_record)
+        self.cs.write_record(name_fn, ram_type, record)
     }
 
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
@@ -314,7 +324,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         cb: impl FnOnce(&mut CircuitBuilder<E>) -> T,
     ) -> T {
         self.cs.namespace(name_fn, |cs| {
-            let mut inner_circuit_builder = CircuitBuilder::new(cs);
+            let mut inner_circuit_builder =
+                CircuitBuilder::new_with_params(cs, self.params.clone());
             cb(&mut inner_circuit_builder)
         })
     }
