@@ -267,11 +267,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             OC::assign_instances(config, cs.num_witin as usize, records)?;
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
-        assert!(
-            self.lk_mlts
-                .insert(OC::name(), logup_multiplicity)
-                .is_none()
-        );
+        for logup_multiplicity in logup_multiplicity {
+            assert!(
+                self.lk_mlts
+                    .insert(OC::name(), logup_multiplicity)
+                    .is_none()
+            );
+        }
 
         Ok(())
     }
