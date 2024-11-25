@@ -5,7 +5,7 @@ use std::{
 };
 
 use ff::Field;
-use itertools::{Itertools, izip};
+use itertools::{Itertools, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -62,10 +62,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut vm_proof = ZKVMProof::empty(pi);
 
         // including raw public input to transcript
-        vm_proof
-            .raw_pi
-            .iter()
-            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+        for v in vm_proof.raw_pi.iter().flatten() {
+            transcript.append_field_element(v);
+        }
 
         let pi: Vec<ArcMultilinearExtension<E>> = vm_proof
             .raw_pi
@@ -77,7 +76,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect();
 
         // commit to fixed commitment
-        for (_, pk) in self.pk.circuit_pks.iter() {
+        for pk in self.pk.circuit_pks.values() {
             if let Some(fixed_commit) = &pk.vk.fixed_commit {
                 PCS::write_commitment(fixed_commit, &mut transcript)
                     .map_err(ZKVMError::PCSError)?;
@@ -147,7 +146,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     cs.w_expressions.len(),
                     cs.lk_expressions.len(),
                 );
-                for lk_s in cs.lk_expressions_namespace_map.iter() {
+                for lk_s in &cs.lk_expressions_namespace_map {
                     tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
                 }
                 let opcode_proof = self.create_opcode_proof(
@@ -1188,7 +1187,7 @@ impl TowerProver {
                 let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
                 let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, out_rt.len());
 
-                for (s, alpha) in prod_specs.iter().zip(alpha_pows.iter()) {
+                for (s, alpha) in izip!(&prod_specs, &alpha_pows) {
                     if round < s.witness.len() {
                         let layer_polys = &s.witness[round];
 
@@ -1210,9 +1209,7 @@ impl TowerProver {
                     }
                 }
 
-                for (s, alpha) in logup_specs
-                    .iter()
-                    .zip(alpha_pows[prod_specs.len()..].chunks(2))
+                for (s, alpha) in izip!(&logup_specs, alpha_pows[prod_specs.len()..].chunks(2))
                 {
                     if round < s.witness.len() {
                         let layer_polys = &s.witness[round];
@@ -1270,7 +1267,7 @@ impl TowerProver {
                 let evals = state.get_mle_final_evaluations();
                 let mut evals_iter = evals.iter();
                 evals_iter.next(); // skip first eq
-                for (i, s) in prod_specs.iter().enumerate() {
+                for (i, s) in enumerate(&prod_specs) {
                     if round < s.witness.len() {
                         // collect evals belong to current spec
                         proofs.push_prod_evals_and_point(
@@ -1282,7 +1279,7 @@ impl TowerProver {
                         );
                     }
                 }
-                for (i, s) in logup_specs.iter().enumerate() {
+                for (i, s) in enumerate(&logup_specs) {
                     if round < s.witness.len() {
                         // collect evals belong to current spec
                         // p1, q2, p2, q1
