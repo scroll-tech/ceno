@@ -773,7 +773,7 @@ Hints:
         let mut rom_inputs =
             HashMap::<ROMType, Vec<(Vec<E>, String, String, Vec<Expression<E>>)>>::new();
         let mut rom_tables = HashMap::<ROMType, HashMap<E, E::BaseField>>::new();
-        for (circuit_name, cs) in cs.circuit_css.iter() {
+        for (circuit_name, cs) in &cs.circuit_css {
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
@@ -958,7 +958,7 @@ Hints:
                 let mut writes_grp_by_annotations = HashMap::new();
                 // store (pc, timestamp) for $ram_type == RAMType::GlobalState
                 let mut gs = HashMap::new();
-                for (circuit_name, cs) in cs.circuit_css.iter() {
+                for (circuit_name, cs) in &cs.circuit_css {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1020,7 +1020,7 @@ Hints:
 
                 let mut reads = HashSet::new();
                 let mut reads_grp_by_annotations = HashMap::new();
-                for (circuit_name, cs) in cs.circuit_css.iter() {
+                for (circuit_name, cs) in &cs.circuit_css {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1065,7 +1065,7 @@ Hints:
         }
         macro_rules! find_rw_mismatch {
             ($reads:ident,$reads_grp_by_annotations:ident,$writes:ident,$writes_grp_by_annotations:ident,$ram_type:expr,$gs:expr) => {
-                for (annotation, (reads, circuit_name)) in $reads_grp_by_annotations.iter() {
+                for (annotation, (reads, circuit_name)) in &$reads_grp_by_annotations {
                     // (pc, timestamp)
                     let gs_of_circuit = $gs.get(circuit_name);
                     let num_missing = reads
@@ -1102,7 +1102,7 @@ Hints:
                     }
                     num_rw_mismatch_errors += num_missing;
                 }
-                for (annotation, (writes, circuit_name)) in $writes_grp_by_annotations.iter() {
+                for (annotation, (writes, circuit_name)) in &$writes_grp_by_annotations {
                     let gs_of_circuit = $gs.get(circuit_name);
                     let num_missing = writes
                         .iter()
