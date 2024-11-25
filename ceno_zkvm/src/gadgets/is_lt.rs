@@ -16,6 +16,8 @@ use crate::{
     witness::LkMultiplicity,
 };
 
+use super::SignedExtendConfig;
+
 #[derive(Debug, Clone)]
 pub struct AssertLTConfig(InnerLtConfig);
 
@@ -71,7 +73,7 @@ impl IsLtConfig {
         max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
         cb.namespace("is_lt", |cb| {
-            let is_lt = cb.create_witin(format!("{name} is_lt witin"))?;
+            let is_lt = cb.create_witin(format!("{name} is_lt witin"));
             cb.assert_bit("is_lt_bit", is_lt.expr())?;
 
             let config = InnerLtConfig::construct_circuit(
@@ -135,7 +137,7 @@ impl InnerLtConfig {
 
         let mut witin_u16 = |var_name: String| -> Result<WitIn, ZKVMError> {
             cb.namespace(format!("var {var_name}"), |cb| {
-                let witin = cb.create_witin(var_name)?;
+                let witin = cb.create_witin(var_name.to_string());
                 cb.assert_ux::<_, 16>(name.clone(), witin.expr())?;
                 Ok(witin)
             })
@@ -211,12 +213,12 @@ pub fn cal_lt_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) ->
 }
 
 #[derive(Debug)]
-pub struct AssertSignedLtConfig {
-    config: InnerSignedLtConfig,
+pub struct AssertSignedLtConfig<E> {
+    config: InnerSignedLtConfig<E>,
 }
 
-impl AssertSignedLtConfig {
-    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display + Clone>(
+impl<E: ExtensionField> AssertSignedLtConfig<E> {
+    pub fn construct_circuit<Name: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: Name,
         lhs: &UInt<E>,
@@ -229,37 +231,37 @@ impl AssertSignedLtConfig {
         })
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        self.config.assign_instance::<E>(instance, lkm, lhs, rhs)?;
+        self.config.assign_instance(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct SignedLtConfig {
+pub struct SignedLtConfig<E> {
     is_lt: WitIn,
-    config: InnerSignedLtConfig,
+    config: InnerSignedLtConfig<E>,
 }
 
-impl SignedLtConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> SignedLtConfig<E> {
+    pub fn expr(&self) -> Expression<E> {
         self.is_lt.expr()
     }
 
-    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display + Clone>(
+    pub fn construct_circuit<Name: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: Name,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
         cb.namespace("is_signed_lt", |cb| {
-            let is_lt = cb.create_witin(format!("{name} is_signed_lt witin"))?;
+            let is_lt = cb.create_witin(format!("{name} is_signed_lt witin"));
             cb.assert_bit("is_lt_bit", is_lt.expr())?;
             let config = InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
 
@@ -267,7 +269,7 @@ impl SignedLtConfig {
         })
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
@@ -276,42 +278,29 @@ impl SignedLtConfig {
     ) -> Result<(), ZKVMError> {
         set_val!(instance, self.is_lt, (lhs < rhs) as u64);
         self.config
-            .assign_instance::<E>(instance, lkm, lhs as SWord, rhs as SWord)?;
+            .assign_instance(instance, lkm, lhs as SWord, rhs as SWord)?;
         Ok(())
     }
 }
 
 #[derive(Debug)]
-struct InnerSignedLtConfig {
-    is_lhs_neg: IsLtConfig,
-    is_rhs_neg: IsLtConfig,
+struct InnerSignedLtConfig<E> {
+    is_lhs_neg: SignedExtendConfig<E>,
+    is_rhs_neg: SignedExtendConfig<E>,
     config: InnerLtConfig,
 }
 
-impl InnerSignedLtConfig {
-    pub fn construct_circuit<E: ExtensionField, Name: Into<String> + Display + Clone>(
+impl<E: ExtensionField> InnerSignedLtConfig<E> {
+    pub fn construct_circuit<Name: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: Name,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
         is_lt_expr: Expression<E>,
     ) -> Result<Self, ZKVMError> {
-        let max_signed_limb_expr: Expression<_> = ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
         // Extract the sign bit.
-        let is_lhs_neg = IsLtConfig::construct_circuit(
-            cb,
-            "lhs_msb",
-            max_signed_limb_expr.clone(),
-            lhs.limbs.iter().last().unwrap().expr(), // msb limb
-            1,
-        )?;
-        let is_rhs_neg = IsLtConfig::construct_circuit(
-            cb,
-            "rhs_msb",
-            max_signed_limb_expr,
-            rhs.limbs.iter().last().unwrap().expr(), // msb limb
-            1,
-        )?;
+        let is_lhs_neg = lhs.is_negative(cb)?;
+        let is_rhs_neg = rhs.is_negative(cb)?;
 
         // Convert to field arithmetic.
         let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
@@ -332,27 +321,24 @@ impl InnerSignedLtConfig {
         })
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
     ) -> Result<(), ZKVMError> {
-        let max_signed_limb = (1u64 << (UInt::<E>::LIMB_BITS - 1)) - 1;
         let lhs_value = Value::new_unchecked(lhs as Word);
         let rhs_value = Value::new_unchecked(rhs as Word);
         self.is_lhs_neg.assign_instance(
             instance,
             lkm,
-            max_signed_limb,
-            *lhs_value.limbs.last().unwrap() as u64,
+            *lhs_value.as_u16_limbs().last().unwrap() as u64,
         )?;
         self.is_rhs_neg.assign_instance(
             instance,
             lkm,
-            max_signed_limb,
-            *rhs_value.limbs.last().unwrap() as u64,
+            *rhs_value.as_u16_limbs().last().unwrap() as u64,
         )?;
 
         self.config

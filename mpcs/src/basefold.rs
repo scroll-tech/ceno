@@ -47,7 +47,6 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
 };
 
-use rand_chacha::{ChaCha8Rng, rand_core::RngCore};
 use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
@@ -80,7 +79,7 @@ enum PolyEvalsCodeword<E: ExtensionField> {
     TooBig(usize),
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore> Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -266,8 +265,7 @@ where
 ///     positions are (i >> k) and (i >> k) XOR 1.
 /// (c) The verifier checks that the folding has been correctly computed
 ///     at these positions.
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug>
-    PolynomialCommitmentScheme<E> for Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> PolynomialCommitmentScheme<E> for Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -279,7 +277,6 @@ where
     type Commitment = BasefoldCommitment<E>;
     type CommitmentChunk = Digest<E::BaseField>;
     type Proof = BasefoldProof<E>;
-    type Rng = ChaCha8Rng;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error> {
         let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size));
@@ -290,10 +287,10 @@ where
     /// Derive the proving key and verification key from the public parameter.
     /// This step simultaneously trims the parameter for the particular size.
     fn trim(
-        pp: &Self::Param,
+        pp: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        <Spec::EncodingScheme as EncodingScheme<E>>::trim(&pp.params, log2_strict(poly_size)).map(
+        <Spec::EncodingScheme as EncodingScheme<E>>::trim(pp.params, log2_strict(poly_size)).map(
             |(pp, vp)| {
                 (
                     BasefoldProverParams {
@@ -311,7 +308,7 @@ where
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
-        let timer = start_timer!(|| "Basefold::commit");
+        let timer = start_timer!("Basefold::commit");
 
         let is_base = match poly.evaluations {
             FieldType::Ext(_) => false,
@@ -390,9 +387,9 @@ where
                 ));
             }
         }
-        let timer = start_timer!(|| "Basefold::batch commit");
+        let timer = start_timer!("Basefold::batch commit");
 
-        let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
+        let encode_timer = start_timer!("Basefold::batch commit::encoding and interpolations");
         // convert each polynomial to a code word
         let evals_codewords = polys
             .par_iter()
@@ -475,7 +472,7 @@ where
         _eval: &E, // Opening does not need eval, except for sanity check
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let timer = start_timer!(|| "Basefold::open");
+        let timer = start_timer!("Basefold::open");
 
         // The encoded polynomial should at least have the number of
         // variables of the basecode, i.e., the size of the message
@@ -516,12 +513,12 @@ where
         // 2.1 Prepare the answers. These include two values in each oracle,
         //     in positions (i, i XOR 1), (i >> 1, (i >> 1) XOR 1), ...
         //     respectively.
-        let query_timer = start_timer!(|| "Basefold::open::query_phase");
+        let query_timer = start_timer!("Basefold::open::query_phase");
         let queries = prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
         end_timer!(query_timer);
 
         // 2.2 Prepare the merkle paths for these answers.
-        let query_timer = start_timer!(|| "Basefold::open::build_query_result");
+        let query_timer = start_timer!("Basefold::open::build_query_result");
         let queries_with_merkle_path =
             QueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
         end_timer!(query_timer);
@@ -555,7 +552,7 @@ where
         evals: &[Evaluation<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let timer = start_timer!(|| "Basefold::batch_open");
+        let timer = start_timer!("Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
         let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
         assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
@@ -576,7 +573,7 @@ where
 
         validate_input("batch open", pp.get_max_message_size_log(), polys, points)?;
 
-        let sumcheck_timer = start_timer!(|| "Basefold::batch_open::initial sumcheck");
+        let sumcheck_timer = start_timer!("Basefold::batch_open::initial sumcheck");
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = (0..batch_size_log)
@@ -732,7 +729,7 @@ where
             coeffs.as_slice(),
         );
 
-        let query_timer = start_timer!(|| "Basefold::batch_open query phase");
+        let query_timer = start_timer!("Basefold::batch_open query phase");
         let query_result = batch_prover_query_phase(
             transcript,
             1 << (num_vars + Spec::get_rate_log()),
@@ -742,7 +739,7 @@ where
         );
         end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::batch_open build query result");
+        let query_timer = start_timer!("Basefold::batch_open build query result");
         let query_result_with_merkle_path =
             BatchedQueriesResultWithMerklePath::from_batched_query_result(
                 query_result,
@@ -777,7 +774,7 @@ where
         evals: &[E],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let timer = start_timer!(|| "Basefold::batch_open");
+        let timer = start_timer!("Basefold::batch_open");
         let num_vars = polys[0].num_vars();
 
         if comm.is_trivial::<Spec>() {
@@ -828,14 +825,14 @@ where
             num_vars - Spec::get_basecode_msg_size_log(),
         );
 
-        let query_timer = start_timer!(|| "Basefold::open::query_phase");
+        let query_timer = start_timer!("Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
         let queries =
             simple_batch_prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
         end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::open::build_query_result");
+        let query_timer = start_timer!("Basefold::open::build_query_result");
 
         let queries_with_merkle_path =
             SimpleBatchQueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
@@ -863,7 +860,7 @@ where
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
-        let timer = start_timer!(|| "Basefold::verify");
+        let timer = start_timer!("Basefold::verify");
 
         if proof.is_trivial() {
             let trivial_proof = &proof.trivial_proof;
@@ -949,7 +946,7 @@ where
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
-        let timer = start_timer!(|| "Basefold::batch_verify");
+        let timer = start_timer!("Basefold::batch_verify");
         // 	let key = "RAYON_NUM_THREADS";
         // 	env::set_var(key, "32");
         let comms = comms.iter().collect_vec();
@@ -966,7 +963,7 @@ where
         assert!(poly_num_vars.iter().min().unwrap() >= &Spec::get_basecode_msg_size_log());
         assert!(!proof.is_trivial());
 
-        let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
+        let sumcheck_timer = start_timer!("Basefold::batch_verify::initial sumcheck");
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = (0..batch_size_log)
             .map(|_| {
@@ -1076,7 +1073,7 @@ where
         proof: &Self::Proof,
         transcript: &mut Transcript<E>,
     ) -> Result<(), Error> {
-        let timer = start_timer!(|| "Basefold::simple batch verify");
+        let timer = start_timer!("Basefold::simple batch verify");
         let batch_size = evals.len();
         if let Some(num_polys) = comm.num_polys {
             assert_eq!(num_polys, batch_size);
@@ -1170,8 +1167,7 @@ where
     }
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>, Rng: RngCore + std::fmt::Debug> NoninteractivePCS<E>
-    for Basefold<E, Spec, Rng>
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
@@ -1188,12 +1184,11 @@ mod test {
         },
     };
     use goldilocks::GoldilocksExt2;
-    use rand_chacha::ChaCha8Rng;
 
     use super::{BasefoldRSParams, structure::BasefoldBasecodeParams};
 
-    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams, ChaCha8Rng>;
-    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams, ChaCha8Rng>;
+    type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
 
     #[test]
     fn commit_open_verify_goldilocks_basecode_base() {

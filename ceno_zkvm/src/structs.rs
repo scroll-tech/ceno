@@ -7,9 +7,9 @@ use crate::{
     tables::TableCircuit,
     witness::{LkMultiplicity, RowMajorMatrix},
 };
-use ceno_emul::StepRecord;
+use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
@@ -43,7 +43,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug, EnumIter)]
+#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
@@ -57,7 +57,7 @@ pub enum ROMType {
     Instruction, // Decoded instruction from the fixed program.
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum RAMType {
     GlobalState,
     Register,
@@ -125,11 +125,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ProgramParams {
+    pub platform: Platform,
+    pub program_size: usize,
+    pub pub_io_len: usize,
+    pub static_memory_len: usize,
+}
+
+impl Default for ProgramParams {
+    fn default() -> Self {
+        ProgramParams {
+            platform: CENO_PLATFORM,
+            program_size: (1 << 14),
+            pub_io_len: (1 << 2),
+            static_memory_len: (1 << 16),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
     pub(crate) initial_global_state_expr: Expression<E>,
     pub(crate) finalize_global_state_expr: Expression<E>,
+    pub params: ProgramParams,
 }
 
 impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
@@ -138,14 +158,22 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
             circuit_css: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
+            params: ProgramParams::default(),
         }
     }
 }
 
 impl<E: ExtensionField> ZKVMConstraintSystem<E> {
+    pub fn new_with_platform(params: ProgramParams) -> Self {
+        ZKVMConstraintSystem {
+            params,
+            ..Default::default()
+        }
+    }
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(format!("riscv_opcode/{}", OC::name()));
-        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+        let mut circuit_builder =
+            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
         assert!(self.circuit_css.insert(OC::name(), cs).is_none());
 
@@ -154,7 +182,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(format!("riscv_table/{}", TC::name()));
-        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+        let mut circuit_builder =
+            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
 
@@ -163,11 +192,16 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
 
     pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
         let mut cs = ConstraintSystem::new("riscv_state");
-        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+        let mut circuit_builder =
+            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         self.initial_global_state_expr =
             SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
         self.finalize_global_state_expr =
             SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
+    }
+
+    pub fn get_css(&self) -> &BTreeMap<String, ConstraintSystem<E>> {
+        &self.circuit_css
     }
 
     pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
@@ -175,7 +209,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMFixedTraces<E: ExtensionField> {
     pub circuit_fixed_traces: BTreeMap<String, Option<RowMajorMatrix<E::BaseField>>>,
 }
@@ -188,7 +222,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
     pub fn register_table_circuit<TC: TableCircuit<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
-        config: TC::TableConfig,
+        config: &TC::TableConfig,
         input: &TC::FixedInput,
     ) {
         let cs = cs.get_cs(&TC::name()).expect("cs not found");
@@ -196,21 +230,30 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
             self.circuit_fixed_traces
                 .insert(
                     TC::name(),
-                    Some(TC::generate_fixed_traces(&config, cs.num_fixed, input)),
+                    Some(TC::generate_fixed_traces(config, cs.num_fixed, input)),
                 )
                 .is_none()
         );
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    pub witnesses: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
+    pub fn get_opcode_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_opcodes.get(name).cloned()
+    }
+
+    pub fn get_table_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+        self.witnesses_tables.get(name).cloned()
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
@@ -222,7 +265,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
             OC::assign_instances(config, cs.num_witin as usize, records)?;
-        assert!(self.witnesses.insert(OC::name(), witness).is_none());
+        assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
+        assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
@@ -273,9 +317,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        assert!(self.witnesses.insert(TC::name(), witness).is_none());
+        assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
+        assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
         Ok(())
+    }
+
+    /// Iterate opcode circuits, then table circuits, sorted by name.
+    pub fn into_iter_sorted(self) -> impl Iterator<Item = (String, RowMajorMatrix<E::BaseField>)> {
+        chain(self.witnesses_opcodes, self.witnesses_tables)
     }
 }
 

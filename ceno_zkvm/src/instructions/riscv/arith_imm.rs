@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    witness::LkMultiplicity,
+    tables::InsnRecord, witness::LkMultiplicity,
 };
 
 use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
@@ -62,7 +62,10 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+        let imm = Value::new(
+            InsnRecord::imm_internal(&step.insn()) as u32,
+            lk_multiplicity,
+        );
 
         let result = rs1_read.add(&imm, lk_multiplicity, true);
 
@@ -83,8 +86,6 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -121,18 +122,7 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 
     #[test]
@@ -162,17 +152,6 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied(
-            &cb,
-            &raw_witin
-                .de_interleaving()
-                .into_mles()
-                .into_iter()
-                .map(|v| v.into())
-                .collect_vec(),
-            &[insn_code],
-            None,
-            Some(lkm),
-        );
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

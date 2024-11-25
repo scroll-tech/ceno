@@ -38,9 +38,14 @@ pub fn barycentric_weights<F: PrimeField>(points: &[F]) -> Vec<F> {
     weights
 }
 
-// Given a vector of field elements {v_i}, compute the vector {v_i^(-1)}
+// Computes the inverse of each field element in a vector {v_i} using a parallelized batch inversion.
 pub fn batch_inversion<F: PrimeField>(v: &mut [F]) {
     batch_inversion_and_mul(v, &F::ONE);
+}
+
+// Computes the inverse of each field element in a vector {v_i} sequentially (serial version).
+pub fn serial_batch_inversion<F: PrimeField>(v: &mut [F]) {
+    serial_batch_inversion_and_mul(v, &F::ONE)
 }
 
 // Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}
@@ -98,9 +103,31 @@ fn serial_batch_inversion_and_mul<F: PrimeField>(v: &mut [F], coeff: &F) {
 }
 
 pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
+    inner_extrapolate::<F, true>(points, weights, evals, at)
+}
+
+pub(crate) fn serial_extrapolate<F: PrimeField>(
+    points: &[F],
+    weights: &[F],
+    evals: &[F],
+    at: &F,
+) -> F {
+    inner_extrapolate::<F, false>(points, weights, evals, at)
+}
+
+fn inner_extrapolate<F: PrimeField, const IS_PARALLEL: bool>(
+    points: &[F],
+    weights: &[F],
+    evals: &[F],
+    at: &F,
+) -> F {
     let (coeffs, sum_inv) = {
         let mut coeffs = points.iter().map(|point| *at - point).collect::<Vec<_>>();
-        batch_inversion(&mut coeffs);
+        if IS_PARALLEL {
+            batch_inversion(&mut coeffs);
+        } else {
+            serial_batch_inversion(&mut coeffs);
+        }
         let mut sum = F::ZERO;
         coeffs.iter_mut().zip(weights).for_each(|(coeff, weight)| {
             *coeff *= weight;
@@ -128,7 +155,7 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
 /// TODO: The quadratic term can be removed by precomputing the lagrange
 /// coefficients.
 pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
-    let start = start_timer!(|| "sum check interpolate uni poly opt");
+    let start = start_timer!("sum check interpolate uni poly opt");
 
     let len = p_i.len();
     let mut evals = vec![];

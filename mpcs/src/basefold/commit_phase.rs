@@ -41,7 +41,7 @@ pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Commit phase");
+    let timer = start_timer!("Commit phase");
     #[cfg(feature = "sanity-check")]
     assert_eq!(point.len(), num_vars);
     let mut trees = Vec::with_capacity(num_vars);
@@ -57,12 +57,12 @@ where
     assert_eq!(running_evals.len(), 1 << num_vars);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let build_eq_timer = start_timer!(|| "Basefold::open");
+    let build_eq_timer = start_timer!("Basefold::open");
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
     reverse_index_bits_in_place(&mut eq);
 
-    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
+    let sumcheck_timer = start_timer!("Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round_field_type(&mut eq, &mut running_evals);
     end_timer!(sumcheck_timer);
 
@@ -188,12 +188,12 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Batch Commit phase");
+    let timer = start_timer!("Batch Commit phase");
     assert_eq!(point.len(), num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = vec![E::ZERO; 1 << (num_vars + Spec::get_rate_log())];
 
-    let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
+    let build_oracle_timer = start_timer!("Basefold build initial oracle");
     // Before the interaction, collect all the polynomials whose num variables match the
     // max num variables
     let running_oracle_len = running_oracle.len();
@@ -209,7 +209,7 @@ where
         });
     end_timer!(build_oracle_timer);
 
-    let build_oracle_timer = start_timer!(|| "Basefold build initial sumcheck evals");
+    let build_oracle_timer = start_timer!("Basefold build initial sumcheck evals");
     // Unlike the FRI part, the sum-check part still follows the original procedure,
     // and linearly combine all the polynomials once for all
     let mut sum_of_all_evals_for_sumcheck = vec![E::ZERO; 1 << num_vars];
@@ -236,7 +236,7 @@ where
     let mut eq = build_eq_x_r_vec(point);
     reverse_index_bits_in_place(&mut eq);
 
-    let sumcheck_timer = start_timer!(|| "Basefold first round");
+    let sumcheck_timer = start_timer!("Basefold first round");
     let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
     let mut last_sumcheck_message =
         sum_check_first_round(&mut eq, &mut sum_of_all_evals_for_sumcheck);
@@ -358,12 +358,12 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Simple batch commit phase");
+    let timer = start_timer!("Simple batch commit phase");
     assert_eq!(point.len(), num_vars);
     assert_eq!(comm.num_polys, batch_coeffs.len());
-    let prepare_timer = start_timer!(|| "Prepare");
+    let prepare_timer = start_timer!("Prepare");
     let mut trees = Vec::with_capacity(num_vars);
-    let batch_codewords_timer = start_timer!(|| "Batch codewords");
+    let batch_codewords_timer = start_timer!("Batch codewords");
     let mut running_oracle = comm.batch_codewords(batch_coeffs);
     end_timer!(batch_codewords_timer);
     let mut running_evals = (0..(1 << num_vars))
@@ -379,15 +379,15 @@ where
     end_timer!(prepare_timer);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let build_eq_timer = start_timer!(|| "Basefold::build eq");
+    let build_eq_timer = start_timer!("Basefold::build eq");
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
 
-    let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
+    let reverse_bits_timer = start_timer!("Basefold::reverse bits");
     reverse_index_bits_in_place(&mut eq);
     end_timer!(reverse_bits_timer);
 
-    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
+    let sumcheck_timer = start_timer!("Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
     end_timer!(sumcheck_timer);
 

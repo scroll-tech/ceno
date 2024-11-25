@@ -13,6 +13,8 @@ use crate::{
         riscv::{constants::UInt, u_insn::UInstructionConfig},
     },
     set_val,
+    tables::InsnRecord,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 
@@ -36,7 +38,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<AuipcConfig<E>, ZKVMError> {
-        let imm = circuit_builder.create_witin("imm")?;
+        let imm = circuit_builder.create_witin("imm");
         let rd_written = UInt::new("rd_written", circuit_builder)?;
 
         let u_insn = UInstructionConfig::construct_circuit(
@@ -46,7 +48,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             rd_written.register_expr(),
         )?;
 
-        let overflow_bit = circuit_builder.create_witin("overflow_bit")?;
+        let overflow_bit = circuit_builder.create_witin("overflow_bit");
         circuit_builder.assert_bit("is_bit", overflow_bit.expr())?;
 
         // assert: imm + pc = rd_written + overflow_bit * 2^32
@@ -74,10 +76,10 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         let pc: u32 = step.pc().before.0;
-        let imm: u32 = step.insn().imm_or_funct7();
-        let (sum, overflow) = pc.overflowing_add(imm);
+        let imm = InsnRecord::imm_internal(&step.insn());
+        let (sum, overflow) = pc.overflowing_add(imm as u32);
 
-        set_val!(instance, config.imm, imm as u64);
+        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
         set_val!(instance, config.overflow_bit, overflow as u64);
 
         let sum_limbs = Value::new(sum, lk_multiplicity);

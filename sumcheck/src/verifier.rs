@@ -21,7 +21,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                 expected_evaluation: claimed_sum,
             };
         }
-        let start = start_timer!(|| "sum check verify");
+        let start = start_timer!("sum check verify");
 
         transcript.append_message(&aux_info.num_variables.to_le_bytes());
         transcript.append_message(&aux_info.max_degree.to_le_bytes());
@@ -44,7 +44,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
     /// Initialize the verifier's state.
     pub fn verifier_init(index_info: &VPAuxInfo<E>) -> Self {
-        let start = start_timer!(|| "sum check verifier init");
+        let start = start_timer!("sum check verifier init");
         let verifier_state = Self {
             round: 1,
             num_vars: index_info.num_variables,
@@ -110,7 +110,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
     /// Otherwise, it is highly unlikely that those two will be equal.
     /// Larger field size guarantees smaller soundness error.
     pub(crate) fn check_and_generate_subclaim(&self, asserted_sum: &E) -> SumCheckSubClaim<E> {
-        let start = start_timer!(|| "sum check check and generate subclaim");
+        let start = start_timer!("sum check check and generate subclaim");
         if !self.finished {
             panic!("Incorrect verifier state: Verifier has not finished.",);
         }

@@ -1,11 +1,11 @@
 use ff_ext::ExtensionField;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 
 use ff::Field;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -21,7 +21,9 @@ use sumcheck::{
 use transcript::Transcript;
 
 use crate::{
+    circuit_builder::SetTableAddrType,
     error::ZKVMError,
+    expression::Instance,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
@@ -38,6 +40,8 @@ use crate::{
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
+type ResultCreateTableProof<E, PCS> = (ZKVMTableProof<E, PCS>, HashMap<usize, E>);
+
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pk: ZKVMProvingKey<E, PCS>,
 }
@@ -48,6 +52,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     }
 
     /// create proof for zkvm execution
+    #[tracing::instrument(skip_all, name = "ZKVM_create_proof")]
     pub fn create_proof(
         &self,
         witnesses: ZKVMWitnesses<E>,
@@ -55,10 +60,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         mut transcript: Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let mut vm_proof = ZKVMProof::empty(pi);
-        let pi = &vm_proof.pv;
 
-        // including public input to transcript
-        pi.iter().for_each(|v| transcript.append_field_element(v));
+        // including raw public input to transcript
+        vm_proof
+            .raw_pi
+            .iter()
+            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+
+        let pi: Vec<ArcMultilinearExtension<E>> = vm_proof
+            .raw_pi
+            .iter()
+            .map(|p| {
+                let pi_mle: ArcMultilinearExtension<E> = p.to_vec().into_mle().into();
+                pi_mle
+            })
+            .collect();
 
         // commit to fixed commitment
         for (_, pk) in self.pk.circuit_pks.iter() {
@@ -71,24 +87,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // commit to main traces
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
-        // sort by circuit name, and we rely on an assumption that
-        // table circuit witnesses come after opcode circuit witnesses
-        for (circuit_name, witness) in witnesses.witnesses {
-            let commit_dur = std::time::Instant::now();
+
+        let commit_to_traces_span = entered_span!("commit_to_traces");
+        // commit to opcode circuits first and then commit to table circuits, sorted by name
+        for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
-            let witness = witness.into_mles();
-            commitments.insert(
-                circuit_name.clone(),
-                PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
-                    .map_err(ZKVMError::PCSError)?,
-            );
-            tracing::info!(
-                "commit to {} traces took {:?}",
-                circuit_name,
-                commit_dur.elapsed()
-            );
+            let span = entered_span!("commit to iteration", circuit_name = circuit_name);
+            let witness = match num_instances {
+                0 => vec![],
+                _ => {
+                    let witness = witness.into_mles();
+                    commitments.insert(
+                        circuit_name.clone(),
+                        PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
+                            .map_err(ZKVMError::PCSError)?,
+                    );
+                    witness
+                }
+            };
+            exit_span!(span);
             wits.insert(circuit_name, (witness, num_instances));
         }
+        exit_span!(commit_to_traces_span);
 
         // squeeze two challenges from transcript
         let challenges = [
@@ -97,6 +117,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         ];
         tracing::debug!("challenges in prover: {:?}", challenges);
 
+        let main_proofs_span = entered_span!("main_proofs");
         let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
         for ((circuit_name, pk), (i, transcript)) in self
             .pk
@@ -107,6 +128,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let (witness, num_instances) = wits
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
+            if witness.is_empty() {
+                continue;
+            }
             let wits_commit = commitments.remove(circuit_name).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
@@ -132,7 +156,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pk,
                     witness.into_iter().map(|w| w.into()).collect_vec(),
                     wits_commit,
-                    pi,
+                    &pi,
                     num_instances,
                     transcript,
                     &challenges,
@@ -146,13 +170,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .opcode_proofs
                     .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
-                let table_proof = self.create_table_proof(
+                let (table_proof, pi_in_evals) = self.create_table_proof(
                     circuit_name,
                     &self.pk.pp,
                     pk,
                     witness.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
-                    pi,
+                    &pi,
                     transcript,
                     &challenges,
                 )?;
@@ -164,8 +188,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 vm_proof
                     .table_proofs
                     .insert(circuit_name.clone(), (i, table_proof));
+                for (idx, eval) in pi_in_evals {
+                    vm_proof.update_pi_eval(idx, eval);
+                }
             }
         }
+        exit_span!(main_proofs_span);
 
         Ok(vm_proof)
     }
@@ -174,6 +202,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(skip_all, name = "create_opcode_proof", fields(circuit_name=name))]
     pub fn create_opcode_proof(
         &self,
         name: &str,
@@ -181,7 +210,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
-        pi: &[E::BaseField],
+        pi: &[ArcMultilinearExtension<'_, E>],
         num_instances: usize,
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
@@ -199,8 +228,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .all(|v| { v.evaluations().len() == next_pow2_instances })
         );
 
+        let wit_inference_span = entered_span!("wit_inference");
         // main constraint: read/write record witness inference
-        let span = entered_span!("wit_inference::record");
+        let record_span = entered_span!("record");
         let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_expressions
             .par_iter()
@@ -213,7 +243,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
         let (w_records_wit, lk_records_wit) = w_lk_records_wit.split_at(cs.w_expressions.len());
-        exit_span!(span);
+        exit_span!(record_span);
 
         // product constraint: tower witness inference
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
@@ -228,7 +258,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         // process last layer by interleaving all the read/write record respectively
         // as last layer is the output of sel stage
-        let span = entered_span!("wit_inference::tower_witness_r_last_layer");
+        let span = entered_span!("tower_witness_r_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let r_records_last_layer =
             interleaving_mles_to_mles(r_records_wit, num_instances, NUM_FANIN, E::ONE);
@@ -236,7 +266,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         // infer all tower witness after last layer
-        let span = entered_span!("wit_inference::tower_witness_r_layers");
+        let span = entered_span!("tower_witness_r_layers");
         let r_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_r_count,
             r_records_last_layer,
@@ -244,14 +274,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_w_last_layer");
+        let span = entered_span!("tower_witness_w_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let w_records_last_layer =
             interleaving_mles_to_mles(w_records_wit, num_instances, NUM_FANIN, E::ONE);
         assert_eq!(w_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_w_layers");
+        let span = entered_span!("tower_witness_w_layers");
         let w_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_w_count,
             w_records_last_layer,
@@ -259,16 +289,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
+        let span = entered_span!("tower_witness_lk_last_layer");
         // TODO optimize last layer to avoid alloc new vector to save memory
         let lk_records_last_layer =
             interleaving_mles_to_mles(lk_records_wit, num_instances, NUM_FANIN, chip_record_alpha);
         assert_eq!(lk_records_last_layer.len(), 2);
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_lk_layers");
+        let span = entered_span!("tower_witness_lk_layers");
         let lk_wit_layers = infer_tower_logup_witness(None, lk_records_last_layer);
         exit_span!(span);
+        exit_span!(wit_inference_span);
 
         if cfg!(test) {
             // sanity check
@@ -299,8 +330,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }));
         }
 
+        let sumcheck_span = entered_span!("SUMCHECK");
         // product constraint tower sumcheck
-        let span = entered_span!("sumcheck::tower");
+        let tower_span = entered_span!("tower");
         // final evals for verifier
         let record_r_out_evals: Vec<E> = r_wit_layers[0]
             .iter()
@@ -338,10 +370,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .max()
                     .unwrap()
         );
-        exit_span!(span);
+        exit_span!(tower_span);
 
+        tracing::debug!("tower sumcheck finished");
         // batch sumcheck: selector + main degree > 1 constraints
-        let span = entered_span!("sumcheck::main_sel");
+        let main_sel_span = entered_span!("main_sel");
         let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
             tower_proof.prod_specs_points[0]
                 .last()
@@ -511,11 +544,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }
         }
 
+        tracing::debug!("main sel sumcheck start");
         let (main_sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
             transcript,
         );
+        tracing::debug!("main sel sumcheck end");
+
         let main_sel_evals = state.get_mle_final_evaluations();
         assert_eq!(
             main_sel_evals.len(),
@@ -554,7 +590,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         let input_open_point = main_sel_sumcheck_proofs.point.clone();
         assert!(input_open_point.len() == log2_num_instances);
-        exit_span!(span);
+        exit_span!(main_sel_span);
+        exit_span!(sumcheck_span);
 
         let span = entered_span!("witin::evals");
         let wits_in_evals: Vec<E> = witnesses
@@ -563,7 +600,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect();
         exit_span!(span);
 
-        let span = entered_span!("pcs_open");
+        let pcs_open_span = entered_span!("pcs_open");
         let opening_dur = std::time::Instant::now();
         tracing::debug!(
             "[opcode {}]: build opening proof for {} polys at {:?}",
@@ -585,7 +622,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             name,
             opening_dur.elapsed(),
         );
-        exit_span!(span);
+        exit_span!(pcs_open_span);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
         Ok(ZKVMOpcodeProof {
@@ -611,6 +648,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// support batch prove for logup + product arguments each with different num_vars()
     /// side effect: concurrency will be determine based on min(thread, num_vars()),
     /// so suggest dont batch too small table (size < threads) with large table together
+    #[tracing::instrument(skip_all, name = "create_table_proof", fields(table_name=name))]
     pub fn create_table_proof(
         &self,
         name: &str,
@@ -618,19 +656,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         circuit_pk: &ProvingKey<E, PCS>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithData,
-        pi: &[E::BaseField],
+        pi: &[ArcMultilinearExtension<'_, E>],
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ZKVMTableProof<E, PCS>, ZKVMError> {
+    ) -> Result<ResultCreateTableProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let fixed = circuit_pk
             .fixed_traces
             .as_ref()
-            .expect("pk.fixed_traces must not be none for table circuit")
-            .iter()
-            .map(|f| -> ArcMultilinearExtension<E> { Arc::new(f.get_ranged_mle(1, 0)) })
-            .collect::<Vec<ArcMultilinearExtension<E>>>();
-
+            .map(|fixed_traces| {
+                fixed_traces
+                    .iter()
+                    .map(|f| -> ArcMultilinearExtension<E> { Arc::new(f.get_ranged_mle(1, 0)) })
+                    .collect::<Vec<ArcMultilinearExtension<E>>>()
+            })
+            .unwrap_or_default();
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
         assert_eq!(fixed.len(), cs.num_fixed);
@@ -649,16 +689,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             cs.r_table_expressions
                 .iter()
                 .zip_eq(cs.w_table_expressions.iter())
-                .all(|(r, w)| r.table_len == w.table_len)
+                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
+        let wit_inference_span = entered_span!("wit_inference");
         // main constraint: lookup denominator and numerator record witness inference
-        let span = entered_span!("wit_inference::record");
+        let record_span = entered_span!("record");
         let mut records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_table_expressions
             .par_iter()
-            .map(|r| &r.values)
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.values))
+            .map(|r| &r.expr)
+            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
             .chain(
                 cs.lk_table_expressions
                     .par_iter()
@@ -678,10 +719,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let (lk_d_wit, _empty) = remains.split_at_mut(cs.lk_table_expressions.len());
         assert!(_empty.is_empty());
 
-        exit_span!(span);
+        exit_span!(record_span);
 
         // infer all tower witness after last layer
-        let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
+        let span = entered_span!("tower_witness_lk_last_layer");
         let mut r_set_last_layer = r_set_wit
             .iter()
             .chain(w_set_wit.iter())
@@ -729,7 +770,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect::<Vec<_>>();
         exit_span!(span);
 
-        let span = entered_span!("wit_inference::tower_witness_lk_layers");
+        let span = entered_span!("tower_witness_lk_layers");
         let r_wit_layers = r_set_last_layer
             .into_iter()
             .zip(r_set_wit.iter())
@@ -750,6 +791,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .map(|(lk_n, lk_d)| infer_tower_logup_witness(Some(lk_n), lk_d))
             .collect_vec();
         exit_span!(span);
+        exit_span!(wit_inference_span);
 
         if cfg!(test) {
             // sanity check
@@ -802,8 +844,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }));
         }
 
+        let sumcheck_span = entered_span!("sumcheck");
         // product constraint tower sumcheck
-        let span = entered_span!("sumcheck::tower");
+        let tower_span = entered_span!("tower");
         // final evals for verifier
         let r_out_evals = r_wit_layers
             .iter()
@@ -860,7 +903,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             rt_tower.len(), // num var length should equal to max_num_instance
             max_log2_num_instance
         );
-        exit_span!(span);
+        exit_span!(tower_span);
 
         // same point sumcheck is optional when all witin + fixed are in same num_vars
         let is_skip_same_point_sumcheck = witnesses
@@ -875,7 +918,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             } else {
                 // one sumcheck to make them opening on same point r (with different prefix)
                 // If all table length are the same, we can skip this sumcheck
-                let span = entered_span!("sumcheck::opening_same_point");
+                let span = entered_span!("opening_same_point");
                 // NOTE: max concurrency will be dominated by smallest table since it will blo
                 let num_threads = optimal_sumcheck_threads(min_log2_num_instance);
                 let alpha_pow = get_challenge_pows(
@@ -964,6 +1007,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 )
             };
 
+        exit_span!(sumcheck_span);
         let span = entered_span!("fixed::evals + witin::evals");
         let mut evals = witnesses
             .par_iter()
@@ -972,19 +1016,52 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect::<Vec<_>>();
         let fixed_in_evals = evals.split_off(witnesses.len());
         let wits_in_evals = evals;
+
+        // evaluate pi if there is instance query
+        let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
+        if !cs.instance_name_map.is_empty() {
+            let span = entered_span!("pi::evals");
+            for &Instance(idx) in cs.instance_name_map.keys() {
+                let poly = &pi[idx];
+                pi_in_evals.insert(idx, poly.evaluate(&input_open_point[..poly.num_vars()]));
+            }
+            exit_span!(span);
+        }
         exit_span!(span);
 
-        let span = entered_span!("pcs_opening");
-        let fixed_opening_proof = PCS::simple_batch_open(
-            pp,
-            &fixed,
-            circuit_pk.fixed_commit_wd.as_ref().unwrap(),
-            &input_open_point,
-            fixed_in_evals.as_slice(),
-            transcript,
-        )
-        .map_err(ZKVMError::PCSError)?;
-        let fixed_commit = PCS::get_pure_commitment(circuit_pk.fixed_commit_wd.as_ref().unwrap());
+        // (non uniform) collect dynamic address hints as witness for verifier
+        // for fix address, we just fill 0, as verifier will derive it from vk
+        let rw_hints_num_vars = izip!(&cs.r_table_expressions, r_set_wit.iter())
+            .map(|(t, mle)| match t.table_spec.addr_type {
+                // for fixed address, prover
+                SetTableAddrType::FixedAddr => 0,
+                SetTableAddrType::DynamicAddr(_) => mle.num_vars(),
+            })
+            .collect_vec();
+        // TODO implement mechanism to skip commitment
+
+        let pcs_opening = entered_span!("pcs_opening");
+        let (fixed_opening_proof, fixed_commit) = if !fixed.is_empty() {
+            (
+                Some(
+                    PCS::simple_batch_open(
+                        pp,
+                        &fixed,
+                        circuit_pk.fixed_commit_wd.as_ref().unwrap(),
+                        &input_open_point,
+                        fixed_in_evals.as_slice(),
+                        transcript,
+                    )
+                    .map_err(ZKVMError::PCSError)?,
+                ),
+                Some(PCS::get_pure_commitment(
+                    circuit_pk.fixed_commit_wd.as_ref().unwrap(),
+                )),
+            )
+        } else {
+            (None, None)
+        };
+
         tracing::debug!(
             "[table {}] build opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
             name,
@@ -1002,7 +1079,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             transcript,
         )
         .map_err(ZKVMError::PCSError)?;
-        exit_span!(span);
+        exit_span!(pcs_opening);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
         tracing::debug!(
             "[table {}] build opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
@@ -1013,20 +1090,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             wits_commit,
         );
 
-        Ok(ZKVMTableProof {
-            r_out_evals,
-            w_out_evals,
-            lk_out_evals,
-            same_r_sumcheck_proofs,
-            rw_in_evals,
-            lk_in_evals,
-            tower_proof,
-            fixed_in_evals,
-            fixed_opening_proof,
-            wits_in_evals,
-            wits_commit,
-            wits_opening_proof,
-        })
+        Ok((
+            ZKVMTableProof {
+                r_out_evals,
+                w_out_evals,
+                lk_out_evals,
+                same_r_sumcheck_proofs,
+                rw_in_evals,
+                lk_in_evals,
+                tower_proof,
+                fixed_in_evals,
+                fixed_opening_proof,
+                rw_hints_num_vars,
+                wits_in_evals,
+                wits_commit,
+                wits_opening_proof,
+            },
+            pi_in_evals,
+        ))
     }
 }
 
@@ -1066,6 +1147,7 @@ impl<E: ExtensionField> TowerProofs<E> {
 
 /// Tower Prover
 impl TowerProver {
+    #[tracing::instrument(skip_all, name = "tower_prover_create_proof")]
     pub fn create_proof<'a, E: ExtensionField>(
         prod_specs: Vec<TowerProverSpec<'a, E>>,
         logup_specs: Vec<TowerProverSpec<'a, E>>,
@@ -1159,12 +1241,19 @@ impl TowerProver {
                         virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
                     }
                 }
+                tracing::debug!("generated tower proof at round {}/{}", round, max_round_index);
 
+                let wrap_batch_span = entered_span!("wrap_batch");
+                // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
+                // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
+                // This is likely a bug in the tracing-flame crate.
                 let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
                     num_threads,
                     virtual_polys.get_batched_polys(),
                     transcript,
                 );
+                exit_span!(wrap_batch_span);
+
                 proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
 
                 // rt' = r_merge || rt

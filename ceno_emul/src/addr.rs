@@ -14,9 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, ops};
+use std::{
+    fmt,
+    ops::{self, Range},
+};
 
 pub const WORD_SIZE: usize = 4;
+pub const PC_WORD_SIZE: usize = 4;
 pub const PC_STEP_SIZE: usize = 4;
 
 // Type aliases to clarify the code without wrapper types.
@@ -26,10 +30,10 @@ pub type Addr = u32;
 pub type Cycle = u64;
 pub type RegIdx = usize;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteAddr(pub u32);
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WordAddr(u32);
 
 impl From<ByteAddr> for WordAddr {
@@ -189,5 +193,31 @@ impl ops::AddAssign<usize> for ByteAddr {
 impl ops::AddAssign<u32> for ByteAddr {
     fn add_assign(&mut self, rhs: u32) {
         self.0 += rhs;
+    }
+}
+
+pub trait IterAddresses {
+    fn iter_addresses(&self) -> impl Iterator<Item = Addr>;
+}
+
+impl IterAddresses for Range<Addr> {
+    fn iter_addresses(&self) -> impl Iterator<Item = Addr> {
+        self.clone().step_by(WORD_SIZE)
+    }
+}
+
+impl<'a, T: GetAddr> IterAddresses for &'a [T] {
+    fn iter_addresses(&self) -> impl Iterator<Item = Addr> {
+        self.iter().map(T::get_addr)
+    }
+}
+
+pub trait GetAddr {
+    fn get_addr(&self) -> Addr;
+}
+
+impl GetAddr for Addr {
+    fn get_addr(&self) -> Addr {
+        *self
     }
 }

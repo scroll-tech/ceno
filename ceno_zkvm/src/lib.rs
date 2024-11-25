@@ -1,6 +1,7 @@
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
 #![feature(variant_count)]
+#![feature(strict_overflow_ops)]
 
 pub mod error;
 pub mod instructions;
@@ -13,6 +14,7 @@ pub mod expression;
 pub mod gadgets;
 mod keygen;
 pub mod state;
+pub mod stats;
 pub mod structs;
 mod uint;
 mod utils;

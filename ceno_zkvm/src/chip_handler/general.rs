@@ -1,22 +1,26 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     instructions::riscv::constants::{
-        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
+        UINT_LIMBS,
     },
-    structs::ROMType,
+    structs::{ProgramParams, RAMType, ROMType},
     tables::InsnRecord,
 };
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
-        Self { cs }
+        Self::new_with_params(cs, ProgramParams::default())
+    }
+    pub fn new_with_params(cs: &'a mut ConstraintSystem<E>, params: ProgramParams) -> Self {
+        Self { cs, params }
     }
 
-    pub fn create_witin<Name>(&mut self, name: Name) -> Result<WitIn, ZKVMError>
+    pub fn create_witin<Name>(&mut self, name: Name) -> WitIn
     where
         Name: Into<String>,
     {
@@ -30,7 +34,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_fixed(name)
     }
 
-    pub fn query_exit_code(&mut self) -> Result<[Instance; 2], ZKVMError> {
+    pub fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], ZKVMError> {
         Ok([
             self.cs.query_instance("exit_code_low", EXIT_CODE_IDX)?,
             self.cs
@@ -54,6 +58,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.query_instance("end_cycle", END_CYCLE_IDX)
     }
 
+    pub fn query_public_io(&mut self) -> Result<Instance, ZKVMError> {
+        self.cs.query_instance("public_io", PUBLIC_IO_IDX)
+    }
+
     pub fn lk_record<Name>(
         &mut self,
         name: Name,
@@ -70,38 +78,41 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         &mut self,
         name: Name,
         table_len: usize,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         Name: Into<String>,
     {
         self.cs
-            .lk_table_record(name, table_len, rlc_record, multiplicity)
+            .lk_table_record(name, table_len, rom_type, record, multiplicity)
     }
 
     pub fn r_table_record<Name>(
         &mut self,
         name: Name,
-        table_len: usize,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         Name: Into<String>,
     {
-        self.cs.r_table_record(name, table_len, rlc_record)
+        self.cs.r_table_record(name, ram_type, table_spec, record)
     }
 
     pub fn w_table_record<Name>(
         &mut self,
         name: Name,
-        table_len: usize,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         Name: Into<String>,
     {
-        self.cs.w_table_record(name, table_len, rlc_record)
+        self.cs.w_table_record(name, ram_type, table_spec, record)
     }
 
     /// Fetch an instruction at a given PC from the Program table.
@@ -112,27 +123,64 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn read_record<Name>(
         &mut self,
         name: Name,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         Name: Into<String>,
     {
-        self.cs.read_record(name, rlc_record)
+        self.cs.read_record(name, ram_type, record)
     }
 
     pub fn write_record<Name>(
         &mut self,
         name: Name,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         Name: Into<String>,
     {
-        self.cs.write_record(name, rlc_record)
+        self.cs.write_record(name, ram_type, record)
     }
 
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         self.cs.rlc_chip_record(records)
+    }
+
+    pub fn create_u8<Name>(&mut self, name: Name) -> Result<WitIn, ZKVMError>
+    where
+        Name: Into<String> + Clone,
+    {
+        let byte = self.cs.create_witin(name.clone());
+        self.assert_ux::<_, 8>(name, byte.expr())?;
+
+        Ok(byte)
+    }
+
+    pub fn create_u16<NR, Name>(&mut self, name: Name) -> Result<WitIn, ZKVMError>
+    where
+        Name: Into<String> + Clone,
+    {
+        let limb = self.cs.create_witin(name.clone());
+        self.assert_ux::<_, 16>(name, limb.expr())?;
+
+        Ok(limb)
+    }
+
+    /// Create a new WitIn constrained to be equal to input expression.
+    pub fn flatten_expr<Name>(
+        &mut self,
+        name: Name,
+        expr: Expression<E>,
+    ) -> Result<WitIn, ZKVMError>
+    where
+        Name: Into<String> + Clone,
+    {
+        let wit = self.cs.create_witin(name.clone());
+        self.require_equal(name, wit.expr(), expr)?;
+
+        Ok(wit)
     }
 
     pub fn require_zero<Name>(
@@ -167,9 +215,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     where
         Name: Into<String>,
     {
-        self.namespace("require_one", |cb| {
-            cb.cs.require_zero(name, Expression::from(1) - expr)
-        })
+        self.namespace("require_one", |cb| cb.cs.require_zero(name, 1 - expr))
     }
 
     pub fn condition_require_equal<Name>(
@@ -197,7 +243,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         when_true: &Expression<E>,
         when_false: &Expression<E>,
     ) -> Expression<E> {
-        cond.clone() * when_true.clone() + (1 - cond.clone()) * when_false.clone()
+        cond * when_true + (1 - cond) * when_false
     }
 
     pub(crate) fn assert_ux<Name, const C: usize>(
@@ -249,7 +295,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         cb: impl FnOnce(&mut CircuitBuilder<E>) -> Result<T, ZKVMError>,
     ) -> Result<T, ZKVMError> {
         self.cs.namespace(name, |cs| {
-            let mut inner_circuit_builder = CircuitBuilder::new(cs);
+            let mut inner_circuit_builder =
+                CircuitBuilder::new_with_params(cs, self.params.clone());
             cb(&mut inner_circuit_builder)
         })
     }
@@ -275,8 +322,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Name: Into<String>,
     {
         self.namespace("assert_bit", |cb| {
-            cb.cs
-                .require_zero(name, expr.clone() * (Expression::ONE - expr))
+            cb.cs.require_zero(name, &expr * (1 - &expr))
         })
     }
 
@@ -341,17 +387,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         lhs: Expression<E>,
         rhs: Expression<E>,
     ) -> Result<(WitIn, WitIn), ZKVMError> {
-        let is_eq = self.create_witin("is_eq")?;
-        let diff_inverse = self.create_witin("diff_inverse")?;
+        let is_eq = self.create_witin("is_eq");
+        let diff_inverse = self.create_witin("diff_inverse");
 
+        self.require_zero("is equal", is_eq.expr() * &lhs - is_eq.expr() * &rhs)?;
         self.require_zero(
             "is equal",
-            is_eq.expr().clone() * lhs.clone() - is_eq.expr() * rhs.clone(),
-        )?;
-        self.require_zero(
-            "is equal",
-            Expression::from(1) - is_eq.expr().clone() - diff_inverse.expr() * lhs
-                + diff_inverse.expr() * rhs,
+            1 - is_eq.expr() - diff_inverse.expr() * lhs + diff_inverse.expr() * rhs,
         )?;
 
         Ok((is_eq, diff_inverse))

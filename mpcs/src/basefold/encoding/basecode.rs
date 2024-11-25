@@ -117,7 +117,7 @@ where
     }
 
     fn trim(
-        pp: &Self::PublicParameters,
+        mut pp: Self::PublicParameters,
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
         if pp.table.len() < Spec::get_rate_log() + max_msg_size_log {
@@ -127,6 +127,9 @@ where
                 max_msg_size_log,
             )));
         }
+        pp.table_w_weights
+            .truncate(Spec::get_rate_log() + max_msg_size_log);
+        pp.table.truncate(Spec::get_rate_log() + max_msg_size_log);
         let mut key: [u8; 16] = [0u8; 16];
         let mut iv: [u8; 16] = [0u8; 16];
         let mut rng = ChaCha8Rng::from_seed(pp.rng_seed);
@@ -135,8 +138,8 @@ where
         rng.fill_bytes(&mut iv);
         Ok((
             Self::ProverParameters {
-                table_w_weights: pp.table_w_weights.clone(),
-                table: pp.table.clone(),
+                table_w_weights: pp.table_w_weights,
+                table: pp.table,
                 rng_seed: pp.rng_seed,
                 _phantom: PhantomData,
             },
@@ -241,7 +244,7 @@ fn encode_field_type_rs_basecode<E: ExtensionField>(
 // FIXME: It is expensive for now because it is using naive FFT (although it is
 // over a small domain)
 fn get_basecode<F: Field>(poly: &[F], rate: usize, message_size: usize) -> Vec<Vec<F>> {
-    let timer = start_timer!(|| "Encode basecode");
+    let timer = start_timer!("Encode basecode");
     // The domain is just counting 1, 2, 3, ... , domain_size
     let domain: Vec<F> = steps(F::ONE).take(message_size * rate).collect();
     let res = poly
@@ -269,7 +272,7 @@ pub fn evaluate_over_foldable_domain_generic_basecode<E: ExtensionField>(
     base_codewords: Vec<FieldType<E>>,
     table: &[Vec<E::BaseField>],
 ) -> FieldType<E> {
-    let timer = start_timer!(|| "evaluate over foldable domain");
+    let timer = start_timer!("evaluate over foldable domain");
     let k = num_coeffs;
     let logk = log2_strict(k);
     let base_log_k = log2_strict(base_message_length);
@@ -430,7 +433,7 @@ mod tests {
     fn prover_verifier_consistency() {
         type Code = Basecode<BasecodeDefaultSpec>;
         let pp: BasecodeParameters<GoldilocksExt2> = Code::setup(10);
-        let (pp, vp) = Code::trim(&pp, 10).unwrap();
+        let (pp, vp) = Code::trim(pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
             for index in 0..(1 << level) {
                 assert_eq!(

@@ -20,7 +20,7 @@ use crate::{
 };
 use ceno_emul::InsnKind;
 
-pub struct BltuCircuit<I>(PhantomData<I>);
+pub struct BltuCircuit<E, I>(PhantomData<(E, I)>);
 
 pub struct InstructionConfig<E: ExtensionField> {
     pub b_insn: BInstructionConfig<E>,
@@ -29,7 +29,7 @@ pub struct InstructionConfig<E: ExtensionField> {
     pub is_lt: IsLtConfig,
 }
 
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<E, I> {
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }

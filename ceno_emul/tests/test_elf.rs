@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, StepRecord, VMState};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, Platform, StepRecord, VMState};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -16,7 +16,7 @@ fn test_ceno_rt_panic() -> Result<()> {
     let steps = run(&mut state)?;
     let last = steps.last().unwrap();
     assert_eq!(last.insn().codes().kind, InsnKind::EANY);
-    assert_eq!(last.rs1().unwrap().value, CENO_PLATFORM.ecall_halt());
+    assert_eq!(last.rs1().unwrap().value, Platform::ecall_halt());
     assert_eq!(last.rs2().unwrap().value, 1); // panic / halt(1)
     Ok(())
 }
@@ -27,7 +27,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
-    let value = state.peek_memory(CENO_PLATFORM.ram_start().into());
+    let value = state.peek_memory(CENO_PLATFORM.ram.start.into());
     assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
     Ok(())
 }
