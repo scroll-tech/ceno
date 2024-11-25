@@ -119,6 +119,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::len(&self.params)
         );
 
+        dbg!(NVRAM::len(&self.params), num_fixed);
         let mut init_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
             num_fixed,
@@ -388,6 +389,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        dbg!(final_mem.len(), num_witness);
         let mut final_table =
             RowMajorMatrix::<F>::new(final_mem.len(), num_witness, InstancePaddingStrategy::Zero);
 

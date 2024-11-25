@@ -50,6 +50,7 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
 
 impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
+        // assert!(false);
         RowMajorMatrix {
             values: vec![T::default(); num_rows * num_col],
             num_col,
