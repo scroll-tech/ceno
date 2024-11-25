@@ -154,15 +154,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             if u.is_expr() {
                 circuit_builder.namespace(
                     || name.to_owned(),
-                    |cb| -> Result<(), ZKVMError> {
+                    |cb| {
                         let existing_expr = u.expr();
                         // this will overwrite existing expressions
                         u.replace_limbs_with_witin(|| "replace_limbs_with_witin".to_string(), cb)?;
                         // check if the new witness equals the existing expression
                         izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
                             cb.require_equal(|| "new_witin_equal_expr".to_string(), lhs, rhs)
-                        })?;
-                        Ok(())
+                        })
                     },
                 )?;
             }
