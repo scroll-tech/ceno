@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
 elf = "0.7"
+itertools.workspace = true
 num-derive.workspace = true
 num-traits.workspace = true
 strum.workspace = true
