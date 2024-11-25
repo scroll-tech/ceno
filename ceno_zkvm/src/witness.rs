@@ -39,14 +39,15 @@ macro_rules! set_fixed_val {
     };
 }
 
-pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send> {
+#[derive(Clone)]
+pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,
     num_padding_rows: usize,
     num_col: usize,
 }
 
-impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
         let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
@@ -86,12 +87,13 @@ impl<T: Sized + Sync + Clone + Send> RowMajorMatrix<T> {
 
     pub fn par_batch_iter_padding_mut(
         &mut self,
-        num_rows: usize,
+        num_instances: Option<usize>,
+        batch_size: usize,
     ) -> rayon::slice::ChunksMut<'_, MaybeUninit<T>> {
-        let valid_instance = self.num_instances();
-        self.values[valid_instance * self.num_col..]
+        let num_instances = num_instances.unwrap_or(self.num_instances());
+        self.values[num_instances * self.num_col..]
             .as_mut()
-            .par_chunks_mut(num_rows * self.num_col)
+            .par_chunks_mut(batch_size * self.num_col)
     }
 
     pub fn de_interleaving(mut self) -> Vec<Vec<T>> {

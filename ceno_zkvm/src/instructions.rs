@@ -81,6 +81,10 @@ pub trait Instruction<E: ExtensionField> {
                 InstancePaddingStrategy::Zero => {
                     vec![MaybeUninit::new(E::BaseField::ZERO); num_witin]
                 }
+                InstancePaddingStrategy::RepeatLast if steps.is_empty() => {
+                    tracing::debug!("No {} steps to repeat, using zero padding", Self::name());
+                    vec![MaybeUninit::new(E::BaseField::ZERO); num_witin]
+                }
                 InstancePaddingStrategy::RepeatLast => raw_witin[steps.len() - 1].to_vec(),
             };
 
@@ -90,7 +94,7 @@ pub trait Instruction<E: ExtensionField> {
                 num_padding_instances
             };
             raw_witin
-                .par_batch_iter_padding_mut(num_padding_instance_per_batch)
+                .par_batch_iter_padding_mut(None, num_padding_instance_per_batch)
                 .with_min_len(MIN_PAR_SIZE)
                 .for_each(|row| {
                     row.chunks_mut(num_witin)
