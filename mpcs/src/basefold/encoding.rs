@@ -35,7 +35,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     fn setup(max_msg_size_log: usize) -> Self::PublicParameters;
 
     fn trim(
-        pp: &Self::PublicParameters,
+        pp: Self::PublicParameters,
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error>;
 
@@ -177,7 +177,7 @@ pub(crate) mod test_util {
         let mut poly = FieldType::Ext(poly);
 
         let pp: Code::PublicParameters = Code::setup(num_vars);
-        let (pp, _) = Code::trim(&pp, num_vars).unwrap();
+        let (pp, _) = Code::trim(pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
         if Code::message_is_left_and_right_folding() {

@@ -15,7 +15,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use ceno_emul::{ByteAddr, CENO_PLATFORM, InsnKind, StepRecord};
+use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
@@ -34,30 +34,21 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
 
 pub struct SWOp;
-
 impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
-
-#[cfg(test)]
 pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
 
 pub struct SHOp;
-
 impl RIVInstruction for SHOp {
     const INST_KIND: InsnKind = InsnKind::SH;
 }
-
-#[cfg(test)]
 pub type ShInstruction<E> = StoreInstruction<E, SHOp, 1>;
 
 pub struct SBOp;
-
 impl RIVInstruction for SBOp {
     const INST_KIND: InsnKind = InsnKind::SB;
 }
-
-#[cfg(test)]
 pub type SbInstruction<E> = StoreInstruction<E, SBOp, 0>;
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
@@ -74,6 +65,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+        // Memory initialization is not guaranteed to contain u32. Range-check it here.
         let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
 
@@ -88,8 +80,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             const MAX_RAM_ADDR: u32 = u32::MAX - 0x7FF; // max positive imm is 0x7FF
             const MIN_RAM_ADDR: u32 = 0x800; // min negative imm is -0x800
             assert!(
-                !CENO_PLATFORM.can_write(MAX_RAM_ADDR + 1)
-                    && !CENO_PLATFORM.can_write(MIN_RAM_ADDR - 1)
+                !circuit_builder.params.platform.can_write(MAX_RAM_ADDR + 1)
+                    && !circuit_builder.params.platform.can_write(MIN_RAM_ADDR - 1)
             );
         }
         circuit_builder.require_equal(
