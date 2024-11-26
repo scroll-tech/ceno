@@ -275,6 +275,7 @@ fn main() {
                 &reg_final,
                 &mem_final,
                 &public_io_final,
+                &[],
             )
             .unwrap();
 

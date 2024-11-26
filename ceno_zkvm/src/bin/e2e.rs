@@ -1,6 +1,6 @@
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState,
-    WORD_SIZE, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, StepRecord,
+    Tracer, VMState, WORD_SIZE, Word, WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
@@ -19,7 +19,9 @@ use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
-    fs, panic,
+    fs,
+    iter::zip,
+    panic,
     time::Instant,
 };
 use tracing::level_filters::LevelFilter;
@@ -41,6 +43,11 @@ struct Args {
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
+
+    /// The private input or hints. This is a raw file mounted as a memory segment.
+    /// Zero-padded to the next power-of-two size.
+    #[arg(long)]
+    private_input: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -93,6 +100,17 @@ fn main() {
     tracing::info!("Loading ELF file: {}", args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
+
+    tracing::info!("Loading private input file: {:?}", args.private_input);
+    let priv_io = memory_from_file(&args.private_input);
+    assert!(
+        priv_io.len() <= platform.private_io.iter_addresses().len(),
+        "private input must fit in {} bytes",
+        platform.private_io.len()
+    );
+    for (addr, value) in zip(platform.private_io.iter_addresses(), &priv_io) {
+        vm.init_memory(addr.into(), *value);
+    }
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
@@ -249,6 +267,14 @@ fn main() {
         .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
         .collect_vec();
 
+    let priv_io_final = zip(platform.private_io.iter_addresses(), &priv_io)
+        .map(|(addr, &value)| MemFinalRecord {
+            addr,
+            value,
+            cycle: *final_access.get(&addr.into()).unwrap_or(&0),
+        })
+        .collect_vec();
+
     // assign table circuits
     config
         .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
@@ -260,6 +286,7 @@ fn main() {
             &reg_final,
             &mem_final,
             &io_final,
+            &priv_io_final,
         )
         .unwrap();
     // assign program circuit
@@ -330,6 +357,18 @@ fn main() {
             };
         }
     };
+}
+
+fn memory_from_file(path: &Option<String>) -> Vec<u32> {
+    path.as_ref()
+        .map(|path| {
+            let mut buf = fs::read(path).expect("could not read file");
+            buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
+            buf.chunks_exact(WORD_SIZE)
+                .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
+                .collect_vec()
+        })
+        .unwrap_or_default()
 }
 
 fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {

@@ -34,25 +34,25 @@ impl DynVolatileRamTable for DynMemTable {
 pub type DynMemCircuit<E> = DynVolatileRamCircuit<E, DynMemTable>;
 
 #[derive(Clone)]
-pub struct PrivateMemTable;
-impl DynVolatileRamTable for PrivateMemTable {
+pub struct PrivateIOTable;
+impl DynVolatileRamTable for PrivateIOTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const ZERO_INIT: bool = false;
 
     fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram.start
+        params.platform.private_io.start
     }
 
     fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram.end
+        params.platform.private_io.end
     }
 
     fn name() -> &'static str {
-        "PrivateMemTable"
+        "PrivateIOTable"
     }
 }
-pub type PrivateMemCircuit<E> = DynVolatileRamCircuit<E, PrivateMemTable>;
+pub type PrivateIOCircuit<E> = DynVolatileRamCircuit<E, PrivateIOTable>;
 
 /// RegTable, fix size without offset
 #[derive(Clone)]

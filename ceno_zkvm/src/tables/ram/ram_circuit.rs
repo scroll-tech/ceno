@@ -189,7 +189,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}", DVRAM::RAM_TYPE)
+        format!("RAM_{:?}_{}", DVRAM::RAM_TYPE, DVRAM::name())
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {

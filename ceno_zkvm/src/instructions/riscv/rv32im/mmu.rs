@@ -8,8 +8,8 @@ use crate::{
     error::ZKVMError,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RegTable,
-        RegTableCircuit, StaticMemCircuit, StaticMemTable, TableCircuit,
+        MemFinalRecord, MemInitRecord, NonVolatileTable, PrivateIOCircuit, PubIOCircuit,
+        PubIOTable, RegTable, RegTableCircuit, StaticMemCircuit, StaticMemTable, TableCircuit,
     },
 };
 
@@ -20,6 +20,8 @@ pub struct MmuConfig<E: ExtensionField> {
     pub static_mem_config: <StaticMemCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of public IO.
     pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// Initialization of private IO.
+    pub private_io_config: <PrivateIOCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -30,11 +32,13 @@ impl<E: ExtensionField> MmuConfig<E> {
         let static_mem_config = cs.register_table_circuit::<StaticMemCircuit<E>>();
 
         let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
+        let private_io_config = cs.register_table_circuit::<PrivateIOCircuit<E>>();
 
         Self {
             reg_config,
             static_mem_config,
             public_io_config,
+            private_io_config,
             params: cs.params.clone(),
         }
     }
@@ -48,7 +52,13 @@ impl<E: ExtensionField> MmuConfig<E> {
         io_addrs: &[Addr],
     ) {
         assert!(
-            chain!(static_mem_init.iter_addresses(), io_addrs.iter_addresses()).all_unique(),
+            chain!(
+                static_mem_init.iter_addresses(),
+                io_addrs.iter_addresses(),
+                // TODO: optimize with min_max and Range.
+                self.params.platform.private_io.iter_addresses(),
+            )
+            .all_unique(),
             "memory addresses must be unique"
         );
 
@@ -61,6 +71,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         );
 
         fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_addrs);
+        fixed.register_table_circuit::<PrivateIOCircuit<E>>(cs, &self.private_io_config, &());
     }
 
     pub fn assign_table_circuit(
@@ -70,6 +81,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
         io_cycles: &[Cycle],
+        private_io_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)?;
 
@@ -80,6 +92,12 @@ impl<E: ExtensionField> MmuConfig<E> {
         )?;
 
         witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
+
+        witness.assign_table_circuit::<PrivateIOCircuit<E>>(
+            cs,
+            &self.private_io_config,
+            private_io_final,
+        )?;
 
         Ok(())
     }
