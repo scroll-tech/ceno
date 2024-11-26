@@ -471,12 +471,12 @@ impl<E: ExtensionField> MemAddr<E> {
 mod test {
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
     use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
+        instructions::InstancePaddingStrategy,
         scheme::mock_prover::MockProver,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -516,7 +516,11 @@ mod test {
 
         let mut lkm = LkMultiplicity::default();
         let num_rows = 2;
-        let mut raw_witin = RowMajorMatrix::<F>::new(num_rows, cb.cs.num_witin as usize);
+        let mut raw_witin = RowMajorMatrix::<F>::new(
+            num_rows,
+            cb.cs.num_witin as usize,
+            InstancePaddingStrategy::Zero,
+        );
         for instance in raw_witin.iter_mut() {
             mem_addr.assign_instance(instance, &mut lkm, addr)?;
         }
@@ -542,7 +546,6 @@ mod test {
         MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
-                .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())

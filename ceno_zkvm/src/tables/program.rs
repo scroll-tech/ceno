@@ -4,10 +4,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
+    instructions::InstancePaddingStrategy,
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
-    tables::{TableCircuit, padding_zero},
+    tables::TableCircuit,
     utils::i64_to_base,
     witness::RowMajorMatrix,
 };
@@ -158,7 +159,12 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let pc_base = program.base_address;
         assert!(num_instructions <= config.program_size);
 
-        let mut fixed = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_fixed);
+        assert_eq!(INVALID as u64, 0, "0 padding must be invalid instructions");
+        let mut fixed = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            num_fixed,
+            InstancePaddingStrategy::Zero,
+        );
 
         fixed
             .par_iter_mut()
@@ -174,9 +180,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                     set_fixed_val!(row, *col, *val);
                 }
             });
-
-        assert_eq!(INVALID as u64, 0, "0 padding must be invalid instructions");
-        padding_zero(&mut fixed, num_fixed, Some(num_instructions));
 
         fixed
     }
@@ -195,7 +198,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             prog_mlt[i] = *mlt;
         }
 
-        let mut witness = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_witin);
+        let mut witness = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            num_witin,
+            InstancePaddingStrategy::Zero,
+        );
         witness
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
@@ -203,8 +210,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .for_each(|(row, mlt)| {
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
-
-        padding_zero(&mut witness, num_witin, Some(program.instructions.len()));
 
         Ok(witness)
     }

@@ -238,7 +238,6 @@ mod test {
             MockProver::assert_with_expected_errors(
                 &cb,
                 &raw_witin
-                    .de_interleaving()
                     .into_mles()
                     .into_iter()
                     .map(|v| v.into())

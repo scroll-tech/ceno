@@ -52,7 +52,6 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
         let mut table = config.generate_fixed_traces(num_fixed, OP::content());
-        Self::padding_zero(&mut table, num_fixed).expect("padding error");
         table
     }
 
@@ -64,7 +63,6 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
         let mut table = config.assign_instances(num_witin, multiplicity, OP::len())?;
-        Self::padding_zero(&mut table, num_witin)?;
         Ok(table)
     }
 }

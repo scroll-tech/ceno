@@ -3,6 +3,7 @@ use std::{
     array,
     cell::RefCell,
     collections::HashMap,
+    iter,
     mem::{self, MaybeUninit},
     ops::Index,
     slice::{Chunks, ChunksMut},
@@ -10,16 +11,20 @@ use std::{
 };
 
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLEs},
+    mle::{DenseMultilinearExtension, IntoMLE, IntoMLEs},
     util::create_uninit_vec,
 };
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+        ParallelIterator,
+    },
     slice::ParallelSliceMut,
 };
 use thread_local::ThreadLocal;
 
 use crate::{
+    instructions::InstancePaddingStrategy,
     structs::ROMType,
     tables::{AndTable, LtuTable, OpsTable, OrTable, PowTable, XorTable},
     utils::next_pow2_instance_padding,
@@ -43,27 +48,28 @@ macro_rules! set_fixed_val {
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,
-    num_padding_rows: usize,
     num_col: usize,
+    padding_strategy: InstancePaddingStrategy,
 }
 
 impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
-    pub fn new(num_rows: usize, num_col: usize) -> Self {
-        let num_total_rows = next_pow2_instance_padding(num_rows);
-        let num_padding_rows = num_total_rows - num_rows;
+    pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
+        // let num_total_rows = next_pow2_instance_padding(num_rows);
+        // let num_padding_rows = num_total_rows - num_rows;
         RowMajorMatrix {
-            values: create_uninit_vec(num_total_rows * num_col),
-            num_padding_rows,
+            values: create_uninit_vec(num_rows * num_col),
             num_col,
+            padding_strategy,
         }
     }
 
     pub fn num_instances(&self) -> usize {
-        self.values.len() / self.num_col - self.num_padding_rows
+        self.values.len() / self.num_col
     }
 
     pub fn num_padding_instances(&self) -> usize {
-        self.num_padding_rows
+        let num_rows = self.num_instances();
+        next_pow2_instance_padding(num_rows) - num_rows
     }
 
     pub fn iter_rows(&self) -> Chunks<MaybeUninit<T>> {
@@ -85,36 +91,53 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         self.values.par_chunks_mut(num_rows * self.num_col)
     }
 
-    pub fn par_batch_iter_padding_mut(
-        &mut self,
-        num_instances: Option<usize>,
-        batch_size: usize,
-    ) -> rayon::slice::ChunksMut<'_, MaybeUninit<T>> {
-        let num_instances = num_instances.unwrap_or(self.num_instances());
-        self.values[num_instances * self.num_col..]
-            .as_mut()
-            .par_chunks_mut(batch_size * self.num_col)
-    }
-
-    pub fn de_interleaving(mut self) -> Vec<Vec<T>> {
-        (0..self.num_col)
-            .map(|i| {
-                self.values
-                    .par_iter_mut()
-                    .skip(i)
-                    .step_by(self.num_col)
-                    .map(|v| unsafe { mem::replace(v, mem::MaybeUninit::uninit()).assume_init() })
-                    .collect::<Vec<T>>()
-            })
-            .collect()
-    }
+    // pub fn par_batch_iter_padding_mut(
+    //     &mut self,
+    //     num_instances: Option<usize>,
+    //     batch_size: usize,
+    // ) -> rayon::slice::ChunksMut<'_, MaybeUninit<T>> {
+    //     let num_instances = num_instances.unwrap_or(self.num_instances());
+    //     self.values[num_instances * self.num_col..]
+    //         .as_mut()
+    //         .par_chunks_mut(batch_size * self.num_col)
+    // }
 }
 
 impl<F: Field> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
-        self.de_interleaving().into_mles()
+        // let start = Instant::now();
+        let padding_row = match self.padding_strategy {
+            InstancePaddingStrategy::RepeatLast if self.values.len() > 0 => self.values
+                [self.values.len() - self.num_col..]
+                .iter()
+                .map(|x| unsafe { x.assume_init() })
+                .collect(),
+            _ => vec![F::ZERO; self.num_col],
+        };
+        let num_padding = self.num_padding_instances();
+        let result = (0..self.num_col)
+            .collect::<Vec<_>>()
+            .par_iter()
+            .map(|i| {
+                self.values
+                    .iter()
+                    .skip(*i)
+                    .step_by(self.num_col)
+                    .map(|x| unsafe { x.assume_init() })
+                    .chain(&mut iter::repeat(padding_row[*i]).take(num_padding))
+                    //.map(|val| *val)
+                    .collect::<Vec<_>>()
+                    .into_mle()
+            })
+            .collect();
+        // let size = self.num_col * self.len();
+        // if size > 1000 * 1000 {
+        //     let duration = start.elapsed().as_secs_f64();
+        //     println!("Time taken: {:?}, size: {:?}", duration, size);
+        // }
+        result
     }
 }
 

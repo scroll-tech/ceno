@@ -727,7 +727,6 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         let wits_in = raw_witin
-            .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
@@ -1214,6 +1213,7 @@ mod tests {
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLTConfig, IsLtConfig},
+        instructions::InstancePaddingStrategy,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -1395,7 +1395,11 @@ mod tests {
             instances: Vec<AssertLtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Zero,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
@@ -1509,7 +1513,11 @@ mod tests {
             instances: Vec<LtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Zero,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
