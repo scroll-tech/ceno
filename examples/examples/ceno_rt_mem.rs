@@ -6,14 +6,21 @@ use core::ptr::{read_volatile, write_volatile};
 
 extern crate ceno_rt;
 const OUTPUT_ADDRESS: u32 = 0x8000_0000;
+const HINT_START: u32 = 0x4000_0000;
+const HINT_END: u32 = 0x5000_0000;
+const HINT: u32 = 0x4000_1000;
 
 ceno_rt::entry!(main);
 #[inline(never)]
 fn main() {
     test_data_section();
 
-    let out = fibonacci_recurse(20, 0, 1);
-    test_output(out);
+    // let out = fibonacci_recurse(20, 0, 1);
+    let out = unsafe {
+        let x = HINT as *mut u32;
+        read_volatile(x)
+    };
+    test_output(out + 6765);
 }
 
 /// Test the .data section is loaded and read/write works.

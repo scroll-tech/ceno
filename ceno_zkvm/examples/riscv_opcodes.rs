@@ -42,6 +42,9 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
     declare_program!(
         program,
+        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io.start), // idempotent?
+        encode_rv32(LW, 10, 0, 1, 0),                              // lw x1, 0(x10)
+
         encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io.start), // lui x10, public_io
         encode_rv32(LW, 10, 0, 1, 0),                              // lw x1, 0(x10)
         encode_rv32(LW, 10, 0, 2, 4),                              // lw x2, 4(x10)
@@ -275,6 +278,7 @@ fn main() {
                 &reg_final,
                 &mem_final,
                 &public_io_final,
+                // TOOD(Matthias): this is where we should be adding the hints.
                 &[],
             )
             .unwrap();
