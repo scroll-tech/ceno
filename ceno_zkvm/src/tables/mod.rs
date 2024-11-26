@@ -1,11 +1,9 @@
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, scheme::constants::MIN_PAR_SIZE,
+    circuit_builder::CircuitBuilder, error::ZKVMError,
     witness::RowMajorMatrix,
 };
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::{collections::HashMap, mem::MaybeUninit};
+use std::collections::HashMap;
 mod range;
 pub use range::*;
 

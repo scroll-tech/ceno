@@ -44,7 +44,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         num_fixed: usize,
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
-        let mut table = config.generate_fixed_traces(num_fixed, RANGE::content());
+        let table = config.generate_fixed_traces(num_fixed, RANGE::content());
         table
     }
 
@@ -55,7 +55,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
-        let mut table = config.assign_instances(num_witin, multiplicity, RANGE::len())?;
+        let table = config.assign_instances(num_witin, multiplicity, RANGE::len())?;
         Ok(table)
     }
 }

@@ -51,7 +51,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         num_fixed: usize,
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
-        let mut table = config.generate_fixed_traces(num_fixed, OP::content());
+        let table = config.generate_fixed_traces(num_fixed, OP::content());
         table
     }
 
@@ -62,7 +62,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
-        let mut table = config.assign_instances(num_witin, multiplicity, OP::len())?;
+        let table = config.assign_instances(num_witin, multiplicity, OP::len())?;
         Ok(table)
     }
 }

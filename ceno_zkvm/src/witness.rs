@@ -11,14 +11,11 @@ use std::{
 };
 
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE, IntoMLEs},
+    mle::{DenseMultilinearExtension, IntoMLE},
     util::create_uninit_vec,
 };
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
-        ParallelIterator,
-    },
+    iter::{IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use thread_local::ThreadLocal;
@@ -90,17 +87,6 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     ) -> rayon::slice::ChunksMut<MaybeUninit<T>> {
         self.values.par_chunks_mut(num_rows * self.num_col)
     }
-
-    // pub fn par_batch_iter_padding_mut(
-    //     &mut self,
-    //     num_instances: Option<usize>,
-    //     batch_size: usize,
-    // ) -> rayon::slice::ChunksMut<'_, MaybeUninit<T>> {
-    //     let num_instances = num_instances.unwrap_or(self.num_instances());
-    //     self.values[num_instances * self.num_col..]
-    //         .as_mut()
-    //         .par_chunks_mut(batch_size * self.num_col)
-    // }
 }
 
 impl<F: Field> RowMajorMatrix<F> {
@@ -127,7 +113,6 @@ impl<F: Field> RowMajorMatrix<F> {
                     .step_by(self.num_col)
                     .map(|x| unsafe { x.assume_init() })
                     .chain(&mut iter::repeat(padding_row[*i]).take(num_padding))
-                    //.map(|val| *val)
                     .collect::<Vec<_>>()
                     .into_mle()
             })
