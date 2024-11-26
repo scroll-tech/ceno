@@ -44,8 +44,8 @@ struct Args {
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
 
-    /// The private input or hints. This is a raw file mounted as a memory segment.
-    /// Zero-padded to the next power-of-two size.
+    /// The private input or hints. This is a raw file mapped as a memory segment.
+    /// Zero-padded to the right to the next power-of-two size.
     #[arg(long)]
     private_input: Option<String>,
 }
