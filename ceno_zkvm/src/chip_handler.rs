@@ -26,10 +26,10 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
 /// Format: `[u16; UINT_LIMBS]`, least-significant-first.
 pub type RegisterExpr<E> = [Expression<E>; UINT_LIMBS];
 
-pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
+pub trait RegisterChipOperations<E: ExtensionField, Name: Into<String>> {
     fn register_read(
         &mut self,
-        name_fn: N,
+        name: Name,
         register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
@@ -39,7 +39,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
     #[allow(clippy::too_many_arguments)]
     fn register_write(
         &mut self,
-        name_fn: N,
+        name: Name,
         register_id: impl ToExpr<E, Output = Expression<E>>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
@@ -54,10 +54,10 @@ pub type AddressExpr<E> = Expression<E>;
 /// The common representation of a memory value.
 pub type MemoryExpr<E> = Expression<E>;
 
-pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
+pub trait MemoryChipOperations<E: ExtensionField, Name: Into<String>> {
     fn memory_read(
         &mut self,
-        name_fn: N,
+        name: Name,
         memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
@@ -67,7 +67,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
     #[allow(clippy::too_many_arguments)]
     fn memory_write(
         &mut self,
-        name_fn: N,
+        name: Name,
         memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,

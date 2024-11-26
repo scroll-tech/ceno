@@ -275,7 +275,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         degree: usize,
         mut rng: &mut impl RngCore,
     ) -> (Vec<ArcDenseMultilinearExtension<E>>, E) {
-        let start = start_timer!(|| "sample random mle list");
+        let start = start_timer!("sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
             multiplicands.push(Vec::with_capacity(1 << nv))
@@ -308,7 +308,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         degree: usize,
         mut rng: impl RngCore,
     ) -> Vec<ArcDenseMultilinearExtension<E>> {
-        let start = start_timer!(|| "sample random zero mle list");
+        let start = start_timer!("sample random zero mle list");
 
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {

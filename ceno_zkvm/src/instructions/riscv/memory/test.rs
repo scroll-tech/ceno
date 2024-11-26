@@ -75,16 +75,13 @@ fn load(mem_value: Word, insn: InsnKind, shift: u32) -> Word {
 }
 
 fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: u32) {
-    let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<E>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || Inst::name(),
-            |cb| {
-                let config = Inst::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace(Inst::name(), |cb| {
+            let config = Inst::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -123,16 +120,13 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
 }
 
 fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: u32) {
-    let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<E>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || Inst::name(),
-            |cb| {
-                let config = Inst::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace(Inst::name(), |cb| {
+            let config = Inst::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 

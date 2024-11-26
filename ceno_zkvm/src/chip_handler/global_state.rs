@@ -14,7 +14,7 @@ impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for Circ
             ts,
         ];
 
-        self.read_record(|| "state_in", RAMType::GlobalState, record)
+        self.read_record("state_in", RAMType::GlobalState, record)
     }
 
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {
@@ -23,6 +23,6 @@ impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for Circ
             pc,
             ts,
         ];
-        self.write_record(|| "state_out", RAMType::GlobalState, record)
+        self.write_record("state_out", RAMType::GlobalState, record)
     }
 }

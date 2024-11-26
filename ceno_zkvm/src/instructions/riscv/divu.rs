@@ -67,18 +67,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
-        let mut divisor = UInt::new_unchecked(|| "divisor", cb)?;
-        let mut outcome = UInt::new(|| "outcome", cb)?;
-        let r = UInt::new(|| "remainder", cb)?;
+        let mut divisor = UInt::new_unchecked("divisor", cb)?;
+        let mut outcome = UInt::new("outcome", cb)?;
+        let r = UInt::new("remainder", cb)?;
         let (dividend, inter_mul_value) =
-            divisor.mul_add(|| "divisor * outcome + r", cb, &mut outcome, &r, true)?;
+            divisor.mul_add("divisor * outcome + r", cb, &mut outcome, &r, true)?;
 
         // div by zero check
-        let is_zero =
-            IsZeroConfig::construct_circuit(cb, || "divisor_zero_check", divisor.value())?;
+        let is_zero = IsZeroConfig::construct_circuit(cb, "divisor_zero_check", divisor.value())?;
         let outcome_value = outcome.value();
         cb.condition_require_equal(
-            || "outcome_is_zero",
+            "outcome_is_zero",
             is_zero.expr(),
             outcome_value.clone(),
             ((1u64 << UInt::<E>::TOTAL_BITS) - 1).into(),
@@ -88,7 +87,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // remainder should be less than divisor if divisor != 0.
         let lt = IsLtConfig::construct_circuit(
             cb,
-            || "remainder < divisor?",
+            "remainder < divisor?",
             r.value(),
             divisor.value(),
             UINT_LIMBS,
@@ -97,7 +96,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // When divisor is zero, remainder is -1 implies "remainder > divisor" aka. lt.expr() == 0
         // otherwise lt.expr() == 1
         cb.require_equal(
-            || "remainder < divisor when non-zero divisor",
+            "remainder < divisor when non-zero divisor",
             is_zero.expr() + lt.expr(),
             Expression::ONE,
         )?;
@@ -193,13 +192,12 @@ mod test {
             exp_outcome: Word,
             is_ok: bool,
         ) {
-            let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+            let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
-                .namespace(
-                    || format!("divu_({name})"),
-                    |cb| Ok(DivUInstruction::construct_circuit(cb)),
-                )
+                .namespace(format!("divu_({name})"), |cb| {
+                    Ok(DivUInstruction::construct_circuit(cb))
+                })
                 .unwrap()
                 .unwrap();
 
@@ -231,7 +229,7 @@ mod test {
 
             config
                 .outcome
-                .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
+                .require_equal("assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
 
             let expected_errors: &[_] = if is_ok { &[] } else { &[name] };

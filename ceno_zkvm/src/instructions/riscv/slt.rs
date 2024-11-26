@@ -35,10 +35,10 @@ impl<E: ExtensionField> Instruction<E> for SltInstruction<E> {
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", cb)?;
+        let rs2_read = UInt::new_unchecked("rs2_read", cb)?;
 
-        let lt = SignedLtConfig::construct_circuit(cb, || "rs1 < rs2", &rs1_read, &rs2_read)?;
+        let lt = SignedLtConfig::construct_circuit(cb, "rs1 < rs2", &rs1_read, &rs2_read)?;
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
@@ -100,16 +100,13 @@ mod test {
     };
 
     fn verify(name: &'static str, rs1: i32, rs2: i32, rd: Word) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || format!("SLT/{name}"),
-                |cb| {
-                    let config = SltInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace(format!("SLT/{name}"), |cb| {
+                let config = SltInstruction::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -132,7 +129,7 @@ mod test {
             UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));

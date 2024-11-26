@@ -171,7 +171,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         }
     }
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
-        let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
+        let mut cs = ConstraintSystem::new(format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
@@ -181,7 +181,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
-        let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
+        let mut cs = ConstraintSystem::new(format!("riscv_table/{}", TC::name()));
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
@@ -191,7 +191,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 
     pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
-        let mut cs = ConstraintSystem::new(|| "riscv_state");
+        let mut cs = ConstraintSystem::new("riscv_state");
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         self.initial_global_state_expr =

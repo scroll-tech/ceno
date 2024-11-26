@@ -166,9 +166,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         // 0. Registers and instruction lookup
 
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
+        let rd_written = UInt::new("rd_written", circuit_builder)?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -182,9 +182,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         let (rs1_val, rs2_val, rd_val, sign_deps) = match I::INST_KIND {
             InsnKind::MULH => {
-                let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
-                let rs2_signed = Signed::construct_circuit(circuit_builder, || "rs2", &rs2_read)?;
-                let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
+                let rs1_signed = Signed::construct_circuit(circuit_builder, "rs1", &rs1_read)?;
+                let rs2_signed = Signed::construct_circuit(circuit_builder, "rs2", &rs2_read)?;
+                let rd_signed = Signed::construct_circuit(circuit_builder, "rd", &rd_written)?;
 
                 (
                     rs1_signed.expr(),
@@ -203,7 +203,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let rd_avoid = Expression::<E>::from((1u64 << BIT_WIDTH) - 1);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
-                    || "constrain_rd",
+                    "constrain_rd",
                     rd_written.value(),
                     rd_avoid,
                 )?;
@@ -217,14 +217,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
 
             InsnKind::MULHSU => {
-                let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
-                let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
+                let rs1_signed = Signed::construct_circuit(circuit_builder, "rs1", &rs1_read)?;
+                let rd_signed = Signed::construct_circuit(circuit_builder, "rd", &rd_written)?;
 
                 // constrain that (signed) rd does not represent 2^31 - 1
                 let rd_avoid = Expression::<E>::from((1u64 << (BIT_WIDTH - 1)) - 1);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
-                    || "constrain_rd",
+                    "constrain_rd",
                     rd_signed.expr(),
                     rd_avoid,
                 )?;
@@ -248,9 +248,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         //    the result of interpreting `rd` as the high limb of a 2s complement
         //    value with some 32-bit low limb
 
-        let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
+        let prod_low = UInt::new("prod_low", circuit_builder)?;
         circuit_builder.require_equal(
-            || "validate_prod_high_limb",
+            "validate_prod_high_limb",
             rs1_val * rs2_val,
             rd_val * (1u64 << 32) + prod_low.value(),
         )?;
@@ -358,12 +358,12 @@ struct Signed<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> Signed<E> {
-    pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
+    pub fn construct_circuit<Name: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
-        name_fn: N,
+        name: Name,
         unsigned_val: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
-        cb.namespace(name_fn, |cb| {
+        cb.namespace(name, |cb| {
             let is_negative = unsigned_val.is_negative(cb)?;
             let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
 
@@ -413,10 +413,10 @@ mod test {
     }
 
     fn verify_mulhu(rs1: u32, rs2: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
+            .namespace("mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
 
@@ -444,7 +444,7 @@ mod test {
         let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
-            || "assert_rd_written",
+            "assert_rd_written",
             rd_written_expr,
             expected_rd_written.value(),
         )
@@ -476,10 +476,10 @@ mod test {
     }
 
     fn verify_mulh(rs1: i32, rs2: i32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mulh", |cb| Ok(MulhInstruction::construct_circuit(cb)))
+            .namespace("mulh", |cb| Ok(MulhInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
 
@@ -504,7 +504,7 @@ mod test {
         // verify value written to register
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
-            || "assert_rd_written",
+            "assert_rd_written",
             rd_written_expr,
             Expression::from(signed_prod_high),
         )
@@ -538,13 +538,10 @@ mod test {
     }
 
     fn verify_mulhsu(rs1: i32, rs2: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "mulhsu",
-                |cb| Ok(MulhsuInstruction::construct_circuit(cb)),
-            )
+            .namespace("mulhsu", |cb| Ok(MulhsuInstruction::construct_circuit(cb)))
             .unwrap()
             .unwrap();
 
@@ -569,7 +566,7 @@ mod test {
         // verify value written to register
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
-            || "assert_rd_written",
+            "assert_rd_written",
             rd_written_expr,
             Expression::from(signed_unsigned_prod_high),
         )

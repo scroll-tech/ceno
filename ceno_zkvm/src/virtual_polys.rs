@@ -190,10 +190,10 @@ mod tests {
 
     #[test]
     fn test_add_mle_list_by_expr() {
-        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cs = ConstraintSystem::new("test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
-        let y = cb.create_witin(|| "y");
+        let x = cb.create_witin("x");
+        let y = cb.create_witin("y");
 
         let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
             .map(|_| vec![Goldilocks::from(1)].into_mle().into())

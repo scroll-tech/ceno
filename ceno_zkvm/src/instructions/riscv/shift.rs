@@ -79,20 +79,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         // rd_written * pow2_rs2_low5 + outflow == inflow * 2**32 + rs1_read
         // 32 + 31.                     31.        31 + 32.         32.     (Bit widths)
 
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let rd_written = UInt::new("rd_written", circuit_builder)?;
 
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let rs2_low5 = circuit_builder.create_witin(|| "rs2_low5");
+        let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
+        let rs2_low5 = circuit_builder.create_witin("rs2_low5");
         // pow2_rs2_low5 is unchecked because it's assignment will be constrained due it's use in lookup_pow2 below
-        let pow2_rs2_low5 = circuit_builder.create_witin(|| "pow2_rs2_low5");
+        let pow2_rs2_low5 = circuit_builder.create_witin("pow2_rs2_low5");
         // rs2 = rs2_high | rs2_low5
-        let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
+        let rs2_high = UInt::new("rs2_high", circuit_builder)?;
 
-        let outflow = circuit_builder.create_witin(|| "outflow");
+        let outflow = circuit_builder.create_witin("outflow");
         let assert_lt_config = AssertLTConfig::construct_circuit(
             circuit_builder,
-            || "outflow < pow2_rs2_low5",
+            "outflow < pow2_rs2_low5",
             outflow.expr(),
             pow2_rs2_low5.expr(),
             2,
@@ -103,7 +103,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let signed_extend_config = match I::INST_KIND {
             InsnKind::SLL => {
                 circuit_builder.require_equal(
-                    || "shift check",
+                    "shift check",
                     rs1_read.value() * pow2_rs2_low5.expr(),
                     outflow.expr() * two_pow_total_bits + rd_written.value(),
                 )?;
@@ -122,7 +122,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                 };
 
                 circuit_builder.require_equal(
-                    || "shift check",
+                    "shift check",
                     rd_written.value() * pow2_rs2_low5.expr() + outflow.expr(),
                     inflow * two_pow_total_bits + rs1_read.value(),
                 )?;
@@ -140,9 +140,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         )?;
 
         circuit_builder.lookup_pow2(rs2_low5.expr(), pow2_rs2_low5.expr())?;
-        circuit_builder.assert_ux::<_, _, 5>(|| "rs2_low5 in u5", rs2_low5.expr())?;
+        circuit_builder.assert_ux::<_, 5>("rs2_low5 in u5", rs2_low5.expr())?;
         circuit_builder.require_equal(
-            || "rs2 == rs2_high * 2^5 + rs2_low5",
+            "rs2 == rs2_high * 2^5 + rs2_low5",
             rs2_read.value(),
             (rs2_high.value() << 5) + rs2_low5.expr(),
         )?;
@@ -293,7 +293,7 @@ mod tests {
         rs2_read: u32,
         expected_rd_written: u32,
     ) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let shift = rs2_read & 0b11111;
@@ -318,7 +318,7 @@ mod tests {
 
         let config = cb
             .namespace(
-                || format!("{prefix}_({name})"),
+                format!("{prefix}_({name})"),
                 ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
             .unwrap();
@@ -326,7 +326,7 @@ mod tests {
         config
             .rd_written
             .require_equal(
-                || format!("{prefix}_({name})_assert_rd_written"),
+                format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
                 &UInt::from_const_unchecked(
                     Value::new_unchecked(expected_rd_written)

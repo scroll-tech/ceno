@@ -45,21 +45,21 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
     ) -> Result<Self, ZKVMError> {
         assert!(n_bits == 8 || n_bits == 16);
 
-        let msb = cb.create_witin(|| "msb");
+        let msb = cb.create_witin("msb");
         // require msb is boolean
-        cb.assert_bit(|| "msb is boolean", msb.expr())?;
+        cb.assert_bit("msb is boolean", msb.expr())?;
 
         // assert 2*val - msb*2^N_BITS is within range [0, 2^N_BITS)
         // - if val < 2^(N_BITS-1), then 2*val < 2^N_BITS, msb can only be zero.
         // - otherwise, 2*val >= 2^N_BITS, then msb can only be one.
         let assert_ux = match n_bits {
-            8 => CircuitBuilder::assert_ux::<_, _, 8>,
-            16 => CircuitBuilder::assert_ux::<_, _, 16>,
+            8 => CircuitBuilder::assert_ux::<_, 8>,
+            16 => CircuitBuilder::assert_ux::<_, 16>,
             _ => unreachable!("unsupported n_bits = {}", n_bits),
         };
         assert_ux(
             cb,
-            || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
+            "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
             2 * val - (msb.expr() << n_bits),
         )?;
 

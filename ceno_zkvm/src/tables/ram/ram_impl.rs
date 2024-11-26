@@ -40,15 +40,15 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
         let init_v = (0..NVRAM::V_LIMBS)
-            .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
+            .map(|i| cb.create_fixed(format!("init_v_limb_{i}")))
             .collect::<Result<Vec<Fixed>, ZKVMError>>()?;
-        let addr = cb.create_fixed(|| "addr")?;
+        let addr = cb.create_fixed("addr")?;
 
-        let final_cycle = cb.create_witin(|| "final_cycle");
+        let final_cycle = cb.create_witin("final_cycle");
         let final_v = if NVRAM::WRITABLE {
             Some(
                 (0..NVRAM::V_LIMBS)
-                    .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
+                    .map(|i| cb.create_witin(format!("final_v_limb_{i}")))
                     .collect::<Vec<WitIn>>(),
             )
         } else {
@@ -76,7 +76,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         .concat();
 
         cb.w_table_record(
-            || "init_table",
+            "init_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
@@ -85,7 +85,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             init_table,
         )?;
         cb.r_table_record(
-            || "final_table",
+            "final_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
@@ -190,9 +190,9 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     ) -> Result<Self, ZKVMError> {
         assert!(!NVRAM::WRITABLE);
         let init_v = cb.query_public_io()?;
-        let addr = cb.create_fixed(|| "addr")?;
+        let addr = cb.create_fixed("addr")?;
 
-        let final_cycle = cb.create_witin(|| "final_cycle");
+        let final_cycle = cb.create_witin("final_cycle");
 
         let init_table = [
             vec![(NVRAM::RAM_TYPE as usize).into()],
@@ -212,7 +212,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         .concat();
 
         cb.w_table_record(
-            || "init_table",
+            "init_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
@@ -221,7 +221,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             init_table,
         )?;
         cb.r_table_record(
-            || "final_table",
+            "final_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::FixedAddr,
@@ -296,12 +296,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        let addr = cb.create_witin(|| "addr");
+        let addr = cb.create_witin("addr");
 
         let final_v = (0..DVRAM::V_LIMBS)
-            .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
+            .map(|i| cb.create_witin(format!("final_v_limb_{i}")))
             .collect::<Vec<WitIn>>();
-        let final_cycle = cb.create_witin(|| "final_cycle");
+        let final_cycle = cb.create_witin("final_cycle");
 
         let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
         let init_expr = if DVRAM::ZERO_INIT {
@@ -328,7 +328,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         .concat();
 
         cb.w_table_record(
-            || "init_table",
+            "init_table",
             DVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
@@ -340,7 +340,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             init_table,
         )?;
         cb.r_table_record(
-            || "final_table",
+            "final_table",
             DVRAM::RAM_TYPE,
             SetTableSpec {
                 addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {

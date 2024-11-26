@@ -44,9 +44,9 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<JalrConfig<E>, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?; // unsigned 32-bit value
+        let imm = circuit_builder.create_witin("imm"); // signed 12-bit value
+        let rd_written = UInt::new("rd_written", circuit_builder)?;
 
         let i_insn = IInstructionConfig::construct_circuit(
             circuit_builder,
@@ -68,11 +68,11 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let (overflow_expr, overflow) = if cfg!(feature = "forbid_overflow") {
             (Expression::ZERO, None)
         } else {
-            let overflow = circuit_builder.create_witin(|| "overflow");
-            let tmp = circuit_builder.create_witin(|| "overflow1");
-            circuit_builder.require_zero(|| "overflow_0_or_pm1", overflow.expr() * tmp.expr())?;
+            let overflow = circuit_builder.create_witin("overflow");
+            let tmp = circuit_builder.create_witin("overflow1");
+            circuit_builder.require_zero("overflow_0_or_pm1", overflow.expr() * tmp.expr())?;
             circuit_builder.require_equal(
-                || "overflow_tmp",
+                "overflow_tmp",
                 tmp.expr(),
                 (1 - overflow.expr()) * (1 + overflow.expr()),
             )?;
@@ -80,20 +80,20 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         };
 
         circuit_builder.require_equal(
-            || "rs1+imm = next_pc_unrounded + overflow*2^32",
+            "rs1+imm = next_pc_unrounded + overflow*2^32",
             rs1_read.value() + imm.expr(),
             next_pc_addr.expr_unaligned() + overflow_expr * (1u64 << 32),
         )?;
 
         circuit_builder.require_equal(
-            || "next_pc_addr = next_pc",
+            "next_pc_addr = next_pc",
             next_pc_addr.expr_align2(),
             i_insn.vm_state.next_pc.unwrap().expr(),
         )?;
 
         // write pc+4 to rd
         circuit_builder.require_equal(
-            || "rd_written = pc+4",
+            "rd_written = pc+4",
             rd_written.value(),
             i_insn.vm_state.pc.expr() + PC_STEP_SIZE,
         )?;

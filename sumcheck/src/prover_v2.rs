@@ -64,7 +64,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 ..Default::default()
             });
         }
-        let start = start_timer!(|| "sum check prove");
+        let start = start_timer!("sum check prove");
 
         transcript.append_message(&(num_variables + log2_max_thread_id).to_le_bytes());
         transcript.append_message(&max_degree.to_le_bytes());
@@ -347,7 +347,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         polynomial: VirtualPolynomialV2<'a, E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     ) -> Self {
-        let start = start_timer!(|| "sum check prover init");
+        let start = start_timer!("sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
@@ -381,7 +381,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             "Prover is not active"
         );
 
-        // let fix_argument = start_timer!(|| "fix argument");
+        // let fix_argument = start_timer!("fix argument");
 
         // Step 1:
         // fix argument and evaluate f(x) over x_m = r; where r is the challenge
@@ -625,7 +625,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 ..Default::default()
             });
         }
-        let start = start_timer!(|| "sum check prove");
+        let start = start_timer!("sum check prove");
 
         transcript.append_message(&num_variables.to_le_bytes());
         transcript.append_message(&max_degree.to_le_bytes());
@@ -694,7 +694,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomialV2<'a, E>) -> Self {
-        let start = start_timer!(|| "sum check prover init");
+        let start = start_timer!("sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
@@ -735,7 +735,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             "Prover is not active"
         );
 
-        // let fix_argument = start_timer!(|| "fix argument");
+        // let fix_argument = start_timer!("fix argument");
 
         // Step 1:
         // fix argument and evaluate f(x) over x_m = r; where r is the challenge

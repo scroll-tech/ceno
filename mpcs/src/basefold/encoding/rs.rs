@@ -524,7 +524,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
 
 #[allow(unused)]
 fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) -> Vec<E> {
-    let timer = start_timer!(|| "Encode RSCode");
+    let timer = start_timer!("Encode RSCode");
     let message_size = poly.len();
     let domain_size_bit = log2_strict(message_size * rate);
     let root = E::BaseField::ROOT_OF_UNITY.pow([1 << (E::BaseField::S - domain_size_bit as u32)]);

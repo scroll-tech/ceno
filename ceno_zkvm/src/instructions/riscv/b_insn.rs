@@ -56,7 +56,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         let rs2 = ReadRS2::construct_circuit(circuit_builder, rs2_read, vm_state.ts)?;
 
         // Immediate
-        let imm = circuit_builder.create_witin(|| "imm");
+        let imm = circuit_builder.create_witin("imm");
 
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
@@ -73,7 +73,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
             branch_taken_bit.clone() * imm.expr() - branch_taken_bit * PC_STEP_SIZE + PC_STEP_SIZE;
         let next_pc = vm_state.next_pc.unwrap();
         circuit_builder.require_equal(
-            || "pc_branch",
+            "pc_branch",
             next_pc.expr(),
             vm_state.pc.expr() + pc_offset,
         )?;

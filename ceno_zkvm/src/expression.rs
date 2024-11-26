@@ -733,27 +733,23 @@ pub struct Fixed(pub usize);
 pub struct Instance(pub usize);
 
 impl WitIn {
-    pub fn from_expr<E: ExtensionField, N, NR>(
-        name: N,
+    pub fn from_expr<E: ExtensionField, Name>(
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         input: Expression<E>,
         debug: bool,
     ) -> Result<Self, ZKVMError>
     where
-        NR: Into<String> + Clone,
-        N: FnOnce() -> NR,
+        Name: Into<String> + Clone,
     {
-        circuit_builder.namespace(
-            || "from_expr",
-            |cb| {
-                let name = name().into();
-                let wit = cb.create_witin(|| name.clone());
-                if !debug {
-                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
-                }
-                Ok(wit)
-            },
-        )
+        circuit_builder.namespace("from_expr", |cb| {
+            let name = name.into();
+            let wit = cb.create_witin(name.clone());
+            if !debug {
+                cb.require_zero(name.clone(), wit.expr() - input)?;
+            }
+            Ok(wit)
+        })
     }
 
     pub fn assign<E: ExtensionField>(
@@ -1013,9 +1009,9 @@ mod tests {
     #[test]
     fn test_expression_arithmetics() {
         type E = GoldilocksExt2;
-        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cs = ConstraintSystem::new("test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
+        let x = cb.create_witin("x");
 
         // scaledsum * challenge
         // 3 * x + 2
@@ -1078,11 +1074,11 @@ mod tests {
     #[test]
     fn test_is_monomial_form() {
         type E = GoldilocksExt2;
-        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cs = ConstraintSystem::new("test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
-        let y = cb.create_witin(|| "y");
-        let z = cb.create_witin(|| "z");
+        let x = cb.create_witin("x");
+        let y = cb.create_witin("y");
+        let z = cb.create_witin("z");
         // scaledsum * challenge
         // 3 * x + 2
         let expr: Expression<E> = 3 * x.expr() + 2;
@@ -1115,10 +1111,10 @@ mod tests {
     #[test]
     fn test_not_monomial_form() {
         type E = GoldilocksExt2;
-        let mut cs = ConstraintSystem::new(|| "test_root");
+        let mut cs = ConstraintSystem::new("test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
-        let y = cb.create_witin(|| "y");
+        let x = cb.create_witin("x");
+        let y = cb.create_witin("y");
         // scaledsum * challenge
         // (x + 1) * (y + 1)
         let expr: Expression<E> = (1 + x.expr()) * (2 + y.expr());

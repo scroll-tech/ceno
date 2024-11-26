@@ -78,14 +78,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         // 32 + 31.   31.        31 + 32.         32.     (Bit widths)
 
         // Note: `imm` wtns is set to 2**imm (upto 32 bit) just for efficient verification.
-        let imm = circuit_builder.create_witin(|| "imm");
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+        let imm = circuit_builder.create_witin("imm");
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let rd_written = UInt::new("rd_written", circuit_builder)?;
 
-        let outflow = circuit_builder.create_witin(|| "outflow");
+        let outflow = circuit_builder.create_witin("outflow");
         let assert_lt_config = AssertLTConfig::construct_circuit(
             circuit_builder,
-            || "outflow < imm",
+            "outflow < imm",
             outflow.expr(),
             imm.expr(),
             2,
@@ -96,7 +96,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let is_lt_config = match I::INST_KIND {
             InsnKind::SLLI => {
                 circuit_builder.require_equal(
-                    || "shift check",
+                    "shift check",
                     rs1_read.value() * imm.expr(), // inflow is zero for this case
                     outflow.expr() * two_pow_total_bits + rd_written.value(),
                 )?;
@@ -113,7 +113,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                     _ => unreachable!(),
                 };
                 circuit_builder.require_equal(
-                    || "shift check",
+                    "shift check",
                     rd_written.value() * imm.expr() + outflow.expr(),
                     inflow * two_pow_total_bits + rs1_read.value(),
                 )?;
@@ -249,7 +249,7 @@ mod test {
         imm: u32,
         expected_rd_written: u32,
     ) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let (prefix, insn_code, rd_written) = match I::INST_KIND {
@@ -272,20 +272,17 @@ mod test {
         };
 
         let config = cb
-            .namespace(
-                || format!("{prefix}_({name})"),
-                |cb| {
-                    let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace(format!("{prefix}_({name})"), |cb| {
+                let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
         config
             .rd_written
             .require_equal(
-                || format!("{prefix}_({name})_assert_rd_written"),
+                format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
                 &UInt::from_const_unchecked(
                     Value::new_unchecked(expected_rd_written)

@@ -43,7 +43,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<JalConfig<E>, ZKVMError> {
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+        let rd_written = UInt::new("rd_written", circuit_builder)?;
 
         let j_insn = JInstructionConfig::construct_circuit(
             circuit_builder,
@@ -52,7 +52,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
         )?;
 
         circuit_builder.require_equal(
-            || "jal rd_written",
+            "jal rd_written",
             rd_written.value(),
             j_insn.vm_state.pc.expr() + PC_STEP_SIZE,
         )?;

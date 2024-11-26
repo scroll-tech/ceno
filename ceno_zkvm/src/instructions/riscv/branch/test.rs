@@ -19,16 +19,13 @@ fn test_opcode_beq() {
 }
 
 fn impl_opcode_beq(equal: bool) {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "beq",
-            |cb| {
-                let config = BeqInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("beq", |cb| {
+            let config = BeqInstruction::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -57,16 +54,13 @@ fn test_opcode_bne() {
 }
 
 fn impl_opcode_bne(equal: bool) {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "bne",
-            |cb| {
-                let config = BneInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("bne", |cb| {
+            let config = BneInstruction::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -101,7 +95,7 @@ fn test_bltu_circuit() -> Result<(), ZKVMError> {
 }
 
 fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
-    let mut cs = ConstraintSystem::new(|| "riscv");
+    let mut cs = ConstraintSystem::new("riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
     let config = BltuInstruction::construct_circuit(&mut circuit_builder)?;
 
@@ -143,7 +137,7 @@ fn test_bgeu_circuit() -> Result<(), ZKVMError> {
 }
 
 fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
-    let mut cs = ConstraintSystem::new(|| "riscv");
+    let mut cs = ConstraintSystem::new("riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
     let config = BgeuInstruction::construct_circuit(&mut circuit_builder)?;
 
@@ -185,7 +179,7 @@ fn test_blt_circuit() -> Result<(), ZKVMError> {
 }
 
 fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
-    let mut cs = ConstraintSystem::new(|| "riscv");
+    let mut cs = ConstraintSystem::new("riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
     let config = BltInstruction::construct_circuit(&mut circuit_builder)?;
 
@@ -227,7 +221,7 @@ fn test_bge_circuit() -> Result<(), ZKVMError> {
 }
 
 fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
-    let mut cs = ConstraintSystem::new(|| "riscv");
+    let mut cs = ConstraintSystem::new("riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
     let config = BgeInstruction::construct_circuit(&mut circuit_builder)?;
 

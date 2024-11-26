@@ -80,9 +80,9 @@ impl<E: ExtensionField> LogicConfig<E> {
         cb: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
     ) -> Result<Self, ZKVMError> {
-        let rs1_read = UInt8::new_unchecked(|| "rs1_read", cb)?;
-        let rd_written = UInt8::new_unchecked(|| "rd_written", cb)?;
-        let imm = UInt8::new_unchecked(|| "imm", cb)?;
+        let rs1_read = UInt8::new_unchecked("rs1_read", cb)?;
+        let rd_written = UInt8::new_unchecked("rd_written", cb)?;
+        let imm = UInt8::new_unchecked("imm", cb)?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
@@ -170,7 +170,7 @@ mod test {
     }
 
     fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_written: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let (prefix, rd_written) = match I::INST_KIND {
@@ -181,13 +181,10 @@ mod test {
         };
 
         let config = cb
-            .namespace(
-                || format!("{prefix}_({name})"),
-                |cb| {
-                    let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace(format!("{prefix}_({name})"), |cb| {
+                let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -208,7 +205,7 @@ mod test {
 
         let expected = UInt8::from_const_unchecked(split_to_u8::<u64>(expected_rd_written));
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
-        cb.require_equal(|| "assert_rd_written", rd_written_expr, expected.value())
+        cb.require_equal("assert_rd_written", rd_written_expr, expected.value())
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));

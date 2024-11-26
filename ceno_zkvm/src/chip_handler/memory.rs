@@ -9,18 +9,18 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 
-impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
+impl<'a, E: ExtensionField, Name: Into<String>> MemoryChipOperations<E, Name>
     for CircuitBuilder<'a, E>
 {
     fn memory_read(
         &mut self,
-        name_fn: N,
+        name: Name,
         memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
-        self.namespace(name_fn, |cb| {
+        self.namespace(name, |cb| {
             // READ (a, v, t)
             let read_record = [
                 vec![RAMType::Memory.into(), memory_addr.clone()],
@@ -35,13 +35,13 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 vec![ts.clone()],
             ]
             .concat();
-            cb.read_record(|| "read_record", RAMType::Memory, read_record)?;
-            cb.write_record(|| "write_record", RAMType::Memory, write_record)?;
+            cb.read_record("read_record", RAMType::Memory, read_record)?;
+            cb.write_record("write_record", RAMType::Memory, write_record)?;
 
             // assert prev_ts < current_ts
             let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,
-                || "prev_ts < ts",
+                "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
                 UINT_LIMBS,
@@ -55,14 +55,14 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
 
     fn memory_write(
         &mut self,
-        name_fn: N,
+        name: Name,
         memory_addr: &AddressExpr<E>,
         prev_ts: Expression<E>,
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
-        self.namespace(name_fn, |cb| {
+        self.namespace(name, |cb| {
             // READ (a, v, t)
             let read_record = [
                 vec![RAMType::Memory.into(), memory_addr.clone()],
@@ -77,12 +77,12 @@ impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOpera
                 vec![ts.clone()],
             ]
             .concat();
-            cb.read_record(|| "read_record", RAMType::Memory, read_record)?;
-            cb.write_record(|| "write_record", RAMType::Memory, write_record)?;
+            cb.read_record("read_record", RAMType::Memory, read_record)?;
+            cb.write_record("write_record", RAMType::Memory, write_record)?;
 
             let lt_cfg = AssertLTConfig::construct_circuit(
                 cb,
-                || "prev_ts < ts",
+                "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
                 UINT_LIMBS,

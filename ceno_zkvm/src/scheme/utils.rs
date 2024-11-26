@@ -666,11 +666,11 @@ mod tests {
     fn test_wit_infer_by_expr_base_field() {
         type E = goldilocks::GoldilocksExt2;
         type B = goldilocks::Goldilocks;
-        let mut cs = ConstraintSystem::<E>::new(|| "test");
+        let mut cs = ConstraintSystem::<E>::new("test");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a");
-        let b = cb.create_witin(|| "b");
-        let c = cb.create_witin(|| "c");
+        let a = cb.create_witin("a");
+        let b = cb.create_witin("b");
+        let c = cb.create_witin("c");
 
         let expr: Expression<E> = a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3 + 2);
 
@@ -692,11 +692,11 @@ mod tests {
     fn test_wit_infer_by_expr_ext_field() {
         type E = goldilocks::GoldilocksExt2;
         type B = goldilocks::Goldilocks;
-        let mut cs = ConstraintSystem::<E>::new(|| "test");
+        let mut cs = ConstraintSystem::<E>::new("test");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a");
-        let b = cb.create_witin(|| "b");
-        let c = cb.create_witin(|| "c");
+        let a = cb.create_witin("a");
+        let b = cb.create_witin("b");
+        let c = cb.create_witin("c");
 
         let expr: Expression<E> = a.expr()
             + b.expr()

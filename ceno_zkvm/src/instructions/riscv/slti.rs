@@ -59,8 +59,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm = cb.create_witin(|| "imm");
+        let rs1_read = UInt::new_unchecked("rs1_read", cb)?;
+        let imm = cb.create_witin("imm");
 
         let (value_expr, is_rs1_neg) = match I::INST_KIND {
             InsnKind::SLTIU => (rs1_read.value(), None),
@@ -72,7 +72,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         };
 
         let lt =
-            IsLtConfig::construct_circuit(cb, || "rs1 < imm", value_expr, imm.expr(), UINT_LIMBS)?;
+            IsLtConfig::construct_circuit(cb, "rs1 < imm", value_expr, imm.expr(), UINT_LIMBS)?;
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
@@ -221,14 +221,14 @@ mod test {
     }
 
     fn verify<I: RIVInstruction>(name: &'static str, rs1_read: u32, imm: i32, expected_rd: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm as u32);
 
         let config = cb
             .namespace(
-                || format!("{:?}_({name})", I::INST_KIND),
+                format!("{:?}_({name})", I::INST_KIND),
                 SetLessThanImmInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
             .unwrap();
@@ -252,7 +252,7 @@ mod test {
         config
             .rd_written
             .require_equal(
-                || format!("{:?}_({name})_assert_rd_written", I::INST_KIND),
+                format!("{:?}_({name})_assert_rd_written", I::INST_KIND),
                 &mut cb,
                 &expected_rd,
             )

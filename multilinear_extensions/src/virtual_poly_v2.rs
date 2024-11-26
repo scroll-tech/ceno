@@ -140,7 +140,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
 
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &VirtualPolynomialV2<'a, E>) {
-        let start = start_timer!(|| "virtual poly add");
+        let start = start_timer!("virtual poly add");
         for (coeffient, products) in other.products.iter() {
             let cur: Vec<_> = products
                 .iter()
@@ -158,7 +158,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     /// Returns an error if the MLE has a different `num_vars()` from self.
     #[tracing::instrument(skip_all, name = "mul_by_mle")]
     pub fn mul_by_mle(&mut self, mle: ArcMultilinearExtension<'a, E>, coefficient: E::BaseField) {
-        let start = start_timer!(|| "mul by mle");
+        let start = start_timer!("mul by mle");
 
         assert_eq!(
             mle.num_vars(),
@@ -196,7 +196,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     /// Evaluate the virtual polynomial at point `point`.
     /// Returns an error is point.len() does not match `num_variables`.
     pub fn evaluate(&self, point: &[E]) -> E {
-        let start = start_timer!(|| "evaluation");
+        let start = start_timer!("evaluation");
 
         assert_eq!(
             self.aux_info.max_num_variables,
@@ -237,7 +237,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
 
     // // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
     // pub fn to_ext_field(&self) -> VirtualPolynomialV2<E> {
-    //     let timer = start_timer!(|| "convert VP to ext field");
+    //     let timer = start_timer!("convert VP to ext field");
     //     let products = self.products.iter().map(|(f, v)| (*f, v.clone())).collect();
 
     //     let mut flattened_ml_extensions = vec![];

@@ -141,7 +141,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
 
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &VirtualPolynomial<E>) {
-        let start = start_timer!(|| "virtual poly add");
+        let start = start_timer!("virtual poly add");
         for (coeffient, products) in other.products.iter() {
             let cur: Vec<ArcDenseMultilinearExtension<E>> = products
                 .iter()
@@ -159,7 +159,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     /// Returns an error if the MLE has a different `num_vars` from self.
     #[tracing::instrument(skip_all, name = "mul_by_mle")]
     pub fn mul_by_mle(&mut self, mle: ArcDenseMultilinearExtension<E>, coefficient: E::BaseField) {
-        let start = start_timer!(|| "mul by mle");
+        let start = start_timer!("mul by mle");
 
         assert_eq!(
             mle.num_vars, self.aux_info.num_variables,
@@ -195,7 +195,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     /// Evaluate the virtual polynomial at point `point`.
     /// Returns an error is point.len() does not match `num_variables`.
     pub fn evaluate(&self, point: &[E]) -> E {
-        let start = start_timer!(|| "evaluation");
+        let start = start_timer!("evaluation");
 
         assert_eq!(
             self.aux_info.num_variables,
@@ -228,7 +228,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
         num_products: usize,
         mut rng: &mut impl Rng,
     ) -> (Self, E) {
-        let start = start_timer!(|| "sample random virtual polynomial");
+        let start = start_timer!("sample random virtual polynomial");
 
         let mut sum = E::ZERO;
         let mut poly = VirtualPolynomial::new(nv);
@@ -274,7 +274,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
     //
     // This function is used in ZeroCheck.
     pub fn build_f_hat(&self, r: &[E]) -> Self {
-        let start = start_timer!(|| "zero check build hat f");
+        let start = start_timer!("zero check build hat f");
 
         assert_eq!(
             self.aux_info.num_variables,
@@ -307,7 +307,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
 
     // TODO: This seems expensive. Is there a better way to covert poly into its ext fields?
     pub fn to_ext_field(&self) -> VirtualPolynomial<E> {
-        let timer = start_timer!(|| "convert VP to ext field");
+        let timer = start_timer!("convert VP to ext field");
         let products = self.products.iter().map(|(f, v)| (*f, v.clone())).collect();
 
         let mut flattened_ml_extensions = vec![];
@@ -336,7 +336,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
 pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
     assert_eq!(x.len(), y.len(), "x and y have different length");
 
-    let start = start_timer!(|| "eq_eval");
+    let start = start_timer!("eq_eval");
     let mut res = F::ONE;
     for (&xi, &yi) in x.iter().zip(y.iter()) {
         let xi_yi = xi * yi;

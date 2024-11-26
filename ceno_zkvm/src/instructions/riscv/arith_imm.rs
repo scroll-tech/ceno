@@ -34,9 +34,9 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new(|| "imm", circuit_builder)?;
-        let rd_written = rs1_read.add(|| "rs1_read + imm", circuit_builder, &imm, true)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let imm = UInt::new("imm", circuit_builder)?;
+        let rd_written = rs1_read.add("rs1_read + imm", circuit_builder, &imm, true)?;
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -97,16 +97,13 @@ mod test {
 
     #[test]
     fn test_opcode_addi() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "addi",
-                |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace("addi", |cb| {
+                let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -130,16 +127,13 @@ mod test {
 
     #[test]
     fn test_opcode_addi_sub() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "addi",
-                |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace("addi", |cb| {
+                let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 

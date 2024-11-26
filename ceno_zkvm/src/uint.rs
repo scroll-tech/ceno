@@ -66,33 +66,33 @@ pub struct UIntLimbs<const M: usize, const C: usize, E: ExtensionField> {
 }
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
-    pub fn new<NR: Into<String>, N: FnOnce() -> NR>(
-        name_fn: N,
+    pub fn new<Name: Into<String>>(
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        Self::new_maybe_unchecked(name_fn, circuit_builder, true)
+        Self::new_maybe_unchecked(name, circuit_builder, true)
     }
 
-    pub fn new_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
-        name_fn: N,
+    pub fn new_unchecked<Name: Into<String>>(
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        Self::new_maybe_unchecked(name_fn, circuit_builder, false)
+        Self::new_maybe_unchecked(name, circuit_builder, false)
     }
 
-    fn new_maybe_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
-        name_fn: N,
+    fn new_maybe_unchecked<Name: Into<String>>(
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         is_check: bool,
     ) -> Result<Self, ZKVMError> {
-        circuit_builder.namespace(name_fn, |cb| {
+        circuit_builder.namespace(name, |cb| {
             Ok(UIntLimbs {
                 limbs: UintLimb::WitIn(
                     (0..Self::NUM_LIMBS)
                         .map(|i| {
-                            let w = cb.create_witin(|| format!("limb_{i}"));
+                            let w = cb.create_witin(format!("limb_{i}"));
                             if is_check {
-                                cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                                cb.assert_ux::<_, C>(format!("limb_{i}_in_{C}"), w.expr())?;
                             }
                             // skip range check
                             Ok(w)
@@ -162,12 +162,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         assert_eq!(expr_limbs.len(), Self::NUM_LIMBS);
         let limbs = (0..Self::NUM_LIMBS)
             .map(|i| {
-                let w = circuit_builder.create_witin(|| "wit for limb");
+                let w = circuit_builder.create_witin("wit for limb");
                 circuit_builder
-                    .assert_ux::<_, _, C>(|| "range check", w.expr())
+                    .assert_ux::<_, C>("range check", w.expr())
                     .unwrap();
                 circuit_builder
-                    .require_zero(|| "create_witin_from_expr", w.expr() - &expr_limbs[i])
+                    .require_zero("create_witin_from_expr", w.expr() - &expr_limbs[i])
                     .unwrap();
                 w
             })
@@ -321,8 +321,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .flat_map(|large_limb| {
                 let limbs = (0..k)
                     .map(|_| {
-                        let w = circuit_builder.create_witin(|| "");
-                        circuit_builder.assert_byte(|| "", w.expr()).unwrap();
+                        let w = circuit_builder.create_witin("");
+                        circuit_builder.assert_byte("", w.expr()).unwrap();
                         w.expr()
                     })
                     .collect_vec();
@@ -334,7 +334,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .unwrap();
 
                 circuit_builder
-                    .require_zero(|| "zero check", large_limb.expr() - combined_limb)
+                    .require_zero("zero check", large_limb.expr() - combined_limb)
                     .unwrap();
                 limbs
             })
@@ -357,18 +357,18 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     /// If current limbs are Expression, this function will create witIn and replace the limbs
-    pub fn replace_limbs_with_witin<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn replace_limbs_with_witin<Name: Into<String>>(
         &mut self,
-        name_fn: N,
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<(), ZKVMError> {
         if let UintLimb::Expression(_) = self.limbs {
-            circuit_builder.namespace(name_fn, |cb| {
+            circuit_builder.namespace(name, |cb| {
                 self.limbs = UintLimb::WitIn(
                     (0..Self::NUM_LIMBS)
                         .map(|i| {
-                            let w = cb.create_witin(|| format!("limb_{i}"));
-                            cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                            let w = cb.create_witin(format!("limb_{i}"));
+                            cb.assert_ux::<_, C>(format!("limb_{i}_in_{C}"), w.expr())?;
                             Ok(w)
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
@@ -380,15 +380,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     // Create witIn for carries
-    fn alloc_carry_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
+    fn alloc_carry_unchecked<Name: Into<String>>(
         &mut self,
-        name_fn: N,
+        name: Name,
         circuit_builder: &mut CircuitBuilder<E>,
         with_overflow: bool,
         num_carries: usize,
     ) -> Result<(), ZKVMError> {
         if self.carries.is_none() {
-            circuit_builder.namespace(name_fn, |cb| {
+            circuit_builder.namespace(name, |cb| {
                 let carries_len = if with_overflow {
                     num_carries
                 } else {
@@ -397,7 +397,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 self.carries = Some(
                     (0..carries_len)
                         .map(|i| {
-                            let c = cb.create_witin(|| format!("carry_{i}"));
+                            let c = cb.create_witin(format!("carry_{i}"));
                             Ok(c)
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,

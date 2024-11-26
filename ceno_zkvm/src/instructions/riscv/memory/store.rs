@@ -63,11 +63,11 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?; // unsigned 32-bit value
+        let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
         // Memory initialization is not guaranteed to contain u32. Range-check it here.
-        let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
-        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
+        let prev_memory_value = UInt::new("prev_memory_value", circuit_builder)?;
+        let imm = circuit_builder.create_witin("imm"); // signed 12-bit value
 
         let memory_addr = match I::INST_KIND {
             InsnKind::SW => MemAddr::construct_align4(circuit_builder),
@@ -85,7 +85,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             );
         }
         circuit_builder.require_equal(
-            || "memory_addr = rs1_read + imm",
+            "memory_addr = rs1_read + imm",
             memory_addr.expr_unaligned(),
             rs1_read.value() + imm.expr(),
         )?;

@@ -29,15 +29,15 @@ impl OpTableConfig {
         table_len: usize,
     ) -> Result<Self, ZKVMError> {
         let abc = [
-            cb.create_fixed(|| "a")?,
-            cb.create_fixed(|| "b")?,
-            cb.create_fixed(|| "c")?,
+            cb.create_fixed("a")?,
+            cb.create_fixed("b")?,
+            cb.create_fixed("c")?,
         ];
-        let mlt = cb.create_witin(|| "mlt");
+        let mlt = cb.create_witin("mlt");
 
         let record_exprs = abc.into_iter().map(|f| Expression::Fixed(f)).collect_vec();
 
-        cb.lk_table_record(|| "record", table_len, rom_type, record_exprs, mlt.expr())?;
+        cb.lk_table_record("record", table_len, rom_type, record_exprs, mlt.expr())?;
 
         Ok(Self { abc, mlt })
     }

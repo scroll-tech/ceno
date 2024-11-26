@@ -154,9 +154,9 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Verifier query phase");
+    let timer = start_timer!("Verifier query phase");
 
-    let encode_timer = start_timer!(|| "Encode final codeword");
+    let encode_timer = start_timer!("Encode final codeword");
     let mut message = final_message.to_vec();
     interpolate_over_boolean_hypercube(&mut message);
     if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
@@ -184,7 +184,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     );
     end_timer!(queries_timer);
 
-    let final_timer = start_timer!(|| "Final checks");
+    let final_timer = start_timer!("Final checks");
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
 
     // The sum-check part of the protocol
@@ -227,8 +227,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Verifier batch query phase");
-    let encode_timer = start_timer!(|| "Encode final codeword");
+    let timer = start_timer!("Verifier batch query phase");
+    let encode_timer = start_timer!("Encode final codeword");
     let mut message = final_message.to_vec();
     if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
         reverse_index_bits_in_place(&mut message);
@@ -261,7 +261,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     end_timer!(queries_timer);
 
     #[allow(unused)]
-    let final_timer = start_timer!(|| "Final checks");
+    let final_timer = start_timer!("Final checks");
     assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
 
     // The sum-check part of the protocol
@@ -303,9 +303,9 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Verifier query phase");
+    let timer = start_timer!("Verifier query phase");
 
-    let encode_timer = start_timer!(|| "Encode final codeword");
+    let encode_timer = start_timer!("Encode final codeword");
     let mut message = final_message.to_vec();
     if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
         reverse_index_bits_in_place(&mut message);
@@ -336,7 +336,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     );
     end_timer!(queries_timer);
 
-    let final_timer = start_timer!(|| "Final checks");
+    let final_timer = start_timer!("Final checks");
     assert_eq!(
         &inner_product(batch_coeffs, evals),
         &degree_2_zero_plus_one(&sum_check_messages[0])
@@ -643,7 +643,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
-        // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
+        // let timer = start_timer!("CodewordSingleQuery::Check Merkle Path");
         match self.query.codepoints {
             CodewordPointPair::Ext(left, right) => {
                 self.merkle_path
@@ -792,7 +792,7 @@ where
     }
 
     fn check_merkle_paths(&self, roots: &[Digest<E::BaseField>]) {
-        // let timer = start_timer!(|| "ListQuery::Check Merkle Path");
+        // let timer = start_timer!("ListQuery::Check Merkle Path");
         self.get_inner()
             .iter()
             .zip(roots.iter())
@@ -859,7 +859,7 @@ where
         comm: &BasefoldCommitment<E>,
         index: usize,
     ) {
-        // let timer = start_timer!(|| "Checking codeword single query");
+        // let timer = start_timer!("Checking codeword single query");
         self.oracle_query.check_merkle_paths(roots);
         self.commitment_query
             .check_merkle_path(&Digest(comm.root().0));
@@ -1180,7 +1180,7 @@ where
         comms: &[&BasefoldCommitment<E>],
         coeffs: &[E],
     ) {
-        let timer = start_timer!(|| "BatchedQueriesResult::check");
+        let timer = start_timer!("BatchedQueriesResult::check");
         self.inner.par_iter().zip(indices.par_iter()).for_each(
             |((index, query), index_in_proof)| {
                 assert_eq!(index, index_in_proof);
@@ -1259,7 +1259,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
-        // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
+        // let timer = start_timer!("CodewordSingleQuery::Check Merkle Path");
         match &self.query.leaves {
             SimpleBatchLeavesPair::Ext(inner) => {
                 self.merkle_path.authenticate_batch_leaves_root_ext(

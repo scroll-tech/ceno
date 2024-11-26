@@ -74,10 +74,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
-        cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
-        )
+        cb.namespace(Self::name(), |cb| Self::TableConfig::construct_circuit(cb))
     }
 
     fn generate_fixed_traces(
@@ -121,10 +118,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
-        cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
-        )
+        cb.namespace(Self::name(), |cb| Self::TableConfig::construct_circuit(cb))
     }
 
     fn generate_fixed_traces(
@@ -193,10 +187,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
-        cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
-        )
+        cb.namespace(Self::name(), |cb| Self::TableConfig::construct_circuit(cb))
     }
 
     fn generate_fixed_traces(

@@ -47,12 +47,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
+        let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
 
         let lt = IsLtConfig::construct_circuit(
             circuit_builder,
-            || "rs1 < rs2",
+            "rs1 < rs2",
             rs1_read.value(),
             rs2_read.value(),
             UINT_LIMBS,
@@ -117,16 +117,13 @@ mod test {
     };
 
     fn verify(name: &'static str, rs1: Word, rs2: Word, rd: Word) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || format!("SLTU/{name}"),
-                |cb| {
-                    let config = SltuInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
+            .namespace(format!("SLTU/{name}"), |cb| {
+                let config = SltuInstruction::construct_circuit(cb);
+                Ok(config)
+            })
             .unwrap()
             .unwrap();
 
@@ -150,7 +147,7 @@ mod test {
 
         config
             .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
+            .require_equal("assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));

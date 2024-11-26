@@ -109,7 +109,7 @@ impl<E: ExtensionField> DummyConfig<E> {
 
         // Registers
         let rs1 = if with_rs1 {
-            let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
+            let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?;
             let rs1_op =
                 ReadRS1::construct_circuit(circuit_builder, rs1_read.register_expr(), vm_state.ts)?;
             Some((rs1_op, rs1_read))
@@ -118,7 +118,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         };
 
         let rs2 = if with_rs2 {
-            let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
+            let rs2_read = UInt::new_unchecked("rs2_read", circuit_builder)?;
             let rs2_op =
                 ReadRS2::construct_circuit(circuit_builder, rs2_read.register_expr(), vm_state.ts)?;
             Some((rs2_op, rs2_read))
@@ -127,7 +127,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         };
 
         let rd = if with_rd {
-            let rd_written = UInt::new_unchecked(|| "rd_written", circuit_builder)?;
+            let rd_written = UInt::new_unchecked("rd_written", circuit_builder)?;
             let rd_op = WriteRD::construct_circuit(
                 circuit_builder,
                 rd_written.register_expr(),
@@ -141,9 +141,9 @@ impl<E: ExtensionField> DummyConfig<E> {
         // Memory
         let mem_addr_val = if with_mem_read || with_mem_write {
             Some([
-                circuit_builder.create_witin(|| "mem_addr"),
-                circuit_builder.create_witin(|| "mem_before"),
-                circuit_builder.create_witin(|| "mem_after"),
+                circuit_builder.create_witin("mem_addr"),
+                circuit_builder.create_witin("mem_before"),
+                circuit_builder.create_witin("mem_after"),
             ])
         } else {
             None
@@ -189,7 +189,7 @@ impl<E: ExtensionField> DummyConfig<E> {
             _ => None,
         };
 
-        let imm = circuit_builder.create_witin(|| "imm");
+        let imm = circuit_builder.create_witin("imm");
 
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),

@@ -33,8 +33,8 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
          -> Result<Vec<WitIn>, ZKVMError> {
             (0..num_bytes)
                 .map(|i| {
-                    let byte = cb.create_witin(|| format!("{}.le_bytes[{}]", anno, i));
-                    cb.assert_ux::<_, _, 8>(|| "byte range check", byte.expr())?;
+                    let byte = cb.create_witin(format!("{}.le_bytes[{}]", anno, i));
+                    cb.assert_ux::<_, 8>("byte range check", byte.expr())?;
 
                     Ok(byte)
                 })
@@ -49,7 +49,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
             let bytes = alloc_bytes(cb, limb_anno, num_bytes)?;
 
             cb.require_equal(
-                || format!("decompose {} into {} bytes", limb_anno, num_bytes),
+                format!("decompose {} into {} bytes", limb_anno, num_bytes),
                 limb.clone(),
                 bytes
                     .iter()
@@ -78,15 +78,15 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 // extract the least significant byte from u16 limb
                 let rs2_limb_bytes = alloc_bytes(cb, "rs2_limb[0]", 1)?;
                 let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
-                cb.assert_ux::<_, _, 8>(
-                    || "rs2_limb[0].le_bytes[1]",
+                cb.assert_ux::<_, 8>(
+                    "rs2_limb[0].le_bytes[1]",
                     u8_base_inv.expr() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
-                let expected_limb_change = cb.create_witin(|| "expected_limb_change");
+                let expected_limb_change = cb.create_witin("expected_limb_change");
                 cb.condition_require_equal(
-                    || "expected_limb_change = select(low_bits[0], rs2 - prev)",
+                    "expected_limb_change = select(low_bits[0], rs2 - prev)",
                     low_bits[0].clone(),
                     expected_limb_change.expr(),
                     (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()) << 8,
@@ -94,9 +94,9 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
-                let expected_change = cb.create_witin(|| "expected_change");
+                let expected_change = cb.create_witin("expected_change");
                 cb.condition_require_equal(
-                    || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
+                    "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
                     low_bits[1].clone(),
                     expected_change.expr(),
                     expected_limb_change.expr() << 16,
@@ -117,11 +117,11 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 let prev_limbs = prev_word.expr();
                 let rs2_limbs = rs2_word.expr();
 
-                let expected_change = cb.create_witin(|| "expected_change");
+                let expected_change = cb.create_witin("expected_change");
 
                 // alloc a new witIn to cache degree 2 expression
                 cb.condition_require_equal(
-                    || "expected_change = select(low_bits[1], 2^16*(limb_change))",
+                    "expected_change = select(low_bits[1], 2^16*(limb_change))",
                     // degree 2 expression
                     low_bits[1].clone(),
                     expected_change.expr(),

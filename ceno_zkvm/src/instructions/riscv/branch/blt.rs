@@ -35,11 +35,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<E, I> {
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<InstructionConfig<E>, ZKVMError> {
-        let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
-        let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
+        let read_rs1 = UInt::new_unchecked("rs1_limbs", circuit_builder)?;
+        let read_rs2 = UInt::new_unchecked("rs2_limbs", circuit_builder)?;
 
         let is_lt =
-            SignedLtConfig::construct_circuit(circuit_builder, || "rs1<rs2", &read_rs1, &read_rs2)?;
+            SignedLtConfig::construct_circuit(circuit_builder, "rs1<rs2", &read_rs1, &read_rs2)?;
 
         let branch_taken_bit = match I::INST_KIND {
             InsnKind::BLT => is_lt.expr(),

@@ -82,10 +82,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
+        let rs1_read = UInt::new_unchecked("rs1_read", circuit_builder)?; // unsigned 32-bit value
+        let imm = circuit_builder.create_witin("imm"); // signed 12-bit value
         // Memory initialization is not guaranteed to contain u32. Range-check it here.
-        let memory_read = UInt::new(|| "memory_read", circuit_builder)?;
+        let memory_read = UInt::new("memory_read", circuit_builder)?;
 
         let memory_addr = match I::INST_KIND {
             InsnKind::LW => MemAddr::construct_align4(circuit_builder),
@@ -95,7 +95,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         }?;
 
         circuit_builder.require_equal(
-            || "memory_addr = rs1_read + imm",
+            "memory_addr = rs1_read + imm",
             memory_addr.expr_unaligned(),
             rs1_read.value() + imm.expr(),
         )?;
@@ -106,9 +106,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         // get target limb from memory word for load instructions except LW
         let target_limb = match I::INST_KIND {
             InsnKind::LB | InsnKind::LBU | InsnKind::LH | InsnKind::LHU => {
-                let target_limb = circuit_builder.create_witin(|| "target_limb");
+                let target_limb = circuit_builder.create_witin("target_limb");
                 circuit_builder.condition_require_equal(
-                    || "target_limb = memory_value[low_bits[1]]",
+                    "target_limb = memory_value[low_bits[1]]",
                     addr_low_bits[1].clone(),
                     target_limb.expr(),
                     memory_value[1].clone(),
@@ -122,11 +122,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         // get target byte from memory word for LB and LBU
         let (target_byte_expr, target_limb_bytes) = match I::INST_KIND {
             InsnKind::LB | InsnKind::LBU => {
-                let target_byte = circuit_builder.create_u8(|| "limb.le_bytes[low_bits[0]]")?;
-                let dummy_byte = circuit_builder.create_u8(|| "limb.le_bytes[1-low_bits[0]]")?;
+                let target_byte = circuit_builder.create_u8("limb.le_bytes[low_bits[0]]")?;
+                let dummy_byte = circuit_builder.create_u8("limb.le_bytes[1-low_bits[0]]")?;
 
                 circuit_builder.condition_require_equal(
-                    || "target_byte = target_limb[low_bits[0]]",
+                    "target_byte = target_limb[low_bits[0]]",
                     addr_low_bits[0].clone(),
                     target_limb.unwrap().expr(),
                     target_byte.expr() * (1<<8) + dummy_byte.expr(), // target_byte = limb.le_bytes[1]

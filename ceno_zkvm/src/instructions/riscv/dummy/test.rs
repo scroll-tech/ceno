@@ -16,16 +16,13 @@ type BeqDummy<E> = DummyInstruction<E, BeqOp>;
 
 #[test]
 fn test_dummy_ecall() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "ecall_dummy",
-            |cb| {
-                let config = EcallDummy::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("ecall_dummy", |cb| {
+            let config = EcallDummy::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -39,16 +36,13 @@ fn test_dummy_ecall() {
 
 #[test]
 fn test_dummy_r() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "add_dummy",
-            |cb| {
-                let config = AddDummy::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("add_dummy", |cb| {
+            let config = AddDummy::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 
@@ -71,16 +65,13 @@ fn test_dummy_r() {
 
 #[test]
 fn test_dummy_b() {
-    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new("riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "beq_dummy",
-            |cb| {
-                let config = BeqDummy::construct_circuit(cb);
-                Ok(config)
-            },
-        )
+        .namespace("beq_dummy", |cb| {
+            let config = BeqDummy::construct_circuit(cb);
+            Ok(config)
+        })
         .unwrap()
         .unwrap();
 

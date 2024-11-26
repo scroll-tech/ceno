@@ -118,15 +118,15 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
         let record = InsnRecord([
-            cb.create_fixed(|| "pc")?,
-            cb.create_fixed(|| "kind")?,
-            cb.create_fixed(|| "rd")?,
-            cb.create_fixed(|| "rs1")?,
-            cb.create_fixed(|| "rs2")?,
-            cb.create_fixed(|| "imm_internal")?,
+            cb.create_fixed("pc")?,
+            cb.create_fixed("kind")?,
+            cb.create_fixed("rd")?,
+            cb.create_fixed("rs1")?,
+            cb.create_fixed("rs2")?,
+            cb.create_fixed("imm_internal")?,
         ]);
 
-        let mlt = cb.create_witin(|| "mlt");
+        let mlt = cb.create_witin("mlt");
 
         let record_exprs = record
             .as_slice()
@@ -135,7 +135,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .collect_vec();
 
         cb.lk_table_record(
-            || "prog table",
+            "prog table",
             cb.params.program_size,
             ROMType::Instruction,
             record_exprs,
