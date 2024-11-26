@@ -7,7 +7,7 @@ use crate::{
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
-    tables::{TableCircuit, padding_zero},
+    tables::TableCircuit,
     utils::i64_to_base,
     witness::RowMajorMatrix,
 };
@@ -176,7 +176,15 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             });
 
         assert_eq!(INVALID as u64, 0, "0 padding must be invalid instructions");
-        padding_zero(&mut fixed, num_fixed, Some(num_instructions));
+        fixed
+            .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
+            .skip(num_instructions)
+            .for_each(|row| {
+                for col in config.record.as_slice() {
+                    set_fixed_val!(row, *col, 0_u64.into());
+                }
+            });
 
         fixed
     }
@@ -204,7 +212,13 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        padding_zero(&mut witness, num_witin, Some(program.instructions.len()));
+        witness
+            .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
+            .skip(program.instructions.len())
+            .for_each(|row| {
+                set_val!(row, config.mlt, 0_u64);
+            });
 
         Ok(witness)
     }

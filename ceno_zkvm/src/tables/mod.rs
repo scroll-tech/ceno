@@ -2,8 +2,8 @@ use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, scheme::constants::MIN_PAR_SIZE,
     witness::RowMajorMatrix,
 };
+use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::{collections::HashMap, mem::MaybeUninit};
 mod range;
@@ -46,34 +46,25 @@ pub trait TableCircuit<E: ExtensionField> {
         table: &mut RowMajorMatrix<E::BaseField>,
         num_witin: usize,
     ) -> Result<(), ZKVMError> {
-        padding_zero(table, num_witin, None);
+        // Fill the padding with zeros, if any.
+        let num_padding_instances = table.num_padding_instances();
+        if num_padding_instances > 0 {
+            let nthreads =
+                std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+            let padding_instance = vec![MaybeUninit::new(E::BaseField::ZERO); num_witin];
+            let num_padding_instance_per_batch = if num_padding_instances > 256 {
+                num_padding_instances.div_ceil(nthreads)
+            } else {
+                num_padding_instances
+            };
+            table
+                .par_batch_iter_padding_mut(num_padding_instance_per_batch)
+                .with_min_len(MIN_PAR_SIZE)
+                .for_each(|row| {
+                    row.chunks_mut(num_witin)
+                        .for_each(|instance| instance.copy_from_slice(padding_instance.as_slice()));
+                });
+        }
         Ok(())
-    }
-}
-
-/// Fill the padding with zeros. Start after the given `num_instances`, or detect it from the table.
-pub fn padding_zero<F: SmallField>(
-    table: &mut RowMajorMatrix<F>,
-    num_cols: usize,
-    num_instances: Option<usize>,
-) {
-    // Fill the padding with zeros, if any.
-    let num_padding_instances = table.num_padding_instances();
-    if num_padding_instances > 0 {
-        let nthreads =
-            std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
-        let padding_instance = vec![MaybeUninit::new(F::ZERO); num_cols];
-        let num_padding_instance_per_batch = if num_padding_instances > 256 {
-            num_padding_instances.div_ceil(nthreads)
-        } else {
-            num_padding_instances
-        };
-        table
-            .par_batch_iter_padding_mut(num_instances, num_padding_instance_per_batch)
-            .with_min_len(MIN_PAR_SIZE)
-            .for_each(|row| {
-                row.chunks_mut(num_cols)
-                    .for_each(|instance| instance.copy_from_slice(padding_instance.as_slice()));
-            });
     }
 }
