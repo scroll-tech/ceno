@@ -97,10 +97,12 @@ impl<F: Field> RowMajorMatrix<F> {
     ) -> Vec<DenseMultilinearExtension<E>> {
         let start = Instant::now();
         let padding_row = match self.padding_strategy {
-            InstancePaddingStrategy::RepeatLast => {
+            // If asked to repeat and actually have content to repeat
+            InstancePaddingStrategy::RepeatLast if self.values.len() > 0 => {
                 self.values[self.values.len() - self.num_col..].to_vec()
             }
-            InstancePaddingStrategy::Zero => vec![F::ZERO; self.num_col],
+            // Otherwise zeros
+            _ => vec![F::ZERO; self.num_col],
         };
         let num_padding = self.num_padding_instances();
         let result = (0..self.num_col)
