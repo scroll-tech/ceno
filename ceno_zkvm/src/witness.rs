@@ -49,15 +49,35 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     padding_strategy: InstancePaddingStrategy,
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy + From<u64> + Eq> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
         // let num_total_rows = next_pow2_instance_padding(num_rows);
         // let num_padding_rows = num_total_rows - num_rows;
-        RowMajorMatrix {
+        let mut ret = RowMajorMatrix {
             values: create_uninit_vec(num_rows * num_col),
             num_col,
             padding_strategy,
-        }
+        };
+
+        let c = Self::canary();
+        ret.values.iter_mut().for_each(|v| *v = MaybeUninit::new(c));
+        ret
+    }
+
+    pub fn all_assigned(&self) -> bool {
+        let c = Self::canary();
+        self.values
+            .iter()
+            .map(|v| {
+                let v = unsafe { v.assume_init() };
+                v != c
+            })
+            .all(|ok| ok)
+    }
+
+    /// Some random value that must be overwritten.
+    fn canary() -> T {
+        T::from(8979837498374919_u64)
     }
 
     pub fn num_instances(&self) -> usize {
@@ -89,10 +109,11 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 }
 
-impl<F: Field> RowMajorMatrix<F> {
+impl<F: Field + From<u64>> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
+        assert!(self.all_assigned());
         // let start = Instant::now();
         let padding_row = match self.padding_strategy {
             InstancePaddingStrategy::RepeatLast if self.values.len() > 0 => self.values
