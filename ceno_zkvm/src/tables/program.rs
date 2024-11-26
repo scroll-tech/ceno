@@ -136,7 +136,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         cb.lk_table_record(
             || "prog table",
-            cb.params.program_size,
+            cb.params.program_size.next_power_of_two(),
             ROMType::Instruction,
             record_exprs,
             mlt.expr(),
@@ -225,25 +225,72 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 }
 
 #[cfg(test)]
-#[test]
-#[allow(clippy::identity_op)]
-fn test_decode_imm() {
-    for (i, expected) in [
-        // Example of I-type: ADDI.
-        // imm    | rs1     | funct3      | rd     | opcode
-        (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
-        // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
-        (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
-        (
-            1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
-            1 << 31,
-        ),
-        // Example of R-type with funct7: SUB.
-        // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-        (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
-    ] {
-        let imm = InsnRecord::imm_internal(&DecodedInstruction::new(i));
-        assert_eq!(imm, expected);
+mod tests {
+    use super::*;
+    use crate::{circuit_builder::ConstraintSystem, witness::LkMultiplicity};
+    use ceno_emul::encode_rv32;
+    use ff::Field;
+    use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
+
+    #[test]
+    #[allow(clippy::identity_op)]
+    fn test_decode_imm() {
+        for (i, expected) in [
+            // Example of I-type: ADDI.
+            // imm    | rs1     | funct3      | rd     | opcode
+            (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
+            // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
+            (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
+            (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
+            (
+                1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
+                1 << 31,
+            ),
+            // Example of R-type with funct7: SUB.
+            // funct7     | rs2    | rs1     | funct3      | rd     | opcode
+            (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
+        ] {
+            let imm = InsnRecord::imm_internal(&DecodedInstruction::new(i));
+            assert_eq!(imm, expected);
+        }
+    }
+
+    #[test]
+    fn test_program_padding() {
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+
+        let actual_len = 3;
+        let instructions = vec![encode_rv32(ADD, 1, 2, 3, 0); actual_len];
+        let program = Program::new(0x2000_0000, 0x2000_0000, instructions, Default::default());
+
+        let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
+
+        let check = |matrix: &RowMajorMatrix<F>| {
+            assert_eq!(
+                matrix.num_instances() + matrix.num_padding_instances(),
+                cb.params.program_size
+            );
+            for row in matrix.iter_rows().skip(actual_len) {
+                for col in row.iter() {
+                    assert_eq!(unsafe { col.assume_init() }, F::ZERO);
+                }
+            }
+        };
+
+        let fixed =
+            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cb.cs.num_fixed, &program);
+        check(&fixed);
+
+        let lkm = LkMultiplicity::default().into_finalize_result();
+
+        let witness = ProgramTableCircuit::<E>::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            &lkm,
+            &program,
+        )
+        .unwrap();
+        check(&witness);
     }
 }
