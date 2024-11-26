@@ -57,8 +57,7 @@ pub fn padding_zero<F: SmallField>(
     num_cols: usize,
     num_instances: Option<usize>,
 ) {
-    // Fill the padding with zeros, if any.
-    let num_padding_instances = table.num_padding_instances();
+    let num_padding_instances = table.num_padding_instances(num_instances);
     if num_padding_instances > 0 {
         let nthreads =
             std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));

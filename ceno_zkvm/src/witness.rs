@@ -62,8 +62,11 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         self.values.len() / self.num_col - self.num_padding_rows
     }
 
-    pub fn num_padding_instances(&self) -> usize {
+    pub fn num_padding_instances(&self, num_instances: Option<usize>) -> usize {
         self.num_padding_rows
+            + num_instances
+                .map(|ni| self.num_instances() - ni)
+                .unwrap_or(0)
     }
 
     pub fn iter_rows(&self) -> Chunks<MaybeUninit<T>> {

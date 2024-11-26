@@ -117,7 +117,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         );
 
         let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_fixed);
-        assert_eq!(init_table.num_padding_instances(), 0);
+        assert_eq!(init_table.num_padding_instances(None), 0);
 
         init_table
             .par_iter_mut()
@@ -247,7 +247,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         assert!(NVRAM::len(&self.params).is_power_of_two());
 
         let mut init_table = RowMajorMatrix::<F>::new(NVRAM::len(&self.params), num_fixed);
-        assert_eq!(init_table.num_padding_instances(), 0);
+        assert_eq!(init_table.num_padding_instances(None), 0);
 
         init_table
             .par_iter_mut()

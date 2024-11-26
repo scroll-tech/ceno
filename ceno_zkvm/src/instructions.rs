@@ -73,7 +73,7 @@ pub trait Instruction<E: ExtensionField> {
             })
             .collect::<Result<(), ZKVMError>>()?;
 
-        let num_padding_instances = raw_witin.num_padding_instances();
+        let num_padding_instances = raw_witin.num_padding_instances(None);
         if num_padding_instances > 0 {
             // Fill the padding based on strategy
 
