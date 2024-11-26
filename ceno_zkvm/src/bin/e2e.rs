@@ -44,10 +44,11 @@ struct Args {
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
 
-    /// The private input or hints. This is a raw file mapped as a memory segment.
+    /// Hints: prover-private unconstrained input.
+    /// This is a raw file mapped as a memory segment.
     /// Zero-padded to the right to the next power-of-two size.
     #[arg(long)]
-    private_input: Option<String>,
+    hints: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -101,14 +102,14 @@ fn main() {
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
 
-    tracing::info!("Loading private input file: {:?}", args.private_input);
-    let priv_io = memory_from_file(&args.private_input);
+    tracing::info!("Loading hints file: {:?}", args.hints);
+    let hints = memory_from_file(&args.hints);
     assert!(
-        priv_io.len() <= platform.private_io.iter_addresses().len(),
-        "private input must fit in {} bytes",
-        platform.private_io.len()
+        hints.len() <= platform.hints.iter_addresses().len(),
+        "hints must fit in {} bytes",
+        platform.hints.len()
     );
-    for (addr, value) in zip(platform.private_io.iter_addresses(), &priv_io) {
+    for (addr, value) in zip(platform.hints.iter_addresses(), &hints) {
         vm.init_memory(addr.into(), *value);
     }
 
@@ -267,7 +268,7 @@ fn main() {
         .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
         .collect_vec();
 
-    let priv_io_final = zip(platform.private_io.iter_addresses(), &priv_io)
+    let priv_io_final = zip(platform.hints.iter_addresses(), &hints)
         .map(|(addr, &value)| MemFinalRecord {
             addr,
             value,

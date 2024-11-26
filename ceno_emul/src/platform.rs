@@ -12,7 +12,7 @@ pub struct Platform {
     pub rom: Range<Addr>,
     pub ram: Range<Addr>,
     pub public_io: Range<Addr>,
-    pub private_io: Range<Addr>,
+    pub hints: Range<Addr>,
     pub stack_top: Addr,
     /// If true, ecall instructions are no-op instead of trap. Testing only.
     pub unsafe_ecall_nop: bool,
@@ -22,7 +22,7 @@ pub const CENO_PLATFORM: Platform = Platform {
     rom: 0x2000_0000..0x3000_0000,
     ram: 0x8000_0000..0xFFFF_0000,
     public_io: 0x3000_1000..0x3000_2000,
-    private_io: 0x4000_0000..0x5000_0000,
+    hints: 0x4000_0000..0x5000_0000,
     stack_top: 0xC0000000,
     unsafe_ecall_nop: false,
 };
@@ -42,8 +42,8 @@ impl Platform {
         self.public_io.contains(&addr)
     }
 
-    pub fn is_priv_io(&self, addr: Addr) -> bool {
-        self.private_io.contains(&addr)
+    pub fn is_hints(&self, addr: Addr) -> bool {
+        self.hints.contains(&addr)
     }
 
     /// Virtual address of a register.
@@ -66,7 +66,7 @@ impl Platform {
     // Permissions.
 
     pub fn can_read(&self, addr: Addr) -> bool {
-        self.is_rom(addr) || self.is_ram(addr) || self.is_pub_io(addr) || self.is_priv_io(addr)
+        self.is_rom(addr) || self.is_ram(addr) || self.is_pub_io(addr) || self.is_hints(addr)
     }
 
     pub fn can_write(&self, addr: Addr) -> bool {
