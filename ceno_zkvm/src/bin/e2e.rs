@@ -45,7 +45,8 @@ struct Args {
     platform: Preset,
 
     /// Hints: prover-private unconstrained input.
-    /// This is a raw file mapped as a memory segment. Zero-padded to the next power-of-two size.
+    /// This is a raw file mapped as a memory segment.
+    /// Zero-padded to the right to the next power-of-two size.
     #[arg(long)]
     hints: Option<String>,
 }
