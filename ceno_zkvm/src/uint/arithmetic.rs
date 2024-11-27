@@ -17,52 +17,53 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     fn internal_add(
         &self,
-        circuit_builder: &mut CircuitBuilder<E>,
+        cb: &mut CircuitBuilder<E>,
         addend: &Vec<Expression<E>>,
         with_overflow: bool,
     ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
-        let mut c = UIntLimbs::<M, C, E>::new_as_empty();
+        let mut c = UIntLimbs::<M, C, E>::new_unchecked(|| "outcome", cb)?;
 
         // allocate witness cells and do range checks for carries
-        c.alloc_carry_unchecked(
-            || "add_carry",
-            circuit_builder,
-            with_overflow,
-            Self::NUM_LIMBS,
-        )?;
+        c.alloc_carry_unchecked(|| "add_carry", cb, with_overflow, Self::NUM_LIMBS)?;
         let Some(carries) = &c.carries else {
             return Err(ZKVMError::CircuitError);
         };
         carries.iter().enumerate().try_for_each(|(i, carry)| {
-            circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
+            cb.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
         })?;
 
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
-        c.limbs = UintLimb::Expression(
-            (self.expr())
-                .iter()
-                .zip((*addend).iter())
-                .enumerate()
-                .map(|(i, (a, b))| {
-                    let carries = c.carries.as_ref().unwrap();
-                    let carry = if i > 0 { carries.get(i - 1) } else { None };
-                    let next_carry = carries.get(i);
+        let outcome = (self.expr())
+            .iter()
+            .zip((*addend).iter())
+            .enumerate()
+            .map(|(i, (a, b))| {
+                let carries = c.carries.as_ref().unwrap();
+                let carry = if i > 0 { carries.get(i - 1) } else { None };
+                let next_carry = carries.get(i);
 
-                    let mut limb_expr = a.clone() + b.clone();
-                    if carry.is_some() {
-                        limb_expr = limb_expr.clone() + carry.unwrap().expr();
-                    }
-                    if next_carry.is_some() {
-                        limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
-                    }
+                let mut limb_expr = a.clone() + b.clone();
+                if carry.is_some() {
+                    limb_expr = limb_expr.clone() + carry.unwrap().expr();
+                }
+                if next_carry.is_some() {
+                    limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                }
 
-                    circuit_builder
-                        .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb_expr.clone())?;
-                    Ok(limb_expr)
-                })
-                .collect::<Result<Vec<Expression<E>>, ZKVMError>>()?,
-        );
+                Ok(limb_expr)
+            })
+            .collect::<Result<Vec<Expression<E>>, ZKVMError>>()?;
+
+        let outcom_value = outcome
+            .into_iter()
+            .rev()
+            .reduce(|sum, limb| (sum << C) + limb)
+            .unwrap();
+
+        // FIXME: not working bcs
+        // when rs1 = rs2 = 0 and c.carry = 1, rd will be larger than u32::MAX and it's illegal.
+        cb.require_equal(|| "add_eq_check", c.value(), outcom_value)?;
 
         Ok(c)
     }
@@ -312,8 +313,9 @@ mod tests {
             // c = 3 + 2 * 2^16 with 0 carries
             let a = vec![1, 1, 0, 0];
             let b = vec![2, 1, 0, 0];
+            let c = vec![3, 2, 0, 0];
             let carries = vec![0; 3]; // no overflow
-            let witness_values = [a, b, carries].concat();
+            let witness_values = [a, b, c, carries].concat();
             verify::<64, 16, E>(witness_values, None, false);
         }
 
@@ -324,8 +326,9 @@ mod tests {
             // c =   1   + 3 * 2^16 with carries [1, 0, 0, 0]
             let a = vec![0xFFFF, 1, 0, 0];
             let b = vec![2, 1, 0, 0];
+            let c = vec![1, 3, 0, 0];
             let carries = vec![1, 0, 0]; // no overflow
-            let witness_values = [a, b, carries].concat();
+            let witness_values = [a, b, c, carries].concat();
             verify::<64, 16, E>(witness_values, None, false);
         }
 
@@ -336,8 +339,9 @@ mod tests {
             // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
             let a = vec![0xFFFF, 0xFFFE, 0, 0];
             let b = vec![2, 1, 0, 0];
+            let c = vec![1, 0, 1, 0];
             let carries = vec![1, 1, 0]; // no overflow
-            let witness_values = [a, b, carries].concat();
+            let witness_values = [a, b, c, carries].concat();
             verify::<64, 16, E>(witness_values, None, false);
         }
 
@@ -348,9 +352,10 @@ mod tests {
             // c = 3 + 2 * 2^16 + 0 +     1 * 2^48 with carries [0, 0, 0, 1]
             let a = vec![1, 1, 0, 0xFFFF];
             let b = vec![2, 1, 0, 2];
+            let c = vec![3, 2, 0, 1];
             let carries = vec![0, 0, 0, 1];
-            let witness_values = [a, b, carries].concat();
-            verify::<64, 16, E>(witness_values, None, false);
+            let witness_values = [a, b, c, carries].concat();
+            verify::<64, 16, E>(witness_values, None, true);
         }
 
         #[test]
@@ -360,8 +365,9 @@ mod tests {
             // c =   1   + 3 * 2^16 with carries [1]
             let a = vec![0xFFFF, 1];
             let b = vec![2, 1];
+            let c = vec![1, 3];
             let carries = vec![1]; // no overflow
-            let witness_values = [a, b, carries].concat();
+            let witness_values = [a, b, c, carries].concat();
             verify::<32, 16, E>(witness_values, None, false);
         }
 
@@ -369,11 +375,12 @@ mod tests {
         fn test_add32_5_w_carry() {
             // a = 31
             // b = 2 + 1 * 2^5
-            // c = 1 + 1 * 2^5 with carries [1, 0, 0, 0]
+            // c = 1 + 3 * 2^5 with carries [1, 0, 0, 0]
             let a = vec![31, 1, 0, 0, 0, 0, 0];
             let b = vec![2, 1, 0, 0, 0, 0, 0];
+            let c = vec![1, 3, 0, 0, 0, 0, 0];
             let carries = vec![1, 0, 0, 0, 0, 0]; // no overflow
-            let witness_values = [a, b, carries].concat();
+            let witness_values = [a, b, c, carries].concat();
             verify::<32, 5, E>(witness_values, None, false);
         }
 
@@ -383,8 +390,9 @@ mod tests {
             // const b = 2
             // c = 3 + 1 * 2^16 with 0 carries
             let a = vec![1, 1, 0, 0];
+            let c = vec![3, 1, 0, 0];
             let carries = vec![0; 3]; // no overflow
-            let witness_values = [a, carries].concat();
+            let witness_values = [a, c, carries].concat();
             verify::<64, 16, E>(witness_values, Some(2), false);
         }
 
@@ -394,8 +402,9 @@ mod tests {
             // const b =   2   +   1   * 2^16 = 65,538
             // c =   1   +   0   * 2^16 + 1 * 2^32 with carries [1, 1, 0, 0]
             let a = vec![0xFFFF, 0xFFFE, 0, 0];
+            let c = vec![1, 0, 1, 0];
             let carries = vec![1, 1, 0]; // no overflow
-            let witness_values = [a, carries].concat();
+            let witness_values = [a, c, carries].concat();
             verify::<64, 16, E>(witness_values, Some(65538), false);
         }
 
@@ -405,8 +414,9 @@ mod tests {
             // const b =   2   + 1 * 2^16 = 65,538
             // c =   1   + 3 * 2^16 with carries [1]
             let a = vec![0xFFFF, 1];
+            let c = vec![1, 3];
             let carries = vec![1]; // no overflow
-            let witness_values = [a, carries].concat();
+            let witness_values = [a, c, carries].concat();
             verify::<32, 16, E>(witness_values, Some(65538), false);
         }
 
@@ -414,10 +424,11 @@ mod tests {
         fn test_add_const32_5_w_carry() {
             // a = 31
             // const b = 2 + 1 * 2^5 = 34
-            // c = 1 + 1 * 2^5 with carries [1, 0, 0, 0]
+            // c = 1 + 3 * 2^5 with carries [1, 0, 0, 0]
             let a = vec![31, 1, 0, 0, 0, 0, 0];
+            let c = vec![1, 3, 0, 0, 0, 0, 0];
             let carries = vec![1, 0, 0, 0, 0, 0]; // no overflow
-            let witness_values = [a, carries].concat();
+            let witness_values = [a, c, carries].concat();
             verify::<32, 5, E>(witness_values, Some(34), false);
         }
 
@@ -458,9 +469,9 @@ mod tests {
                 &const_b_pre_allocated
             };
 
-            // the num of witness is 3, a, b and c_carries if it's a `add`
-            // only the num is 2 if it's a `add_const` bcs there is no `b`
-            let num_witness = if const_b.is_none() { 3 } else { 2 };
+            // the num of witness is 4, a, b, c and c_carries if it's a `add`
+            // only the num is 3 if it's a `add_const` bcs there is no `b`
+            let num_witness = if const_b.is_none() { 4 } else { 3 };
             let wit_end_idx = if overflow {
                 num_witness * single_wit_size
             } else {
@@ -479,7 +490,7 @@ mod tests {
                     if i != 0 {
                         result[i] += carries[i - 1];
                     }
-                    if !overflow && carry.is_some() {
+                    if carry.is_some() {
                         result[i] -= carry.unwrap() * pow_of_c;
                     }
                 });

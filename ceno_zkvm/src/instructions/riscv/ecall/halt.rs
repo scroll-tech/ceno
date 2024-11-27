@@ -16,6 +16,7 @@ use crate::{
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 pub struct HaltConfig {
@@ -35,14 +36,11 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let prev_x10_ts = cb.create_witin(|| "prev_x10_ts");
-        let exit_code = {
-            let exit_code = cb.query_exit_code()?;
-            [exit_code[0].expr(), exit_code[1].expr()]
-        };
+        let exit_code = cb.query_exit_code().unwrap();
 
         let ecall_cfg = EcallInstructionConfig::construct_circuit(
             cb,
-            [ECALL_HALT_OPCODE[0].into(), ECALL_HALT_OPCODE[1].into()],
+            vec![ECALL_HALT_OPCODE[0].into(), ECALL_HALT_OPCODE[1].into()],
             None,
             Some(EXIT_PC.into()),
         )?;
@@ -53,7 +51,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             E::BaseField::from(ceno_emul::Platform::reg_arg0() as u64),
             prev_x10_ts.expr(),
             ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
-            exit_code,
+            exit_code.iter().map(|e| e.expr()).collect_vec(),
         )?;
 
         Ok(HaltConfig {

@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
@@ -6,7 +7,7 @@ use crate::{
     expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     instructions::riscv::constants::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
-        UINT_LIMBS,
+        UINT_LIMBS, UInt,
     },
     structs::{ProgramParams, RAMType, ROMType},
     tables::InsnRecord,
@@ -36,12 +37,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_fixed(name_fn)
     }
 
-    pub fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], ZKVMError> {
-        Ok([
-            self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
-            self.cs
-                .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
-        ])
+    pub fn query_exit_code(&mut self) -> Result<Vec<Instance>, ZKVMError> {
+        Ok((0..UInt::<E>::NUM_LIMBS)
+            .map(|i| {
+                self.cs
+                    .query_instance(|| "exit_code", EXIT_CODE_IDX + i)
+                    .unwrap()
+            })
+            .collect_vec())
     }
 
     pub fn query_init_pc(&mut self) -> Result<Instance, ZKVMError> {
