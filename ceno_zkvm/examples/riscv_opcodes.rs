@@ -152,7 +152,7 @@ fn main() {
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    for instance_num_vars in args.start..args.end {
+    for instance_num_vars in args.start..args.start + 1 {
         println!("\n--\nEntry: {}", instance_num_vars);
         println!("instance_num_vars: {}", instance_num_vars);
         let step_loop = 1 << (instance_num_vars - 1); // 1 step in loop contribute to 2 add instance
