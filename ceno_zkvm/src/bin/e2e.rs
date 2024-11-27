@@ -62,7 +62,6 @@ fn main() {
 
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-    const PROGRAM_SIZE: usize = 1 << 14;
     type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
     // set up logger
@@ -82,20 +81,26 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    // TODO: get from program.
     let platform = match args.platform {
         Preset::Ceno => CENO_PLATFORM,
         Preset::Sp1 => Platform {
             // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
             stack_top: 0x0020_0400,
-            rom: 0x0020_0800..0x0040_0000,
-            ram: 0x0020_0000..0xFFFF_0000,
+            rom: 0x0020_0800..0x00398dd0,
+            ram: 0x0010_0000..0xFFFF_0000,
             unsafe_ecall_nop: true,
             ..CENO_PLATFORM
         },
     };
     tracing::info!("Running on platform {:?}", args.platform);
 
-    const STACK_SIZE: u32 = 256;
+    // TODO: move to Platform.
+    let _end = 0x003e2370;
+    const HEAP_SIZE: u32 = 2 * 1024 * 1024;
+    let heap_addrs = _end.._end + HEAP_SIZE;
+
+    const STACK_SIZE: u32 = 4813;
     let mut mem_padder = MemPadder::new(platform.ram.clone());
 
     tracing::info!("Loading ELF file: {}", args.elf);
@@ -118,7 +123,8 @@ fn main() {
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let program_params = ProgramParams {
         platform: platform.clone(),
-        program_size: PROGRAM_SIZE,
+        program_size: vm.program().instructions.len(),
+        static_memory_len: 1 << 24, // TODO: calculate.
         ..ProgramParams::default()
     };
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
@@ -151,7 +157,11 @@ fn main() {
             .map(|i| platform.stack_top - i * WORD_SIZE as u32)
             .map(|addr| MemInitRecord { addr, value: 0 });
 
-        let mem_init = chain!(program_addrs, stack_addrs).collect_vec();
+        let heap = heap_addrs
+            .iter_addresses()
+            .map(|addr| MemInitRecord { addr, value: 0 });
+
+        let mem_init = chain!(program_addrs, stack_addrs, heap).collect_vec();
 
         mem_padder.padded_sorted(mmu_config.static_mem_len(), mem_init)
     };
