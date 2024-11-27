@@ -73,12 +73,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             )));
         }
 
-        self.verify_proof_validity(vm_proof, transcript)
+        self.verify_proof_validity(vm_proof, num_instances, transcript)
     }
 
     fn verify_proof_validity(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
+        num_instances: usize,
         mut transcript: Transcript<E>,
     ) -> Result<bool, ZKVMError> {
         // main invariant between opcode circuits and table circuits
@@ -148,6 +149,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .circuit_vks
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
+            transcript.append_field_element(&E::BaseField::from(num_instances as u64));
             let _rand_point = self.verify_opcode_proof(
                 &name,
                 &self.vk.vp,

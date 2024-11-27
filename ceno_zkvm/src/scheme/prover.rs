@@ -150,6 +150,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 for lk_s in cs.lk_expressions_namespace_map.iter() {
                     tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
                 }
+                transcript.append_field_element(&E::BaseField::from(num_instances as u64));
                 let opcode_proof = self.create_opcode_proof(
                     circuit_name,
                     &self.pk.pp,
