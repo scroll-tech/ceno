@@ -113,7 +113,7 @@ mod tests {
     use goldilocks::{GoldilocksExt2 as E, SmallField};
 
     #[test]
-    fn test_ops_table_assign() {
+    fn test_ops_pow_table_assign() {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
