@@ -203,6 +203,13 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.assign_carries_auxiliary(instance, lkm, &value.carries, value.max_carry_value)
     }
 
+    pub fn assign(&self, instance: &mut [MaybeUninit<E::BaseField>], limb_value: &u32) {
+        if let UintLimb::WitIn(wires) = &self.limbs {
+            instance[wires[0].id as usize] =
+                MaybeUninit::new(E::BaseField::from(*limb_value as u64));
+        }
+    }
+
     pub fn assign_limbs(&self, instance: &mut [MaybeUninit<E::BaseField>], limbs_values: &[u16]) {
         assert!(
             limbs_values.len() <= Self::NUM_LIMBS,
@@ -227,14 +234,16 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         instance: &mut [MaybeUninit<E::BaseField>],
         carry_values: &[T],
     ) {
+        let carries_len = self
+            .carries
+            .as_ref()
+            .map(|carries| carries.len())
+            .unwrap_or_default();
         assert!(
-            carry_values.len()
-                <= self
-                    .carries
-                    .as_ref()
-                    .map(|carries| carries.len())
-                    .unwrap_or_default(),
-            "assign input length mismatch",
+            carry_values.len() <= carries_len,
+            "assign input length mismatch. input_len={}, NUM_CELLS={}",
+            carry_values.len(),
+            carries_len
         );
         if let Some(carries) = &self.carries {
             for (wire, carry) in carries.iter().zip(
@@ -380,7 +389,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     }
 
     // Create witIn for carries
-    fn alloc_carry_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn alloc_carry_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
@@ -520,6 +529,23 @@ impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<
                 .collect::<Vec<Expression<E>>>(),
             UintLimb::Expression(e) => e.clone(),
         }
+    }
+}
+
+impl<E: ExtensionField> UIntLimbs<32, 32, E> {
+    pub fn register_expr(&self) -> RegisterExpr<E> {
+        let u32_limbs = self.expr();
+        u32_limbs.try_into().expect("1 limb with M=32 and C=32")
+    }
+
+    /// Interpret this UInt as a memory address.
+    pub fn address_expr(&self) -> AddressExpr<E> {
+        self.value()
+    }
+
+    /// Return a value suitable for memory read/write. From [u16; 2] limbs
+    pub fn memory_expr(&self) -> MemoryExpr<E> {
+        self.value()
     }
 }
 

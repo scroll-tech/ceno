@@ -3,7 +3,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
-use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
+use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt, UInt32};
 use crate::{
     chip_handler::{
         AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
@@ -185,7 +185,7 @@ impl<E: ExtensionField> ReadRS2<E> {
 pub struct WriteRD<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
-    pub prev_value: UInt<E>,
+    pub prev_value: UInt32<E>,
     pub lt_cfg: AssertLTConfig,
 }
 
@@ -197,7 +197,7 @@ impl<E: ExtensionField> WriteRD<E> {
     ) -> Result<Self, ZKVMError> {
         let id = circuit_builder.create_witin(|| "rd_id");
         let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts");
-        let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
+        let prev_value = UInt32::new_unchecked(|| "prev_rd_value", circuit_builder)?;
         let (_, lt_cfg) = circuit_builder.register_write(
             || "write_rd",
             id,
@@ -226,10 +226,11 @@ impl<E: ExtensionField> WriteRD<E> {
         set_val!(instance, self.prev_ts, op.previous_cycle);
 
         // Register state
-        self.prev_value.assign_limbs(
-            instance,
-            Value::new_unchecked(op.value.before).as_u16_limbs(),
-        );
+        // self.prev_value.assign_limbs(
+        //     instance,
+        //     Value::new_unchecked(op.value.before).as_u16_limbs(),
+        // );
+        self.prev_value.assign(instance, &op.value.before);
 
         // Register write
         self.lt_cfg.assign_instance(

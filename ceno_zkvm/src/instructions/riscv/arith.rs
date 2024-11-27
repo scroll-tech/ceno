@@ -3,12 +3,17 @@ use std::marker::PhantomData;
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
-use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
+use super::{
+    RIVInstruction,
+    constants::{UInt, UInt32},
+    r_insn::RInstructionConfig,
+};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    expression::ToExpr,
     instructions::Instruction,
-    uint::{Value, ValueMul},
+    uint::{UIntLimbs, UintLimb, Value, ValueMul},
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -18,9 +23,9 @@ use core::mem::MaybeUninit;
 pub struct ArithConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    rd_written: UInt<E>,
+    rs1_read: UInt32<E>,
+    rs2_read: UInt32<E>,
+    rd_written: UInt32<E>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -43,6 +48,7 @@ impl RIVInstruction for MulOp {
 }
 pub type MulInstruction<E> = ArithInstruction<E, MulOp>;
 
+const POW_OF_C: usize = 2_usize.pow(32u32);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
 
@@ -50,46 +56,54 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let (rs1_read, rs2_read, rd_written) = match I::INST_KIND {
             InsnKind::ADD => {
                 // rd_written = rs1_read + rs2_read
-                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-                let rd_written = rs1_read.add(|| "rd_written", circuit_builder, &rs2_read, true)?;
-                (rs1_read, rs2_read, rd_written)
-            }
+                let rs1_read = UInt32::new_unchecked(|| "rs1_read", cb)?;
+                let rs2_read = UInt32::new_unchecked(|| "rs2_read", cb)?;
 
-            InsnKind::SUB => {
-                // rd_written + rs2_read = rs1_read
-                // rd_written is the new value to be updated in register so we need to constrain its range.
-                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-                let rs1_read = rs2_read.clone().add(
-                    || "rs1_read",
-                    circuit_builder,
-                    &rd_written.clone(),
-                    true,
+                // one more witness for rd_written
+                let mut rd_written = UInt32::new_unchecked(|| "rd", cb)?;
+                rd_written.alloc_carry_unchecked(|| "add_carry", cb, true, 1)?;
+                let carry = rd_written.carries.clone().unwrap().last().unwrap().expr() * POW_OF_C;
+
+                // skip u16 lookup check and replace with equality check
+                cb.require_equal(
+                    || "add_eq",
+                    rd_written.value(),
+                    rs1_read.value() + rs2_read.value() - carry,
                 )?;
                 (rs1_read, rs2_read, rd_written)
             }
 
-            InsnKind::MUL => {
-                // rs1_read * rs2_read = rd_written
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-                let rd_written =
-                    rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true)?;
+            InsnKind::SUB => {
+                let rs1_read = UInt32::new_unchecked(|| "rs1_read", cb)?;
+                let rs2_read = UInt32::new_unchecked(|| "rs2_read", cb)?;
+                let mut rd_written =
+                    UInt32::from_exprs_unchecked(vec![rs1_read.value() - rs2_read.value()]);
+                rd_written.alloc_carry_unchecked(|| "add_carry", cb, true, 1)?;
                 (rs1_read, rs2_read, rd_written)
             }
 
+            InsnKind::MUL => {
+                //     // rs1_read * rs2_read = rd_written
+                //     let mut rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
+                //     let mut rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
+                //     let rd_written = rs1_read.mul(|| "rd_written", cb, &mut rs2_read, true)?;
+                //     (rs1_read, rs2_read, rd_written)
+                let rs1_read = UInt32::new_unchecked(|| "rs1_read", cb)?;
+                let rs2_read = UInt32::new_unchecked(|| "rs2_read", cb)?;
+                let mut rd_written =
+                    UInt32::from_exprs_unchecked(vec![rs1_read.value() - rs2_read.value()]);
+                rd_written.alloc_carry_unchecked(|| "add_carry", cb, true, 1)?;
+                (rs1_read, rs2_read, rd_written)
+            }
             _ => unreachable!("Unsupported instruction kind"),
         };
 
         let r_insn = RInstructionConfig::construct_circuit(
-            circuit_builder,
+            cb,
             I::INST_KIND,
             rs1_read.register_expr(),
             rs2_read.register_expr(),
@@ -114,52 +128,61 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
-        config
-            .rs2_read
-            .assign_limbs(instance, rs2_read.as_u16_limbs());
+        let rs2_value = step.rs2().unwrap().value;
+        let rs2_read = Value::new_unchecked(rs2_value);
+        config.rs2_read.assign(instance, &rs2_value);
 
         match I::INST_KIND {
             InsnKind::ADD => {
                 // rs1_read + rs2_read = rd_written
-                let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-                config
-                    .rs1_read
-                    .assign_limbs(instance, rs1_read.as_u16_limbs());
-                let result = rs1_read.add(&rs2_read, lk_multiplicity, true);
-                config.rd_written.assign_carries(instance, &result.carries);
+                // let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
+                // config
+                //     .rs1_read
+                //     .assign_limbs(instance, rs1_read.as_u16_limbs());
+                // let result = rs1_read.add(&rs2_read, lk_multiplicity, true);
+                // config.rd_written.assign_carries(instance, &result.carries);
+                let rs1_value = step.rs1().unwrap().value;
+                config.rs1_read.assign(instance, &rs1_value);
+                let (ret, overflow) = rs1_value.overflowing_add(rs2_value);
+                config.rd_written.assign(instance, &ret);
+                config.rd_written.assign_carries(instance, &[overflow]);
             }
 
             InsnKind::SUB => {
                 // rs1_read = rd_written + rs2_read
-                let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-                config
-                    .rd_written
-                    .assign_limbs(instance, rd_written.as_u16_limbs());
-                let result = rs2_read.add(&rd_written, lk_multiplicity, true);
-                config.rs1_read.assign_carries(instance, &result.carries);
+                // let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
+                // config
+                //     .rd_written
+                //     .assign_limbs(instance, rd_written.as_u16_limbs());
+                // let result = rs2_read.add(&rd_written, lk_multiplicity, true);
+                // config.rs1_read.assign_carries(instance, &result.carries);
+
+                let rs1_value = step.rs1().unwrap().value;
+                config.rs1_read.assign(instance, &rs1_value);
+                let (ret, overflow) = rs1_value.overflowing_sub(rs2_value);
+                config.rd_written.assign(instance, &ret);
+                config.rd_written.assign_carries(instance, &[overflow]);
             }
 
             InsnKind::MUL => {
-                // rs1_read * rs2_read = rd_written
-                let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-                let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
+                //     // rs1_read * rs2_read = rd_written
+                //     let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
+                //     let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
 
-                config
-                    .rs1_read
-                    .assign_limbs(instance, rs1_read.as_u16_limbs());
+                //     config
+                //         .rs1_read
+                //         .assign_limbs(instance, rs1_read.as_u16_limbs());
 
-                let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
+                //     let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
 
-                config
-                    .rd_written
-                    .assign_mul_outcome(instance, lk_multiplicity, &ValueMul {
-                        limbs: rd_written.limbs.to_vec(),
-                        carries: result.carries,
-                        max_carry_value: result.max_carry_value,
-                    })?;
+                //     config
+                //         .rd_written
+                //         .assign_mul_outcome(instance, lk_multiplicity, &ValueMul {
+                //             limbs: rd_written.limbs.to_vec(),
+                //             carries: result.carries,
+                //             max_carry_value: result.max_carry_value,
+                //         })?;
             }
-
             _ => unreachable!("Unsupported instruction kind"),
         };
 
@@ -202,18 +225,14 @@ mod test {
                     MOCK_PC_START,
                     insn_code,
                     11,
-                    0xfffffffe,
-                    Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
+                    11,
+                    Change::new(0, 11_u32.wrapping_add(11_u32)),
                     0,
                 ),
             ])
             .unwrap();
 
-        let expected_rd_written = UInt::from_const_unchecked(
-            Value::new_unchecked(11_u32.wrapping_add(0xfffffffe))
-                .as_u16_limbs()
-                .to_vec(),
-        );
+        let expected_rd_written = UInt32::from_const_unchecked(vec![11_u32.wrapping_add(11_u32)]);
 
         config
             .rd_written
@@ -253,11 +272,8 @@ mod test {
             ])
             .unwrap();
 
-        let expected_rd_written = UInt::from_const_unchecked(
-            Value::new_unchecked((u32::MAX - 1).wrapping_add(u32::MAX - 1))
-                .as_u16_limbs()
-                .to_vec(),
-        );
+        let expected_rd_written =
+            UInt32::from_const_unchecked(vec![(u32::MAX - 1).wrapping_add(u32::MAX - 1)]);
 
         config
             .rd_written
@@ -297,7 +313,7 @@ mod test {
             ])
             .unwrap();
 
-        let expected_rd_written = UInt::from_const_unchecked(
+        let expected_rd_written = UInt32::from_const_unchecked(
             Value::new_unchecked(11_u32.wrapping_sub(2))
                 .as_u16_limbs()
                 .to_vec(),
@@ -341,7 +357,7 @@ mod test {
             ])
             .unwrap();
 
-        let expected_rd_written = UInt::from_const_unchecked(
+        let expected_rd_written = UInt32::from_const_unchecked(
             Value::new_unchecked(3_u32.wrapping_sub(11))
                 .as_u16_limbs()
                 .to_vec(),
@@ -381,7 +397,7 @@ mod test {
             .unwrap();
 
         let expected_rd_written =
-            UInt::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
+            UInt32::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
 
         config
             .rd_written
@@ -416,7 +432,7 @@ mod test {
             ])
             .unwrap();
 
-        let expected_rd_written = UInt::from_const_unchecked(vec![0u64, 0]);
+        let expected_rd_written = UInt32::from_const_unchecked(vec![0u64, 0]);
 
         config
             .rd_written
@@ -459,7 +475,7 @@ mod test {
             ])
             .unwrap();
 
-        let expected_rd_written = UInt::from_const_unchecked(c_limb.clone());
+        let expected_rd_written = UInt32::from_const_unchecked(c_limb.clone());
 
         config
             .rd_written

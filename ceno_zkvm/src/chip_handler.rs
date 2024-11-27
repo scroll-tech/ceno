@@ -23,8 +23,7 @@ pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
 }
 
 /// The common representation of a register value.
-/// Format: `[u16; UINT_LIMBS]`, least-significant-first.
-pub type RegisterExpr<E> = [Expression<E>; UINT_LIMBS];
+pub type RegisterExpr<E> = Vec<Expression<E>>;
 
 pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     fn register_read(
