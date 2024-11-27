@@ -26,7 +26,12 @@ use std::{
 };
 use tracing::level_filters::LevelFilter;
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_subscriber::{
+    EnvFilter, Registry,
+    filter::filter_fn,
+    fmt::{self, format::FmtSpan},
+    layer::SubscriberExt,
+};
 use transcript::Transcript;
 
 /// Prove the execution of a fixed RISC-V program.
@@ -65,20 +70,31 @@ fn main() {
     const PROGRAM_SIZE: usize = 1 << 14;
     type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
+    let mut fmt_layer = fmt::layer()
+        .compact()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_target(false)
+        .with_thread_names(false);
+    fmt_layer.set_ansi(false);
+
+    let mut filter_by_name_layer = filter_fn(|metadata| {
+        metadata.name().starts_with("commit to")
+            || [
+                "create_opcode_proof",
+                "wit_inference",
+                "tower",
+                "create_table_proof",
+                "pcs_opening",
+            ]
+            .contains(&metadata.name())
+    });
     // set up logger
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
-        )
-        .with(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::DEBUG.into())
-                .from_env_lossy(),
-        )
+        .with(fmt_layer)
+        .with(filter_by_name_layer)
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
