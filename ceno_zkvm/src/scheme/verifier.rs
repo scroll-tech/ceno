@@ -93,6 +93,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let point_eval = PointAndEval::default();
         let mut transcripts = transcript.fork(vm_proof.num_circuits());
 
+        println!("NAMES: {:?}", self.vk.circuit_vks.keys());
         for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
             println!("NAME: {}", name);
 
@@ -456,6 +457,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             c_concat.extend(ext_field_as_limbs_no_trait(c));
         }
         print_list_as_input("challenges", &c_concat);
+
+        println!("--\nWITNESSES:");
 
         // --
         // END PRINT
