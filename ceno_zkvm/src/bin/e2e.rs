@@ -97,7 +97,6 @@ fn main() {
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
 
-    // TODO: get from program.
     let platform = match args.platform {
         Preset::Ceno => CENO_PLATFORM,
         Preset::Sp1 => Platform {
@@ -125,6 +124,25 @@ fn main() {
 
     let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
 
+    let mem_init = {
+        let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
+            addr: *addr,
+            value: *value,
+        });
+
+        let stack = stack_addrs
+            .iter_addresses()
+            .map(|addr| MemInitRecord { addr, value: 0 });
+
+        let heap = heap_addrs
+            .iter_addresses()
+            .map(|addr| MemInitRecord { addr, value: 0 });
+
+        let mem_init = chain!(program_addrs, stack, heap).collect_vec();
+
+        mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
+    };
+
     tracing::info!("Loading ELF file: {}", args.elf);
     let mut vm = VMState::new(platform.clone(), program);
 
@@ -145,7 +163,7 @@ fn main() {
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: vm.program().instructions.len(),
-        static_memory_len: 1 << 24, // TODO: calculate.
+        static_memory_len: mem_init.len(),
         ..ProgramParams::default()
     };
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
@@ -163,29 +181,6 @@ fn main() {
         &prog_config,
         vm.program(),
     );
-
-    let mem_init = {
-        let program_addrs = vm
-            .program()
-            .image
-            .iter()
-            .map(|(addr, value)| MemInitRecord {
-                addr: *addr,
-                value: *value,
-            });
-
-        let stack = stack_addrs
-            .iter_addresses()
-            .map(|addr| MemInitRecord { addr, value: 0 });
-
-        let heap = heap_addrs
-            .iter_addresses()
-            .map(|addr| MemInitRecord { addr, value: 0 });
-
-        let mem_init = chain!(program_addrs, stack, heap).collect_vec();
-
-        mem_padder.padded_sorted(mmu_config.static_mem_len(), mem_init)
-    };
 
     // IO is not used in this program, but it must have a particular size at the moment.
     let io_init = mem_padder.padded_sorted(mmu_config.public_io_len(), vec![]);
