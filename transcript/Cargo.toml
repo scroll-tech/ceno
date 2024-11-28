@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "Transcript generation for Ceno"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "transcript"
+readme.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]
