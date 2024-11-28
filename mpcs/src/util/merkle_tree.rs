@@ -220,6 +220,10 @@ where
         leaf_index: usize,
     ) -> MerklePathWithoutLeafOrRoot<E> {
         assert!(leaf_index < self.leaves_size().1);
+        // The inner (i.e., the digests without leaves) have half
+        // number of bottom-layer nodes than the Merkle tree leaves.
+        // So leaves of index 2i and 2i+1 in Merkle tree corresponds
+        // to the index i in the inner.
         self.inner
             .merkle_path_without_leaf_sibling_or_root(leaf_index >> 1)
     }
