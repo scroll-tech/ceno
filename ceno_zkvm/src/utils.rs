@@ -1,3 +1,5 @@
+use std::{collections::HashMap, fmt::Display, hash::Hash};
+
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -179,4 +181,22 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
 /// get next power of 2 instance with minimal size 2
 pub fn next_pow2_instance_padding(num_instance: usize) -> usize {
     num_instance.next_power_of_two().max(2)
+}
+
+pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
+    format!(
+        "[{}]",
+        map.iter().map(|(k, v)| format!("{k}: {v}")).join(",")
+    )
+}
+
+pub fn merge_frequency_tables<K: Hash + std::cmp::Eq>(
+    lhs: HashMap<K, usize>,
+    rhs: HashMap<K, usize>,
+) -> HashMap<K, usize> {
+    let mut ret = lhs;
+    rhs.into_iter().for_each(|(key, value)| {
+        *ret.entry(key).or_insert(0) += value;
+    });
+    ret
 }
