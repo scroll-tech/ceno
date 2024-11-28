@@ -42,8 +42,41 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
         ZKVMVerifier { vk }
     }
+
+    /// Verify a trace from start to halt.
     #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
+        &self,
+        vm_proof: ZKVMProof<E, PCS>,
+        transcript: Transcript<E>,
+    ) -> Result<bool, ZKVMError> {
+        self.verify_proof_halt(vm_proof, transcript, true)
+    }
+
+    /// Verify a trace from start to optional halt.
+    pub fn verify_proof_halt(
+        &self,
+        vm_proof: ZKVMProof<E, PCS>,
+        transcript: Transcript<E>,
+        does_halt: bool,
+    ) -> Result<bool, ZKVMError> {
+        // require ecall/halt proof to exist, depending whether we expect a halt.
+        let num_instances = vm_proof
+            .opcode_proofs
+            .get(&HaltInstruction::<E>::name())
+            .map(|(_, p)| p.num_instances)
+            .unwrap_or(0);
+        if num_instances != (does_halt as usize) {
+            return Err(ZKVMError::VerifyError(format!(
+                "ecall/halt num_instances={}, expected={}",
+                num_instances, does_halt as usize
+            )));
+        }
+
+        self.verify_proof_validity(vm_proof, transcript)
+    }
+
+    fn verify_proof_validity(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: Transcript<E>,
@@ -52,21 +85,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
-
-        // require ecall/halt proof to exist
-        {
-            if let Some((_, proof)) = vm_proof.opcode_proofs.get(&HaltInstruction::<E>::name()) {
-                if proof.num_instances != 1 {
-                    return Err(ZKVMError::VerifyError(
-                        "ecall/halt num_instances != 1".into(),
-                    ));
-                }
-            } else {
-                return Err(ZKVMError::VerifyError(
-                    "ecall/halt proof does not exist".into(),
-                ));
-            }
-        }
 
         let pi_evals = &vm_proof.pi_evals;
 
@@ -99,11 +117,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
+        for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {
+            tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
         }
-        for (_, (_, proof)) in vm_proof.table_proofs.iter() {
+        for (name, (_, proof)) in vm_proof.table_proofs.iter() {
+            tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
         }
@@ -113,7 +133,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::debug!("challenges: {:?}", challenges);
+        tracing::debug!("challenges in verifier: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
@@ -520,7 +540,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 [num_vars, num_vars]
             }
             // dynamic: respect prover hint
-            SetTableAddrType::DynamicAddr => {
+            SetTableAddrType::DynamicAddr(_) => {
                 // check number of vars doesn't exceed max len defined in vk
                 // this is important to prevent address overlapping
                 assert!((1 << hint_num_vars) <= r.table_spec.len);
@@ -699,18 +719,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify dynamic address evaluation succinctly
         // TODO we can also skip their mpcs proof
         for r_table in cs.r_table_expressions.iter() {
-            match r_table.table_spec.addr_type {
+            match &r_table.table_spec.addr_type {
                 SetTableAddrType::FixedAddr => (),
-                SetTableAddrType::DynamicAddr => {
-                    let offset = r_table.table_spec.offset;
+                SetTableAddrType::DynamicAddr(spec) => {
                     let expected_eval = eval_wellform_address_vec(
-                        offset as u64,
+                        spec.offset as u64,
                         WORD_SIZE as u64,
                         &input_opening_point,
                     );
-                    if expected_eval
-                        != proof.wits_in_evals[r_table.table_spec.addr_witin_id.unwrap()]
-                    {
+                    if expected_eval != proof.wits_in_evals[spec.addr_witin_id] {
                         return Err(ZKVMError::VerifyError(
                             "dynamic addr evaluate != expected_evals".into(),
                         ));

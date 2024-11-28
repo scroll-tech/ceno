@@ -26,7 +26,7 @@ use crate::{
     structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
     util::{
         AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
-        merge_sumcheck_polys_v2,
+        merge_sumcheck_polys_v2, serial_extrapolate,
     },
 };
 
@@ -80,10 +80,12 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             })
             .collect::<Vec<_>>();
 
+        // spawn extra #(max_thread_id - 1) work threads
+        let num_worker_threads = max_thread_id - 1;
+        // whereas the main-thread be the last work thread
+        let main_thread_id = num_worker_threads;
         let scoped_fn = |s: &Scope<'a>| {
-            // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last
-            // work thread
-            for (thread_id, poly) in polys.iter_mut().enumerate().take(max_thread_id - 1) {
+            for (thread_id, poly) in polys.iter_mut().enumerate().take(num_worker_threads) {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
                     mem::take(poly),
                     extrapolation_aux.clone(),
@@ -97,11 +99,19 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     current_span.in_scope(|| {
                         let mut challenge = None;
                         let span = entered_span!("prove_rounds");
-                        for _ in 0..num_variables {
+                        for i in 0..num_variables {
                             let prover_msg = IOPProverStateV2::prove_round_and_update_state(
                                 &mut prover_state,
                                 &challenge,
                             );
+                            if thread_id < 2 {
+                                tracing::debug!(
+                                    "thread {}: sumcheck round {}/{}",
+                                    thread_id,
+                                    i + 1,
+                                    num_variables
+                                );
+                            }
                             thread_based_transcript
                                 .append_field_element_exts(&prover_msg.evaluations);
 
@@ -136,9 +146,8 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             }
 
             let mut prover_msgs = Vec::with_capacity(num_variables);
-            let thread_id = max_thread_id - 1;
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
-                mem::take(&mut polys[thread_id]),
+                mem::take(&mut polys[main_thread_id]),
                 extrapolation_aux.clone(),
             );
             let tx_prover_state = tx_prover_state.clone();
@@ -152,13 +161,13 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             for _ in 0..num_variables {
                 let prover_msg =
                     IOPProverStateV2::prove_round_and_update_state(&mut prover_state, &challenge);
-                thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
                 // for each round, we must collect #SIZE prover message
                 let mut evaluations = AdditiveVec::new(max_degree + 1);
 
                 // sum for all round poly evaluations vector
-                for _ in 0..max_thread_id {
+                evaluations += AdditiveVec(prover_msg.evaluations);
+                for _ in 0..num_worker_threads {
                     let round_poly_coeffs = thread_based_transcript.read_field_element_exts();
                     evaluations += AdditiveVec(round_poly_coeffs);
                 }
@@ -167,7 +176,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 transcript.append_field_element_exts(&evaluations.0);
 
                 let next_challenge = transcript.get_and_append_challenge(b"Internal round");
-                (0..max_thread_id).for_each(|_| {
+                (0..num_worker_threads).for_each(|_| {
                     thread_based_transcript.send_challenge(next_challenge.elements);
                 });
 
@@ -177,8 +186,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     evaluations: evaluations.0,
                 });
 
-                challenge =
-                    Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
+                challenge = Some(next_challenge);
                 thread_based_transcript.commit_rolling();
             }
             exit_span!(main_thread_span);
@@ -210,7 +218,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         }
                     });
                 tx_prover_state
-                    .send(Some((thread_id, prover_state)))
+                    .send(Some((main_thread_id, prover_state)))
                     .unwrap();
             } else {
                 tx_prover_state.send(None).unwrap();
@@ -555,11 +563,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
                 let span = entered_span!("extrapolation");
                 let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
-                    .into_par_iter()
                     .map(|i| {
                         let (points, weights) = &self.extrapolation_aux[products.len() - 1];
                         let at = E::from((products.len() + 1 + i) as u64);
-                        extrapolate(points, weights, &sum, &at)
+                        serial_extrapolate(points, weights, &sum, &at)
                     })
                     .collect::<Vec<_>>();
                 sum.extend(extrapolation);
