@@ -1,5 +1,9 @@
 [package]
+categories.workspace = true
+description = "Build scripts for ceno examples"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "ceno-examples"
+repository.workspace = true
 version.workspace = true
