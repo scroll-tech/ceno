@@ -2,6 +2,7 @@ use std::mem::MaybeUninit;
 
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
+use multilinear_extensions::util::max_usable_threads;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -47,8 +48,7 @@ pub trait Instruction<E: ExtensionField> {
         num_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
-        let nthreads =
-            std::env::var("RAYON_NUM_THREADS").map_or(8, |s| s.parse::<usize>().unwrap_or(8));
+        let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
         } else {
@@ -79,6 +79,10 @@ pub trait Instruction<E: ExtensionField> {
 
             let padding_instance = match Self::padding_strategy() {
                 InstancePaddingStrategy::Zero => {
+                    vec![MaybeUninit::new(E::BaseField::ZERO); num_witin]
+                }
+                InstancePaddingStrategy::RepeatLast if steps.is_empty() => {
+                    tracing::debug!("No {} steps to repeat, using zero padding", Self::name());
                     vec![MaybeUninit::new(E::BaseField::ZERO); num_witin]
                 }
                 InstancePaddingStrategy::RepeatLast => raw_witin[steps.len() - 1].to_vec(),

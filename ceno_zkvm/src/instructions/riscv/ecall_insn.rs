@@ -10,7 +10,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, InsnKind::EANY, PC_STEP_SIZE, StepRecord, Tracer};
+use ceno_emul::{InsnKind::EANY, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
@@ -51,7 +51,7 @@ impl EcallInstructionConfig {
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(
             || "write x5",
-            E::BaseField::from(CENO_PLATFORM.reg_ecall() as u64),
+            E::BaseField::from(Platform::reg_ecall() as u64),
             prev_x5_ts.expr(),
             ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),

@@ -38,11 +38,7 @@ sanity-check = []
 
 [[bench]]
 harness = false
-name = "commit_open_verify_rs"
-
-[[bench]]
-harness = false
-name = "commit_open_verify_basecode"
+name = "basefold"
 
 [[bench]]
 harness = false

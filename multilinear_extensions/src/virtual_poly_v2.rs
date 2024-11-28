@@ -63,12 +63,6 @@ pub struct VPAuxInfo<E> {
     pub phantom: PhantomData<E>,
 }
 
-impl<E: ExtensionField> AsRef<[u8]> for VPAuxInfo<E> {
-    fn as_ref(&self) -> &[u8] {
-        todo!()
-    }
-}
-
 impl<'a, E: ExtensionField> VirtualPolynomialV2<'a, E> {
     /// Creates an empty virtual polynomial with `max_num_variables`.
     pub fn new(max_num_variables: usize) -> Self {
