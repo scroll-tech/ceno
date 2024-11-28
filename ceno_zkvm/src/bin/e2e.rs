@@ -187,7 +187,8 @@ fn main() {
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
 
-    tracing::info!("Proving {} execution steps", all_records.len());
+    let cycle_num = all_records.len();
+    tracing::info!("Proving {} execution steps", cycle_num);
     for (i, step) in enumerate(&all_records).rev().take(5).rev() {
         tracing::trace!("Step {i}: {:?} - {:?}\n", step.insn().codes().kind, step);
     }
@@ -306,10 +307,22 @@ fn main() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
+    let proving_time = timer.elapsed().as_secs_f64();
+    let e2e_time = e2e_start.elapsed().as_secs_f64();
+    let witgen_time = e2e_time - proving_time;
     println!(
-        "fibonacci create_proof, time = {}, e2e = {:?}",
-        timer.elapsed().as_secs_f64(),
-        e2e_start.elapsed(),
+        "Proving finished.\n\
+\tProving time = {:.3}s, freq = {:.3}khz\n\
+\tWitgen  time = {:.3}s, freq = {:.3}khz\n\
+\tTotal   time = {:.3}s, freq = {:.3}khz\n\
+\tthread num: {}",
+        proving_time,
+        cycle_num as f64 / proving_time / 1000.0,
+        witgen_time,
+        cycle_num as f64 / witgen_time / 1000.0,
+        e2e_time,
+        cycle_num as f64 / e2e_time / 1000.0,
+        rayon::current_num_threads()
     );
 
     let transcript = Transcript::new(b"riscv");
