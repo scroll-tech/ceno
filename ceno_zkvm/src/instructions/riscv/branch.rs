@@ -25,22 +25,22 @@ pub struct BltuOp;
 impl RIVInstruction for BltuOp {
     const INST_KIND: InsnKind = InsnKind::BLTU;
 }
-pub type BltuInstruction = bltu::BltuCircuit<BltuOp>;
+pub type BltuInstruction<E> = bltu::BltuCircuit<E, BltuOp>;
 
 pub struct BgeuOp;
 impl RIVInstruction for BgeuOp {
     const INST_KIND: InsnKind = InsnKind::BGEU;
 }
-pub type BgeuInstruction = bltu::BltuCircuit<BgeuOp>;
+pub type BgeuInstruction<E> = bltu::BltuCircuit<E, BgeuOp>;
 
 pub struct BltOp;
 impl RIVInstruction for BltOp {
     const INST_KIND: InsnKind = InsnKind::BLT;
 }
-pub type BltInstruction = blt::BltCircuit<BltOp>;
+pub type BltInstruction<E> = blt::BltCircuit<E, BltOp>;
 
 pub struct BgeOp;
 impl RIVInstruction for BgeOp {
     const INST_KIND: InsnKind = InsnKind::BGE;
 }
-pub type BgeInstruction = blt::BltCircuit<BgeOp>;
+pub type BgeInstruction<E> = blt::BltCircuit<E, BgeOp>;

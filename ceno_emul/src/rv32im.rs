@@ -15,6 +15,8 @@
 // limitations under the License.
 
 use anyhow::{Result, anyhow};
+use itertools::enumerate;
+use num_derive::ToPrimitive;
 use std::sync::OnceLock;
 use strum_macros::EnumIter;
 
@@ -111,7 +113,7 @@ pub struct DecodedInstruction {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum InsnCategory {
+pub enum InsnCategory {
     Compute,
     Branch,
     Load,
@@ -132,7 +134,7 @@ pub enum InsnFormat {
 }
 use InsnFormat::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, EnumIter)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter, ToPrimitive)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {
     INVALID,
@@ -196,7 +198,7 @@ impl InsnKind {
 pub struct InsnCodes {
     pub format: InsnFormat,
     pub kind: InsnKind,
-    category: InsnCategory,
+    pub category: InsnCategory,
     pub(crate) opcode: u32,
     pub(crate) func3: u32,
     pub(crate) func7: u32,
@@ -402,7 +404,7 @@ struct FastDecodeTable {
 impl FastDecodeTable {
     fn new() -> Self {
         let mut table: FastInstructionTable = [0; 1 << 10];
-        for (isa_idx, insn) in RV32IM_ISA.iter().enumerate() {
+        for (isa_idx, insn) in enumerate(&RV32IM_ISA) {
             Self::add_insn(&mut table, insn, isa_idx);
         }
         Self { table }
