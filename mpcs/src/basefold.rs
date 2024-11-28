@@ -1192,7 +1192,7 @@ mod test {
 
     #[test]
     fn commit_open_verify_goldilocks() {
-        for base in [true, false].into_iter() {
+        for base in [true, false] {
             // Challenge is over extension field, poly over the base field
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(base, 10, 11);
             // Test trivial proof with small num vars
@@ -1206,7 +1206,7 @@ mod test {
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks() {
-        for base in [true, false].into_iter() {
+        for base in [true, false] {
             // Both challenge and poly are over base field
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
                 base, 10, 11, 1,
@@ -1234,10 +1234,10 @@ mod test {
 
     #[test]
     fn batch_commit_open_verify() {
-        for base in [true, false].iter() {
+        for base in [true, false] {
             // Both challenge and poly are over base field
-            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(*base, 10, 11);
-            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(*base, 10, 11);
+            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(base, 10, 11);
+            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(base, 10, 11);
         }
     }
 }
