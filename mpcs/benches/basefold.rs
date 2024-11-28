@@ -201,11 +201,7 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                 &mut transcript,
             );
 
-            let values: Vec<E> = evals
-                .iter()
-                .map(Evaluation::value)
-                .copied()
-                .collect::<Vec<E>>();
+            let values: Vec<E> = evals.iter().map(Evaluation::value).copied().collect();
             transcript.append_field_element_exts(values.as_slice());
 
             let backup_transcript = transcript.clone();
