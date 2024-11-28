@@ -1,13 +1,13 @@
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use std::cmp::Ordering;
+use itertools::{Itertools, chain, iproduct};
 
 use super::Expression;
 use Expression::*;
+use std::iter::Sum;
 
 impl<E: ExtensionField> Expression<E> {
     pub(super) fn to_monomial_form_inner(&self) -> Self {
-        Self::sum_terms(Self::combine(self.distribute()))
+        Self::combine(self.distribute()).into_iter().sum()
     }
 
     fn distribute(&self) -> Vec<Term<E>> {
@@ -26,64 +26,47 @@ impl<E: ExtensionField> Expression<E> {
                 }]
             }
 
-            Sum(a, b) => {
-                let mut res = a.distribute();
-                res.extend(b.distribute());
-                res
-            }
+            Sum(a, b) => chain!(a.distribute(), b.distribute()).collect(),
 
-            Product(a, b) => {
-                let a = a.distribute();
-                let b = b.distribute();
-                let mut res = vec![];
-                for a in a {
-                    for b in &b {
-                        res.push(Term {
-                            coeff: &a.coeff * &b.coeff,
-                            vars: a.vars.iter().chain(b.vars.iter()).cloned().collect(),
-                        });
-                    }
-                }
-                res
-            }
+            Product(a, b) => iproduct!(a.distribute(), b.distribute())
+                .map(|(a, b)| Term {
+                    coeff: &a.coeff * &b.coeff,
+                    vars: chain!(&a.vars, &b.vars).cloned().collect(),
+                })
+                .collect(),
 
-            ScaledSum(x, a, b) => {
-                let x = x.distribute();
-                let a = a.distribute();
-                let mut res = b.distribute();
-                for x in x {
-                    for a in &a {
-                        res.push(Term {
-                            coeff: &x.coeff * &a.coeff,
-                            vars: x.vars.iter().chain(a.vars.iter()).cloned().collect(),
-                        });
-                    }
-                }
-                res
-            }
+            ScaledSum(x, a, b) => chain!(
+                b.distribute(),
+                iproduct!(x.distribute(), a.distribute()).map(|(x, a)| Term {
+                    coeff: &x.coeff * &a.coeff,
+                    vars: chain!(&x.vars, &a.vars).cloned().collect(),
+                })
+            )
+            .collect(),
         }
     }
 
-    fn combine(terms: Vec<Term<E>>) -> Vec<Term<E>> {
-        let mut res: Vec<Term<E>> = vec![];
-        for mut term in terms {
-            term.vars.sort();
-
-            if let Some(res_term) = res.iter_mut().find(|res_term| res_term.vars == term.vars) {
-                res_term.coeff = res_term.coeff.clone() + term.coeff.clone();
-            } else {
-                res.push(term);
-            }
+    fn combine(mut terms: Vec<Term<E>>) -> Vec<Term<E>> {
+        for Term { vars, .. } in &mut terms {
+            vars.sort();
         }
-        res
-    }
-
-    fn sum_terms(terms: Vec<Term<E>>) -> Self {
         terms
             .into_iter()
-            .map(|term| term.vars.into_iter().fold(term.coeff, |a, b| a * b))
-            .reduce(|a, b| a + b)
-            .unwrap_or(Expression::ZERO)
+            .map(|Term { coeff, vars }| (vars, coeff))
+            .into_group_map()
+            .into_iter()
+            .map(|(vars, coeffs)| Term {
+                coeff: coeffs.into_iter().sum(),
+                vars,
+            })
+            .collect()
+    }
+}
+
+impl<E: ExtensionField> Sum<Term<E>> for Expression<E> {
+    fn sum<I: Iterator<Item = Term<E>>>(iter: I) -> Self {
+        iter.map(|term| term.coeff * term.vars.into_iter().product::<Expression<_>>())
+            .sum()
     }
 }
 
@@ -91,55 +74,6 @@ impl<E: ExtensionField> Expression<E> {
 struct Term<E: ExtensionField> {
     coeff: Expression<E>,
     vars: Vec<Expression<E>>,
-}
-
-// Define a lexicographic order for expressions. It compares the types first, then the arguments left-to-right.
-impl<E: ExtensionField> Ord for Expression<E> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        use Ordering::*;
-
-        match (self, other) {
-            (Fixed(a), Fixed(b)) => a.cmp(b),
-            (WitIn(a), WitIn(b)) => a.cmp(b),
-            (Instance(a), Instance(b)) => a.cmp(b),
-            (Challenge(a, b, c, d), Challenge(e, f, g, h)) => {
-                let cmp = a.cmp(e);
-                if cmp == Equal {
-                    let cmp = b.cmp(f);
-                    if cmp == Equal {
-                        let cmp = cmp_ext(c, g);
-                        if cmp == Equal { cmp_ext(d, h) } else { cmp }
-                    } else {
-                        cmp
-                    }
-                } else {
-                    cmp
-                }
-            }
-            (Fixed(_), _) => Less,
-            (Instance(_), Fixed(_)) => Greater,
-            (Instance(_), _) => Less,
-            (WitIn(_), Fixed(_)) => Greater,
-            (WitIn(_), Instance(_)) => Greater,
-            (WitIn(_), _) => Less,
-            (Challenge(..), Fixed(_)) => Greater,
-            (Challenge(..), Instance(_)) => Greater,
-            (Challenge(..), WitIn(_)) => Greater,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<E: ExtensionField> PartialOrd for Expression<E> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-fn cmp_ext<E: ExtensionField>(a: &E, b: &E) -> Ordering {
-    let a = a.as_bases().iter().map(|f| f.to_canonical_u64());
-    let b = b.as_bases().iter().map(|f| f.to_canonical_u64());
-    a.cmp(b)
 }
 
 #[cfg(test)]
