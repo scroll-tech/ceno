@@ -361,8 +361,6 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
 // unfortunately integration benchmarks do not compile the #[cfg(test)]
 // code. So remove the gate for the entire module, only gate the test
 // functions.
-// TODO(Matthias): use cfg(or(test, bench)) or something like that.
-//
 // This is not the best way: the test utility functions should not be
 // compiled in the release build. Need a better solution.
 #[doc(hidden)]
