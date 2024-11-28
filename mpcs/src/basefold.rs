@@ -1179,8 +1179,8 @@ mod test {
     use crate::{
         basefold::Basefold,
         test_util::{
-            run_batch_commit_open_verify, run_commit_open_verify,
-            run_simple_batch_commit_open_verify,
+            gen_rand_poly_base, gen_rand_poly_ext, run_batch_commit_open_verify,
+            run_commit_open_verify, run_simple_batch_commit_open_verify,
         },
     };
     use goldilocks::GoldilocksExt2;
@@ -1191,108 +1191,79 @@ mod test {
     type PcsGoldilocksBaseCode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
 
     #[test]
-    fn commit_open_verify_goldilocks_basecode_base() {
-        // Challenge is over extension field, poly over the base field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 10, 11);
-        // Test trivial proof with small num vars
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 4, 6);
+    fn commit_open_verify_goldilocks() {
+        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
+            // Challenge is over extension field, poly over the base field
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(gen_rand_poly, 10, 11);
+            // Test trivial proof with small num vars
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(gen_rand_poly, 4, 6);
+            // Challenge is over extension field, poly over the base field
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 10, 11);
+            // Test trivial proof with small num vars
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 4, 6);
+        }
     }
 
     #[test]
-    fn commit_open_verify_goldilocks_rscode_base() {
-        // Challenge is over extension field, poly over the base field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11);
-        // Test trivial proof with small num vars
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 4, 6);
+    fn simple_batch_commit_open_verify_goldilocks() {
+        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+                gen_rand_poly,
+                10,
+                11,
+                1,
+            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+                gen_rand_poly,
+                10,
+                11,
+                4,
+            );
+            // Test trivial proof with small num vars
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+                gen_rand_poly,
+                4,
+                6,
+                4,
+            );
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+                gen_rand_poly,
+                10,
+                11,
+                1,
+            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+                gen_rand_poly,
+                10,
+                11,
+                4,
+            );
+            // Test trivial proof with small num vars
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+                gen_rand_poly,
+                4,
+                6,
+                4,
+            );
+        }
     }
 
     #[test]
-    fn commit_open_verify_goldilocks_basecode_2() {
-        // Both challenge and poly are over extension field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(false, 10, 11);
-        // Test trivial proof with small num vars
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(false, 4, 6);
-    }
-
-    #[test]
-    fn commit_open_verify_goldilocks_rscode_2() {
-        // Both challenge and poly are over extension field
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 10, 11);
-        // Test trivial proof with small num vars
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 4, 6);
-    }
-
-    #[test]
-    fn simple_batch_commit_open_verify_goldilocks_basecode_base() {
-        // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-            true, 10, 11, 1,
-        );
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-            true, 10, 11, 4,
-        );
-        // Test trivial proof with small num vars
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 4, 6, 4);
-    }
-
-    #[test]
-    fn simple_batch_commit_open_verify_goldilocks_rscode_base() {
-        // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 1);
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11, 4);
-        // Test trivial proof with small num vars
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 4, 6, 4);
-    }
-
-    #[test]
-    fn simple_batch_commit_open_verify_goldilocks_basecode_2() {
-        // Both challenge and poly are over extension field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-            false, 10, 11, 1,
-        );
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-            false, 10, 11, 4,
-        );
-        // Test trivial proof with small num vars
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-            false, 4, 6, 4,
-        );
-    }
-
-    #[test]
-    fn simple_batch_commit_open_verify_goldilocks_rscode_2() {
-        // Both challenge and poly are over extension field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-            false, 10, 11, 1,
-        );
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-            false, 10, 11, 4,
-        );
-        // Test trivial proof with small num vars
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 4, 6, 4);
-    }
-
-    #[test]
-    fn batch_commit_open_verify_goldilocks_basecode_base() {
-        // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(true, 10, 11);
-    }
-
-    #[test]
-    fn batch_commit_open_verify_goldilocks_rscode_base() {
-        // Both challenge and poly are over base field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(true, 10, 11);
-    }
-
-    #[test]
-    fn batch_commit_open_verify_goldilocks_basecode_2() {
-        // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(false, 10, 11);
-    }
-
-    #[test]
-    fn batch_commit_open_verify_goldilocks_rscode_2() {
-        // Both challenge and poly are over extension field
-        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(false, 10, 11);
+    fn batch_commit_open_verify() {
+        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
+            // Both challenge and poly are over base field
+            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+                gen_rand_poly,
+                10,
+                11,
+            );
+            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+                gen_rand_poly,
+                10,
+                11,
+            );
+        }
     }
 }
