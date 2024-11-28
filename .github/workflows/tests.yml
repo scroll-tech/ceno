@@ -10,7 +10,7 @@ on:
 
 jobs:
   skip_check:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
     steps:
@@ -29,7 +29,7 @@ jobs:
       (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
     name: Run Tests
     timeout-minutes: 30
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
 
     strategy:
       matrix:
