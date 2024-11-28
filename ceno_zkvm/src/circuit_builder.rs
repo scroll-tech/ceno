@@ -1,6 +1,6 @@
 use ceno_emul::Addr;
-use itertools::Itertools;
-use std::{collections::HashMap, marker::PhantomData};
+use itertools::{Itertools, chain};
+use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
@@ -10,12 +10,12 @@ use crate::{
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
-    structs::{ProvingKey, RAMType, VerifyingKey, WitnessId},
+    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
 
 /// namespace used for annotation, preserve meta info during circuit construction
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct NameSpace {
     namespace: Vec<String>,
 }
@@ -49,7 +49,7 @@ impl NameSpace {
         let mut name = String::new();
 
         let mut needs_separation = false;
-        for ns in ns.iter().chain(Some(&this).into_iter()) {
+        for ns in chain!(ns, once(&this)) {
             if needs_separation {
                 name += "/";
             }
@@ -78,14 +78,18 @@ pub struct LogupTableExpression<E: ExtensionField> {
 #[derive(Clone, Debug)]
 pub enum SetTableAddrType {
     FixedAddr,
-    DynamicAddr,
+    DynamicAddr(DynamicAddr),
+}
+
+#[derive(Clone, Debug)]
+pub struct DynamicAddr {
+    pub addr_witin_id: usize,
+    pub offset: Addr,
 }
 
 #[derive(Clone, Debug)]
 pub struct SetTableSpec {
     pub addr_type: SetTableAddrType,
-    pub addr_witin_id: Option<usize>,
-    pub offset: Addr,
     pub len: usize,
 }
 
@@ -102,6 +106,7 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
+    // pub platform: Platform,
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
 
@@ -159,6 +164,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(root_name_fn: N) -> Self {
         Self {
             num_witin: 0,
+            // platform,
             witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
@@ -492,4 +498,5 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 #[derive(Debug)]
 pub struct CircuitBuilder<'a, E: ExtensionField> {
     pub(crate) cs: &'a mut ConstraintSystem<E>,
+    pub params: ProgramParams,
 }
