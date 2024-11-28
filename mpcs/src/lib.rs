@@ -357,14 +357,25 @@ fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
     })
 }
 
-#[cfg(test)]
+// TODO: Need to use some functions here in the integration benchmarks. But
+// unfortunately integration benchmarks do not compile the #[cfg(test)]
+// code. So remove the gate for the entire module, only gate the test
+// functions.
+// This is not the best way: the test utility functions should not be
+// compiled in the release build. Need a better solution.
+#[doc(hidden)]
 pub mod test_util {
-    use crate::{Evaluation, PolynomialCommitmentScheme};
+    #[cfg(test)]
+    use crate::Evaluation;
+    use crate::PolynomialCommitmentScheme;
     use ff_ext::ExtensionField;
-    use itertools::{Itertools, chain};
+    use itertools::Itertools;
+    #[cfg(test)]
+    use itertools::chain;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
+    #[cfg(test)]
     use multilinear_extensions::{
-        mle::{DenseMultilinearExtension, MultilinearExtension},
-        virtual_poly_v2::ArcMultilinearExtension,
+        mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
     use transcript::Transcript;
@@ -377,29 +388,26 @@ pub mod test_util {
         Pcs::trim(param, poly_size).unwrap()
     }
 
-    pub fn gen_rand_poly<E: ExtensionField>(
-        num_vars: usize,
-        base: bool,
-    ) -> DenseMultilinearExtension<E> {
-        if base {
-            DenseMultilinearExtension::random(num_vars, &mut OsRng)
-        } else {
-            DenseMultilinearExtension::from_evaluations_ext_vec(
-                num_vars,
-                (0..(1 << num_vars))
-                    .map(|_| E::random(&mut OsRng))
-                    .collect_vec(),
-            )
-        }
+    pub fn gen_rand_poly_base<E: ExtensionField>(num_vars: usize) -> DenseMultilinearExtension<E> {
+        DenseMultilinearExtension::random(num_vars, &mut OsRng)
+    }
+
+    pub fn gen_rand_poly_ext<E: ExtensionField>(num_vars: usize) -> DenseMultilinearExtension<E> {
+        DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_vars,
+            (0..(1 << num_vars))
+                .map(|_| E::random(&mut OsRng))
+                .collect_vec(),
+        )
     }
 
     pub fn gen_rand_polys<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
         batch_size: usize,
-        base: bool,
+        gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
     ) -> Vec<DenseMultilinearExtension<E>> {
         (0..batch_size)
-            .map(|i| gen_rand_poly(num_vars(i), base))
+            .map(|i| gen_rand_poly(num_vars(i)))
             .collect_vec()
     }
 
@@ -432,8 +440,9 @@ pub mod test_util {
             .collect_vec()
     }
 
+    #[cfg(test)]
     pub fn run_commit_open_verify<E: ExtensionField, Pcs>(
-        base: bool,
+        gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
     ) where
@@ -445,7 +454,7 @@ pub mod test_util {
             // Commit and open
             let (comm, eval, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
-                let poly = gen_rand_poly(num_vars, base);
+                let poly = gen_rand_poly(num_vars);
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let eval = poly.evaluate(point.as_slice());
@@ -472,8 +481,9 @@ pub mod test_util {
         }
     }
 
+    #[cfg(test)]
     pub fn run_batch_commit_open_verify<E, Pcs>(
-        base: bool,
+        gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
     ) where
@@ -495,7 +505,7 @@ pub mod test_util {
 
             let (comms, evals, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
-                let polys = gen_rand_polys(|i| num_vars - (i >> 1), batch_size, base);
+                let polys = gen_rand_polys(|i| num_vars - (i >> 1), batch_size, gen_rand_poly);
 
                 let comms =
                     commit_polys_individually::<E, Pcs>(&pp, polys.as_slice(), &mut transcript);
@@ -552,8 +562,9 @@ pub mod test_util {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs>(
-        base: bool,
+        gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
         batch_size: usize,
@@ -566,7 +577,7 @@ pub mod test_util {
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = Transcript::new(b"BaseFold");
-                let polys = gen_rand_polys(|_| num_vars, batch_size, base);
+                let polys = gen_rand_polys(|_| num_vars, batch_size, gen_rand_poly);
                 let comm =
                     Pcs::batch_commit_and_write(&pp, polys.as_slice(), &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
