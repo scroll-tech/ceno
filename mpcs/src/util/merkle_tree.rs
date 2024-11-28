@@ -1,11 +1,9 @@
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use multilinear_extensions::mle::FieldType;
+use itertools::{Itertools, izip};
+use multilinear_extensions::{mle::FieldType, util::max_usable_threads};
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-    },
-    slice::ParallelSlice,
+    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    slice::{ParallelSlice, ParallelSliceMut},
 };
 
 use crate::util::{
@@ -90,16 +88,36 @@ where
     }
 
     pub fn batch_leaves(&self, coeffs: &[E]) -> Vec<E> {
-        (0..self.leaves[0].len())
-            .into_par_iter()
-            .map(|i| {
-                self.leaves
-                    .iter()
-                    .zip(coeffs.iter())
-                    .map(|(leaf, coeff)| field_type_index_ext(leaf, i) * *coeff)
-                    .sum()
-            })
-            .collect()
+        let n_threads = max_usable_threads();
+        let batch_size_per_thread = self.leaves[0].len().div_ceil(n_threads);
+        let mut output = vec![E::ZERO; self.leaves[0].len()];
+        for (leaf, coeff) in izip!(self.leaves(), coeffs) {
+            // TODO use macro to merge 2 implementation
+            match leaf {
+                FieldType::Base(vec) => {
+                    output
+                        .par_chunks_mut(batch_size_per_thread)
+                        .zip_eq(vec.par_chunks(batch_size_per_thread))
+                        .for_each(|(output, vec)| {
+                            for i in 0..output.len() {
+                                output[i] += *coeff * vec[i];
+                            }
+                        });
+                }
+                FieldType::Ext(vec) => {
+                    output
+                        .par_chunks_mut(batch_size_per_thread)
+                        .zip_eq(vec.par_chunks(batch_size_per_thread))
+                        .for_each(|(output, vec)| {
+                            for i in 0..output.len() {
+                                output[i] += vec[i] * coeff;
+                            }
+                        });
+                }
+                FieldType::Unreachable => todo!(),
+            }
+        }
+        output
     }
 
     pub fn size(&self) -> (usize, usize) {
