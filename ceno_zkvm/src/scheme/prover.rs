@@ -653,7 +653,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// support batch prove for logup + product arguments each with different num_vars()
     /// side effect: concurrency will be determine based on min(thread, num_vars()),
     /// so suggest dont batch too small table (size < threads) with large table together
-    #[tracing::instrument(skip_all, name = "create_table_proof", fields(table_name=name))]
+    #[tracing::instrument(skip_all, name = "create_table_proof", fields(table_name=name, profiling_2))]
     pub fn create_table_proof(
         &self,
         name: &str,
