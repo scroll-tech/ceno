@@ -11,7 +11,7 @@ use crate::{
     util::{
         arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
         field_type_index_ext, field_type_iter_ext,
-        hash::write_digest_to_transcript,
+        hash::{hash_two_digests, write_digest_to_transcript},
         log2_strict,
         merkle_tree::MerkleTree,
     },
@@ -414,7 +414,7 @@ where
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
-    let mut running_tree_inner = Vec::new();
+    let mut next_running_tree_inner = Vec::new();
 
     let mut prover_states = batched_polys
         .into_par_iter()
@@ -442,7 +442,9 @@ where
         sumcheck_messages.push(evaluations.0);
         transcript.append_field_element_exts(&evaluations.0);
 
-        let next_challenge = transcript.get_and_append_challenge(b"Internal round");
+        let next_challenge = transcript.get_and_append_challenge(b"commit round");
+
+        // folding FRI with challenge to collect new leafs
         let next_running_oracles = running_oracle
             .par_chunks_exact(running_oracle.len().div_ceil(num_threads))
             .flat_map(|running_oracle| {
@@ -455,6 +457,51 @@ where
             })
             .collect::<Vec<_>>();
 
+        // merkelize new leafs
+        let next_running_tree_inners = next_running_oracles
+            .par_chunks_exact(next_running_oracles.len().div_ceil(num_threads))
+            .map(|next_running_oracle| MerkleTree::<E>::compute_inner_ext_seq(next_running_oracle))
+            .collect::<Vec<_>>();
+
+        // merge #threads running_tree_inners into one running tree inner
+        // TODO optimize to be more memory efficiency
+        let next_running_tree_inner = {
+            let mut incompleted_running_tree_inner = next_running_tree_inners
+                .into_iter()
+                .reduce(|tree_a, tree_b| {
+                    tree_a
+                        .iter_mut()
+                        .zip(tree_b)
+                        .for_each(|(layer_a, layer_b)| {
+                            layer_a.extend(layer_b.into_iter());
+                        });
+                    tree_a
+                })
+                .unwrap();
+            for i in incompleted_running_tree_inner.len()
+                ..(incompleted_running_tree_inner.len() + log2_strict(num_threads))
+            {
+                let oracle = incompleted_running_tree_inner[i - 1]
+                    .chunks_exact(2)
+                    .map(|ys| hash_two_digests(&ys[0], &ys[1]))
+                    .collect::<Vec<_>>();
+
+                incompleted_running_tree_inner.push(oracle);
+            }
+            incompleted_running_tree_inner
+        };
+
+        let next_running_tree = MerkleTree::<E>::from_inner_leaves(
+            next_running_tree_inner,
+            FieldType::Ext(next_running_oracles),
+        );
+        trees.push(next_running_tree);
+
+        let running_root = next_running_tree.root();
+        write_digest_to_transcript(&running_root, transcript);
+        roots.push(running_root);
+
+        running_oracle = next_running_oracles;
         challenge = Some(next_challenge);
     }
 
@@ -480,7 +527,7 @@ where
 
         if i > 0 {
             let running_tree = MerkleTree::<E>::from_inner_leaves(
-                running_tree_inner,
+                next_running_tree_inner,
                 FieldType::Ext(running_oracle),
             );
             trees.push(running_tree);
@@ -489,8 +536,8 @@ where
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
-            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
-            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
+            next_running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
+            let running_root = MerkleTree::<E>::root_from_inner(&next_running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
             running_oracle = new_running_oracle;
@@ -499,7 +546,7 @@ where
             // knows the old value is safe to move.
             last_sumcheck_message = Vec::new();
             running_oracle = Vec::new();
-            running_tree_inner = Vec::new();
+            next_running_tree_inner = Vec::new();
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // running_evals is exactly the evaluation representation of the
