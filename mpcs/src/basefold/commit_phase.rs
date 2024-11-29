@@ -6,20 +6,29 @@ use super::{
         sum_check_last_round,
     },
 };
-use crate::util::{
-    arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
-    field_type_index_ext, field_type_iter_ext,
-    hash::write_digest_to_transcript,
-    log2_strict,
-    merkle_tree::MerkleTree,
+use crate::{
+    basefold::virtual_polys::VirtualPolynomials,
+    util::{
+        arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
+        field_type_index_ext, field_type_iter_ext,
+        hash::write_digest_to_transcript,
+        log2_strict,
+        merkle_tree::MerkleTree,
+    },
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
+use sumcheck::{structs::IOPProverStateV2, util::AdditiveVec};
 use transcript::Transcript;
 
-use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
+use multilinear_extensions::{
+    mle::{FieldType, IntoMLE, MultilinearExtension},
+    util::max_usable_threads,
+    virtual_poly::build_eq_x_r_vec,
+    virtual_poly_v2::ArcMultilinearExtension,
+};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
 use rayon::prelude::{
@@ -366,7 +375,7 @@ where
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
     let mut running_oracle = comm.batch_codewords(batch_coeffs);
     end_timer!(batch_codewords_timer);
-    let mut running_evals = (0..(1 << num_vars))
+    let mut running_evals: ArcMultilinearExtension<_> = (0..(1 << num_vars))
         .into_par_iter()
         .map(|i| {
             comm.polynomials_bh_evals
@@ -375,7 +384,9 @@ where
                 .map(|(eval, coeff)| field_type_index_ext(eval, i) * *coeff)
                 .sum()
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+        .into_mle()
+        .into();
     end_timer!(prepare_timer);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
@@ -385,16 +396,68 @@ where
 
     let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
     reverse_index_bits_in_place(&mut eq);
+    let eq: ArcMultilinearExtension<_> = eq.into_mle().into();
     end_timer!(reverse_bits_timer);
 
-    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
-    let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
-    end_timer!(sumcheck_timer);
+    //    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
+
+    let num_threads = max_usable_threads();
+    let max_overall_num_variables = running_evals.num_vars();
+    let polys = VirtualPolynomials::new(num_threads, max_overall_num_variables);
+    polys.add_mle_list(vec![&eq, &running_evals], E::ONE);
+    let batched_polys = polys.get_batched_polys();
+    let max_num_variables = batched_polys[0].aux_info.max_num_variables;
+
+    // let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
+    //  end_timer!(sumcheck_timer);
 
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_message = Vec::new();
     let mut running_tree_inner = Vec::new();
+
+    let mut prover_states = batched_polys
+        .into_par_iter()
+        .map(|poly| {
+            IOPProverStateV2::prover_init_with_extrapolation_aux(poly, vec![(vec![], vec![])])
+        })
+        .collect::<Vec<_>>();
+    let mut challenge = None;
+    for i in 0..max_num_variables {
+        let prover_msgs = prover_states
+            .par_iter_mut()
+            .map(|prover_state| {
+                IOPProverStateV2::prove_round_and_update_state(&mut prover_state, &challenge)
+            })
+            .collect::<Vec<_>>();
+
+        // for each round, we must collect #SIZE prover message
+        let evaluations: AdditiveVec<E> =
+            prover_msgs
+                .into_iter()
+                .fold(AdditiveVec::new(2), |mut acc, prover_msg| {
+                    acc += AdditiveVec(prover_msg.evaluations);
+                    acc
+                });
+        sumcheck_messages.push(evaluations.0);
+        transcript.append_field_element_exts(&evaluations.0);
+
+        let next_challenge = transcript.get_and_append_challenge(b"Internal round");
+        let next_running_oracles = running_oracle
+            .par_chunks_exact(running_oracle.len().div_ceil(num_threads))
+            .flat_map(|running_oracle| {
+                basefold_one_round_by_interpolation_weights_seq::<E, Spec>(
+                    pp,
+                    log2_strict(running_oracle.len()) - 1,
+                    running_oracle,
+                    next_challenge.elements,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        challenge = Some(next_challenge);
+    }
+
     for i in 0..num_rounds {
         let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
         // For the first round, no need to send the running root, because this root is
@@ -491,6 +554,23 @@ fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: Basefold
 ) -> Vec<E> {
     values
         .par_chunks_exact(2)
+        .enumerate()
+        .map(|(i, ys)| {
+            let (x0, x1, w) =
+                <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs(pp, level, i);
+            interpolate2_weights([(x0, ys[0]), (x1, ys[1])], w, challenge)
+        })
+        .collect::<Vec<_>>()
+}
+
+fn basefold_one_round_by_interpolation_weights_seq<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    level: usize,
+    values: &[E],
+    challenge: E,
+) -> Vec<E> {
+    values
+        .chunks_exact(2)
         .enumerate()
         .map(|(i, ys)| {
             let (x0, x1, w) =

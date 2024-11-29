@@ -69,6 +69,10 @@ pub use encoding::{coset_fft, fft, fft_root_table};
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
 mod query_phase;
+
+// TODO share with ceno_zkvm
+mod virtual_polys;
+
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
 mod sumcheck;

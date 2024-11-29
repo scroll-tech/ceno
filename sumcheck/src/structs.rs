@@ -23,7 +23,7 @@ impl<E: ExtensionField> IOPProof<E> {
 /// is a list of evaluations.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IOPProverMessage<E: ExtensionField> {
-    pub(crate) evaluations: Vec<E>,
+    pub evaluations: Vec<E>,
 }
 
 /// Prover State of a PolyIOP.
