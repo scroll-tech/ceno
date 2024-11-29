@@ -6,7 +6,7 @@ pub mod plonky2_util;
 use ff::{Field, PrimeField};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::{Itertools, izip};
+use itertools::{Either, Itertools, izip};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod merkle_tree;
@@ -148,38 +148,45 @@ pub fn field_type_index_set_ext<E: ExtensionField>(
     }
 }
 
-pub struct FieldTypeIterExt<'a, E: ExtensionField> {
-    inner: &'a FieldType<E>,
-    index: usize,
-}
-
-impl<'a, E: ExtensionField> Iterator for FieldTypeIterExt<'a, E> {
-    type Item = E;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.inner.len() {
-            None
-        } else {
-            let res = field_type_index_ext(self.inner, self.index);
-            self.index += 1;
-            Some(res)
-        }
-    }
-}
-
 pub fn poly_iter_ext<E: ExtensionField>(
     poly: &DenseMultilinearExtension<E>,
-) -> FieldTypeIterExt<E> {
-    FieldTypeIterExt {
-        inner: &poly.evaluations,
-        index: 0,
+) -> impl Iterator<Item = E> + '_ {
+    field_type_iter_ext(&poly.evaluations)
+}
+
+pub fn field_type_iter_ext<E: ExtensionField>(
+    evaluations: &FieldType<E>,
+) -> impl Iterator<Item = E> + '_ {
+    match evaluations {
+        FieldType::Ext(coeffs) => Either::Left(coeffs.iter().copied()),
+        FieldType::Base(coeffs) => Either::Right(coeffs.iter().map(|x| (*x).into())),
+        _ => unreachable!(),
     }
 }
 
-pub fn field_type_iter_ext<E: ExtensionField>(evaluations: &FieldType<E>) -> FieldTypeIterExt<E> {
-    FieldTypeIterExt {
-        inner: evaluations,
-        index: 0,
+pub fn field_type_to_ext_vec<E: ExtensionField>(evaluations: &FieldType<E>) -> Vec<E> {
+    match evaluations {
+        FieldType::Ext(coeffs) => coeffs.to_vec(),
+        FieldType::Base(coeffs) => coeffs.iter().map(|&x| x.into()).collect(),
+        _ => unreachable!(),
+    }
+}
+
+pub fn field_type_as_ext<E: ExtensionField>(values: &FieldType<E>) -> &Vec<E> {
+    match values {
+        FieldType::Ext(coeffs) => coeffs,
+        FieldType::Base(_) => panic!("Expected ext field"),
+        _ => unreachable!(),
+    }
+}
+
+pub fn field_type_iter_base<E: ExtensionField>(
+    values: &FieldType<E>,
+) -> impl Iterator<Item = &E::BaseField> + '_ {
+    match values {
+        FieldType::Ext(coeffs) => Either::Left(coeffs.iter().flat_map(|x| x.as_bases())),
+        FieldType::Base(coeffs) => Either::Right(coeffs.iter()),
+        _ => unreachable!(),
     }
 }
 
