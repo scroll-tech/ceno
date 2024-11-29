@@ -25,14 +25,9 @@ use std::{
     time::Instant,
 };
 use tracing::level_filters::LevelFilter;
-use tracing_flame::FlameLayer;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
-    EnvFilter, Layer, Registry,
-    filter::{self, filter_fn},
-    fmt,
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
+    EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 use transcript::Transcript;
 
