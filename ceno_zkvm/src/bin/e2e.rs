@@ -26,7 +26,14 @@ use std::{
 };
 use tracing::level_filters::LevelFilter;
 use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_forest::ForestLayer;
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry,
+    filter::{self, filter_fn},
+    fmt,
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+};
 use transcript::Transcript;
 
 /// Prove the execution of a fixed RISC-V program.
@@ -39,6 +46,11 @@ struct Args {
     /// The maximum number of steps to execute the program.
     #[arg(short, long)]
     max_steps: Option<usize>,
+
+    // Profiling granularity.
+    // Setting any value restricts logs to profiling information
+    #[arg(long)]
+    profiling: Option<usize>,
 
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
@@ -65,22 +77,36 @@ fn main() {
     const PROGRAM_SIZE: usize = 1 << 14;
     type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
-    // set up logger
-    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
-    let subscriber = Registry::default()
-        .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
-        )
-        .with(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::DEBUG.into())
-                .from_env_lossy(),
-        )
-        .with(flame_layer.with_threads_collapsed(true));
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    // default filter
+    let default_filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::DEBUG.into())
+        .from_env_lossy();
+
+    // filter by profiling level;
+    // spans with level i contain the field "profiling_{i}"
+    // this restricts statistics to first (args.profiling) levels
+    let profiling_level = args.profiling.unwrap_or(1);
+    let filter_by_profiling_level = filter_fn(move |metadata| {
+        (1..)
+            .map(|i| format!("profiling_{i}"))
+            .take(profiling_level)
+            .any(|field| metadata.fields().field(&field).is_some())
+    });
+
+    let fmt_layer = fmt::layer()
+        .compact()
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .without_time();
+
+    Registry::default()
+        .with(ForestLayer::default())
+        .with(fmt_layer)
+        // if some profiling granularity is specified, use the profiling filter,
+        // otherwise use the default
+        .with((args.profiling.is_some()).then(|| filter_by_profiling_level))
+        .with((args.profiling.is_none()).then(|| default_filter))
+        .init();
 
     let platform = match args.platform {
         Preset::Ceno => CENO_PLATFORM,
