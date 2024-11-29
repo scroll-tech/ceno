@@ -111,8 +111,8 @@ fn main() {
         .with(fmt_layer)
         // if some profiling granularity is specified, use the profiling filter,
         // otherwise use the default
-        .with((args.profiling.is_some()).then(|| filter_by_profiling_level))
-        .with((args.profiling.is_none()).then(|| default_filter))
+        .with((args.profiling.is_some()).then_some(filter_by_profiling_level))
+        .with((args.profiling.is_none()).then_some(default_filter))
         .init();
 
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
