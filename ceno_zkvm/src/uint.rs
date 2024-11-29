@@ -17,7 +17,7 @@ use ark_std::iterable::Iterable;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
-use itertools::Itertools;
+use itertools::{Itertools, enumerate};
 use std::{
     borrow::Cow,
     mem::{self, MaybeUninit},
@@ -34,12 +34,33 @@ pub enum UintLimb<E: ExtensionField> {
     Expression(Vec<Expression<E>>),
 }
 
-impl<E: ExtensionField> UintLimb<E> {
-    pub fn iter(&self) -> impl Iterator<Item = &WitIn> {
+impl<E: ExtensionField> IntoIterator for UintLimb<E> {
+    type Item = WitIn;
+    type IntoIter = std::vec::IntoIter<WitIn>;
+
+    fn into_iter(self) -> Self::IntoIter {
         match self {
-            UintLimb::WitIn(vec) => vec.iter(),
+            UintLimb::WitIn(wits) => wits.into_iter(),
             _ => unimplemented!(),
         }
+    }
+}
+
+impl<'a, E: ExtensionField> IntoIterator for &'a UintLimb<E> {
+    type Item = &'a WitIn;
+    type IntoIter = std::slice::Iter<'a, WitIn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            UintLimb::WitIn(wits) => wits.iter(),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl<E: ExtensionField> UintLimb<E> {
+    pub fn iter(&self) -> impl Iterator<Item = &WitIn> {
+        self.into_iter()
     }
 }
 
@@ -735,8 +756,8 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         let mut c_limbs = vec![0u16; num_limbs];
         let mut carries = vec![0u64; num_limbs];
         let mut tmp = vec![0u64; num_limbs];
-        a_limbs.iter().enumerate().for_each(|(i, &a_limb)| {
-            b_limbs.iter().enumerate().for_each(|(j, &b_limb)| {
+        enumerate(a_limbs).for_each(|(i, &a_limb)| {
+            enumerate(b_limbs).for_each(|(j, &b_limb)| {
                 let idx = i + j;
                 if idx < num_limbs {
                     tmp[idx] += a_limb as u64 * b_limb as u64;

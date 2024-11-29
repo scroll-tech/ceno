@@ -1,12 +1,16 @@
 use std::time::Duration;
 
 use criterion::*;
-use ff::Field;
+use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 
 use itertools::{Itertools, chain};
 use mpcs::{
-    Basefold, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
+    Basefold, BasefoldBasecodeParams, BasefoldRSParams, Evaluation, PolynomialCommitmentScheme,
+    test_util::{
+        commit_polys_individually, gen_rand_poly_base, gen_rand_poly_ext, gen_rand_polys,
+        get_point_from_challenge, get_points_from_challenge, setup_pcs,
+    },
     util::plonky2_util::log2_ceil,
 };
 
@@ -14,12 +18,10 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly_v2::ArcMultilinearExtension,
 };
-use rand::{SeedableRng, rngs::OsRng};
-use rand_chacha::ChaCha8Rng;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use transcript::Transcript;
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
+type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
 type T = Transcript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
@@ -29,10 +31,19 @@ const NUM_VARS_END: usize = 20;
 const BATCH_SIZE_LOG_START: usize = 6;
 const BATCH_SIZE_LOG_END: usize = 6;
 
-fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
+struct Switch<'a, E: ExtensionField> {
+    name: &'a str,
+    gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
+}
+
+fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
+    c: &mut Criterion,
+    switch: Switch<E>,
+    id: &str,
+) {
     let mut group = c.benchmark_group(format!(
-        "commit_open_verify_goldilocks_rs_{}",
-        if is_base { "base" } else { "ext2" }
+        "commit_open_verify_goldilocks_{}_{}",
+        id, switch.name,
     ));
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
@@ -50,18 +61,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
         };
 
         let mut transcript = T::new(b"BaseFold");
-        let poly = if is_base {
-            DenseMultilinearExtension::random(num_vars, &mut OsRng)
-        } else {
-            DenseMultilinearExtension::from_evaluations_ext_vec(
-                num_vars,
-                (0..1 << num_vars)
-                    .into_par_iter()
-                    .map(|_| E::random(&mut OsRng))
-                    .collect(),
-            )
-        };
-
+        let poly = (switch.gen_rand_poly)(num_vars);
         let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
 
         group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
@@ -70,9 +70,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             })
         });
 
-        let point = (0..num_vars)
-            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-            .collect::<Vec<_>>();
+        let point = get_point_from_challenge(num_vars, &mut transcript);
         let eval = poly.evaluate(point.as_slice());
         transcript.append_field_element_ext(&eval);
         let transcript_for_bench = transcript.clone();
@@ -91,9 +89,7 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
         let comm = Pcs::get_pure_commitment(&comm);
         let mut transcript = T::new(b"BaseFold");
         Pcs::write_commitment(&comm, &mut transcript).unwrap();
-        let point = (0..num_vars)
-            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-            .collect::<Vec<_>>();
+        let point = get_point_from_challenge(num_vars, &mut transcript);
         transcript.append_field_element_ext(&eval);
         let transcript_for_bench = transcript.clone();
         Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
@@ -109,10 +105,24 @@ fn bench_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     }
 }
 
-fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
+const BASE: Switch<GoldilocksExt2> = Switch {
+    name: "base",
+    gen_rand_poly: gen_rand_poly_base,
+};
+
+const EXT: Switch<GoldilocksExt2> = Switch {
+    name: "ext",
+    gen_rand_poly: gen_rand_poly_ext,
+};
+
+fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
+    c: &mut Criterion,
+    switch: Switch<E>,
+    id: &str,
+) {
     let mut group = c.benchmark_group(format!(
-        "batch_commit_open_verify_goldilocks_rs_{}",
-        if is_base { "base" } else { "ext2" }
+        "batch_commit_open_verify_goldilocks_{}_{}",
+        id, switch.name,
     ));
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
@@ -120,13 +130,8 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
             let batch_size = 1 << batch_size_log;
             let num_points = batch_size >> 1;
-            let rng = ChaCha8Rng::from_seed([0u8; 32]);
             // Setup
-            let (pp, vp) = {
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(param, poly_size).unwrap()
-            };
+            let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             // Batch commit and open
             let evals = chain![
                 (0..num_points).map(|point| (point * 2, point)), // Every point matches two polys
@@ -136,37 +141,18 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
             .collect_vec();
 
             let mut transcript = T::new(b"BaseFold");
-            let polys = (0..batch_size)
-                .map(|i| {
-                    if is_base {
-                        DenseMultilinearExtension::random(
-                            num_vars - log2_ceil((i >> 1) + 1),
-                            &mut rng.clone(),
-                        )
-                    } else {
-                        DenseMultilinearExtension::from_evaluations_ext_vec(
-                            num_vars - log2_ceil((i >> 1) + 1),
-                            (0..1 << (num_vars - log2_ceil((i >> 1) + 1)))
-                                .into_par_iter()
-                                .map(|_| E::random(&mut OsRng))
-                                .collect(),
-                        )
-                    }
-                })
-                .collect_vec();
-            let comms = polys
-                .iter()
-                .map(|poly| Pcs::commit_and_write(&pp, poly, &mut transcript).unwrap())
-                .collect_vec();
+            let polys = gen_rand_polys(
+                |i| num_vars - log2_ceil((i >> 1) + 1),
+                batch_size,
+                switch.gen_rand_poly,
+            );
+            let comms = commit_polys_individually::<E, Pcs>(&pp, &polys, &mut transcript);
 
-            let points = (0..num_points)
-                .map(|i| {
-                    (0..num_vars - i)
-                        .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                        .collect::<Vec<_>>()
-                })
-                .take(num_points)
-                .collect_vec();
+            let points = get_points_from_challenge(
+                |i| num_vars - log2_ceil(i + 1),
+                num_points,
+                &mut transcript,
+            );
 
             let evals = evals
                 .iter()
@@ -175,11 +161,7 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                     Evaluation::new(poly, point, polys[poly].evaluate(&points[point]))
                 })
                 .collect_vec();
-            let values: Vec<E> = evals
-                .iter()
-                .map(Evaluation::value)
-                .copied()
-                .collect::<Vec<E>>();
+            let values: Vec<E> = evals.iter().map(Evaluation::value).copied().collect();
             transcript.append_field_element_exts(values.as_slice());
             let transcript_for_bench = transcript.clone();
             let proof =
@@ -208,14 +190,11 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
                     comm
                 })
                 .collect_vec();
-            let points = (0..num_points)
-                .map(|i| {
-                    (0..num_vars - i)
-                        .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                        .collect::<Vec<_>>()
-                })
-                .take(num_points)
-                .collect_vec();
+            let points = get_points_from_challenge(
+                |i| num_vars - log2_ceil(i + 1),
+                num_points,
+                &mut transcript,
+            );
 
             let values: Vec<E> = evals
                 .iter()
@@ -252,38 +231,23 @@ fn bench_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
     }
 }
 
-fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: bool) {
+fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
+    c: &mut Criterion,
+    switch: Switch<E>,
+    id: &str,
+) {
     let mut group = c.benchmark_group(format!(
-        "simple_batch_commit_open_verify_goldilocks_rs_{}",
-        if is_base { "base" } else { "extension" }
+        "simple_batch_commit_open_verify_goldilocks_{}_{}",
+        id, switch.name,
     ));
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
             let batch_size = 1 << batch_size_log;
-            let rng = ChaCha8Rng::from_seed([0u8; 32]);
-            let (pp, vp) = {
-                let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size).unwrap();
-                Pcs::trim(param, poly_size).unwrap()
-            };
+            let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
-            let polys = (0..batch_size)
-                .map(|_| {
-                    if is_base {
-                        DenseMultilinearExtension::random(num_vars, &mut rng.clone())
-                    } else {
-                        DenseMultilinearExtension::from_evaluations_ext_vec(
-                            num_vars,
-                            (0..1 << num_vars)
-                                .into_par_iter()
-                                .map(|_| E::random(&mut OsRng))
-                                .collect(),
-                        )
-                    }
-                })
-                .collect_vec();
+            let polys = gen_rand_polys(|_| num_vars, batch_size, switch.gen_rand_poly);
             let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
 
             group.bench_function(
@@ -294,20 +258,14 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
                     })
                 },
             );
-
-            let polys: Vec<ArcMultilinearExtension<GoldilocksExt2>> =
-                polys.into_iter().map(|poly| poly.into()).collect_vec();
-
-            let point = (0..num_vars)
-                .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                .collect::<Vec<_>>();
-
-            let evals = (0..batch_size)
-                .map(|i| polys[i].evaluate(&point))
-                .collect_vec();
-
+            let point = get_point_from_challenge(num_vars, &mut transcript);
+            let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
             transcript.append_field_element_exts(&evals);
             let transcript_for_bench = transcript.clone();
+            let polys = polys
+                .iter()
+                .map(|poly| ArcMultilinearExtension::from(poly.clone()))
+                .collect::<Vec<_>>();
             let proof = Pcs::simple_batch_open(&pp, &polys, &comm, &point, &evals, &mut transcript)
                 .unwrap();
 
@@ -337,9 +295,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
             let mut transcript = Transcript::new(b"BaseFold");
             Pcs::write_commitment(&comm, &mut transcript).unwrap();
 
-            let point = (0..num_vars)
-                .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-                .collect::<Vec<_>>();
+            let point = get_point_from_challenge(num_vars, &mut transcript);
             transcript.append_field_element_exts(&evals);
             let backup_transcript = transcript.clone();
 
@@ -369,34 +325,61 @@ fn bench_simple_batch_commit_open_verify_goldilocks(c: &mut Criterion, is_base: 
     }
 }
 
-fn bench_commit_open_verify_goldilocks_2(c: &mut Criterion) {
-    bench_commit_open_verify_goldilocks(c, false);
+fn bench_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, EXT, "rs");
 }
 
-fn bench_commit_open_verify_goldilocks_base(c: &mut Criterion) {
-    bench_commit_open_verify_goldilocks(c, true);
+fn bench_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, EXT, "basecode");
 }
 
-fn bench_batch_commit_open_verify_goldilocks_2(c: &mut Criterion) {
-    bench_batch_commit_open_verify_goldilocks(c, false);
+fn bench_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, BASE, "rs");
 }
 
-fn bench_batch_commit_open_verify_goldilocks_base(c: &mut Criterion) {
-    bench_batch_commit_open_verify_goldilocks(c, true);
+fn bench_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
+    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, BASE, "basecode");
 }
 
-fn bench_simple_batch_commit_open_verify_goldilocks_2(c: &mut Criterion) {
-    bench_simple_batch_commit_open_verify_goldilocks(c, false);
+fn bench_batch_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
+    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, EXT, "rs");
 }
 
-fn bench_simple_batch_commit_open_verify_goldilocks_base(c: &mut Criterion) {
-    bench_simple_batch_commit_open_verify_goldilocks(c, true);
+fn bench_batch_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
+    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, EXT, "basecode");
+}
+
+fn bench_batch_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
+    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, BASE, "rs");
+}
+
+fn bench_batch_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
+    bench_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, BASE, "basecode");
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_ext_rs(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, EXT, "rs");
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_ext_basecode(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, EXT, "basecode");
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, BASE, "rs");
+}
+
+fn bench_simple_batch_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
+    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, BASE, "basecode");
 }
 
 criterion_group! {
   name = bench_basefold;
   config = Criterion::default().warm_up_time(Duration::from_millis(3000));
-  targets = bench_simple_batch_commit_open_verify_goldilocks_base, bench_simple_batch_commit_open_verify_goldilocks_2, bench_batch_commit_open_verify_goldilocks_base, bench_batch_commit_open_verify_goldilocks_2, bench_commit_open_verify_goldilocks_base, bench_commit_open_verify_goldilocks_2,
+  targets =
+  bench_simple_batch_commit_open_verify_goldilocks_base_rs, bench_simple_batch_commit_open_verify_goldilocks_ext_rs,
+  bench_batch_commit_open_verify_goldilocks_base_rs, bench_batch_commit_open_verify_goldilocks_ext_rs, bench_commit_open_verify_goldilocks_base_rs, bench_commit_open_verify_goldilocks_ext_rs,
+  bench_simple_batch_commit_open_verify_goldilocks_base_basecode, bench_simple_batch_commit_open_verify_goldilocks_ext_basecode, bench_batch_commit_open_verify_goldilocks_base_basecode, bench_batch_commit_open_verify_goldilocks_ext_basecode, bench_commit_open_verify_goldilocks_base_basecode, bench_commit_open_verify_goldilocks_ext_basecode,
 }
 
 criterion_main!(bench_basefold);
