@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "Multilinear extensions for the Ceno project"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "multilinear_extensions"
+readme.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]
