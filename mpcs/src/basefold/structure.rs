@@ -65,6 +65,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) codeword_tree: MerkleTree<E>,
+    // TODO commitment can be base field?
     pub(crate) polynomials_bh_evals: Vec<FieldType<E>>,
     pub(crate) num_vars: usize,
     pub(crate) is_base: bool,

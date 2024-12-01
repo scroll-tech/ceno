@@ -30,7 +30,7 @@ use sumcheck::{
 use transcript::{Challenge, Transcript};
 
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    mle::{DenseMultilinearExtension, FieldType, IntoMLE},
     util::max_usable_threads,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -365,7 +365,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     challenge: Option<Challenge<E>>,
     sumcheck_messages: &mut Vec<Vec<E>>,
     transcript: &mut Transcript<E>,
-    running_oracle: &[E],
+    running_oracle: Option<&[E]>,
     num_threads: usize,
     trees: &mut Vec<MerkleTree<E>>,
     roots: &mut Vec<Digest<E::BaseField>>,
@@ -393,9 +393,16 @@ where
 
     let next_challenge = transcript.get_and_append_challenge(b"commit round");
 
-    // folding FRI with challenge to collect new leafs
+    let running_oracle = trees
+        .last()
+        .map(|last_tree| match &last_tree.leaves()[0] {
+            FieldType::Ext(running_oracle) => running_oracle.as_slice(),
+            _ => unimplemented!(".."),
+        })
+        .unwrap_or_else(|| running_oracle.expect("illegal input"));
+    let running_oracle_len = running_oracle.len();
     let next_running_oracles = running_oracle
-        .par_chunks_exact(running_oracle.len().div_ceil(num_threads))
+        .par_chunks_exact(running_oracle_len.div_ceil(num_threads))
         .flat_map(|running_oracle| {
             basefold_one_round_by_interpolation_weights_seq::<E, Spec>(
                 pp,
@@ -412,7 +419,7 @@ where
         .map(|next_running_oracle| MerkleTree::<E>::compute_inner_ext_seq(next_running_oracle))
         .collect::<Vec<_>>();
 
-    // merge #threads running_tree_inners into one running tree inner
+    // merge #threads running_tree_inners into one running tree inner by single thread
     // TODO optimize to be more memory efficiency
     let next_running_tree_inner = {
         let mut incompleted_running_tree_inner = next_running_tree_inners
@@ -494,7 +501,6 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     transcript: &mut Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
-    root: Vec<Digest<E::BaseField>>,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -505,16 +511,18 @@ where
     let prepare_timer = start_timer!(|| "Prepare");
     let mut trees: Vec<MerkleTree<E>> = Vec::with_capacity(num_vars);
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
-    let mut running_oracle = comm.batch_codewords(batch_coeffs);
+    let running_oracle = comm.batch_codewords(batch_coeffs);
     end_timer!(batch_codewords_timer);
-    let mut running_evals: ArcMultilinearExtension<_> = (0..(1 << num_vars))
+
+    let running_evals: ArcMultilinearExtension<_> = (0..(1 << num_vars))
         .into_par_iter()
+        .with_min_len(64)
         .map(|i| {
             comm.polynomials_bh_evals
                 .iter()
                 .zip(batch_coeffs)
                 .map(|(eval, coeff)| field_type_index_ext(eval, i) * *coeff)
-                .sum()
+                .sum::<E>()
         })
         .collect::<Vec<_>>()
         .into_mle()
@@ -535,7 +543,8 @@ where
 
     let num_threads = max_usable_threads();
     let max_overall_num_variables = running_evals.num_vars();
-    let polys = VirtualPolynomials::new(num_threads, max_overall_num_variables);
+    println!("running_evals.num_vars() {}", running_evals.num_vars());
+    let mut polys = VirtualPolynomials::new(num_threads, max_overall_num_variables);
     polys.add_mle_list(vec![&eq, &running_evals], E::ONE);
     let batched_polys = polys.get_batched_polys();
     let max_num_variables = batched_polys[0].aux_info.max_num_variables;
@@ -545,8 +554,6 @@ where
 
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
-    let mut final_message = Vec::new();
-    let mut next_running_tree_inner = Vec::new();
 
     let mut prover_states = batched_polys
         .into_par_iter()
@@ -556,22 +563,18 @@ where
         .collect::<Vec<_>>();
     let mut challenge = None;
     for i in 0..max_num_variables {
-        challenge = basefold_one_round(
+        println!("prover inner round {i}");
+        challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
             transcript,
-            if i == 0 {
-                &running_oracle
-            } else {
-                match trees.last().unwrap().leaves() {}
-            },
+            if i == 0 { Some(&running_oracle) } else { None },
             num_threads,
             &mut trees,
             &mut roots,
         );
-        running_oracle = next_running_oracles;
     }
 
     // last round: push challenge and bind last variable for all prover_states
@@ -588,18 +591,15 @@ where
 
     let mut challenge = None;
     for i in 0..log2_strict(num_threads) {
-        challenge = basefold_one_round(
+        println!("prover outer round {i}");
+        challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
             transcript,
-            if i == 0 {
-                &running_oracle
-            } else {
-                trees.last().unwrap().leaves()
-            },
-            num_threads,
+            None,
+            1,
             &mut trees,
             &mut roots,
         );
@@ -609,6 +609,8 @@ where
     if let Some(p) = challenge {
         sumcheck_push_last_variable(&mut prover_states, p, max_num_variables);
     }
+
+    let mut running_evals = prover_states[0].get_mle_final_evaluations()[1..].to_vec(); // skip index 0
 
     reverse_index_bits_in_place(&mut running_evals);
     transcript.append_field_element_exts(&running_evals);
@@ -630,9 +632,14 @@ where
             _ => panic!("Should be ext field"),
         };
 
-        let mut new_running_oracle = new_running_oracle;
-        reverse_index_bits_in_place(&mut new_running_oracle);
-        assert_eq!(basecode, new_running_oracle);
+        match &trees.last().unwrap().leaves()[0] {
+            FieldType::Ext(running_oracle) => {
+                let mut running_oracle = running_oracle.to_vec();
+                reverse_index_bits_in_place(&mut running_oracle);
+                assert_eq!(basecode, running_oracle);
+            }
+            _ => unimplemented!(".."),
+        }
     }
 
     end_timer!(timer);

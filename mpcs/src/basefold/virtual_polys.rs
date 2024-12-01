@@ -88,13 +88,4 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     pub fn get_batched_polys(self) -> Vec<VirtualPolynomialV2<'a, E>> {
         self.polys
     }
-
-    #[cfg(test)]
-    pub fn degree(&self) -> usize {
-        assert!(self.polys.iter().map(|p| p.aux_info.max_degree).all_equal());
-        self.polys
-            .first()
-            .map(|p| p.aux_info.max_degree)
-            .unwrap_or_default()
-    }
 }
