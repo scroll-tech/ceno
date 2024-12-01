@@ -372,6 +372,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(tower_span);
 
+        tracing::debug!("tower sumcheck finished");
         // batch sumcheck: selector + main degree > 1 constraints
         let main_sel_span = entered_span!("main_sel");
         let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
@@ -543,11 +544,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }
         }
 
+        tracing::debug!("main sel sumcheck start");
         let (main_sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
             transcript,
         );
+        tracing::debug!("main sel sumcheck end");
+
         let main_sel_evals = state.get_mle_final_evaluations();
         assert_eq!(
             main_sel_evals.len(),
@@ -1031,7 +1035,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .map(|(t, mle)| match t.table_spec.addr_type {
                 // for fixed address, prover
                 SetTableAddrType::FixedAddr => 0,
-                SetTableAddrType::DynamicAddr => mle.num_vars(),
+                SetTableAddrType::DynamicAddr(_) => mle.num_vars(),
             })
             .collect_vec();
         // TODO implement mechanism to skip commitment
@@ -1237,6 +1241,7 @@ impl TowerProver {
                         virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
                     }
                 }
+                tracing::debug!("generated tower proof at round {}/{}", round, max_round_index);
 
                 let wrap_batch_span = entered_span!("wrap_batch");
                 // NOTE: at the time of adding this span, visualizing it with the flamegraph layer

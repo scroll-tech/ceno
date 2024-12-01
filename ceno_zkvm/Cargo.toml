@@ -22,6 +22,7 @@ sumcheck = { version = "0", path = "../sumcheck" }
 transcript = { path = "../transcript" }
 
 itertools.workspace = true
+num-traits.workspace = true
 paste.workspace = true
 prettytable-rs.workspace = true
 strum.workspace = true

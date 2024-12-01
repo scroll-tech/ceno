@@ -1,7 +1,10 @@
 use ceno_emul::InsnKind;
 
 mod rv32im;
-pub use rv32im::Rv32imConfig;
+pub use rv32im::{
+    DummyExtraConfig, Rv32imConfig,
+    mmu::{MemPadder, MmuConfig},
+};
 
 pub mod arith;
 pub mod arith_imm;

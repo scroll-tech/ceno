@@ -2,20 +2,17 @@ use std::{panic, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
-    instructions::riscv::{Rv32imConfig, constants::EXIT_PC},
+    instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
-    tables::{
-        DynVolatileRamTable, MemFinalRecord, MemTable, ProgramTableCircuit, init_program_data,
-        init_public_io, initial_registers,
-    },
+    tables::{MemFinalRecord, ProgramTableCircuit},
 };
 use clap::Parser;
 
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext,
+    CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, BLTU, EANY, LUI, LW},
-    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
+    PC_WORD_SIZE, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -92,6 +89,9 @@ fn main() {
             })
             .collect(),
     );
+    let mem_addresses = CENO_PLATFORM.ram_start()..=CENO_PLATFORM.ram_end();
+    let io_addresses = CENO_PLATFORM.public_io_start()..=CENO_PLATFORM.public_io_end();
+
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let mut fmt_layer = fmt::layer()
         .compact()
@@ -122,7 +122,7 @@ fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-
+    let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
@@ -136,16 +136,28 @@ fn main() {
 
     let static_report = StaticReport::new(&zkvm_cs);
 
-    let reg_init = initial_registers();
-    // Define program constant here
-    let program_data: &[u32] = &[];
-    let program_data_init = init_program_data(program_data);
+    let reg_init = MmuConfig::<E>::initial_registers();
 
-    config.generate_fixed_traces(
+    // RAM is not used in this program, but it must have a particular size at the moment.
+    let mem_init = MemPadder::init_mem(mem_addresses, MmuConfig::<E>::static_mem_len(), &[]);
+
+    let init_public_io = |values: &[Word]| {
+        MemPadder::init_mem(
+            io_addresses.clone(),
+            MmuConfig::<E>::public_io_len(),
+            values,
+        )
+    };
+
+    let io_addrs = init_public_io(&[]).iter().map(|v| v.addr).collect_vec();
+
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+    mmu_config.generate_fixed_traces(
         &zkvm_cs,
         &mut zkvm_fixed_traces,
         &reg_init,
-        &program_data_init,
+        &mem_init,
+        &io_addrs,
     );
 
     let pk = zkvm_cs
@@ -171,7 +183,7 @@ fn main() {
         let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
         // init mmio
-        for record in program_data_init.iter().chain(public_io_init.iter()) {
+        for record in &public_io_init {
             vm.init_memory(record.addr.into(), record.value);
         }
 
@@ -195,7 +207,7 @@ fn main() {
         let exit_code = halt_record.rs2().unwrap().value;
         let pi = PublicValues::new(
             exit_code,
-            CENO_PLATFORM.rom_start(),
+            vm.program().entry,
             Tracer::SUBCYCLES_PER_INSN as u32,
             EXIT_PC as u32,
             end_cycle,
@@ -232,14 +244,14 @@ fn main() {
             })
             .collect_vec();
 
-        // Find the final program_data cycles.
-        let program_data_final = program_data_init
+        // Find the final memory values and cycles.
+        let mem_final = mem_init
             .iter()
             .map(|rec| {
                 let vma: WordAddr = rec.addr.into();
                 MemFinalRecord {
                     addr: rec.addr,
-                    value: rec.value,
+                    value: vm.peek_memory(vma),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             })
@@ -248,40 +260,19 @@ fn main() {
         // Find the final public io cycles.
         let public_io_final = public_io_init
             .iter()
-            .map(|rec| {
-                let vma: WordAddr = rec.addr.into();
-                MemFinalRecord {
-                    addr: rec.addr,
-                    value: rec.value,
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
-                }
-            })
-            .collect_vec();
-
-        // Find the final mem data and cycles.
-        // TODO retrieve max address access
-        // as we already support non-uniform proving of memory
-        let num_entry = 1 << 12;
-        let mem_final = (0..num_entry)
-            .map(|entry_index| {
-                let byte_addr = ByteAddr::from(MemTable::addr(entry_index));
-                let vma = byte_addr.waddr();
-                MemFinalRecord {
-                    addr: byte_addr.0,
-                    value: vm.peek_memory(vma),
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
-                }
-            })
+            .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
             .collect_vec();
 
         // assign table circuits
         config
+            .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
+            .unwrap();
+        mmu_config
             .assign_table_circuit(
                 &zkvm_cs,
                 &mut zkvm_witness,
                 &reg_final,
                 &mem_final,
-                &program_data_final,
                 &public_io_final,
             )
             .unwrap();
