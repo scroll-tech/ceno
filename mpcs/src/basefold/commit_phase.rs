@@ -642,6 +642,12 @@ where
         }
     }
 
+    println!(
+        "sumcheck_messages len() {} roots.len {}, final_message {:?}",
+        sumcheck_messages.len(),
+        roots.len(),
+        final_message
+    );
     end_timer!(timer);
     (trees, BasefoldCommitPhaseProof {
         sumcheck_messages,
