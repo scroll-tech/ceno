@@ -34,7 +34,7 @@ pub struct IOPProverStateV2<'a, E: ExtensionField> {
     /// the current round number
     pub(crate) round: usize,
     /// pointer to the virtual polynomial
-    pub(crate) poly: VirtualPolynomialV2<'a, E>,
+    pub poly: VirtualPolynomialV2<'a, E>,
     /// points with precomputed barycentric weights for extrapolating smaller
     /// degree uni-polys to `max_degree + 1` evaluations.
     pub(crate) extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,

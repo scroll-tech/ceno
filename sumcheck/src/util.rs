@@ -252,7 +252,7 @@ pub(crate) fn merge_sumcheck_polys<E: ExtensionField>(
     poly
 }
 
-pub(crate) fn merge_sumcheck_polys_v2<'a, E: ExtensionField>(
+pub fn merge_sumcheck_polys_v2<'a, E: ExtensionField>(
     prover_states: &[IOPProverStateV2<'a, E>],
     max_thread_id: usize,
 ) -> VirtualPolynomialV2<'a, E> {

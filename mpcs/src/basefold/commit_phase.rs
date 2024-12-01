@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::{
     encoding::EncodingScheme,
     structure::{BasefoldCommitPhaseProof, BasefoldSpec},
@@ -19,12 +21,16 @@ use crate::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use poseidon::digest::Digest;
 use serde::{Serialize, de::DeserializeOwned};
-use sumcheck::{structs::IOPProverStateV2, util::AdditiveVec};
-use transcript::Transcript;
+use sumcheck::{
+    structs::IOPProverStateV2,
+    util::{AdditiveVec, merge_sumcheck_polys_v2},
+};
+use transcript::{Challenge, Transcript};
 
 use multilinear_extensions::{
-    mle::{FieldType, IntoMLE, MultilinearExtension},
+    mle::{DenseMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::max_usable_threads,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -353,6 +359,131 @@ where
     })
 }
 
+fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    prover_states: &mut Vec<IOPProverStateV2<'_, E>>,
+    challenge: Option<Challenge<E>>,
+    sumcheck_messages: &mut Vec<Vec<E>>,
+    transcript: &mut Transcript<E>,
+    running_oracle: &[E],
+    num_threads: usize,
+    trees: &mut Vec<MerkleTree<E>>,
+    roots: &mut Vec<Digest<E::BaseField>>,
+) -> Option<Challenge<E>>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let prover_msgs = prover_states
+        .par_iter_mut()
+        .map(|prover_state| {
+            IOPProverStateV2::prove_round_and_update_state(prover_state, &challenge)
+        })
+        .collect::<Vec<_>>();
+
+    // for each round, we must collect #SIZE prover message
+    let evaluations: AdditiveVec<E> =
+        prover_msgs
+            .into_iter()
+            .fold(AdditiveVec::new(2), |mut acc, prover_msg| {
+                acc += AdditiveVec(prover_msg.evaluations);
+                acc
+            });
+    transcript.append_field_element_exts(&evaluations.0);
+    sumcheck_messages.push(evaluations.0);
+
+    let next_challenge = transcript.get_and_append_challenge(b"commit round");
+
+    // folding FRI with challenge to collect new leafs
+    let next_running_oracles = running_oracle
+        .par_chunks_exact(running_oracle.len().div_ceil(num_threads))
+        .flat_map(|running_oracle| {
+            basefold_one_round_by_interpolation_weights_seq::<E, Spec>(
+                pp,
+                log2_strict(running_oracle.len()) - 1,
+                running_oracle,
+                next_challenge.elements,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    // merkelize new leafs
+    let next_running_tree_inners = next_running_oracles
+        .par_chunks_exact(next_running_oracles.len().div_ceil(num_threads))
+        .map(|next_running_oracle| MerkleTree::<E>::compute_inner_ext_seq(next_running_oracle))
+        .collect::<Vec<_>>();
+
+    // merge #threads running_tree_inners into one running tree inner
+    // TODO optimize to be more memory efficiency
+    let next_running_tree_inner = {
+        let mut incompleted_running_tree_inner = next_running_tree_inners
+            .into_iter()
+            .reduce(|mut tree_a, tree_b| {
+                tree_a
+                    .iter_mut()
+                    .zip(tree_b)
+                    .for_each(|(layer_a, layer_b)| {
+                        layer_a.extend(layer_b.into_iter());
+                    });
+                tree_a
+            })
+            .unwrap();
+        for i in incompleted_running_tree_inner.len()
+            ..(incompleted_running_tree_inner.len() + log2_strict(num_threads))
+        {
+            let oracle = incompleted_running_tree_inner[i - 1]
+                .chunks_exact(2)
+                .map(|ys| hash_two_digests(&ys[0], &ys[1]))
+                .collect::<Vec<_>>();
+
+            incompleted_running_tree_inner.push(oracle);
+        }
+        incompleted_running_tree_inner
+    };
+
+    let next_running_tree = MerkleTree::<E>::from_inner_leaves(
+        next_running_tree_inner,
+        FieldType::Ext(next_running_oracles),
+    );
+    let running_root = next_running_tree.root();
+    write_digest_to_transcript(&running_root, transcript);
+    roots.push(running_root);
+    trees.push(next_running_tree);
+
+    Some(next_challenge)
+}
+
+fn sumcheck_push_last_variable<E: ExtensionField>(
+    prover_states: &mut Vec<IOPProverStateV2<'_, E>>,
+    p: Challenge<E>,
+    max_num_variables: usize,
+) {
+    prover_states.iter_mut().for_each(|prover_state| {
+        prover_state.challenges.push(p);
+        // fix last challenge to collect final evaluation
+        prover_state
+            .poly
+            .flattened_ml_extensions
+            .iter_mut()
+            .for_each(|mle| {
+                if max_num_variables == 1 {
+                    // first time fix variable should be create new instance
+                    if mle.num_vars() > 0 {
+                        *mle = mle.fix_variables(&[p.elements]).into();
+                    } else {
+                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                            0,
+                            mle.get_base_field_vec().to_vec(),
+                        ))
+                    }
+                } else {
+                    let mle = Arc::get_mut(mle).unwrap();
+                    if mle.num_vars() > 0 {
+                        mle.fix_variables_in_place(&[p.elements]);
+                    }
+                }
+            });
+    });
+}
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
 pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
@@ -363,6 +494,7 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     transcript: &mut Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
+    root: Vec<Digest<E::BaseField>>,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -371,7 +503,7 @@ where
     assert_eq!(point.len(), num_vars);
     assert_eq!(comm.num_polys, batch_coeffs.len());
     let prepare_timer = start_timer!(|| "Prepare");
-    let mut trees = Vec::with_capacity(num_vars);
+    let mut trees: Vec<MerkleTree<E>> = Vec::with_capacity(num_vars);
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
     let mut running_oracle = comm.batch_codewords(batch_coeffs);
     end_timer!(batch_codewords_timer);
@@ -424,167 +556,85 @@ where
         .collect::<Vec<_>>();
     let mut challenge = None;
     for i in 0..max_num_variables {
-        let prover_msgs = prover_states
-            .par_iter_mut()
-            .map(|prover_state| {
-                IOPProverStateV2::prove_round_and_update_state(&mut prover_state, &challenge)
-            })
-            .collect::<Vec<_>>();
+        challenge = basefold_one_round(
+            pp,
+            &mut prover_states,
+            challenge,
+            &mut sumcheck_messages,
+            transcript,
+            if i == 0 {
+                &running_oracle
+            } else {
+                match trees.last().unwrap().leaves() {}
+            },
+            num_threads,
+            &mut trees,
+            &mut roots,
+        );
+        running_oracle = next_running_oracles;
+    }
 
-        // for each round, we must collect #SIZE prover message
-        let evaluations: AdditiveVec<E> =
-            prover_msgs
-                .into_iter()
-                .fold(AdditiveVec::new(2), |mut acc, prover_msg| {
-                    acc += AdditiveVec(prover_msg.evaluations);
-                    acc
-                });
-        sumcheck_messages.push(evaluations.0);
-        transcript.append_field_element_exts(&evaluations.0);
+    // last round: push challenge and bind last variable for all prover_states
+    if let Some(p) = challenge {
+        sumcheck_push_last_variable(&mut prover_states, p, max_num_variables);
+    }
 
-        let next_challenge = transcript.get_and_append_challenge(b"commit round");
+    // deal with log(#thread) basefold rounds
+    let poly = merge_sumcheck_polys_v2(&prover_states, num_threads);
+    let mut prover_states = vec![IOPProverStateV2::prover_init_with_extrapolation_aux(
+        poly,
+        vec![(vec![], vec![])],
+    )];
 
-        // folding FRI with challenge to collect new leafs
-        let next_running_oracles = running_oracle
-            .par_chunks_exact(running_oracle.len().div_ceil(num_threads))
-            .flat_map(|running_oracle| {
-                basefold_one_round_by_interpolation_weights_seq::<E, Spec>(
-                    pp,
-                    log2_strict(running_oracle.len()) - 1,
-                    running_oracle,
-                    next_challenge.elements,
-                )
-            })
-            .collect::<Vec<_>>();
+    let mut challenge = None;
+    for i in 0..log2_strict(num_threads) {
+        challenge = basefold_one_round(
+            pp,
+            &mut prover_states,
+            challenge,
+            &mut sumcheck_messages,
+            transcript,
+            if i == 0 {
+                &running_oracle
+            } else {
+                trees.last().unwrap().leaves()
+            },
+            num_threads,
+            &mut trees,
+            &mut roots,
+        );
+    }
 
-        // merkelize new leafs
-        let next_running_tree_inners = next_running_oracles
-            .par_chunks_exact(next_running_oracles.len().div_ceil(num_threads))
-            .map(|next_running_oracle| MerkleTree::<E>::compute_inner_ext_seq(next_running_oracle))
-            .collect::<Vec<_>>();
+    // last round: push challenge and bind last variable for all prover_states
+    if let Some(p) = challenge {
+        sumcheck_push_last_variable(&mut prover_states, p, max_num_variables);
+    }
 
-        // merge #threads running_tree_inners into one running tree inner
-        // TODO optimize to be more memory efficiency
-        let next_running_tree_inner = {
-            let mut incompleted_running_tree_inner = next_running_tree_inners
-                .into_iter()
-                .reduce(|tree_a, tree_b| {
-                    tree_a
-                        .iter_mut()
-                        .zip(tree_b)
-                        .for_each(|(layer_a, layer_b)| {
-                            layer_a.extend(layer_b.into_iter());
-                        });
-                    tree_a
-                })
-                .unwrap();
-            for i in incompleted_running_tree_inner.len()
-                ..(incompleted_running_tree_inner.len() + log2_strict(num_threads))
-            {
-                let oracle = incompleted_running_tree_inner[i - 1]
-                    .chunks_exact(2)
-                    .map(|ys| hash_two_digests(&ys[0], &ys[1]))
-                    .collect::<Vec<_>>();
+    reverse_index_bits_in_place(&mut running_evals);
+    transcript.append_field_element_exts(&running_evals);
+    let final_message = running_evals;
 
-                incompleted_running_tree_inner.push(oracle);
-            }
-            incompleted_running_tree_inner
+    if cfg!(feature = "sanity-check") {
+        // If the prover is honest, in the last round, the running oracle
+        // on the prover side should be exactly the encoding of the folded polynomial.
+
+        let mut coeffs = final_message.clone();
+        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+            reverse_index_bits_in_place(&mut coeffs);
+        }
+        interpolate_over_boolean_hypercube(&mut coeffs);
+        let basecode =
+            <Spec::EncodingScheme as EncodingScheme<E>>::encode(pp, &FieldType::Ext(coeffs));
+        let basecode = match basecode {
+            FieldType::Ext(basecode) => basecode,
+            _ => panic!("Should be ext field"),
         };
 
-        let next_running_tree = MerkleTree::<E>::from_inner_leaves(
-            next_running_tree_inner,
-            FieldType::Ext(next_running_oracles),
-        );
-        trees.push(next_running_tree);
-
-        let running_root = next_running_tree.root();
-        write_digest_to_transcript(&running_root, transcript);
-        roots.push(running_root);
-
-        running_oracle = next_running_oracles;
-        challenge = Some(next_challenge);
+        let mut new_running_oracle = new_running_oracle;
+        reverse_index_bits_in_place(&mut new_running_oracle);
+        assert_eq!(basecode, new_running_oracle);
     }
 
-    for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
-        // For the first round, no need to send the running root, because this root is
-        // committing to a vector that can be recovered from linearly combining other
-        // already-committed vectors.
-        transcript.append_field_element_exts(&last_sumcheck_message);
-        sumcheck_messages.push(last_sumcheck_message);
-
-        let challenge = transcript
-            .get_and_append_challenge(b"commit round")
-            .elements;
-
-        // Fold the current oracle for FRI
-        let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
-            pp,
-            log2_strict(running_oracle.len()) - 1,
-            &running_oracle,
-            challenge,
-        );
-
-        if i > 0 {
-            let running_tree = MerkleTree::<E>::from_inner_leaves(
-                next_running_tree_inner,
-                FieldType::Ext(running_oracle),
-            );
-            trees.push(running_tree);
-        }
-
-        if i < num_rounds - 1 {
-            last_sumcheck_message =
-                sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
-            next_running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
-            let running_root = MerkleTree::<E>::root_from_inner(&next_running_tree_inner);
-            write_digest_to_transcript(&running_root, transcript);
-            roots.push(running_root);
-            running_oracle = new_running_oracle;
-        } else {
-            // Assign a new value to the old running vars so that the compiler
-            // knows the old value is safe to move.
-            last_sumcheck_message = Vec::new();
-            running_oracle = Vec::new();
-            next_running_tree_inner = Vec::new();
-            // The difference of the last round is that we don't need to compute the message,
-            // and we don't interpolate the small polynomials. So after the last round,
-            // running_evals is exactly the evaluation representation of the
-            // folded polynomial so far.
-            sum_check_last_round(&mut eq, &mut running_evals, challenge);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut running_evals);
-            transcript.append_field_element_exts(&running_evals);
-            final_message = running_evals;
-            // To avoid the compiler complaining that running_evals is moved.
-            running_evals = Vec::new();
-
-            if cfg!(feature = "sanity-check") {
-                // If the prover is honest, in the last round, the running oracle
-                // on the prover side should be exactly the encoding of the folded polynomial.
-
-                let mut coeffs = final_message.clone();
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
-                    reverse_index_bits_in_place(&mut coeffs);
-                }
-                interpolate_over_boolean_hypercube(&mut coeffs);
-                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
-                    pp,
-                    &FieldType::Ext(coeffs),
-                );
-                let basecode = match basecode {
-                    FieldType::Ext(basecode) => basecode,
-                    _ => panic!("Should be ext field"),
-                };
-
-                let mut new_running_oracle = new_running_oracle;
-                reverse_index_bits_in_place(&mut new_running_oracle);
-                assert_eq!(basecode, new_running_oracle);
-            }
-        }
-        end_timer!(sumcheck_timer);
-    }
     end_timer!(timer);
     (trees, BasefoldCommitPhaseProof {
         sumcheck_messages,
