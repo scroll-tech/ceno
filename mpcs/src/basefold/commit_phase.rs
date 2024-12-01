@@ -25,7 +25,7 @@ use poseidon::digest::Digest;
 use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
     structs::IOPProverStateV2,
-    util::{AdditiveVec, merge_sumcheck_polys_v2},
+    util::{AdditiveVec, merge_sumcheck_polys_v3},
 };
 use transcript::{Challenge, Transcript};
 
@@ -491,6 +491,18 @@ fn sumcheck_push_last_variable<E: ExtensionField>(
             });
     });
 }
+
+/// we expect each thread at least take 4 num of sumcheck variables
+/// return optimal num threads to run sumcheck
+pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
+    let expected_max_threads = max_usable_threads();
+    let min_numvar_per_thread = 4;
+    if num_vars <= min_numvar_per_thread {
+        1
+    } else {
+        (1 << (num_vars - min_numvar_per_thread)).min(expected_max_threads)
+    }
+}
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
 pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
@@ -508,6 +520,7 @@ where
     let timer = start_timer!(|| "Simple batch commit phase");
     assert_eq!(point.len(), num_vars);
     assert_eq!(comm.num_polys, batch_coeffs.len());
+    assert!(num_rounds <= num_vars);
     let prepare_timer = start_timer!(|| "Prepare");
     let mut trees: Vec<MerkleTree<E>> = Vec::with_capacity(num_vars);
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
@@ -541,10 +554,13 @@ where
 
     //    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
 
-    let num_threads = max_usable_threads();
-    let max_overall_num_variables = running_evals.num_vars();
-    println!("running_evals.num_vars() {}", running_evals.num_vars());
-    let mut polys = VirtualPolynomials::new(num_threads, max_overall_num_variables);
+    let num_threads = optimal_sumcheck_threads(num_vars);
+    println!(
+        "running_evals.num_vars() {}, {num_threads} ",
+        running_evals.num_vars()
+    );
+    let mut polys = VirtualPolynomials::new(num_threads, num_vars);
+
     polys.add_mle_list(vec![&eq, &running_evals], E::ONE);
     let batched_polys = polys.get_batched_polys();
     let max_num_variables = batched_polys[0].aux_info.max_num_variables;
@@ -562,7 +578,15 @@ where
         })
         .collect::<Vec<_>>();
     let mut challenge = None;
-    for i in 0..max_num_variables {
+
+    // eg1 num_vars = 10, thread = 8, log(thread) = 3
+    // => per inner max => 10 - 3 = 7 vars
+    // => need to choose min(num_round, 7)
+
+    // eg2 num_vars = 3, thread = 16, log(thread) = 4
+    // => per inner max => 10 - 3 = 7 vars
+    // => need to choose min(num_round, 7)
+    for i in 0..num_rounds.min(num_vars - log2_strict(num_threads)) {
         println!("prover inner round {i}");
         challenge = basefold_one_round::<E, Spec>(
             pp,
@@ -583,14 +607,15 @@ where
     }
 
     // deal with log(#thread) basefold rounds
-    let poly = merge_sumcheck_polys_v2(&prover_states, num_threads);
+    let poly = merge_sumcheck_polys_v3(&prover_states);
     let mut prover_states = vec![IOPProverStateV2::prover_init_with_extrapolation_aux(
         poly,
         vec![(vec![], vec![])],
     )];
 
     let mut challenge = None;
-    for i in 0..log2_strict(num_threads) {
+
+    for i in 0..num_rounds.saturating_sub(num_vars - log2_strict(num_threads)) {
         println!("prover outer round {i}");
         challenge = basefold_one_round::<E, Spec>(
             pp,
@@ -610,7 +635,8 @@ where
         sumcheck_push_last_variable(&mut prover_states, p, max_num_variables);
     }
 
-    let mut running_evals = prover_states[0].get_mle_final_evaluations()[1..].to_vec(); // skip index 0
+    let mut running_evals = prover_states[0].get_mle_final_evaluations(); // skip index 0
+    let mut running_evals = running_evals.split_off(running_evals.len() / 2);
 
     reverse_index_bits_in_place(&mut running_evals);
     transcript.append_field_element_exts(&running_evals);

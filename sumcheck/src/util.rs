@@ -282,6 +282,42 @@ pub fn merge_sumcheck_polys_v2<'a, E: ExtensionField>(
     poly
 }
 
+/// NOTE: assume each prover_states poly num_vars are already in "small size"
+pub fn merge_sumcheck_polys_v3<'a, E: ExtensionField>(
+    prover_states: &[IOPProverStateV2<'a, E>],
+) -> VirtualPolynomialV2<'a, E> {
+    let log2_prover_states_len = ceil_log2(prover_states.len());
+    let mut poly = prover_states[0].poly.clone(); // assume poly evaluation size already been small
+    poly.aux_info.max_num_variables = 0;
+    for i in 0..poly.flattened_ml_extensions.len() {
+        let num_vars = ceil_log2(
+            prover_states[0].poly.flattened_ml_extensions[i]
+                .evaluations()
+                .len(),
+        ) + log2_prover_states_len;
+        poly.aux_info.max_num_variables = poly.aux_info.max_num_variables.max(num_vars);
+        let ml_ext = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_vars,
+            prover_states
+                .iter()
+                .flat_map(|prover_state| {
+                    let mle = &prover_state.poly.flattened_ml_extensions[i];
+                    op_mle!(
+                        mle,
+                        |f| {
+                            // assert!(f.len() == 1);
+                            f.to_vec()
+                        },
+                        |_v| unreachable!()
+                    )
+                })
+                .collect::<Vec<E>>(),
+        );
+        poly.flattened_ml_extensions[i] = Arc::new(ml_ext);
+    }
+    poly
+}
+
 #[derive(Clone, Copy, Debug)]
 /// util collection to support fundamental operation
 pub struct AdditiveArray<F, const N: usize>(pub [F; N]);

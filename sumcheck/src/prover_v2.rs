@@ -591,15 +591,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         self.poly
             .flattened_ml_extensions
             .iter()
-            .map(|mle| {
-                assert!(
-                    mle.evaluations().len() == 1,
-                    "mle.evaluations.len() {} != 1, must be called after prove_round_and_update_state",
-                    mle.evaluations().len(),
-                );
+            .flat_map(|mle| {
                 op_mle! {
-                    |mle| mle[0],
-                    |eval| E::from(eval)
+                    |mle| mle.to_vec(),
+                    |eval| eval.into_iter().map(E::from).collect::<Vec<_>>()
                 }
             })
             .collect()
