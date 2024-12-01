@@ -88,6 +88,7 @@ fn bench_add(c: &mut Criterion) {
                         let timer = Instant::now();
                         let num_instances = 1 << instance_num_vars;
                         let mut transcript = Transcript::new(b"riscv");
+                        let commit_proof_dur = std::time::Instant::now();
                         let commit =
                             Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
                                 .unwrap();
@@ -95,6 +96,7 @@ fn bench_add(c: &mut Criterion) {
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,
                         ];
+                        println!("ADD commit proof took {:?}", commit_proof_dur.elapsed(),);
 
                         let _ = prover
                             .create_opcode_proof(

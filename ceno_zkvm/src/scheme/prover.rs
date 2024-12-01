@@ -214,6 +214,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         transcript: &mut Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
+        let main_proof_dur = std::time::Instant::now();
         let cs = circuit_pk.get_cs();
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
@@ -598,6 +599,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .map(|poly| poly.evaluate(&input_open_point))
             .collect();
         exit_span!(span);
+        println!(
+            "[opcode {}] main proof took {:?}",
+            name,
+            main_proof_dur.elapsed(),
+        );
 
         let pcs_open_span = entered_span!("pcs_open");
         let opening_dur = std::time::Instant::now();
@@ -621,8 +627,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             name,
             opening_dur.elapsed(),
         );
+        println!(
+            "[opcode {}] build opening proof took {:?}",
+            name,
+            opening_dur.elapsed(),
+        );
         exit_span!(pcs_open_span);
+        let wits_commit_dur = std::time::Instant::now();
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
+        println!(
+            "[opcode {}] wits_commit took {:?}",
+            name,
+            wits_commit_dur.elapsed(),
+        );
 
         Ok(ZKVMOpcodeProof {
             num_instances,
