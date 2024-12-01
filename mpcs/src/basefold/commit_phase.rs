@@ -359,6 +359,7 @@ where
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     prover_states: &mut Vec<IOPProverStateV2<'_, E>>,
@@ -369,6 +370,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     num_threads: usize,
     trees: &mut Vec<MerkleTree<E>>,
     roots: &mut Vec<Digest<E::BaseField>>,
+    is_last_round: bool,
 ) -> Option<Challenge<E>>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -384,7 +386,7 @@ where
     let evaluations: AdditiveVec<E> =
         prover_msgs
             .into_iter()
-            .fold(AdditiveVec::new(2), |mut acc, prover_msg| {
+            .fold(AdditiveVec::new(3), |mut acc, prover_msg| {
                 acc += AdditiveVec(prover_msg.evaluations);
                 acc
             });
@@ -451,9 +453,11 @@ where
         next_running_tree_inner,
         FieldType::Ext(next_running_oracles),
     );
-    let running_root = next_running_tree.root();
-    write_digest_to_transcript(&running_root, transcript);
-    roots.push(running_root);
+    if !is_last_round {
+        let running_root = next_running_tree.root();
+        write_digest_to_transcript(&running_root, transcript);
+        roots.push(running_root);
+    }
     trees.push(next_running_tree);
 
     Some(next_challenge)
@@ -496,7 +500,7 @@ fn sumcheck_push_last_variable<E: ExtensionField>(
 /// return optimal num threads to run sumcheck
 pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
     let expected_max_threads = max_usable_threads();
-    let min_numvar_per_thread = 4;
+    let min_numvar_per_thread = 2;
     if num_vars <= min_numvar_per_thread {
         1
     } else {
@@ -563,7 +567,6 @@ where
 
     polys.add_mle_list(vec![&eq, &running_evals], E::ONE);
     let batched_polys = polys.get_batched_polys();
-    let max_num_variables = batched_polys[0].aux_info.max_num_variables;
 
     // let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
     //  end_timer!(sumcheck_timer);
@@ -587,7 +590,7 @@ where
     // => per inner max => 10 - 3 = 7 vars
     // => need to choose min(num_round, 7)
     for i in 0..num_rounds.min(num_vars - log2_strict(num_threads)) {
-        println!("prover inner round {i}");
+        // println!("prover inner round {i}");
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
@@ -598,12 +601,17 @@ where
             num_threads,
             &mut trees,
             &mut roots,
+            i == num_rounds - 1,
         );
     }
 
     // last round: push challenge and bind last variable for all prover_states
     if let Some(p) = challenge {
-        sumcheck_push_last_variable(&mut prover_states, p, max_num_variables);
+        sumcheck_push_last_variable(
+            &mut prover_states,
+            p,
+            num_rounds.min(num_vars - log2_strict(num_threads)),
+        );
     }
 
     // deal with log(#thread) basefold rounds
@@ -616,7 +624,7 @@ where
     let mut challenge = None;
 
     for i in 0..num_rounds.saturating_sub(num_vars - log2_strict(num_threads)) {
-        println!("prover outer round {i}");
+        // println!("prover outer round {i}");
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
@@ -627,12 +635,14 @@ where
             1,
             &mut trees,
             &mut roots,
+            i == num_rounds.saturating_sub(num_vars - log2_strict(num_threads)) - 1,
         );
     }
 
     // last round: push challenge and bind last variable for all prover_states
     if let Some(p) = challenge {
-        sumcheck_push_last_variable(&mut prover_states, p, max_num_variables);
+        // TODO num_rounds doens't matter, just need to be > 1 to assure fix variable in place
+        sumcheck_push_last_variable(&mut prover_states, p, num_rounds);
     }
 
     let mut running_evals = prover_states[0].get_mle_final_evaluations(); // skip index 0
@@ -668,12 +678,12 @@ where
         }
     }
 
-    println!(
-        "sumcheck_messages len() {} roots.len {}, final_message {:?}",
-        sumcheck_messages.len(),
-        roots.len(),
-        final_message
-    );
+    // println!(
+    //     "sumcheck_messages len() {} roots.len {}, final_message {:?}",
+    //     sumcheck_messages.len(),
+    //     roots.len(),
+    //     final_message
+    // );
     end_timer!(timer);
     (trees, BasefoldCommitPhaseProof {
         sumcheck_messages,
