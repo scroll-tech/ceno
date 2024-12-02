@@ -32,7 +32,7 @@ use divu::{DivDummy, RemDummy, RemuDummy};
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use mulh::{MulhInstruction, MulhsuInstruction};
+use mulh::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::SltInstruction;
 use slti::SltiuInstruction;
