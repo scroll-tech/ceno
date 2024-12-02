@@ -390,10 +390,16 @@ where
                 acc += AdditiveVec(prover_msg.evaluations);
                 acc
             });
+
     transcript.append_field_element_exts(&evaluations.0);
     sumcheck_messages.push(evaluations.0);
 
     let next_challenge = transcript.get_and_append_challenge(b"commit round");
+    println!(
+        "evaluations {:?}, next_challenge {:?}",
+        sumcheck_messages.last(),
+        next_challenge
+    );
 
     let running_oracle = trees
         .last()
