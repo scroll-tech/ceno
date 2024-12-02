@@ -154,7 +154,7 @@ fn inner_extrapolate<F: PrimeField, const IS_PARALLEL: bool>(
 /// negligible compared to field operations.
 /// TODO: The quadratic term can be removed by precomputing the lagrange
 /// coefficients.
-pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
+pub fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
     let start = start_timer!(|| "sum check interpolate uni poly opt");
 
     let len = p_i.len();

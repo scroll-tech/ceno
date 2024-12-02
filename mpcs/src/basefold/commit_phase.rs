@@ -650,11 +650,12 @@ where
 
     // last round: push challenge and bind last variable for all prover_states
     if let Some(p) = challenge {
-        // TODO num_rounds doens't matter, just need to be > 1 to assure fix variable in place
+        // num_rounds doens't matter, just need to be > 1 to assure fix variable in place
         sumcheck_push_last_variable(&mut prover_states, p, num_rounds);
     }
 
-    let mut running_evals = prover_states[0].get_mle_final_evaluations(); // skip index 0
+    let mut running_evals = prover_states[0].get_mle_final_evaluations();
+    // skip first half which is eq evaluation
     let mut running_evals = running_evals.split_off(running_evals.len() / 2);
 
     reverse_index_bits_in_place(&mut running_evals);
