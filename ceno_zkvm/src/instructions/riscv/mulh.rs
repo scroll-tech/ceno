@@ -252,7 +252,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         circuit_builder.require_equal(
             || "validate_prod_high_limb",
             rs1_val * rs2_val,
-            rd_val * (1u64 << 32) + prod_low.value(),
+            (rd_val << 32) + prod_low.value(),
         )?;
 
         Ok(MulhConfig {
@@ -308,7 +308,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
 
                 let prod = (rs1_s as i64) * (rs2_s as i64);
-                ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
+                prod as u64 as u32
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
@@ -317,7 +317,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
                 let prod = rs1_val.as_u64() * rs2_val.as_u64();
-                (prod % (1u64 << BIT_WIDTH)) as u32
+                prod as u32
             }
             MulhSignDependencies::SU {
                 rs1_signed,
