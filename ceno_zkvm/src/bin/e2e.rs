@@ -25,6 +25,7 @@ use std::{
     time::Instant,
 };
 use tracing::level_filters::LevelFilter;
+use tracing_flame::FlameLayer;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
@@ -94,9 +95,8 @@ fn main() {
     // this restricts statistics to first (args.profiling) levels
     let profiling_level = args.profiling.unwrap_or(1);
     let filter_by_profiling_level = filter_fn(move |metadata| {
-        (1..)
+        (1..=profiling_level)
             .map(|i| format!("profiling_{i}"))
-            .take(profiling_level)
             .any(|field| metadata.fields().field(&field).is_some())
     });
 
@@ -106,13 +106,21 @@ fn main() {
         .with_thread_names(false)
         .without_time();
 
+    // set up logger
+    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+
     Registry::default()
         .with(ForestLayer::default())
         .with(fmt_layer)
         // if some profiling granularity is specified, use the profiling filter,
         // otherwise use the default
-        .with((args.profiling.is_some()).then_some(filter_by_profiling_level))
-        .with((args.profiling.is_none()).then_some(default_filter))
+        .with(
+            args.profiling
+                .is_some()
+                .then_some(filter_by_profiling_level),
+        )
+        .with(args.profiling.is_none().then_some(default_filter))
+        .with(flame_layer.with_threads_collapsed(true))
         .init();
 
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
