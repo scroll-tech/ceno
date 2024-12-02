@@ -134,8 +134,9 @@ pub struct MulhConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
     rd_written: UInt<E>,
     sign_deps: MulhSignDependencies<E>,
-    prod_half: UInt<E>,
     r_insn: RInstructionConfig<E>,
+    /// The low/high part of the result of multiplying two Uint32.
+    prod_lo_hi: UInt<E>,
 }
 
 enum MulhSignDependencies<E: ExtensionField> {
@@ -187,7 +188,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         )?;
 
         // 1. Compute the signed values associated with `rs1`, `rs2`, `rd` and 2nd half of the prod
-        let (rs1_val, rs2_val, rd_val, sign_deps, prod_half) = match I::INST_KIND {
+        let (rs1_val, rs2_val, rd_val, sign_deps, prod_lo_hi) = match I::INST_KIND {
             InsnKind::MULH => {
                 let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
                 let rs2_signed = Signed::construct_circuit(circuit_builder, || "rs2", &rs2_read)?;
@@ -279,18 +280,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // 2. Verify that the product of signed inputs `rs1` and `rs2` is equal to
         //    the result of interpreting `rd` as the high limb of a 2s complement
         //    value
-        if I::INST_KIND == InsnKind::MUL {
-            circuit_builder.require_equal(
+        match I::INST_KIND {
+            InsnKind::MUL => circuit_builder.require_equal(
                 || "validate_prod_low_limb",
                 rs1_val * rs2_val,
-                prod_half.value() * (1u64 << BIT_WIDTH) + rd_val,
-            )?;
-        } else {
-            circuit_builder.require_equal(
+                prod_lo_hi.value() * (1u64 << BIT_WIDTH) + rd_val,
+            )?,
+            // MULH families
+            InsnKind::MULHU | InsnKind::MULHSU | InsnKind::MULH => circuit_builder.require_equal(
                 || "validate_prod_high_limb",
                 rs1_val * rs2_val,
-                rd_val * (1u64 << BIT_WIDTH) + prod_half.value(),
-            )?;
+                rd_val * (1u64 << BIT_WIDTH) + prod_lo_hi.value(),
+            )?,
+            _ => unreachable!("Unsupported instruction kind"),
         }
 
         Ok(MulhConfig {
@@ -298,7 +300,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             rs2_read,
             rd_written,
             sign_deps,
-            prod_half,
+            prod_lo_hi,
             r_insn,
         })
     }
@@ -334,7 +336,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             .assign_instance(instance, lk_multiplicity, step)?;
 
         // Assign signed values, if any, and compute low 32-bit limb of product
-        let prod_half = match &config.sign_deps {
+        let prod_lo_hi = match &config.sign_deps {
             MulhSignDependencies::SS {
                 rs1_signed,
                 rs2_signed,
@@ -392,10 +394,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
         };
 
-        let prod_half_val = Value::new(prod_half, lk_multiplicity);
+        let prod_lo_hi_val = Value::new(prod_lo_hi, lk_multiplicity);
         config
-            .prod_half
-            .assign_limbs(instance, prod_half_val.as_u16_limbs());
+            .prod_lo_hi
+            .assign_limbs(instance, prod_lo_hi_val.as_u16_limbs());
 
         Ok(())
     }
@@ -494,13 +496,15 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let outcome = if I::INST_KIND == InsnKind::MUL {
-            rs1.wrapping_mul(rs2)
-        } else {
-            let a = Value::<'_, u32>::new_unchecked(rs1);
-            let b = Value::<'_, u32>::new_unchecked(rs2);
-            let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
-            value_mul.as_hi_value::<u32>().as_u32()
+        let outcome = match I::INST_KIND {
+            InsnKind::MUL => rs1.wrapping_mul(rs2),
+            InsnKind::MULHU => {
+                let a = Value::<'_, u32>::new_unchecked(rs1);
+                let b = Value::<'_, u32>::new_unchecked(rs2);
+                let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
+                value_mul.as_hi_value::<u32>().as_u32()
+            }
+            _ => unreachable!("Unsupported instruction kind"),
         };
 
         // values assignment
