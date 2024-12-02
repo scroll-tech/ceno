@@ -2,7 +2,7 @@ use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word
 use ceno_zkvm::e2e::run_e2e;
 use clap::{Parser, ValueEnum};
 use itertools::Itertools;
-use std::{fs, usize};
+use std::fs;
 use tracing::level_filters::LevelFilter;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
