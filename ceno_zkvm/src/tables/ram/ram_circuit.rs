@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
+use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -25,6 +25,18 @@ pub struct MemFinalRecord {
     pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
+}
+
+impl GetAddr for MemInitRecord {
+    fn get_addr(&self) -> Addr {
+        self.addr
+    }
+}
+
+impl GetAddr for MemFinalRecord {
+    fn get_addr(&self) -> Addr {
+        self.addr
+    }
 }
 
 /// - **Non-Volatile**: The initial values can be set to any arbitrary value.
@@ -178,7 +190,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}", DVRAM::RAM_TYPE)
+        format!("RAM_{:?}_{}", DVRAM::RAM_TYPE, DVRAM::name())
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {

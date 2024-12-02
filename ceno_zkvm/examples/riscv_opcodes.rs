@@ -42,10 +42,10 @@ const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
     let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
     declare_program!(
         program,
-        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io_start()), // lui x10, public_io
-        encode_rv32(LW, 10, 0, 1, 0),                                // lw x1, 0(x10)
-        encode_rv32(LW, 10, 0, 2, 4),                                // lw x2, 4(x10)
-        encode_rv32(LW, 10, 0, 3, 8),                                // lw x3, 8(x10)
+        encode_rv32(LUI, 0, 0, 10, CENO_PLATFORM.public_io.start), // lui x10, public_io
+        encode_rv32(LW, 10, 0, 1, 0),                              // lw x1, 0(x10)
+        encode_rv32(LW, 10, 0, 2, 4),                              // lw x2, 4(x10)
+        encode_rv32(LW, 10, 0, 3, 8),                              // lw x3, 8(x10)
         // Main loop.
         encode_rv32(ADD, 1, 4, 4, 0),              // add x4, x1, x4
         encode_rv32(ADD, 2, 3, 3, 0),              // add x3, x2, x3
@@ -90,8 +90,8 @@ fn main() {
             })
             .collect(),
     );
-    let mem_addresses = CENO_PLATFORM.ram_start()..=CENO_PLATFORM.ram_end();
-    let io_addresses = CENO_PLATFORM.public_io_start()..=CENO_PLATFORM.public_io_end();
+    let mem_addresses = CENO_PLATFORM.ram.clone();
+    let io_addresses = CENO_PLATFORM.public_io.clone();
 
     let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let mut fmt_layer = fmt::layer()
@@ -275,6 +275,7 @@ fn main() {
                 &reg_final,
                 &mem_final,
                 &public_io_final,
+                &[],
             )
             .unwrap();
 

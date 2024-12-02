@@ -1,6 +1,6 @@
-use std::{collections::HashSet, iter::zip, ops::RangeInclusive};
+use std::{collections::HashSet, iter::zip, ops::Range};
 
-use ceno_emul::{Addr, Cycle, WORD_SIZE, Word};
+use ceno_emul::{Addr, Cycle, IterAddresses, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 
@@ -8,8 +8,8 @@ use crate::{
     error::ZKVMError,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RegTable,
-        RegTableCircuit, StaticMemCircuit, StaticMemTable, TableCircuit,
+        HintsCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable,
+        RegTable, RegTableCircuit, StaticMemCircuit, StaticMemTable, TableCircuit,
     },
 };
 
@@ -20,6 +20,8 @@ pub struct MmuConfig<E: ExtensionField> {
     pub static_mem_config: <StaticMemCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of public IO.
     pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// Initialization of hints.
+    pub hints_config: <HintsCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -30,11 +32,13 @@ impl<E: ExtensionField> MmuConfig<E> {
         let static_mem_config = cs.register_table_circuit::<StaticMemCircuit<E>>();
 
         let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
+        let hints_config = cs.register_table_circuit::<HintsCircuit<E>>();
 
         Self {
             reg_config,
             static_mem_config,
             public_io_config,
+            hints_config,
             params: cs.params.clone(),
         }
     }
@@ -48,9 +52,11 @@ impl<E: ExtensionField> MmuConfig<E> {
         io_addrs: &[Addr],
     ) {
         assert!(
-            chain(
-                static_mem_init.iter().map(|record| record.addr),
-                io_addrs.iter().copied(),
+            chain!(
+                static_mem_init.iter_addresses(),
+                io_addrs.iter_addresses(),
+                // TODO: optimize with min_max and Range.
+                self.params.platform.hints.iter_addresses(),
             )
             .all_unique(),
             "memory addresses must be unique"
@@ -65,6 +71,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         );
 
         fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_addrs);
+        fixed.register_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, &());
     }
 
     pub fn assign_table_circuit(
@@ -74,6 +81,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
         io_cycles: &[Cycle],
+        hints_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)?;
 
@@ -84,6 +92,8 @@ impl<E: ExtensionField> MmuConfig<E> {
         )?;
 
         witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
+
+        witness.assign_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, hints_final)?;
 
         Ok(())
     }
@@ -107,7 +117,7 @@ impl<E: ExtensionField> MmuConfig<E> {
 }
 
 pub struct MemPadder {
-    valid_addresses: RangeInclusive<Addr>,
+    valid_addresses: Range<Addr>,
     used_addresses: HashSet<Addr>,
 }
 
@@ -118,7 +128,7 @@ impl MemPadder {
     ///
     /// Require: `values.len() <= padded_len <= address_range.len()`
     pub fn init_mem(
-        address_range: RangeInclusive<Addr>,
+        address_range: Range<Addr>,
         padded_len: usize,
         values: &[Word],
     ) -> Vec<MemInitRecord> {
@@ -129,7 +139,7 @@ impl MemPadder {
         records
     }
 
-    pub fn new(valid_addresses: RangeInclusive<Addr>) -> Self {
+    pub fn new(valid_addresses: Range<Addr>) -> Self {
         Self {
             valid_addresses,
             used_addresses: HashSet::new(),

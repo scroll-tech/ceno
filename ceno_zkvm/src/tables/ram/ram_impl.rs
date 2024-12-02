@@ -397,8 +397,11 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
             .zip(final_mem.into_par_iter())
-            .for_each(|(row, rec)| {
+            .enumerate()
+            .for_each(|(i, (row, rec))| {
+                assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
                 set_val!(row, self.addr, rec.addr as u64);
+
                 if self.final_v.len() == 1 {
                     // Assign value directly.
                     set_val!(row, self.final_v[0], rec.value as u64);

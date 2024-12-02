@@ -199,7 +199,7 @@ impl StepRecord {
             Some(value),
             Some(Change::new(value, value)),
             Some(WriteOp {
-                addr: CENO_PLATFORM.ram_start().into(),
+                addr: CENO_PLATFORM.ram.start.into(),
                 value: Change {
                     before: value,
                     after: value,

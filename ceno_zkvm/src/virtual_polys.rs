@@ -246,8 +246,8 @@ mod tests {
                 },
             );
 
-            <<E as ExtensionField>::BaseField as std::convert::Into<E>>::into(
-                evals.iter().sum::<<E as ExtensionField>::BaseField>()
+            GoldilocksExt2::from(
+                evals.iter().sum::<Goldilocks>()
                     * base_2.pow([(max_num_vars - fs[0].num_vars()) as u64]),
             )
         };

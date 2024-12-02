@@ -1,6 +1,6 @@
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, Platform, StepRecord, Tracer, VMState,
-    WORD_SIZE, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program,
+    StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
 };
 use ceno_zkvm::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
@@ -19,7 +19,9 @@ use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
-    fs, panic,
+    fs,
+    iter::zip,
+    panic,
     time::Instant,
 };
 use tracing::level_filters::LevelFilter;
@@ -41,6 +43,20 @@ struct Args {
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
+
+    /// Hints: prover-private unconstrained input.
+    /// This is a raw file mapped as a memory segment.
+    /// Zero-padded to the right to the next power-of-two size.
+    #[arg(long)]
+    hints: Option<String>,
+
+    /// Stack size in bytes.
+    #[arg(long, default_value = "32768")]
+    stack_size: u32,
+
+    /// Heap size in bytes.
+    #[arg(long, default_value = "2097152")]
+    heap_size: u32,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -50,11 +66,15 @@ enum Preset {
 }
 
 fn main() {
-    let args = Args::parse();
+    let args = {
+        let mut args = Args::parse();
+        args.stack_size = args.stack_size.next_multiple_of(WORD_SIZE as u32);
+        args.heap_size = args.heap_size.next_multiple_of(WORD_SIZE as u32);
+        args
+    };
 
     type E = GoldilocksExt2;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-    const PROGRAM_SIZE: usize = 1 << 14;
     type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
     // set up logger
@@ -74,33 +94,76 @@ fn main() {
         .with(flame_layer.with_threads_collapsed(true));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
+
     let platform = match args.platform {
         Preset::Ceno => CENO_PLATFORM,
         Preset::Sp1 => Platform {
             // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
             stack_top: 0x0020_0400,
-            rom_start: 0x0020_0800,
-            rom_end: 0x003f_ffff,
-            ram_start: 0x0020_0000,
-            ram_end: 0xFFFF_0000 - 1,
+            rom: program.base_address
+                ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
+            ram: 0x0010_0000..0xFFFF_0000,
             unsafe_ecall_nop: true,
+            ..CENO_PLATFORM
         },
     };
-    tracing::info!("Running on platform {:?}", args.platform);
+    tracing::info!("Running on platform {:?} {:?}", args.platform, platform);
+    tracing::info!(
+        "Stack: {} bytes. Heap: {} bytes.",
+        args.stack_size,
+        args.heap_size
+    );
 
-    const STACK_SIZE: u32 = 256;
-    let mut mem_padder = MemPadder::new(platform.ram_start()..=platform.ram_end());
+    let stack_addrs = platform.stack_top - args.stack_size..platform.stack_top;
+
+    // Detect heap as starting after program data.
+    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+    let heap_addrs = heap_start..heap_start + args.heap_size;
+
+    let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
+
+    let mem_init = {
+        let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
+            addr: *addr,
+            value: *value,
+        });
+
+        let stack = stack_addrs
+            .iter_addresses()
+            .map(|addr| MemInitRecord { addr, value: 0 });
+
+        let heap = heap_addrs
+            .iter_addresses()
+            .map(|addr| MemInitRecord { addr, value: 0 });
+
+        let mem_init = chain!(program_addrs, stack, heap).collect_vec();
+
+        mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
+    };
 
     tracing::info!("Loading ELF file: {}", args.elf);
-    let elf_bytes = fs::read(&args.elf).expect("read elf file");
-    let mut vm = VMState::new_from_elf(platform.clone(), &elf_bytes).unwrap();
+    let mut vm = VMState::new(platform.clone(), program);
+
+    tracing::info!("Loading hints file: {:?}", args.hints);
+    let hints = memory_from_file(&args.hints);
+    assert!(
+        hints.len() <= platform.hints.iter_addresses().len(),
+        "hints must fit in {} bytes",
+        platform.hints.len()
+    );
+    for (addr, value) in zip(platform.hints.iter_addresses(), &hints) {
+        vm.init_memory(addr.into(), *value);
+    }
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let program_params = ProgramParams {
         platform: platform.clone(),
-        program_size: PROGRAM_SIZE,
+        program_size: vm.program().instructions.len(),
+        static_memory_len: mem_init.len(),
         ..ProgramParams::default()
     };
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
@@ -118,25 +181,6 @@ fn main() {
         &prog_config,
         vm.program(),
     );
-
-    let mem_init = {
-        let program_addrs = vm
-            .program()
-            .image
-            .iter()
-            .map(|(addr, value)| MemInitRecord {
-                addr: *addr,
-                value: *value,
-            });
-
-        let stack_addrs = (1..=STACK_SIZE)
-            .map(|i| platform.stack_top - i * WORD_SIZE as u32)
-            .map(|addr| MemInitRecord { addr, value: 0 });
-
-        let mem_init = chain!(program_addrs, stack_addrs).collect_vec();
-
-        mem_padder.padded_sorted(mmu_config.static_mem_len(), mem_init)
-    };
 
     // IO is not used in this program, but it must have a particular size at the moment.
     let io_init = mem_padder.padded_sorted(mmu_config.public_io_len(), vec![]);
@@ -169,7 +213,8 @@ fn main() {
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
 
-    tracing::info!("Proving {} execution steps", all_records.len());
+    let cycle_num = all_records.len();
+    tracing::info!("Proving {} execution steps", cycle_num);
     for (i, step) in enumerate(&all_records).rev().take(5).rev() {
         tracing::trace!("Step {i}: {:?} - {:?}\n", step.insn().codes().kind, step);
     }
@@ -250,6 +295,14 @@ fn main() {
         .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
         .collect_vec();
 
+    let priv_io_final = zip(platform.hints.iter_addresses(), &hints)
+        .map(|(addr, &value)| MemFinalRecord {
+            addr,
+            value,
+            cycle: *final_access.get(&addr.into()).unwrap_or(&0),
+        })
+        .collect_vec();
+
     // assign table circuits
     config
         .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
@@ -261,6 +314,7 @@ fn main() {
             &reg_final,
             &mem_final,
             &io_final,
+            &priv_io_final,
         )
         .unwrap();
     // assign program circuit
@@ -279,10 +333,22 @@ fn main() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
+    let proving_time = timer.elapsed().as_secs_f64();
+    let e2e_time = e2e_start.elapsed().as_secs_f64();
+    let witgen_time = e2e_time - proving_time;
     println!(
-        "fibonacci create_proof, time = {}, e2e = {:?}",
-        timer.elapsed().as_secs_f64(),
-        e2e_start.elapsed(),
+        "Proving finished.\n\
+\tProving time = {:.3}s, freq = {:.3}khz\n\
+\tWitgen  time = {:.3}s, freq = {:.3}khz\n\
+\tTotal   time = {:.3}s, freq = {:.3}khz\n\
+\tthread num: {}",
+        proving_time,
+        cycle_num as f64 / proving_time / 1000.0,
+        witgen_time,
+        cycle_num as f64 / witgen_time / 1000.0,
+        e2e_time,
+        cycle_num as f64 / e2e_time / 1000.0,
+        rayon::current_num_threads()
     );
 
     let transcript = Transcript::new(b"riscv");
@@ -331,6 +397,18 @@ fn main() {
             };
         }
     };
+}
+
+fn memory_from_file(path: &Option<String>) -> Vec<u32> {
+    path.as_ref()
+        .map(|path| {
+            let mut buf = fs::read(path).expect("could not read file");
+            buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
+            buf.chunks_exact(WORD_SIZE)
+                .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
+                .collect_vec()
+        })
+        .unwrap_or_default()
 }
 
 fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {

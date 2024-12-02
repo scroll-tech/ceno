@@ -19,11 +19,11 @@ impl DynVolatileRamTable for DynMemTable {
     const ZERO_INIT: bool = true;
 
     fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram_start()
+        params.platform.ram.start
     }
 
     fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram_end()
+        params.platform.ram.end
     }
 
     fn name() -> &'static str {
@@ -34,25 +34,25 @@ impl DynVolatileRamTable for DynMemTable {
 pub type DynMemCircuit<E> = DynVolatileRamCircuit<E, DynMemTable>;
 
 #[derive(Clone)]
-pub struct PrivateMemTable;
-impl DynVolatileRamTable for PrivateMemTable {
+pub struct HintsTable;
+impl DynVolatileRamTable for HintsTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const ZERO_INIT: bool = false;
 
     fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram_start()
+        params.platform.hints.start
     }
 
     fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram_end()
+        params.platform.hints.end
     }
 
     fn name() -> &'static str {
-        "PrivateMemTable"
+        "HintsTable"
     }
 }
-pub type PrivateMemCircuit<E> = DynVolatileRamCircuit<E, PrivateMemTable>;
+pub type HintsCircuit<E> = DynVolatileRamCircuit<E, HintsTable>;
 
 /// RegTable, fix size without offset
 #[derive(Clone)]
