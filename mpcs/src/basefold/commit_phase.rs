@@ -395,11 +395,11 @@ where
     sumcheck_messages.push(evaluations.0);
 
     let next_challenge = transcript.get_and_append_challenge(b"commit round");
-    println!(
-        "evaluations {:?}, next_challenge {:?}",
-        sumcheck_messages.last(),
-        next_challenge
-    );
+    // println!(
+    //     "evaluations {:?}, next_challenge {:?}",
+    //     sumcheck_messages.last(),
+    //     next_challenge
+    // );
 
     let running_oracle = trees
         .last()
@@ -411,10 +411,13 @@ where
     let running_oracle_len = running_oracle.len();
     let next_running_oracles = running_oracle
         .par_chunks_exact(running_oracle_len.div_ceil(num_threads))
-        .flat_map(|running_oracle| {
+        .enumerate()
+        .flat_map(|(i, running_oracle)| {
+            let offset = i * running_oracle.len() / 2;
             basefold_one_round_by_interpolation_weights_seq::<E, Spec>(
                 pp,
-                log2_strict(running_oracle.len()) - 1,
+                offset,
+                log2_strict(running_oracle_len) - 1,
                 running_oracle,
                 next_challenge.elements,
             )
@@ -437,7 +440,7 @@ where
                     .iter_mut()
                     .zip(tree_b)
                     .for_each(|(layer_a, layer_b)| {
-                        layer_a.extend(layer_b.into_iter());
+                        layer_a.extend(layer_b);
                     });
                 tree_a
             })
@@ -565,10 +568,10 @@ where
     //    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
 
     let num_threads = optimal_sumcheck_threads(num_vars);
-    println!(
-        "running_evals.num_vars() {}, {num_threads} ",
-        running_evals.num_vars()
-    );
+    // println!(
+    //     "running_evals.num_vars() {}, {num_threads} ",
+    //     running_evals.num_vars()
+    // );
     let mut polys = VirtualPolynomials::new(num_threads, num_vars);
 
     polys.add_mle_list(vec![&eq, &running_evals], E::ONE);
@@ -717,6 +720,7 @@ fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: Basefold
 
 fn basefold_one_round_by_interpolation_weights_seq<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    offset: usize,
     level: usize,
     values: &[E],
     challenge: E,
@@ -725,6 +729,7 @@ fn basefold_one_round_by_interpolation_weights_seq<E: ExtensionField, Spec: Base
         .chunks_exact(2)
         .enumerate()
         .map(|(i, ys)| {
+            let i = offset + i;
             let (x0, x1, w) =
                 <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs(pp, level, i);
             interpolate2_weights([(x0, ys[0]), (x1, ys[1])], w, challenge)
