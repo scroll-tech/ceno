@@ -6,7 +6,8 @@ use goldilocks::GoldilocksExt2;
 
 use itertools::Itertools;
 use mpcs::{
-    Basefold, BasefoldBasecodeParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme,
+    Basecode, BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, EncodingScheme,
+    PolynomialCommitmentScheme,
     util::{
         arithmetic::interpolate_field_type_over_boolean_hypercube,
         plonky2_util::reverse_index_bits_in_place_field_type,
@@ -67,11 +68,7 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
                                 let mut coeffs = poly.evaluations.clone();
                                 interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
-                                let mut codeword =
-                                    <<BasefoldBasecodeParams as BasefoldSpec<E>>::EncodingScheme as EncodingScheme<E>>::encode(
-                                        &pp.encoding_params,
-                                        &coeffs,
-                                    );
+                                let mut codeword = Basecode::encode(&pp.encoding_params, &coeffs);
 
                                 // If using repetition code as basecode, it may be faster to use the following line of code to create the commitment and comment out the two lines above
                                 //        let mut codeword = evaluate_over_foldable_domain(pp.log_rate, coeffs, &pp.table);
