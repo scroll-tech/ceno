@@ -307,7 +307,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let rs2_s = rs2_signed.assign_instance(instance, lk_multiplicity, &rs2_val)?;
                 rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
 
-                ((rs1_s as i64) * (rs2_s as i64)) as u32
+                (rs1_s as u32) * (rs2_s as u32)
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
