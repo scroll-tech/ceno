@@ -14,7 +14,7 @@ use ceno_zkvm::{
 };
 use clap::{Parser, ValueEnum};
 use ff_ext::ff::Field;
-use goldilocks::GoldilocksExt2;
+use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
@@ -365,8 +365,8 @@ fn main() {
 
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-    zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
+    zkvm_proof.raw_pi[0] = vec![Goldilocks::ONE];
+    zkvm_proof.raw_pi[1] = vec![Goldilocks::ONE];
 
     // capture panic message, if have
     let default_hook = panic::take_hook();
