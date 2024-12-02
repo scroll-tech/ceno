@@ -136,6 +136,8 @@ pub struct MulhConfig<E: ExtensionField> {
     sign_deps: MulhSignDependencies<E>,
     r_insn: RInstructionConfig<E>,
     /// The low/high part of the result of multiplying two Uint32.
+    ///
+    /// Whether it's low or high depends on the operation.
     prod_lo_hi: UInt<E>,
 }
 
@@ -284,13 +286,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             InsnKind::MUL => circuit_builder.require_equal(
                 || "validate_prod_low_limb",
                 rs1_val * rs2_val,
-                prod_lo_hi.value() * (1u64 << BIT_WIDTH) + rd_val,
+                (prod_lo_hi.value() << 32) + rd_val,
             )?,
             // MULH families
             InsnKind::MULHU | InsnKind::MULHSU | InsnKind::MULH => circuit_builder.require_equal(
                 || "validate_prod_high_limb",
                 rs1_val * rs2_val,
-                rd_val * (1u64 << BIT_WIDTH) + prod_lo_hi.value(),
+                (rd_val << 32) + prod_lo_hi.value(),
             )?,
             _ => unreachable!("Unsupported instruction kind"),
         }
@@ -348,7 +350,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
 
                 let prod = (rs1_s as i64) * (rs2_s as i64);
-                ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
+                // only take the low part of the product
+                prod as u32
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
@@ -357,11 +360,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
                 let prod = rs1_val.as_u64() * rs2_val.as_u64();
-                (prod % (1u64 << BIT_WIDTH)) as u32
+                // only take the low part of the product
+                prod as u32
             }
             MulhSignDependencies::LL { constrain_rd } => {
                 let prod = rs1_val.as_u64() * rs2_val.as_u64();
-                let prod_lo = (prod % (1u64 << BIT_WIDTH)) as u32;
+                let prod_lo = prod as u32;
                 assert_eq!(prod_lo, rd);
 
                 let prod_hi = (prod >> BIT_WIDTH) as u32;
@@ -386,11 +390,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let rd_f = i64_to_base(rd_s as i64);
                 let avoid_f = i64_to_base(i32::MAX.into());
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
-                // let nonzero_val = ((1i64 << (BIT_WIDTH - 1)) - 1) - (rd_s as i64);
-                // constrain_rd.assign_instance(instance, i64_to_base(nonzero_val))?;
 
                 let prod = (rs1_s as i64).wrapping_mul(rs2 as i64);
-                ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
+                // only take the low part of the product
+                prod as u32
             }
         };
 
