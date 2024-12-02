@@ -460,6 +460,10 @@ mod test {
     #[test]
     fn test_opcode_mul() {
         verify_mulu::<MulOp>("basic", 2, 11);
+        verify_mulu::<MulOp>("2 * 0", 2, 0);
+        verify_mulu::<MulOp>("0 * 0", 0, 0);
+        verify_mulu::<MulOp>("0 * 2", 0, 2);
+        verify_mulu::<MulOp>("0 * u32::MAX", 0, u32::MAX);
         verify_mulu::<MulOp>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulOp>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
     }
@@ -467,6 +471,10 @@ mod test {
     #[test]
     fn test_opcode_mulhu() {
         verify_mulu::<MulhuOp>("basic", 2, 11);
+        verify_mulu::<MulhuOp>("2 * 0", 2, 0);
+        verify_mulu::<MulhuOp>("0 * 0", 0, 0);
+        verify_mulu::<MulhuOp>("0 * 2", 0, 2);
+        verify_mulu::<MulhuOp>("0 * u32::MAX", 0, u32::MAX);
         verify_mulu::<MulhuOp>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulhuOp>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
     }
