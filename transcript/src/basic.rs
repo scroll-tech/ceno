@@ -100,7 +100,7 @@ impl<E: ExtensionField> Transcript<E> {
         unimplemented!()
     }
 
-    pub fn read_field_element(&self) -> <E as ExtensionField>::BaseField {
+    pub fn read_field_element(&self) -> E::BaseField {
         unimplemented!()
     }
 

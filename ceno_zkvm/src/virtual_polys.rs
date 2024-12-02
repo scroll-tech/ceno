@@ -169,7 +169,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 mod tests {
 
     use ark_std::test_rng;
-    use ff_ext::ExtensionField;
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
@@ -231,10 +230,10 @@ mod tests {
     fn test_sumcheck_different_degree() {
         let max_num_vars = 3;
         let fn_eval = |fs: &[ArcMultilinearExtension<E>]| -> E {
-            let base_2 = <E as ExtensionField>::BaseField::from(2);
+            let base_2 = Goldilocks::from(2);
 
             let evals = fs.iter().fold(
-                vec![<E as ExtensionField>::BaseField::ONE; 1 << fs[0].num_vars()],
+                vec![Goldilocks::ONE; 1 << fs[0].num_vars()],
                 |mut evals, f| {
                     evals
                         .iter_mut()
@@ -258,21 +257,21 @@ mod tests {
 
         let f1: [ArcMultilinearExtension<E>; 2] = std::array::from_fn(|_| {
             (0..1 << (max_num_vars - 2))
-                .map(|_| <E as ExtensionField>::BaseField::random(&mut rng))
+                .map(|_| Goldilocks::random(&mut rng))
                 .collect_vec()
                 .into_mle()
                 .into()
         });
         let f2: [ArcMultilinearExtension<E>; 1] = std::array::from_fn(|_| {
             (0..1 << (max_num_vars))
-                .map(|_| <E as ExtensionField>::BaseField::random(&mut rng))
+                .map(|_| Goldilocks::random(&mut rng))
                 .collect_vec()
                 .into_mle()
                 .into()
         });
         let f3: [ArcMultilinearExtension<E>; 3] = std::array::from_fn(|_| {
             (0..1 << (max_num_vars - 1))
-                .map(|_| <E as ExtensionField>::BaseField::random(&mut rng))
+                .map(|_| Goldilocks::random(&mut rng))
                 .collect_vec()
                 .into_mle()
                 .into()
