@@ -328,7 +328,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?
             }
         };
-        let prod_low = (rs1).wrapping_mul(rs2);
+        let prod_low = rs1.wrapping_mul(rs2);
 
         let prod_low_val = Value::new(prod_low, lk_multiplicity);
         config
