@@ -78,7 +78,7 @@
 //! the high limb uniquely represent the product values for unsigned/unsigned
 //! and signed/unsigned products.
 
-use std::{fmt::Display, marker::PhantomData};
+use std::{fmt::Display, marker::PhantomData, u32};
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -211,7 +211,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             InsnKind::MULHU => {
                 let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
                 // constrain that rd does not represent 2^32 - 1
-                let rd_avoid = Expression::<E>::from((1u64 << BIT_WIDTH) - 1);
+                let rd_avoid = Expression::<E>::from(u32::MAX);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
                     || "constrain_rd",
@@ -229,7 +229,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
             InsnKind::MUL => {
                 // constrain that prod_hi does not represent 2^32 - 1
-                let prod_hi_avoid = Expression::<E>::from((1u64 << BIT_WIDTH) - 1);
+                let prod_hi_avoid = Expression::<E>::from(u32::MAX);
                 let prod_hi = UInt::new(|| "prod_hi", circuit_builder)?;
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
@@ -253,7 +253,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
 
                 // constrain that (signed) rd does not represent 2^31 - 1
-                let rd_avoid = Expression::<E>::from((1u64 << (BIT_WIDTH - 1)) - 1);
+                let rd_avoid = Expression::<E>::from(i32::MAX);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
                     || "constrain_rd",
@@ -353,7 +353,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
                 let rd_f = E::BaseField::from(rd as u64);
-                let avoid_f = E::BaseField::from((1u64 << BIT_WIDTH) - 1);
+                let avoid_f = E::BaseField::from(u32::MAX.into());
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
                 let prod = rs1_val.as_u64() * rs2_val.as_u64();
@@ -365,7 +365,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 assert_eq!(prod_lo, rd);
 
                 let prod_hi = (prod >> BIT_WIDTH) as u32;
-                let avoid_f = E::BaseField::from((1u64 << BIT_WIDTH) - 1);
+                let avoid_f = E::BaseField::from(u32::MAX.into());
                 constrain_rd.assign_instance(
                     instance,
                     E::BaseField::from(prod_hi as u64),
@@ -384,7 +384,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
                 // assign nonzero value (i32::MAX - rd)
                 let rd_f = i64_to_base(rd_s as i64);
-                let avoid_f = i64_to_base((1i64 << (BIT_WIDTH - 1)) - 1);
+                let avoid_f = i64_to_base(i32::MAX.into());
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
                 // let nonzero_val = ((1i64 << (BIT_WIDTH - 1)) - 1) - (rd_s as i64);
                 // constrain_rd.assign_instance(instance, i64_to_base(nonzero_val))?;
