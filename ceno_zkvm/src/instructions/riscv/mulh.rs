@@ -296,27 +296,22 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             .assign_instance(instance, lk_multiplicity, step)?;
 
         // Assign signed values, if any, and compute low 32-bit limb of product
-        let prod_low = match &config.sign_deps {
+        match &config.sign_deps {
             MulhSignDependencies::SS {
                 rs1_signed,
                 rs2_signed,
                 rd_signed,
             } => {
                 // Signed register values
-                let rs1_s = rs1_signed.assign_instance(instance, lk_multiplicity, &rs1_val)?;
-                let rs2_s = rs2_signed.assign_instance(instance, lk_multiplicity, &rs2_val)?;
+                rs1_signed.assign_instance(instance, lk_multiplicity, &rs1_val)?;
+                rs2_signed.assign_instance(instance, lk_multiplicity, &rs2_val)?;
                 rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
-
-                (rs1_s as u32) * (rs2_s as u32)
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
                 let rd_f = E::BaseField::from(rd as u64);
                 let avoid_f = E::BaseField::from((1u64 << BIT_WIDTH) - 1);
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
-
-                let prod = rs1_val.as_u64() * rs2_val.as_u64();
-                prod as u32
             }
             MulhSignDependencies::SU {
                 rs1_signed,
@@ -324,19 +319,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 constrain_rd,
             } => {
                 // Signed register values
-                let rs1_s = rs1_signed.assign_instance(instance, lk_multiplicity, &rs1_val)?;
+                rs1_signed.assign_instance(instance, lk_multiplicity, &rs1_val)?;
                 let rd_s = rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
 
                 // assign nonzero value (i32::MAX - rd)
                 let rd_f = i64_to_base(rd_s as i64);
                 let avoid_f = i64_to_base((1i64 << (BIT_WIDTH - 1)) - 1);
-                constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
-                // let nonzero_val = ((1i64 << (BIT_WIDTH - 1)) - 1) - (rd_s as i64);
-                // constrain_rd.assign_instance(instance, i64_to_base(nonzero_val))?;
-
-                (rs1_s as i64).wrapping_mul(rs2 as i64) as u32
+                constrain_rd.assign_instance(instance, rd_f, avoid_f)?
             }
         };
+        let prod_low = (rs1).wrapping_mul(rs2);
 
         let prod_low_val = Value::new(prod_low, lk_multiplicity);
         config
