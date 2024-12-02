@@ -1,0 +1,10 @@
+# TODO(Matthias): review and see which exception we can remove over time.
+# Eg removing syn is blocked by ark-ff-asm cutting a new release
+# (https://github.com/arkworks-rs/algebra/issues/813) amongst other things.
+allowed-duplicate-crates = [
+  "syn",
+  "windows-sys",
+  "regex-automata",
+  "regex-syntax",
+  "itertools",
+]

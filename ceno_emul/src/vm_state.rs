@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    PC_STEP_SIZE, Program,
+    PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
@@ -44,7 +44,7 @@ impl VMState {
         };
 
         // init memory from program.image
-        for (&addr, &value) in program.image.iter() {
+        for (&addr, &value) in &program.image {
             vm.init_memory(ByteAddr(addr).waddr(), value);
         }
 
@@ -111,9 +111,9 @@ impl VMState {
 impl EmuContext for VMState {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
-        let function = self.load_register(self.platform.reg_ecall())?;
-        let arg0 = self.load_register(self.platform.reg_arg0())?;
-        if function == self.platform.ecall_halt() {
+        let function = self.load_register(Platform::reg_ecall())?;
+        let arg0 = self.load_register(Platform::reg_arg0())?;
+        if function == Platform::ecall_halt() {
             tracing::debug!("halt with exit_code={}", arg0);
 
             self.halt();
@@ -123,7 +123,8 @@ impl EmuContext for VMState {
             // Read two registers, write one register, write one memory word, and branch.
             tracing::warn!("ecall ignored: syscall_id={}", function);
             self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
-            let addr = self.platform.ram_start().into();
+            // Example ecall effect - any writable address will do.
+            let addr = (self.platform.stack_top - WORD_SIZE as u32).into();
             self.store_memory(addr, self.peek_memory(addr))?;
             self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)

@@ -24,7 +24,10 @@ use crate::{
         U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, XorTableCircuit,
     },
 };
-use ceno_emul::{CENO_PLATFORM, InsnKind, InsnKind::*, StepRecord};
+use ceno_emul::{
+    InsnKind::{self, *},
+    Platform, StepRecord,
+};
 use divu::{DivDummy, RemDummy, RemuDummy};
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
@@ -324,7 +327,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             let insn_kind = record.insn().codes().kind;
             match insn_kind {
                 // ecall / halt
-                EANY if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() => {
+                EANY if record.rs1().unwrap().value == Platform::ecall_halt() => {
                     halt_records.push(record);
                 }
                 // other type of ecalls are handled by dummy ecall instruction
