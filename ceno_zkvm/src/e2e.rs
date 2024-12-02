@@ -9,24 +9,19 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit},
 };
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program,
-    StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
+    ByteAddr, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program, StepRecord, Tracer,
+    VMState, WORD_SIZE, WordAddr,
 };
-use clap::{Parser, ValueEnum};
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
 use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
     iter::zip,
     panic,
     time::Instant,
 };
-use tracing::level_filters::LevelFilter;
-use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 use transcript::Transcript;
 
 pub fn run_e2e(

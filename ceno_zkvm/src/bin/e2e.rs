@@ -1,35 +1,11 @@
-use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program,
-    StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
-};
-use ceno_zkvm::{
-    e2e::run_e2e,
-    instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
-    scheme::{
-        PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
-        verifier::ZKVMVerifier,
-    },
-    state::GlobalState,
-    structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit},
-};
+use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word};
+use ceno_zkvm::e2e::run_e2e;
 use clap::{Parser, ValueEnum};
-use ff_ext::ff::Field;
-use goldilocks::GoldilocksExt2;
-use itertools::{Itertools, MinMaxResult, chain, enumerate};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    iter::zip,
-    panic,
-    time::Instant,
-    usize,
-};
+use itertools::Itertools;
+use std::{fs, usize};
 use tracing::level_filters::LevelFilter;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
-use transcript::Transcript;
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
@@ -91,10 +67,6 @@ fn main() {
         args.heap_size = args.heap_size.next_multiple_of(WORD_SIZE as u32);
         args
     };
-
-    type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
     tracing::info!("Loading ELF file: {}", &args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
