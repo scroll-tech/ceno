@@ -1,3 +1,5 @@
+# This docker image is used to run the CI pipeline in the Github Actions
+
 FROM ghcr.io/actions/actions-runner:latest
 
 COPY start.sh start.sh
