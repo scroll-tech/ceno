@@ -20,7 +20,8 @@ pub fn imm_j(imm: i32) -> u32 {
 }
 
 fn imm_with_max_valid_bits(imm: i32, bits: u32) -> u32 {
-    imm as u32 & !(u32::MAX << bits)
+    let shift = 32 - bits;
+    (imm << shift >> shift) as u32
 }
 
 pub fn imm_u(imm: u32) -> u32 {
@@ -43,4 +44,12 @@ pub fn u32_extra() -> impl Strategy<Value = u32> {
 #[allow(clippy::cast_possible_wrap)]
 pub fn i32_extra() -> impl Strategy<Value = i32> {
     u32_extra().prop_map(|x| x as i32)
+}
+
+pub fn imm_extra(bits: u32) -> impl Strategy<Value = i32> {
+    i32_extra().prop_map(move |x| imm_with_max_valid_bits(x, bits) as i32)
+}
+
+pub fn immu_extra(bits: u32) -> impl Strategy<Value = u32> {
+    i32_extra().prop_map(move |x| imm_with_max_valid_bits(x, bits))
 }

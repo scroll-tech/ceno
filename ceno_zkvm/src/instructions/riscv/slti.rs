@@ -139,94 +139,98 @@ mod test {
     use ceno_emul::{Change, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
 
-    use itertools::Itertools;
-    use rand::Rng;
-    // Not sure.
-    use multilinear_extensions::mle::IntoMLEs;
+    use proptest::proptest;
 
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
             Instruction,
-            riscv::test_utils::{i32_extra, imm_i},
+            riscv::test_utils::{i32_extra, imm_extra, immu_extra, u32_extra},
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
     #[test]
     fn test_sltiu_true() {
-        verify::<SltiuOp>("lt = true, 0 < 1", 0, 1, 1);
-        verify::<SltiuOp>("lt = true, 1 < 2", 1, 2, 1);
-        verify::<SltiuOp>("lt = true, 10 < 20", 10, 20, 1);
-        verify::<SltiuOp>("lt = true, 0 < imm upper boundary", 0, 2047, 1);
+        let verify = |name, a, imm| verify::<SltiuOp>(name, a, imm, true);
+        verify("lt = true, 0 < 1", 0, 1);
+        verify("lt = true, 1 < 2", 1, 2);
+        verify("lt = true, 10 < 20", 10, 20);
+        verify("lt = true, 0 < imm upper boundary", 0, 2047);
         // negative imm is treated as positive
-        verify::<SltiuOp>("lt = true, 0 < u32::MAX-1", 0, -1, 1);
-        verify::<SltiuOp>("lt = true, 1 < u32::MAX-1", 1, -1, 1);
-        verify::<SltiuOp>("lt = true, 0 < imm lower bondary", 0, -2048, 1);
+        verify("lt = true, 0 < u32::MAX-1", 0, -1);
+        verify("lt = true, 1 < u32::MAX-1", 1, -1);
+        verify("lt = true, 0 < imm lower bondary", 0, -2048);
     }
 
     #[test]
     fn test_sltiu_false() {
-        verify::<SltiuOp>("lt = false, 1 < 0", 1, 0, 0);
-        verify::<SltiuOp>("lt = false, 2 < 1", 2, 1, 0);
-        verify::<SltiuOp>("lt = false, 100 < 50", 100, 50, 0);
-        verify::<SltiuOp>("lt = false, 500 < 100", 500, 100, 0);
-        verify::<SltiuOp>("lt = false, 100000 < 2047", 100000, 2047, 0);
-        verify::<SltiuOp>("lt = false, 100000 < 0", 100000, 0, 0);
-        verify::<SltiuOp>("lt = false, 0 == 0", 0, 0, 0);
-        verify::<SltiuOp>("lt = false, 1 == 1", 1, 1, 0);
-        verify::<SltiuOp>("lt = false, imm upper bondary", u32::MAX, 2047, 0);
+        let verify = |name, a, imm| verify::<SltiuOp>(name, a, imm, false);
+        verify("lt = false, 1 < 0", 1, 0);
+        verify("lt = false, 2 < 1", 2, 1);
+        verify("lt = false, 100 < 50", 100, 50);
+        verify("lt = false, 500 < 100", 500, 100);
+        verify("lt = false, 100000 < 2047", 100000, 2047);
+        verify("lt = false, 100000 < 0", 100000, 0);
+        verify("lt = false, 0 == 0", 0, 0);
+        verify("lt = false, 1 == 1", 1, 1);
+        verify("lt = false, imm upper bondary", u32::MAX, 2047);
         // negative imm is treated as positive
-        verify::<SltiuOp>("lt = false, imm lower bondary", u32::MAX, -2048, 0);
+        verify("lt = false, imm lower bondary", u32::MAX, -2048);
     }
 
-    #[test]
-    fn test_sltiu_random() {
-        let mut rng = rand::thread_rng();
-        let a: u32 = rng.gen::<u32>();
-        let b: i32 = rng.gen_range(-2048..2048);
-        println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify::<SltiuOp>("random unsigned comparison", a, b, (a < (b as u32)) as u32);
+    proptest! {
+        #[test]
+        fn test_sltiu_prop(
+            a in u32_extra(),
+            imm in immu_extra(12),
+        ) {
+            verify::<SltiuOp>("random SltiuOp", a, imm as i32, a < imm);
+        }
     }
 
     #[test]
     fn test_slti_true() {
-        verify::<SltiOp>("lt = true, 0 < 1", 0, 1, 1);
-        verify::<SltiOp>("lt = true, 1 < 2", 1, 2, 1);
-        verify::<SltiOp>("lt = true, -1 < 0", -1i32 as u32, 0, 1);
-        verify::<SltiOp>("lt = true, -1 < 1", -1i32 as u32, 1, 1);
-        verify::<SltiOp>("lt = true, -2 < -1", -2i32 as u32, -1, 1);
+        let verify = |name, a: i32, imm| verify::<SltiOp>(name, a as u32, imm, true);
+        verify("lt = true, 0 < 1", 0, 1);
+        verify("lt = true, 1 < 2", 1, 2);
+        verify("lt = true, -1 < 0", -1, 0);
+        verify("lt = true, -1 < 1", -1, 1);
+        verify("lt = true, -2 < -1", -2, -1);
         // -2048 <= imm <= 2047
-        verify::<SltiOp>("lt = true, imm upper bondary", i32::MIN as u32, 2047, 1);
-        verify::<SltiOp>("lt = true, imm lower bondary", i32::MIN as u32, -2048, 1);
+        verify("lt = true, imm upper bondary", i32::MIN, 2047);
+        verify("lt = true, imm lower bondary", i32::MIN, -2048);
     }
 
     #[test]
     fn test_slti_false() {
-        verify::<SltiOp>("lt = false, 1 < 0", 1, 0, 0);
-        verify::<SltiOp>("lt = false, 2 < 1", 2, 1, 0);
-        verify::<SltiOp>("lt = false, 0 < -1", 0, -1, 0);
-        verify::<SltiOp>("lt = false, 1 < -1", 1, -1, 0);
-        verify::<SltiOp>("lt = false, -1 < -2", -1i32 as u32, -2, 0);
-        verify::<SltiOp>("lt = false, 0 == 0", 0, 0, 0);
-        verify::<SltiOp>("lt = false, 1 == 1", 1, 1, 0);
-        verify::<SltiOp>("lt = false, -1 == -1", -1i32 as u32, -1, 0);
+        let verify = |name, a: i32, imm| verify::<SltiOp>(name, a as u32, imm, false);
+        verify("lt = false, 1 < 0", 1, 0);
+        verify("lt = false, 2 < 1", 2, 1);
+        verify("lt = false, 0 < -1", 0, -1);
+        verify("lt = false, 1 < -1", 1, -1);
+        verify("lt = false, -1 < -2", -1, -2);
+        verify("lt = false, 0 == 0", 0, 0);
+        verify("lt = false, 1 == 1", 1, 1);
+        verify("lt = false, -1 == -1", -1, -1);
         // -2048 <= imm <= 2047
-        verify::<SltiOp>("lt = false, imm upper bondary", i32::MAX as u32, 2047, 0);
-        verify::<SltiOp>("lt = false, imm lower bondary", i32::MAX as u32, -2048, 0);
+        verify("lt = false, imm upper bondary", i32::MAX, 2047);
+        verify("lt = false, imm lower bondary", i32::MAX, -2048);
     }
 
-    #[test]
-    fn test_slti_random() {
-        let mut rng = rand::thread_rng();
-        let a: i32 = rng.gen();
-        let b: i32 = rng.gen_range(-2048..2048);
-        println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify::<SltiOp>("random 1", a as u32, b, (a < b) as u32);
+    proptest! {
+        #[test]
+        fn test_slti_prop(
+            a in i32_extra(),
+            imm in imm_extra(12),
+        ) {
+            verify::<SltiOp>("random SltiOp", a as u32, imm, a < imm);
+        }
     }
 
-    fn verify<I: RIVInstruction>(name: &'static str, rs1_read: u32, imm: i32, expected_rd: u32) {
+    fn verify<I: RIVInstruction>(name: &'static str, rs1_read: u32, imm: i32, expected_rd: bool) {
+        let expected_rd = expected_rd as u32;
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
@@ -265,16 +269,5 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    use proptest::{prelude::Strategy, proptest};
-    proptest! {
-        #[test]
-        fn test_slti_prop(
-            a in i32_extra(),
-            b in i32_extra().prop_map(|x| x & 0x7FF),
-        ) {
-            verify("random 1", a, b, (a < b) as u32);
-        }
     }
 }
