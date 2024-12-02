@@ -335,8 +335,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 // let nonzero_val = ((1i64 << (BIT_WIDTH - 1)) - 1) - (rd_s as i64);
                 // constrain_rd.assign_instance(instance, i64_to_base(nonzero_val))?;
 
-                let prod = (rs1_s as i64).wrapping_mul(rs2 as i64);
-                ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
+                (rs1_s as i64).wrapping_mul(rs2 as i64) as u32
             }
         };
 
@@ -365,7 +364,7 @@ impl<E: ExtensionField> Signed<E> {
     ) -> Result<Self, ZKVMError> {
         cb.namespace(name_fn, |cb| {
             let is_negative = unsigned_val.is_negative(cb)?;
-            let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
+            let val = unsigned_val.value() - (is_negative.expr() << BIT_WIDTH);
 
             Ok(Self { is_negative, val })
         })
