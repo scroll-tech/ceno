@@ -1065,6 +1065,9 @@ dependencies = [
  "rayon",
  "serde",
  "sumcheck",
+ "tracing",
+ "tracing-flame",
+ "tracing-subscriber",
  "transcript",
 ]
 

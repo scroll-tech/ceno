@@ -24,6 +24,7 @@ use itertools::Itertools;
 use poseidon::digest::Digest;
 use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
+    entered_span, exit_span,
     structs::IOPProverStateV2,
     util::{AdditiveVec, merge_sumcheck_polys_v3},
 };
@@ -375,12 +376,14 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    let prove_round_and_update_state_span = entered_span!("prove_round_and_update_state");
     let prover_msgs = prover_states
         .par_iter_mut()
         .map(|prover_state| {
             IOPProverStateV2::prove_round_and_update_state(prover_state, &challenge)
         })
         .collect::<Vec<_>>();
+    exit_span!(prove_round_and_update_state_span);
 
     // for each round, we must collect #SIZE prover message
     let evaluations: AdditiveVec<E> =
@@ -409,6 +412,7 @@ where
         })
         .unwrap_or_else(|| running_oracle.expect("illegal input"));
     let running_oracle_len = running_oracle.len();
+    let next_running_oracles_span = entered_span!("next_running_oracles");
     let next_running_oracles = running_oracle
         .par_chunks_exact(running_oracle_len.div_ceil(num_threads))
         .enumerate()
@@ -423,15 +427,19 @@ where
             )
         })
         .collect::<Vec<_>>();
+    exit_span!(next_running_oracles_span);
 
     // merkelize new leafs
+    let next_running_tree_inners_span = entered_span!("next_running_tree_inners");
     let next_running_tree_inners = next_running_oracles
         .par_chunks_exact(next_running_oracles.len().div_ceil(num_threads))
         .map(|next_running_oracle| MerkleTree::<E>::compute_inner_ext_seq(next_running_oracle))
         .collect::<Vec<_>>();
+    exit_span!(next_running_tree_inners_span);
 
     // merge #threads running_tree_inners into one running tree inner by single thread
     // TODO optimize to be more memory efficiency
+    let merge_next_running_tree_inners_span = entered_span!("merge_next_running_tree_inners");
     let next_running_tree_inner = {
         let mut incompleted_running_tree_inner = next_running_tree_inners
             .into_iter()
@@ -457,6 +465,7 @@ where
         }
         incompleted_running_tree_inner
     };
+    exit_span!(merge_next_running_tree_inners_span);
 
     let next_running_tree = MerkleTree::<E>::from_inner_leaves(
         next_running_tree_inner,
@@ -517,6 +526,7 @@ pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
     }
 }
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
+#[tracing::instrument(skip_all, name = "mpcs::simple_batch_commit_phase")]
 #[allow(clippy::too_many_arguments)]
 pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
@@ -531,14 +541,18 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     let timer = start_timer!(|| "Simple batch commit phase");
+    let timer_span = entered_span!("Simple batch commit phase");
     assert_eq!(point.len(), num_vars);
     assert_eq!(comm.num_polys, batch_coeffs.len());
     assert!(num_rounds <= num_vars);
     let prepare_timer = start_timer!(|| "Prepare");
+    let prepare_timer_span = entered_span!("prepare");
     let mut trees: Vec<MerkleTree<E>> = Vec::with_capacity(num_vars);
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
+    let batch_codewords_span = entered_span!("Batch codewords");
     let running_oracle = comm.batch_codewords(batch_coeffs);
     end_timer!(batch_codewords_timer);
+    exit_span!(batch_codewords_span);
 
     let running_evals: ArcMultilinearExtension<_> = (0..(1 << num_vars))
         .into_par_iter()
@@ -554,18 +568,21 @@ where
         .into_mle()
         .into();
     end_timer!(prepare_timer);
+    exit_span!(prepare_timer_span);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_timer = start_timer!(|| "Basefold::build eq");
+    let build_eq_timers_span = entered_span!("Basefold::build eq");
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
+    exit_span!(build_eq_timers_span);
 
     let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
+    let reverse_bits_timer_span = entered_span!("Basefold::reverse bits");
     reverse_index_bits_in_place(&mut eq);
     let eq: ArcMultilinearExtension<_> = eq.into_mle().into();
     end_timer!(reverse_bits_timer);
-
-    //    let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
+    exit_span!(reverse_bits_timer_span);
 
     let num_threads = optimal_sumcheck_threads(num_vars);
     // println!(
@@ -591,13 +608,7 @@ where
         .collect::<Vec<_>>();
     let mut challenge = None;
 
-    // eg1 num_vars = 10, thread = 8, log(thread) = 3
-    // => per inner max => 10 - 3 = 7 vars
-    // => need to choose min(num_round, 7)
-
-    // eg2 num_vars = 3, thread = 16, log(thread) = 4
-    // => per inner max => 10 - 3 = 7 vars
-    // => need to choose min(num_round, 7)
+    let inner_sumcheck_span = entered_span!("inner_sumcheck_span");
     for i in 0..num_rounds.min(num_vars - log2_strict(num_threads)) {
         // println!("prover inner round {i}");
         challenge = basefold_one_round::<E, Spec>(
@@ -613,6 +624,7 @@ where
             i == num_rounds - 1,
         );
     }
+    exit_span!(inner_sumcheck_span);
 
     // last round: push challenge and bind last variable for all prover_states
     if let Some(p) = challenge {
@@ -624,14 +636,17 @@ where
     }
 
     // deal with log(#thread) basefold rounds
+    let merge_sumcheck_polys_span = entered_span!("merge_sumcheck_polys");
     let poly = merge_sumcheck_polys_v3(&prover_states);
     let mut prover_states = vec![IOPProverStateV2::prover_init_with_extrapolation_aux(
         poly,
         vec![(vec![], vec![])],
     )];
+    exit_span!(merge_sumcheck_polys_span);
 
     let mut challenge = None;
 
+    let outer_sumcheck_span = entered_span!("outer_sumcheck_span");
     for i in 0..num_rounds.saturating_sub(num_vars - log2_strict(num_threads)) {
         // println!("prover outer round {i}");
         challenge = basefold_one_round::<E, Spec>(
@@ -647,6 +662,7 @@ where
             i == num_rounds.saturating_sub(num_vars - log2_strict(num_threads)) - 1,
         );
     }
+    exit_span!(outer_sumcheck_span);
 
     // last round: push challenge and bind last variable for all prover_states
     if let Some(p) = challenge {
@@ -695,6 +711,7 @@ where
     //     final_message
     // );
     end_timer!(timer);
+    exit_span!(timer_span);
     (trees, BasefoldCommitPhaseProof {
         sumcheck_messages,
         roots,

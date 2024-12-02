@@ -31,6 +31,9 @@ rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
 sumcheck = { version = "0", path = "../sumcheck" }
+tracing.workspace = true
+tracing-flame.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
