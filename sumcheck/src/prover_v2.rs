@@ -22,7 +22,7 @@ use transcript::{Challenge, Transcript, TranscriptSyncronized};
 use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
 
 use crate::{
-    entered_span, exit_span,
+    macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
     util::{
         AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
