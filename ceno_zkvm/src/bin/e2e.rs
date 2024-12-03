@@ -4,7 +4,6 @@ use clap::{Parser, ValueEnum};
 use itertools::Itertools;
 use std::fs;
 use tracing::level_filters::LevelFilter;
-use tracing_flame::FlameLayer;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
@@ -80,9 +79,6 @@ fn main() {
         .with_thread_names(false)
         .without_time();
 
-    // set up logger
-    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
-
     Registry::default()
         .with(ForestLayer::default())
         .with(fmt_layer)
@@ -94,7 +90,6 @@ fn main() {
                 .then_some(filter_by_profiling_level),
         )
         .with(args.profiling.is_none().then_some(default_filter))
-        .with(flame_layer.with_threads_collapsed(true))
         .init();
 
     let args = {

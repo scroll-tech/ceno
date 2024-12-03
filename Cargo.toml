@@ -49,7 +49,6 @@ strum_macros = "0.26"
 tracing = { version = "0.1", features = [
   "attributes",
 ] }
-tracing-flame = "0.2"
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
