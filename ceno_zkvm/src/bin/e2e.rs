@@ -25,6 +25,8 @@ struct Args {
     #[arg(long)]
     profiling: Option<usize>,
 
+    distinct_opcode: bool,
+
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
@@ -73,6 +75,9 @@ fn main() {
             .any(|field| metadata.fields().field(&field).is_some())
     });
 
+    let filter_non_collapsible =
+        filter_fn(move |metadata| metadata.fields().field("collapsible").is_none());
+
     let fmt_layer = fmt::layer()
         .compact()
         .with_thread_ids(false)
@@ -80,6 +85,7 @@ fn main() {
         .without_time();
 
     Registry::default()
+        .with(filter_non_collapsible)
         .with(ForestLayer::default())
         .with(fmt_layer)
         // if some profiling granularity is specified, use the profiling filter,
