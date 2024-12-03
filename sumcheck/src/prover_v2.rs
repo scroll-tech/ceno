@@ -99,19 +99,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     // Nesting is possible, but then `tracing-forest` does the wrong thing when measuring duration.
                     // TODO: investigate possibility of nesting with correct duration of parent span
                     let span = entered_span!("prove_rounds", profiling_5 = true);
-                    for i in 0..num_variables {
+                    for _ in 0..num_variables {
                         let prover_msg = IOPProverStateV2::prove_round_and_update_state(
                             &mut prover_state,
                             &challenge,
                         );
-                        if thread_id < 2 {
-                            tracing::debug!(
-                                "thread {}: sumcheck round {}/{}",
-                                thread_id,
-                                i + 1,
-                                num_variables
-                            );
-                        }
                         thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
                         challenge = Some(

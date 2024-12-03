@@ -157,9 +157,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     cs.w_expressions.len(),
                     cs.lk_expressions.len(),
                 );
-                for lk_s in &cs.lk_expressions_namespace_map {
-                    tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
-                }
                 let opcode_proof = self.create_opcode_proof(
                     circuit_name,
                     &self.pk.pp,
@@ -613,10 +610,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let pcs_open_span = entered_span!("pcs_open", profiling_3 = true);
         let opening_dur = std::time::Instant::now();
         tracing::debug!(
-            "[opcode {}]: build opening proof for {} polys at {:?}",
+            "[opcode {}]: build opening proof for {} polys",
             name,
-            witnesses.len(),
-            input_open_point
+            witnesses.len()
         );
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
@@ -1051,7 +1047,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // TODO implement mechanism to skip commitment
 
         let pcs_opening = entered_span!("pcs_opening");
-        let (fixed_opening_proof, fixed_commit) = if !fixed.is_empty() {
+        let (fixed_opening_proof, _fixed_commit) = if !fixed.is_empty() {
             (
                 Some(
                     PCS::simple_batch_open(
@@ -1073,12 +1069,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         };
 
         tracing::debug!(
-            "[table {}] build opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
+            "[table {}] build opening proof for {} fixed polys",
             name,
-            fixed.len(),
-            input_open_point,
-            fixed_in_evals,
-            fixed_commit,
+            fixed.len()
         );
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
@@ -1092,12 +1085,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(pcs_opening);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
         tracing::debug!(
-            "[table {}] build opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            "[table {}] build opening proof for {} polys",
             name,
             witnesses.len(),
-            input_open_point,
-            wits_in_evals,
-            wits_commit,
         );
 
         Ok((
@@ -1249,7 +1239,6 @@ impl TowerProver {
                         virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
                     }
                 }
-                tracing::debug!("generated tower proof at round {}/{}", round, max_round_index);
 
                 let wrap_batch_span = entered_span!("wrap_batch");
                 // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
