@@ -127,7 +127,7 @@ pub(crate) fn extrapolate<F: PrimeField>(points: &[F], weights: &[F], evals: &[F
 /// negligible compared to field operations.
 /// TODO: The quadratic term can be removed by precomputing the lagrange
 /// coefficients.
-pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
+pub(crate) fn interpolate_uni_poly<F: PrimeField, const PRINT_WITNESS: bool>(p_i: &[F], eval_at: F) -> F {
     let start = start_timer!(|| "sum check interpolate uni poly opt");
     let len = p_i.len();
     let mut evals = vec![];
@@ -168,7 +168,9 @@ pub(crate) fn interpolate_uni_poly<F: PrimeField>(p_i: &[F], eval_at: F) -> F {
         // Instead, process the string directly
         let str_seg: Vec<&str> = inv.split(&['(', ')']).collect();
         // PRINT WITNESSES
-        println!("{} {}", str_seg[2], str_seg[4]);
+        if PRINT_WITNESS {
+            println!("{} {}", str_seg[2], str_seg[4]);
+        }
         res += p_i[i] * prod * denom_down * (denom_up * evals[i]).invert().unwrap();
 
         // compute denom for the next step is current_denom * (len-i)/i

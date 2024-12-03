@@ -13,25 +13,27 @@ pub fn bit_decompose(input: u64, num_var: usize) -> Vec<bool> {
 
 // TODO avoid duplicate implementation with sumcheck package
 /// log2 ceil of x
-pub fn ceil_log2(x: usize) -> usize {
+pub fn ceil_log2<const PRINT_WITNESS: bool>(x: usize) -> usize {
     assert!(x > 0, "ceil_log2: x must be positive");
     // Calculate the number of bits in usize
     let usize_bits = std::mem::size_of::<usize>() * 8;
     let result = usize_bits - (x - 1).leading_zeros() as usize;
     // PRINT WITNESSES
-    // bits of x in BIG ENDIAN order
-    let mut bits = Vec::new();
-    let mut x = x;
-    while x > 0 {
-        bits.insert(0, x % 2);
-        x /= 2;
+    if PRINT_WITNESS {
+        // bits of x in BIG ENDIAN order
+        let mut bits = Vec::new();
+        let mut x = if x == 1 { x } else { x - 1 };
+        while x > 0 {
+            bits.insert(0, x % 2);
+            x /= 2;
+        }
+        // Convert the first entry to bit width
+        print!("{}", bits.len());
+        for b in &bits[1..] {
+            print!(" {}", b);
+        }
+        println!();
     }
-    // Convert the first entry to bit width
-    print!("{}", bits.len());
-    for b in &bits[1..] {
-        print!(" {}", b);
-    }
-    println!();
     result
 }
 

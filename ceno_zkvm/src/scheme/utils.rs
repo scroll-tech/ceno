@@ -38,10 +38,10 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
         mles.iter()
             .all(|mle| mle.evaluations().len() <= next_power_of_2)
     );
-    let log2_num_instances = ceil_log2(next_power_of_2);
+    let log2_num_instances = ceil_log2::<false>(next_power_of_2);
     let per_fanin_len = (mles[0].evaluations().len() / num_limbs).max(1); // minimal size 1
-    let log2_mle_size = ceil_log2(mles.len());
-    let log2_num_limbs = ceil_log2(num_limbs);
+    let log2_mle_size = ceil_log2::<false>(mles.len());
+    let log2_num_limbs = ceil_log2::<false>(num_limbs);
 
     (0..num_limbs)
         .into_par_iter()
@@ -99,7 +99,7 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
         assert_eq!(q_mles.len(), 2);
         assert!(q_mles.iter().map(|q| q.evaluations().len()).all_equal());
     }
-    let num_vars = ceil_log2(q_mles[0].evaluations().len());
+    let num_vars = ceil_log2::<false>(q_mles[0].evaluations().len());
     let mut wit_layers = (0..num_vars).fold(vec![(p_mles, q_mles)], |mut acc, _| {
         let (p, q): &(
             Option<Vec<ArcMultilinearExtension<E>>>,
@@ -193,7 +193,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     num_product_fanin: usize,
 ) -> Vec<Vec<ArcMultilinearExtension<'_, E>>> {
     assert!(last_layer.len() == num_product_fanin);
-    let log2_num_product_fanin = ceil_log2(num_product_fanin);
+    let log2_num_product_fanin = ceil_log2::<false>(num_product_fanin);
     let mut wit_layers =
         (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
             let next_layer = acc.last().unwrap();
@@ -256,21 +256,21 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                         vec![a[0] + b[0]],
                     )),
                     (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
+                        ceil_log2::<false>(b.len()),
                         b.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|b| a[0] + *b)
                             .collect(),
                     )),
                     (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
+                        ceil_log2::<false>(a.len()),
                         a.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|a| *a + b[0])
                             .collect(),
                     )),
                     (_, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
+                        ceil_log2::<false>(a.len()),
                         a.par_iter()
                             .zip(b.par_iter())
                             .with_min_len(MIN_PAR_SIZE)
@@ -288,14 +288,14 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                         vec![a[0] * b[0]],
                     )),
                     (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
+                        ceil_log2::<false>(b.len()),
                         b.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|b| a[0] * *b)
                             .collect(),
                     )),
                     (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
+                        ceil_log2::<false>(a.len()),
                         a.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|a| *a * b[0])
@@ -306,7 +306,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                         // we do the pointwise evaluation multiplication here without involving FFT
                         // the evaluations outside of range will be checked via sumcheck + identity polynomial
                         Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            ceil_log2(a.len()),
+                            ceil_log2::<false>(a.len()),
                             a.par_iter()
                                 .zip(b.par_iter())
                                 .with_min_len(MIN_PAR_SIZE)
@@ -334,7 +334,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             );
             op_mle!(|x| {
                 Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(x.len()),
+                    ceil_log2::<false>(x.len()),
                     x.par_iter()
                         .with_min_len(MIN_PAR_SIZE)
                         .map(|x| a * x + b)
@@ -398,7 +398,7 @@ mod tests {
             vec![E::ONE, E::from(2u64)].into_mle().into(),
             vec![E::from(3u64), E::from(4u64)].into_mle().into(),
         ];
-        let num_vars = ceil_log2(last_layer[0].evaluations().len()) + 1;
+        let num_vars = ceil_log2::<false>(last_layer[0].evaluations().len()) + 1;
         let res = infer_tower_product_witness(num_vars, last_layer.clone(), 2);
         let (left, right) = (&res[0][0], &res[0][1]);
         let final_product = commutative_op_mle_pair!(

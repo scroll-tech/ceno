@@ -83,7 +83,7 @@ impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMult
 impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for DenseMultilinearExtension<E> {
     fn from(val: Vec<Vec<E::BaseField>>) -> Self {
         let per_instance_size = val[0].len();
-        let next_pow2_per_instance_size = ceil_log2(per_instance_size);
+        let next_pow2_per_instance_size = ceil_log2::<false>(per_instance_size);
         let evaluations = val
             .into_iter()
             .enumerate()
@@ -101,7 +101,7 @@ impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for DenseMultilinearExtensi
             })
             .collect::<Vec<E::BaseField>>();
         assert!(evaluations.len().is_power_of_two());
-        let num_vars = ceil_log2(evaluations.len());
+        let num_vars = ceil_log2::<false>(evaluations.len());
         DenseMultilinearExtension::from_evaluations_vec(num_vars, evaluations)
     }
 }
@@ -116,7 +116,7 @@ impl<F: Field, E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<
     fn into_mle(mut self) -> DenseMultilinearExtension<E> {
         let next_pow2 = self.len().next_power_of_two();
         self.resize(next_pow2, F::ZERO);
-        DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
+        DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2::<false>(next_pow2), self)
     }
 }
 pub trait IntoMLEs<T>: Sized {
@@ -727,11 +727,11 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
         match (&mut self.evaluations, rhs.evaluations_to_owned()) {
             (FieldType::Base(e1), FieldType::Base(e2)) => {
                 e1.extend(e2);
-                self.num_vars = ceil_log2(e1.len());
+                self.num_vars = ceil_log2::<false>(e1.len());
             }
             (FieldType::Ext(e1), FieldType::Ext(e2)) => {
                 e1.extend(e2);
-                self.num_vars = ceil_log2(e1.len());
+                self.num_vars = ceil_log2::<false>(e1.len());
             }
             (FieldType::Unreachable, b @ FieldType::Base(..)) => {
                 self.num_vars = rhs_num_vars;
@@ -777,7 +777,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
             FieldType::Base(evaluations) => {
                 let old_size_per_instance = evaluations.len() / num_instances;
                 DenseMultilinearExtension::from_evaluations_vec(
-                    ceil_log2(new_len),
+                    ceil_log2::<false>(new_len),
                     evaluations
                         .chunks(old_size_per_instance)
                         .flat_map(|chunk| {
@@ -805,7 +805,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
             FieldType::Base(evaluations) => {
                 let old_size_per_instance = evaluations.len() / num_instances;
                 DenseMultilinearExtension::from_evaluations_vec(
-                    self.num_vars + ceil_log2(num_dups),
+                    self.num_vars + ceil_log2::<false>(num_dups),
                     evaluations
                         .chunks(old_size_per_instance)
                         .flat_map(|chunk| {
@@ -815,7 +815,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                                 .cloned()
                                 .take(old_size_per_instance * num_dups)
                         })
-                        .take(1 << (self.num_vars + ceil_log2(num_dups)))
+                        .take(1 << (self.num_vars + ceil_log2::<false>(num_dups)))
                         .collect::<Vec<E::BaseField>>(),
                 )
             }
@@ -844,7 +844,7 @@ impl<'a, E: ExtensionField> RangedMultilinearExtension<'a, E> {
             inner,
             start,
             offset,
-            num_vars: ceil_log2(offset),
+            num_vars: ceil_log2::<false>(offset),
         }
     }
 }

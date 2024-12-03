@@ -182,7 +182,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let log2_num_instances = ceil_log2::<false>(next_pow2_instances);
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         // sanity check
@@ -216,9 +216,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             cs.lk_expressions.len(),
         );
         let (log2_r_count, log2_w_count, log2_lk_count) = (
-            ceil_log2(r_counts_per_instance),
-            ceil_log2(w_counts_per_instance),
-            ceil_log2(lk_counts_per_instance),
+            ceil_log2::<false>(r_counts_per_instance),
+            ceil_log2::<false>(w_counts_per_instance),
+            ceil_log2::<false>(lk_counts_per_instance),
         );
         // process last layer by interleaving all the read/write record respectively
         // as last layer is the output of sel stage
@@ -278,14 +278,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     && q2.evaluations().len() == expected_size
             }));
             assert!(r_wit_layers.iter().enumerate().all(|(i, r_wit_layer)| {
-                let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
+                let expected_size = 1 << (ceil_log2::<false>(NUM_FANIN) * i);
                 r_wit_layer.len() == NUM_FANIN
                     && r_wit_layer
                         .iter()
                         .all(|f| f.evaluations().len() == expected_size)
             }));
             assert!(w_wit_layers.iter().enumerate().all(|(i, w_wit_layer)| {
-                let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
+                let expected_size = 1 << (ceil_log2::<false>(NUM_FANIN) * i);
                 w_wit_layer.len() == NUM_FANIN
                     && w_wit_layer
                         .iter()
@@ -622,7 +622,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .iter()
             .map(|f| -> ArcMultilinearExtension<E> { Arc::new(f.get_ranged_mle(1, 0)) })
             .collect::<Vec<ArcMultilinearExtension<E>>>();
-        let log2_num_instances = ceil_log2(num_instances);
+        let log2_num_instances = ceil_log2::<false>(num_instances);
         let next_pow2_instances = 1 << log2_num_instances;
 
         // sanity check
@@ -653,7 +653,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         let lk_counts_per_instance = cs.lk_table_expressions.len();
-        let log2_lk_count = ceil_log2(lk_counts_per_instance);
+        let log2_lk_count = ceil_log2::<false>(lk_counts_per_instance);
 
         // infer all tower witness after last layer
         let span = entered_span!("wit_inference::tower_witness_lk_last_layer");
@@ -890,7 +890,7 @@ impl TowerProver {
         assert_eq!(num_fanin, 2);
 
         let mut proofs = TowerProofs::new(prod_specs.len(), logup_specs.len());
-        let log_num_fanin = ceil_log2(num_fanin);
+        let log_num_fanin = ceil_log2::<false>(num_fanin);
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
         let max_round_index = prod_specs
             .iter()

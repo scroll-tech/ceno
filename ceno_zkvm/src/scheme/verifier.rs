@@ -350,6 +350,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         mem_offset += proof_entries_concat.len();
         print_list_as_input("proof_entries_concat", &proof_entries_concat);
         print_list_as_input("proof_pointers_mat", &proof_pointers_mat);
+        head_pointers_list[0] = head_pointers_list[0].iter().map(|i| mem_offset + i).collect();
+        head_pointers_list[1] = head_pointers_list[1].iter().map(|i| mem_offset + i).collect();
+        head_pointers_list[2] = head_pointers_list[2].iter().map(|i| mem_offset + i).collect();
         // main_sel_sumcheck_proofs
         let mut mssp_concat = Vec::new();
         let mut mssp_offset = 0;
@@ -395,9 +398,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         println!("proof^tower_proof^prod_spec_size: {}", proof.tower_proof.prod_spec_size());
         println!("proof^tower_proof^logup_spec_size: {}", proof.tower_proof.logup_spec_size());
         // proofs
-        head_pointers_list[0] = head_pointers_list[0].iter().map(|i| mem_offset + i).collect();
-        head_pointers_list[1] = head_pointers_list[1].iter().map(|i| mem_offset + i).collect();
-        head_pointers_list[2] = head_pointers_list[2].iter().map(|i| mem_offset + i).collect();
         print_list_as_input("proof^tower_proof^proofs", &head_pointers_list[0]);
         print_list_as_input("proof^tower_proof^prod_specs_eval", &head_pointers_list[1]);
         print_list_as_input("proof^tower_proof^logup_specs_eval", &head_pointers_list[2]);
@@ -471,15 +471,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.lk_expressions.len(),
         );
         let (log2_r_count, log2_w_count, log2_lk_count) = (
-            ceil_log2(r_counts_per_instance),
-            ceil_log2(w_counts_per_instance),
-            ceil_log2(lk_counts_per_instance),
+            ceil_log2::<true>(r_counts_per_instance),
+            ceil_log2::<true>(w_counts_per_instance),
+            ceil_log2::<true>(lk_counts_per_instance),
         );
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let num_instances = proof.num_instances;
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instance);
+        let log2_num_instances = ceil_log2::<true>(next_pow2_instance);
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -709,10 +709,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     ) -> Result<Point<E>, ZKVMError> {
         let cs = circuit_vk.get_cs();
         let lk_counts_per_instance = cs.lk_table_expressions.len();
-        let log2_lk_count = ceil_log2(lk_counts_per_instance);
+        let log2_lk_count = ceil_log2::<true>(lk_counts_per_instance);
 
         let num_instances = proof.num_instances;
-        let log2_num_instances = ceil_log2(num_instances);
+        let log2_num_instances = ceil_log2::<true>(num_instances);
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -941,7 +941,7 @@ impl TowerVerify {
         let num_prod_spec = prod_out_evals.len();
         let num_logup_spec = logup_out_evals.len();
 
-        let log2_num_fanin = ceil_log2(num_fanin);
+        let log2_num_fanin = ceil_log2::<false>(num_fanin);
         // sanity check
         assert!(num_prod_spec == tower_proofs.prod_spec_size());
         assert!(prod_out_evals.iter().all(|evals| evals.len() == num_fanin));
@@ -985,7 +985,6 @@ impl TowerVerify {
         let mut logup_spec_q_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
 
         let expected_max_round = expected_rounds.iter().max().unwrap();
-
         let (next_rt, _) = (0..(expected_max_round-1)).try_fold(
             (
                 PointAndEval {

@@ -133,7 +133,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                         self.max_degree + 1
                     );
                 }
-                interpolate_uni_poly::<E>(evaluations, challenge.elements)
+                interpolate_uni_poly::<E, true>(evaluations, challenge.elements)
             })
             .collect::<Vec<_>>();
 
