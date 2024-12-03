@@ -59,10 +59,6 @@ fn main() {
         args
     };
 
-    type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
-
     // default filter
     let default_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::DEBUG.into())
