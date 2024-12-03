@@ -33,7 +33,6 @@ prettytable-rs.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 tracing.workspace = true
-tracing-flame.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
 
