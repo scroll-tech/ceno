@@ -78,7 +78,7 @@
 //! the high limb uniquely represent the product values for unsigned/unsigned
 //! and signed/unsigned products.
 
-use std::{fmt::Display, marker::PhantomData, u32};
+use std::{fmt::Display, marker::PhantomData};
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
