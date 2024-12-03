@@ -52,7 +52,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     }
 
     /// create proof for zkvm execution
-    #[tracing::instrument(skip_all, name = "ZKVM_create_proof", fields(profiling_1))]
+    #[tracing::instrument(
+        skip_all,
+        name = "ZKVM_create_proof",
+        fields(profiling_1),
+        level = "trace"
+    )]
     pub fn create_proof(
         &self,
         witnesses: ZKVMWitnesses<E>,
@@ -207,7 +212,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
     #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(skip_all, name = "create_opcode_proof", fields(circuit_name=name,profiling_2))]
+    #[tracing::instrument(skip_all, name = "create_opcode_proof", fields(circuit_name=name,profiling_2), level="trace")]
     pub fn create_opcode_proof(
         &self,
         name: &str,
@@ -653,7 +658,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// support batch prove for logup + product arguments each with different num_vars()
     /// side effect: concurrency will be determine based on min(thread, num_vars()),
     /// so suggest dont batch too small table (size < threads) with large table together
-    #[tracing::instrument(skip_all, name = "create_table_proof", fields(table_name=name, profiling_2))]
+    #[tracing::instrument(skip_all, name = "create_table_proof", fields(table_name=name, profiling_2), level="trace")]
     pub fn create_table_proof(
         &self,
         name: &str,
@@ -1152,7 +1157,7 @@ impl<E: ExtensionField> TowerProofs<E> {
 
 /// Tower Prover
 impl TowerProver {
-    #[tracing::instrument(skip_all, name = "tower_prover_create_proof")]
+    #[tracing::instrument(skip_all, name = "tower_prover_create_proof", level = "trace")]
     pub fn create_proof<'a, E: ExtensionField>(
         prod_specs: Vec<TowerProverSpec<'a, E>>,
         logup_specs: Vec<TowerProverSpec<'a, E>>,
