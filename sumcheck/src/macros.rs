@@ -1,3 +1,5 @@
+use tracing::span;
+
 pub macro entered_span {
     ($first:expr, $($fields:tt)*) => {
         tracing_span!($first, $($fields)*).entered()
@@ -7,12 +9,12 @@ pub macro entered_span {
     },
 }
 
-pub macro tracing_span {
+macro tracing_span {
     ($first:expr, $($fields:tt)*) => {
-        tracing::span!(tracing::Level::INFO, $first, $($fields)*)
+        span!(tracing::Level::INFO, $first, $($fields)*)
     },
     ($first:expr $(,)*) => {
-        tracing::span!(tracing::Level::INFO, $first)
+        span!(tracing::Level::INFO, $first)
     },
 }
 
