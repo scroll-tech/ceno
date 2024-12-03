@@ -14,7 +14,7 @@ use ceno_emul::{
 };
 use ff_ext::ff::Field;
 use goldilocks::GoldilocksExt2;
-use itertools::{Itertools, MinMaxResult, chain, enumerate};
+use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
@@ -24,111 +24,52 @@ use std::{
 };
 use transcript::Transcript;
 
-pub fn run_e2e(
-    program: Program,
-    platform: Platform,
-    stack_size: u32,
-    heap_size: u32,
-    hints: Vec<u32>,
+type E = GoldilocksExt2;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
+
+struct FullMemState<Record> {
+    mem: Vec<Record>,
+    io: Vec<Record>,
+    reg: Vec<Record>,
+    priv_io: Vec<Record>,
+}
+
+type InitMemState = FullMemState<MemInitRecord>;
+type FinalMemState = FullMemState<MemFinalRecord>;
+
+struct SimulationResult {
+    exit_code: Option<u32>,
+    all_records: Vec<StepRecord>,
+    final_mem_state: FinalMemState,
+    pi: PublicValues<u32>,
+}
+
+fn simulate_program(
+    program: &Program,
     max_steps: usize,
-) {
-    type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
-    let stack_addrs = platform.stack_top - stack_size..platform.stack_top;
+    init_mem_state: InitMemState,
+    platform: &Platform,
+    hints: Vec<u32>,
+) -> SimulationResult {
+    let InitMemState {
+        mem: mem_init,
+        io: io_init,
+        reg: reg_init,
+        priv_io: _,
+    } = init_mem_state;
 
-    // Detect heap as starting after program data.
-    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
-    let heap_addrs = heap_start..heap_start + heap_size;
-
-    let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
-
-    let mem_init = {
-        let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
-            addr: *addr,
-            value: *value,
-        });
-
-        let stack = stack_addrs
-            .iter_addresses()
-            .map(|addr| MemInitRecord { addr, value: 0 });
-
-        let heap = heap_addrs
-            .iter_addresses()
-            .map(|addr| MemInitRecord { addr, value: 0 });
-
-        let mem_init = chain!(program_addrs, stack, heap).collect_vec();
-
-        mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
-    };
-
-    let mut vm = VMState::new(platform.clone(), program);
+    let mut vm: VMState = VMState::new(platform.clone(), program.clone());
 
     for (addr, value) in zip(platform.hints.iter_addresses(), &hints) {
         vm.init_memory(addr.into(), *value);
     }
-
-    // keygen
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let program_params = ProgramParams {
-        platform: platform.clone(),
-        program_size: vm.program().instructions.len(),
-        static_memory_len: mem_init.len(),
-        ..ProgramParams::default()
-    };
-    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
-
-    let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
-    zkvm_cs.register_global_state::<GlobalState>();
-
-    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-
-    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
-        &zkvm_cs,
-        &prog_config,
-        vm.program(),
-    );
-
-    // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = mem_padder.padded_sorted(mmu_config.public_io_len(), vec![]);
-
-    let reg_init = mmu_config.initial_registers();
-    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
-    mmu_config.generate_fixed_traces(
-        &zkvm_cs,
-        &mut zkvm_fixed_traces,
-        &reg_init,
-        &mem_init,
-        &io_init.iter().map(|rec| rec.addr).collect_vec(),
-    );
-    dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
-
-    let pk = zkvm_cs
-        .clone()
-        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
-        .expect("keygen failed");
-    let vk = pk.get_vk();
-
-    // proving
-    let e2e_start = Instant::now();
-    let prover = ZKVMProver::new(pk);
-    let verifier = ZKVMVerifier::new(vk);
 
     let all_records = vm
         .iter_until_halt()
         .take(max_steps)
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
-
-    let cycle_num = all_records.len();
-    tracing::info!("Proving {} execution steps", cycle_num);
-    for (i, step) in enumerate(&all_records).rev().take(5).rev() {
-        tracing::trace!("Step {i}: {:?} - {:?}\n", step.insn().codes().kind, step);
-    }
 
     // Find the exit code from the HALT step, if halting at all.
     let exit_code = all_records
@@ -152,16 +93,6 @@ pub fn run_e2e(
         end_cycle,
         io_init.iter().map(|rec| rec.value).collect_vec(),
     );
-
-    let mut zkvm_witness = ZKVMWitnesses::default();
-    // assign opcode circuits
-    let dummy_records = config
-        .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
-        .unwrap();
-    dummy_config
-        .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, dummy_records)
-        .unwrap();
-    zkvm_witness.finalize_lk_multiplicities();
 
     // Find the final register values and cycles.
     let reg_final = reg_init
@@ -203,7 +134,11 @@ pub fn run_e2e(
     // Find the final public IO cycles.
     let io_final = io_init
         .iter()
-        .map(|rec| *final_access.get(&rec.addr.into()).unwrap_or(&0))
+        .map(|rec| MemFinalRecord {
+            addr: rec.addr,
+            value: rec.value,
+            cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
+        })
         .collect_vec();
 
     let priv_io_final = zip(platform.hints.iter_addresses(), &hints)
@@ -214,6 +149,136 @@ pub fn run_e2e(
         })
         .collect_vec();
 
+    return SimulationResult {
+        pi,
+        exit_code,
+        all_records,
+        final_mem_state: FinalMemState {
+            reg: reg_final,
+            io: io_final,
+            mem: mem_final,
+            priv_io: priv_io_final,
+        },
+    };
+}
+
+fn init_mem(
+    program: &Program,
+    platform: &Platform,
+    mem_padder: &mut MemPadder,
+    stack_size: u32,
+    heap_size: u32,
+) -> Vec<MemInitRecord> {
+    let stack_addrs = platform.stack_top - stack_size..platform.stack_top;
+    // Detect heap as starting after program data.
+    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+    let heap_addrs = heap_start..heap_start + heap_size;
+    let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
+        addr: *addr,
+        value: *value,
+    });
+
+    let stack = stack_addrs
+        .iter_addresses()
+        .map(|addr| MemInitRecord { addr, value: 0 });
+
+    let heap = heap_addrs
+        .iter_addresses()
+        .map(|addr| MemInitRecord { addr, value: 0 });
+
+    let mem_init = chain!(program_addrs, stack, heap).collect_vec();
+
+    mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
+}
+
+pub fn run_e2e(
+    program: Program,
+    platform: Platform,
+    stack_size: u32,
+    heap_size: u32,
+    hints: Vec<u32>,
+    max_steps: usize,
+) {
+    // Detect heap as starting after program data.
+    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+    let heap_addrs = heap_start..heap_start + heap_size;
+    let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
+    let mem_init = init_mem(&program, &platform, &mut mem_padder, stack_size, heap_size);
+
+    let program_params = ProgramParams {
+        platform: platform.clone(),
+        program_size: program.instructions.len(),
+        static_memory_len: mem_init.len(),
+        ..ProgramParams::default()
+    };
+    let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
+
+    let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
+    zkvm_cs.register_global_state::<GlobalState>();
+
+    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
+
+    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+        &zkvm_cs,
+        &prog_config,
+        &program,
+    );
+
+    // IO is not used in this program, but it must have a particular size at the moment.
+    let io_init = mem_padder.padded_sorted(mmu_config.public_io_len(), vec![]);
+    let reg_init = mmu_config.initial_registers();
+
+    config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+    mmu_config.generate_fixed_traces(
+        &zkvm_cs,
+        &mut zkvm_fixed_traces,
+        &reg_init,
+        &mem_init,
+        &io_init.iter().map(|rec| rec.addr).collect_vec(),
+    );
+    dummy_config.generate_fixed_traces(&zkvm_cs, &mut zkvm_fixed_traces);
+
+    let sim_result = simulate_program(
+        &program,
+        max_steps,
+        InitMemState {
+            io: io_init,
+            reg: reg_init,
+            mem: mem_init,
+            priv_io: vec![],
+        },
+        &platform,
+        hints.clone(),
+    );
+    let cycle_num = sim_result.all_records.len();
+
+    // keygen
+    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let pk = zkvm_cs
+        .clone()
+        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
+        .expect("keygen failed");
+    let vk = pk.get_vk();
+
+    // proving
+    let e2e_start = Instant::now();
+    let prover = ZKVMProver::new(pk);
+    let verifier = ZKVMVerifier::new(vk);
+
+    let mut zkvm_witness = ZKVMWitnesses::default();
+    // assign opcode circuits
+    let dummy_records = config
+        .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, sim_result.all_records)
+        .unwrap();
+    dummy_config
+        .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, dummy_records)
+        .unwrap();
+    zkvm_witness.finalize_lk_multiplicities();
+
     // assign table circuits
     config
         .assign_table_circuit(&zkvm_cs, &mut zkvm_witness)
@@ -222,31 +287,42 @@ pub fn run_e2e(
         .assign_table_circuit(
             &zkvm_cs,
             &mut zkvm_witness,
-            &reg_final,
-            &mem_final,
-            &io_final,
-            &priv_io_final,
+            &sim_result.final_mem_state.reg,
+            &sim_result.final_mem_state.mem,
+            &sim_result
+                .final_mem_state
+                .io
+                .iter()
+                .map(|rec| rec.cycle)
+                .collect_vec(),
+            &sim_result.final_mem_state.priv_io,
         )
         .unwrap();
     // assign program circuit
     zkvm_witness
-        .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, vm.program())
+        .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
     if std::env::var("MOCK_PROVING").is_ok() {
-        MockProver::assert_satisfied_full(zkvm_cs, zkvm_fixed_traces, &zkvm_witness, &pi);
+        MockProver::assert_satisfied_full(
+            zkvm_cs,
+            zkvm_fixed_traces,
+            &zkvm_witness,
+            &sim_result.pi,
+        );
         tracing::info!("Mock proving passed");
     }
     let timer = Instant::now();
 
     let transcript = Transcript::new(b"riscv");
     let mut zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, transcript)
+        .create_proof(zkvm_witness, sim_result.pi, transcript)
         .expect("create_proof failed");
 
     let proving_time = timer.elapsed().as_secs_f64();
     let e2e_time = e2e_start.elapsed().as_secs_f64();
     let witgen_time = e2e_time - proving_time;
+
     println!(
         "Proving finished.\n\
 \tProving time = {:.3}s, freq = {:.3}khz\n\
@@ -265,10 +341,14 @@ pub fn run_e2e(
     let transcript = Transcript::new(b"riscv");
     assert!(
         verifier
-            .verify_proof_halt(zkvm_proof.clone(), transcript, exit_code.is_some())
+            .verify_proof_halt(
+                zkvm_proof.clone(),
+                transcript,
+                sim_result.exit_code.is_some()
+            )
             .expect("verify proof return with error"),
     );
-    match exit_code {
+    match sim_result.exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
