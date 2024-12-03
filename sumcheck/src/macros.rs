@@ -9,7 +9,7 @@ pub macro entered_span {
     },
 }
 
-macro tracing_span {
+pub macro tracing_span {
     ($first:expr, $($fields:tt)*) => {
         span!(tracing::Level::INFO, $first, $($fields)*)
     },
