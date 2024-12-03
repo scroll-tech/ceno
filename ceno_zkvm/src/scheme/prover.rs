@@ -15,7 +15,7 @@ use multilinear_extensions::{
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
-    entered_span, exit_span,
+    macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverStateV2},
 };
 use transcript::Transcript;

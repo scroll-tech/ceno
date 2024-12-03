@@ -24,7 +24,7 @@ use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use sumcheck::{entered_span, exit_span};
+use sumcheck::macros::{entered_span, exit_span};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::Transcript;
