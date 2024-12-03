@@ -88,6 +88,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut wits = BTreeMap::new();
 
         let commit_to_traces_span = entered_span!("commit_to_traces");
+        let commit_to_trace_dur = std::time::Instant::now();
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
@@ -107,6 +108,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             exit_span!(span);
             wits.insert(circuit_name, (witness, num_instances));
         }
+        println!(
+            "commit to trace duration {:?}",
+            commit_to_trace_dur.elapsed(),
+        );
         exit_span!(commit_to_traces_span);
 
         // squeeze two challenges from transcript
@@ -599,11 +604,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .map(|poly| poly.evaluate(&input_open_point))
             .collect();
         exit_span!(span);
-        // println!(
-        //     "[opcode {}] main proof took {:?}",
-        //     name,
-        //     main_proof_dur.elapsed(),
-        // );
+        println!(
+            "[opcode {}] main proof took {:?}",
+            name,
+            main_proof_dur.elapsed(),
+        );
 
         let pcs_open_span = entered_span!("pcs_open");
         let opening_dur = std::time::Instant::now();
@@ -627,19 +632,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             name,
             opening_dur.elapsed(),
         );
-        // println!(
-        //     "[opcode {}] build opening proof took {:?}",
-        //     name,
-        //     opening_dur.elapsed(),
-        // );
+        println!(
+            "[opcode {}] build opening proof took {:?}",
+            name,
+            opening_dur.elapsed(),
+        );
         exit_span!(pcs_open_span);
         let wits_commit_dur = std::time::Instant::now();
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
-        // println!(
-        //     "[opcode {}] wits_commit took {:?}",
-        //     name,
-        //     wits_commit_dur.elapsed(),
-        // );
+        println!(
+            "[opcode {}] wits_commit took {:?}",
+            name,
+            wits_commit_dur.elapsed(),
+        );
 
         Ok(ZKVMOpcodeProof {
             num_instances,
