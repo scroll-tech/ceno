@@ -369,7 +369,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     ///
     /// Main algorithm used is from section 3.2 of [XZZPS19](https://eprint.iacr.org/2019/317.pdf#subsection.3.2).
     #[tracing::instrument(skip_all, name = "sumcheck::prove_round_and_update_state")]
-    pub(crate) fn prove_round_and_update_state(
+    pub fn prove_round_and_update_state(
         &mut self,
         challenge: &Option<Challenge<E>>,
     ) -> IOPProverMessage<E> {
@@ -591,15 +591,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         self.poly
             .flattened_ml_extensions
             .iter()
-            .map(|mle| {
-                assert!(
-                    mle.evaluations().len() == 1,
-                    "mle.evaluations.len() {} != 1, must be called after prove_round_and_update_state",
-                    mle.evaluations().len(),
-                );
+            .flat_map(|mle| {
                 op_mle! {
-                    |mle| mle[0],
-                    |eval| E::from(eval)
+                    |mle| mle.to_vec(),
+                    |eval| eval.into_iter().map(E::from).collect::<Vec<_>>()
                 }
             })
             .collect()

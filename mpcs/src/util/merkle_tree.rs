@@ -1,11 +1,9 @@
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use multilinear_extensions::mle::FieldType;
+use itertools::{Itertools, izip};
+use multilinear_extensions::{mle::FieldType, util::max_usable_threads};
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-    },
-    slice::ParallelSlice,
+    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    slice::{ParallelSlice, ParallelSliceMut},
 };
 
 use crate::util::{
@@ -46,6 +44,10 @@ where
 
     pub fn compute_inner_ext(leaves: &[E]) -> Vec<Vec<Digest<E::BaseField>>> {
         merkelize_ext::<E>(&[leaves])
+    }
+
+    pub fn compute_inner_ext_seq(leaves: &[E]) -> Vec<Vec<Digest<E::BaseField>>> {
+        merkelize_ext_seq::<E>(&[leaves])
     }
 
     pub fn root_from_inner(inner: &[Vec<Digest<E::BaseField>>]) -> Digest<E::BaseField> {
@@ -90,16 +92,36 @@ where
     }
 
     pub fn batch_leaves(&self, coeffs: &[E]) -> Vec<E> {
-        (0..self.leaves[0].len())
-            .into_par_iter()
-            .map(|i| {
-                self.leaves
-                    .iter()
-                    .zip(coeffs.iter())
-                    .map(|(leaf, coeff)| field_type_index_ext(leaf, i) * *coeff)
-                    .sum()
-            })
-            .collect()
+        let n_threads = max_usable_threads();
+        let batch_size_per_thread = self.leaves[0].len().div_ceil(n_threads);
+        let mut output = vec![E::ZERO; self.leaves[0].len()];
+        for (leaf, coeff) in izip!(self.leaves(), coeffs) {
+            // TODO use macro to merge 2 implementation
+            match leaf {
+                FieldType::Base(vec) => {
+                    output
+                        .par_chunks_mut(batch_size_per_thread)
+                        .zip_eq(vec.par_chunks(batch_size_per_thread))
+                        .for_each(|(output, vec)| {
+                            for i in 0..output.len() {
+                                output[i] += *coeff * vec[i];
+                            }
+                        });
+                }
+                FieldType::Ext(vec) => {
+                    output
+                        .par_chunks_mut(batch_size_per_thread)
+                        .zip_eq(vec.par_chunks(batch_size_per_thread))
+                        .for_each(|(output, vec)| {
+                            for i in 0..output.len() {
+                                output[i] += vec[i] * coeff;
+                            }
+                        });
+                }
+                FieldType::Unreachable => todo!(),
+            }
+        }
+        output
     }
 
     pub fn size(&self) -> (usize, usize) {
@@ -402,6 +424,51 @@ fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseFi
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
+            .map(|ys| hash_two_digests(&ys[0], &ys[1]))
+            .collect::<Vec<_>>();
+
+        tree.push(oracle);
+    }
+    end_timer!(timer);
+    tree
+}
+
+fn merkelize_ext_seq<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseField>>> {
+    #[cfg(feature = "sanity-check")]
+    for i in 0..(values.len() - 1) {
+        assert_eq!(values[i].len(), values[i + 1].len());
+    }
+    let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
+    let log_v = log2_strict(values[0].len());
+    let mut tree = Vec::with_capacity(log_v);
+    // The first layer of hashes, half the number of leaves
+    let mut hashes = vec![Digest::default(); values[0].len() >> 1];
+    if values.len() == 1 {
+        hashes.iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = hash_two_leaves_ext::<E>(&values[0][i << 1], &values[0][(i << 1) + 1]);
+        });
+    } else {
+        hashes.iter_mut().enumerate().for_each(|(i, hash)| {
+            *hash = hash_two_leaves_batch_ext::<E>(
+                values
+                    .iter()
+                    .map(|values| values[i << 1])
+                    .collect_vec()
+                    .as_slice(),
+                values
+                    .iter()
+                    .map(|values| values[(i << 1) + 1])
+                    .collect_vec()
+                    .as_slice(),
+            );
+        });
+    }
+
+    tree.push(hashes);
+
+    for i in 1..(log_v) {
+        let oracle = tree[i - 1]
+            .chunks_exact(2)
             .map(|ys| hash_two_digests(&ys[0], &ys[1]))
             .collect::<Vec<_>>();
 
