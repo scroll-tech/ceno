@@ -59,6 +59,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         pi: PublicValues<u32>,
         mut transcript: Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
+        let create_proof_dur = std::time::Instant::now();
         let mut vm_proof = ZKVMProof::empty(pi);
 
         // including raw public input to transcript
@@ -88,6 +89,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut wits = BTreeMap::new();
 
         let commit_to_traces_span = entered_span!("commit_to_traces");
+        let commit_to_trace_dur = std::time::Instant::now();
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
@@ -107,6 +109,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             exit_span!(span);
             wits.insert(circuit_name, (witness, num_instances));
         }
+        println!(
+            "commit to trace duration {:?}",
+            commit_to_trace_dur.elapsed(),
+        );
         exit_span!(commit_to_traces_span);
 
         // squeeze two challenges from transcript
@@ -117,6 +123,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         tracing::debug!("challenges in prover: {:?}", challenges);
 
         let main_proofs_span = entered_span!("main_proofs");
+        let main_proofs_dur = std::time::Instant::now();
         let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
         for ((circuit_name, pk), (i, transcript)) in self
             .pk
@@ -193,7 +200,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }
         }
         exit_span!(main_proofs_span);
+        println!("main proofs duration {:?}", main_proofs_dur.elapsed(),);
 
+        println!("create proof duration  {:?}", create_proof_dur.elapsed(),);
         Ok(vm_proof)
     }
     /// create proof giving witness and num_instances
