@@ -289,7 +289,7 @@ dependencies = [
  "tempfile",
  "thread_local",
  "tracing",
- "tracing-flame",
+ "tracing-forest",
  "tracing-subscriber",
  "transcript",
 ]
@@ -1946,12 +1946,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-flame"
-version = "0.2.0"
+name = "tracing-forest"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bae117ee14789185e129aaee5d93750abe67fdc5a9a62650452bfe4e122a3a9"
+checksum = "ee40835db14ddd1e3ba414292272eddde9dad04d3d4b65509656414d1c42592f"
 dependencies = [
- "lazy_static",
+ "smallvec",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
 ]

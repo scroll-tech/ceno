@@ -25,7 +25,6 @@ use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use sumcheck::macros::{entered_span, exit_span};
-use tracing_flame::FlameLayer;
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::Transcript;
 const PROGRAM_SIZE: usize = 16;
@@ -93,7 +92,6 @@ fn main() {
     let mem_addresses = CENO_PLATFORM.ram.clone();
     let io_addresses = CENO_PLATFORM.public_io.clone();
 
-    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let mut fmt_layer = fmt::layer()
         .compact()
         .with_span_events(FmtSpan::CLOSE)
@@ -107,10 +105,7 @@ fn main() {
     // Example: RUST_LOG="[sumcheck]" cargo run.. to get only events under the "sumcheck" span
     let filter = EnvFilter::from_default_env();
 
-    let subscriber = Registry::default()
-        .with(fmt_layer)
-        .with(filter)
-        .with(flame_layer.with_threads_collapsed(true));
+    let subscriber = Registry::default().with(fmt_layer).with(filter);
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let top_level = entered_span!("TOPLEVEL");

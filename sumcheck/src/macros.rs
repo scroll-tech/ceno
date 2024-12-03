@@ -8,7 +8,7 @@ pub macro entered_span {
 
 pub macro tracing_span {
     ($first:expr $(, $($fields:tt)*)?) => {
-        span!(tracing::Level::INFO, $first, $($($fields)*)?)
+        span!(tracing::Level::TRACE, $first, $($($fields)*)?)
     },
 }
 
