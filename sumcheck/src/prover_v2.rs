@@ -95,6 +95,9 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 let mut thread_based_transcript = thread_based_transcript.clone();
                 s.spawn(move |_| {
                     let mut challenge = None;
+                    // Note: This span is not nested into the "spawn loop" span, although lexically it looks so.
+                    // Nesting is possible, but then `tracing-forest` does the wrong thing when measuring duration.
+                    // TODO: investigate possibility of nesting with correct duration of parent span
                     let span = entered_span!("prove_rounds", profiling_5 = true);
                     for i in 0..num_variables {
                         let prover_msg = IOPProverStateV2::prove_round_and_update_state(
