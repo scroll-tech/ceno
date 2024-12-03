@@ -349,9 +349,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let rs2_s = rs2_signed.assign_instance(instance, lk_multiplicity, &rs2_val)?;
                 rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
 
-                let prod = (rs1_s as i64) * (rs2_s as i64);
                 // only take the low part of the product
-                prod as u32
+                rs1_s.wrapping_mul(rs2_s) as u32
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
@@ -359,23 +358,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let avoid_f = E::BaseField::from(u32::MAX.into());
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
-                let prod = rs1_val.as_u64() * rs2_val.as_u64();
                 // only take the low part of the product
-                prod as u32
+                rs1.wrapping_mul(rs2)
             }
             MulhSignDependencies::LL { constrain_rd } => {
                 let prod = rs1_val.as_u64() * rs2_val.as_u64();
                 let prod_lo = prod as u32;
                 assert_eq!(prod_lo, rd);
 
-                let prod_hi = (prod >> BIT_WIDTH) as u32;
+                let prod_hi = prod >> BIT_WIDTH;
                 let avoid_f = E::BaseField::from(u32::MAX.into());
-                constrain_rd.assign_instance(
-                    instance,
-                    E::BaseField::from(prod_hi as u64),
-                    avoid_f,
-                )?;
-                prod_hi
+                constrain_rd.assign_instance(instance, E::BaseField::from(prod_hi), avoid_f)?;
+                prod_hi as u32
             }
             MulhSignDependencies::SU {
                 rs1_signed,
@@ -391,9 +385,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let avoid_f = i64_to_base(i32::MAX.into());
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
-                let prod = (rs1_s as i64).wrapping_mul(rs2 as i64);
                 // only take the low part of the product
-                prod as u32
+                (rs2).wrapping_mul(rs1_s as u32)
             }
         };
 
