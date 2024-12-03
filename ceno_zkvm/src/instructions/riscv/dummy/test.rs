@@ -19,14 +19,7 @@ fn test_dummy_ecall() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "ecall_dummy",
-            |cb| {
-                let config = EcallDummy::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "ecall_dummy", EcallDummy::construct_circuit)
         .unwrap();
 
     let step = StepRecord::new_ecall_any(4, MOCK_PC_START);
@@ -42,14 +35,7 @@ fn test_dummy_r() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "add_dummy",
-            |cb| {
-                let config = AddDummy::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "add_dummy", AddDummy::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
@@ -74,14 +60,7 @@ fn test_dummy_b() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "beq_dummy",
-            |cb| {
-                let config = BeqDummy::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "beq_dummy", BeqDummy::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, 8);

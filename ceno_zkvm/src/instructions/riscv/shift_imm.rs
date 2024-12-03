@@ -274,12 +274,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-                |cb| {
-                    let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
-                    Ok(config)
-                },
+                ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         config
