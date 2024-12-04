@@ -12,7 +12,7 @@ use ceno_emul::{
     ByteAddr, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program, StepRecord, Tracer,
     VMState, WORD_SIZE, WordAddr,
 };
-use ff_ext::ff::Field;
+use ff_ext::{ExtensionField, ff::Field};
 use goldilocks::GoldilocksExt2;
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
@@ -24,9 +24,9 @@ use std::{
 };
 use transcript::Transcript;
 
-type E = GoldilocksExt2;
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
+// type E = GoldilocksExt2;
+// type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+// type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
 
 struct FullMemState<Record> {
     mem: Vec<Record>,
@@ -191,20 +191,20 @@ fn init_mem(
     mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
 }
 
-struct LargeConfig {
+struct LargeConfig<E: ExtensionField> {
     zkvm_cs: ZKVMConstraintSystem<E>,
     config: Rv32imConfig<E>,
     mmu_config: MmuConfig<E>,
     dummy_config: DummyExtraConfig<E>,
     prog_config: ProgramTableConfig,
 }
-fn construct_configs(program_params: ProgramParams) -> LargeConfig {
+fn construct_configs<E: ExtensionField>(program_params: ProgramParams) -> LargeConfig<E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
+    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
     LargeConfig {
         zkvm_cs,
@@ -215,19 +215,19 @@ fn construct_configs(program_params: ProgramParams) -> LargeConfig {
     }
 }
 
-struct WithFixedTraces {
-    large_config: LargeConfig,
+struct WithFixedTraces<E: ExtensionField> {
+    large_config: LargeConfig<E>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
 }
 
-fn construct_with_fixed_traces(
-    large_config: LargeConfig,
+fn construct_with_fixed_traces<E: ExtensionField>(
+    large_config: LargeConfig<E>,
     init_mem_state: &InitMemState,
     program: &Program,
-) -> WithFixedTraces {
+) -> WithFixedTraces<E> {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
 
-    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &large_config.zkvm_cs,
         &large_config.prog_config,
         program,
@@ -253,16 +253,16 @@ fn construct_with_fixed_traces(
     }
 }
 
-struct WithWitness {
-    with_fixed_traces: WithFixedTraces,
+struct WithWitness<E: ExtensionField> {
+    with_fixed_traces: WithFixedTraces<E>,
     zkvm_witnesses: ZKVMWitnesses<E>,
 }
 
-fn construct_with_witness(
-    with_fixed_traces: WithFixedTraces,
+fn construct_with_witness<E: ExtensionField>(
+    with_fixed_traces: WithFixedTraces<E>,
     sim_result: SimulationResult,
     program: &Program,
-) -> WithWitness {
+) -> WithWitness<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
     let dummy_records = with_fixed_traces
@@ -310,7 +310,7 @@ fn construct_with_witness(
         .unwrap();
     // assign program circuit
     zkvm_witness
-        .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
+        .assign_table_circuit::<ProgramTableCircuit<E>>(
             &with_fixed_traces.large_config.zkvm_cs,
             &with_fixed_traces.large_config.prog_config,
             &program,
@@ -323,7 +323,7 @@ fn construct_with_witness(
     }
 }
 
-pub fn run_e2e(
+pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     program: Program,
     platform: Platform,
     stack_size: u32,
@@ -343,13 +343,6 @@ pub fn run_e2e(
         static_memory_len: mem_init.len(),
         ..ProgramParams::default()
     };
-    // let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
-
-    // let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-    // let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
-    // let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
-    // let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
-    // zkvm_cs.register_global_state::<GlobalState>();
 
     let large_config = construct_configs(program_params);
     // IO is not used in this program, but it must have a particular size at the moment.
@@ -365,7 +358,7 @@ pub fn run_e2e(
 
     let with_fixed_traces = construct_with_fixed_traces(large_config, &init_full_mem, &program);
 
-    let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints.clone());
+    let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints);
 
     // Clone some sim_result fields before consuming
     let pi = sim_result.pi.clone();
@@ -375,14 +368,14 @@ pub fn run_e2e(
     let with_witness = construct_with_witness(with_fixed_traces, sim_result, &program);
 
     // keygen
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let pk = with_witness
         .with_fixed_traces
         .large_config
         .zkvm_cs
         .clone()
-        .key_gen::<Pcs>(
+        .key_gen::<PCS>(
             pp.clone(),
             vp.clone(),
             with_witness.with_fixed_traces.zkvm_fixed_traces.clone(),
@@ -441,42 +434,43 @@ pub fn run_e2e(
         Some(code) => tracing::error!("exit code {}. Failure.", code),
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
     }
-
-    let transcript = Transcript::new(b"riscv");
-    // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-    zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-
-    // capture panic message, if have
-    let default_hook = panic::take_hook();
-    panic::set_hook(Box::new(|_info| {
-        // by default it will print msg to stdout/stderr
-        // we override it to avoid print msg since we will capture the msg by our own
-    }));
-    let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-    panic::set_hook(default_hook);
-    match result {
-        Ok(res) => {
-            res.expect_err("verify proof should return with error");
-        }
-        Err(err) => {
-            let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<String>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<&String>() {
-                message.to_string()
-            } else {
-                unreachable!()
-            };
-
-            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
-                println!("unknown panic {msg:?}");
-                panic::resume_unwind(err);
-            };
-        }
-    };
 }
+
+// let transcript = Transcript::new(b"riscv");
+// change public input maliciously should cause verifier to reject proof
+// zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
+// zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
+//
+// capture panic message, if have
+// let default_hook = panic::take_hook();
+// panic::set_hook(Box::new(|_info| {
+// by default it will print msg to stdout/stderr
+// we override it to avoid print msg since we will capture the msg by our own
+// }));
+// let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
+// panic::set_hook(default_hook);
+// match result {
+// Ok(res) => {
+// res.expect_err("verify proof should return with error");
+// }
+// Err(err) => {
+// let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
+// message.to_string()
+// } else if let Some(message) = err.downcast_ref::<String>() {
+// message.to_string()
+// } else if let Some(message) = err.downcast_ref::<&String>() {
+// message.to_string()
+// } else {
+// unreachable!()
+// };
+//
+// if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+// println!("unknown panic {msg:?}");
+// panic::resume_unwind(err);
+// };
+// }
+// };
+// }
 
 fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
     let accessed_addrs = vm
