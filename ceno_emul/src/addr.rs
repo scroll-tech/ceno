@@ -197,17 +197,17 @@ impl ops::AddAssign<u32> for ByteAddr {
 }
 
 pub trait IterAddresses {
-    fn iter_addresses(&self) -> impl Iterator<Item = Addr>;
+    fn iter_addresses(&self) -> impl ExactSizeIterator<Item = Addr>;
 }
 
 impl IterAddresses for Range<Addr> {
-    fn iter_addresses(&self) -> impl Iterator<Item = Addr> {
+    fn iter_addresses(&self) -> impl ExactSizeIterator<Item = Addr> {
         self.clone().step_by(WORD_SIZE)
     }
 }
 
 impl<'a, T: GetAddr> IterAddresses for &'a [T] {
-    fn iter_addresses(&self) -> impl Iterator<Item = Addr> {
+    fn iter_addresses(&self) -> impl ExactSizeIterator<Item = Addr> {
         self.iter().map(T::get_addr)
     }
 }

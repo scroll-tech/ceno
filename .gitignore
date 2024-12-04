@@ -8,3 +8,4 @@ report.json
 table_cache_dev_*
 .DS_Store
 tracing.folded
+.env
