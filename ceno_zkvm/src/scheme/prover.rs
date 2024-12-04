@@ -92,7 +92,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
-            //transcript.append_field_element(&E::BaseField::from(num_instances as u64));
             let span = entered_span!("commit to iteration", circuit_name = circuit_name);
             let witness = match num_instances {
                 0 => vec![],

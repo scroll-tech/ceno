@@ -117,7 +117,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        for (name, (i, proof)) in vm_proof.opcode_proofs.iter() {
+        for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {
             tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
@@ -142,7 +142,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // For each opcode, include the num_instances 
         // into its corresponding fork of the transcript.
-        for ((name, _), (i, transcript)) in self
+        for ((name, _), (_, transcript)) in self
             .vk
             .circuit_vks
             .iter() // Sorted by key.
