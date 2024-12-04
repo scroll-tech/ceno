@@ -35,7 +35,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
     /// This is experiment features. It's preferable that we move parallel level up more to
     /// "bould_poly" so it can be more isolation
-    #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys")]
+    #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys", level = "trace")]
     pub fn prove_batch_polys(
         max_thread_id: usize,
         mut polys: Vec<VirtualPolynomialV2<'a, E>>,
@@ -84,6 +84,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         let num_worker_threads = max_thread_id - 1;
         // whereas the main-thread be the last work thread
         let main_thread_id = num_worker_threads;
+        let span = entered_span!("spawn loop", profiling_4 = true);
         let scoped_fn = |s: &Scope<'a>| {
             for (thread_id, poly) in polys.iter_mut().enumerate().take(num_worker_threads) {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
@@ -92,58 +93,56 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 );
                 let tx_prover_state = tx_prover_state.clone();
                 let mut thread_based_transcript = thread_based_transcript.clone();
-                let current_span = tracing::Span::current();
-                // NOTE: Apply the span.in_scope(||) pattern to record work of spawned thread inside
-                // span of parent thread.
                 s.spawn(move |_| {
-                    current_span.in_scope(|| {
-                        let mut challenge = None;
-                        let span = entered_span!("prove_rounds");
-                        for i in 0..num_variables {
-                            let prover_msg = IOPProverStateV2::prove_round_and_update_state(
-                                &mut prover_state,
-                                &challenge,
+                    let mut challenge = None;
+                    // Note: This span is not nested into the "spawn loop" span, although lexically it looks so.
+                    // Nesting is possible, but then `tracing-forest` does the wrong thing when measuring duration.
+                    // TODO: investigate possibility of nesting with correct duration of parent span
+                    let span = entered_span!("prove_rounds", profiling_5 = true);
+                    for i in 0..num_variables {
+                        let prover_msg = IOPProverStateV2::prove_round_and_update_state(
+                            &mut prover_state,
+                            &challenge,
+                        );
+                        if thread_id < 2 {
+                            tracing::debug!(
+                                "thread {}: sumcheck round {}/{}",
+                                thread_id,
+                                i + 1,
+                                num_variables
                             );
-                            if thread_id < 2 {
-                                tracing::debug!(
-                                    "thread {}: sumcheck round {}/{}",
-                                    thread_id,
-                                    i + 1,
-                                    num_variables
-                                );
-                            }
-                            thread_based_transcript
-                                .append_field_element_exts(&prover_msg.evaluations);
+                        }
+                        thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
-                            challenge = Some(
-                                thread_based_transcript.get_and_append_challenge(b"Internal round"),
-                            );
-                            thread_based_transcript.commit_rolling();
-                        }
-                        exit_span!(span);
-                        // pushing the last challenge point to the state
-                        if let Some(p) = challenge {
-                            prover_state.challenges.push(p);
-                            // fix last challenge to collect final evaluation
-                            prover_state
-                                .poly
-                                .flattened_ml_extensions
-                                .iter_mut()
-                                .for_each(|mle| {
-                                    let mle = Arc::get_mut(mle).unwrap();
-                                    if mle.num_vars() > 0 {
-                                        mle.fix_variables_in_place(&[p.elements]);
-                                    }
-                                });
-                            tx_prover_state
-                                .send(Some((thread_id, prover_state)))
-                                .unwrap();
-                        } else {
-                            tx_prover_state.send(None).unwrap();
-                        }
-                    })
-                });
+                        challenge = Some(
+                            thread_based_transcript.get_and_append_challenge(b"Internal round"),
+                        );
+                        thread_based_transcript.commit_rolling();
+                    }
+                    exit_span!(span);
+                    // pushing the last challenge point to the state
+                    if let Some(p) = challenge {
+                        prover_state.challenges.push(p);
+                        // fix last challenge to collect final evaluation
+                        prover_state
+                            .poly
+                            .flattened_ml_extensions
+                            .iter_mut()
+                            .for_each(|mle| {
+                                let mle = Arc::get_mut(mle).unwrap();
+                                if mle.num_vars() > 0 {
+                                    mle.fix_variables_in_place(&[p.elements]);
+                                }
+                            });
+                        tx_prover_state
+                            .send(Some((thread_id, prover_state)))
+                            .unwrap();
+                    } else {
+                        tx_prover_state.send(None).unwrap();
+                    }
+                })
             }
+            exit_span!(span);
 
             let mut prover_msgs = Vec::with_capacity(num_variables);
             let mut prover_state = Self::prover_init_with_extrapolation_aux(

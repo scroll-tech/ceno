@@ -5,10 +5,7 @@ use ff_ext::ExtensionField;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    instructions::Instruction,
-    uint::{Value, ValueMul},
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -36,12 +33,6 @@ impl RIVInstruction for SubOp {
     const INST_KIND: InsnKind = InsnKind::SUB;
 }
 pub type SubInstruction<E> = ArithInstruction<E, SubOp>;
-
-pub struct MulOp;
-impl RIVInstruction for MulOp {
-    const INST_KIND: InsnKind = InsnKind::MUL;
-}
-pub type MulInstruction<E> = ArithInstruction<E, MulOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
@@ -73,15 +64,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     &rd_written.clone(),
                     true,
                 )?;
-                (rs1_read, rs2_read, rd_written)
-            }
-
-            InsnKind::MUL => {
-                // rs1_read * rs2_read = rd_written
-                let mut rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let mut rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-                let rd_written =
-                    rs1_read.mul(|| "rd_written", circuit_builder, &mut rs2_read, true)?;
                 (rs1_read, rs2_read, rd_written)
             }
 
@@ -138,26 +120,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     .assign_limbs(instance, rd_written.as_u16_limbs());
                 let result = rs2_read.add(&rd_written, lk_multiplicity, true);
                 config.rs1_read.assign_carries(instance, &result.carries);
-            }
-
-            InsnKind::MUL => {
-                // rs1_read * rs2_read = rd_written
-                let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-                let rd_written = Value::new_unchecked(step.rd().unwrap().value.after);
-
-                config
-                    .rs1_read
-                    .assign_limbs(instance, rs1_read.as_u16_limbs());
-
-                let result = rs1_read.mul(&rs2_read, lk_multiplicity, true);
-
-                config
-                    .rd_written
-                    .assign_mul_outcome(instance, lk_multiplicity, &ValueMul {
-                        limbs: rd_written.limbs.to_vec(),
-                        carries: result.carries,
-                        max_carry_value: result.max_carry_value,
-                    })?;
             }
 
             _ => unreachable!("Unsupported instruction kind"),
@@ -353,119 +315,5 @@ mod test {
             .unwrap();
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, None);
-    }
-
-    #[test]
-    fn test_opcode_mul() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
-
-        // values assignment
-        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    11,
-                    2,
-                    Change::new(0, 22),
-                    0,
-                ),
-            ])
-            .unwrap();
-
-        let expected_rd_written =
-            UInt::from_const_unchecked(Value::new_unchecked(22u32).as_u16_limbs().to_vec());
-
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    #[test]
-    fn test_opcode_mul_overflow() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
-
-        // values assignment
-        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    u32::MAX / 2 + 1,
-                    2,
-                    Change::new(0, 0),
-                    0,
-                ),
-            ])
-            .unwrap();
-
-        let expected_rd_written = UInt::from_const_unchecked(vec![0u64, 0]);
-
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    #[test]
-    fn test_opcode_mul_overflow2() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(|| "mul", |cb| Ok(MulInstruction::construct_circuit(cb)))
-            .unwrap()
-            .unwrap();
-
-        let a = Value::<'_, u32>::new_unchecked(u32::MAX);
-        let b = Value::<'_, u32>::new_unchecked(u32::MAX);
-        let ret = a.mul(&b, &mut LkMultiplicity::default(), true);
-        let c_limb = ret.limbs;
-
-        // values assignment
-        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            MulInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    a.as_u64() as u32,
-                    b.as_u64() as u32,
-                    Change::new(
-                        0,
-                        Value::<u32>::from_limb_unchecked(c_limb.clone()).as_u64() as u32,
-                    ),
-                    0,
-                ),
-            ])
-            .unwrap();
-
-        let expected_rd_written = UInt::from_const_unchecked(c_limb.clone());
-
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }

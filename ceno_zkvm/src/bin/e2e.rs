@@ -4,8 +4,10 @@ use clap::{Parser, ValueEnum};
 use itertools::Itertools;
 use std::fs;
 use tracing::level_filters::LevelFilter;
-use tracing_flame::FlameLayer;
-use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
+use tracing_forest::ForestLayer;
+use tracing_subscriber::{
+    EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
@@ -17,6 +19,11 @@ struct Args {
     /// The maximum number of steps to execute the program.
     #[arg(short, long)]
     max_steps: Option<usize>,
+
+    // Profiling granularity.
+    // Setting any value restricts logs to profiling information
+    #[arg(long)]
+    profiling: Option<usize>,
 
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
@@ -44,22 +51,46 @@ enum Preset {
 }
 
 fn main() {
-    // set up logger
-    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
-    let subscriber = Registry::default()
+    let args = {
+        let mut args = Args::parse();
+        args.stack_size = args.stack_size.next_multiple_of(WORD_SIZE as u32);
+        args.heap_size = args.heap_size.next_multiple_of(WORD_SIZE as u32);
+        args
+    };
+
+    // default filter
+    let default_filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::DEBUG.into())
+        .from_env_lossy();
+
+    // filter by profiling level;
+    // spans with level i contain the field "profiling_{i}"
+    // this restricts statistics to first (args.profiling) levels
+    let profiling_level = args.profiling.unwrap_or(1);
+    let filter_by_profiling_level = filter_fn(move |metadata| {
+        (1..=profiling_level)
+            .map(|i| format!("profiling_{i}"))
+            .any(|field| metadata.fields().field(&field).is_some())
+    });
+
+    let fmt_layer = fmt::layer()
+        .compact()
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .without_time();
+
+    Registry::default()
+        .with(args.profiling.is_some().then_some(ForestLayer::default()))
+        .with(fmt_layer)
+        // if some profiling granularity is specified, use the profiling filter,
+        // otherwise use the default
         .with(
-            fmt::layer()
-                .compact()
-                .with_thread_ids(false)
-                .with_thread_names(false),
+            args.profiling
+                .is_some()
+                .then_some(filter_by_profiling_level),
         )
-        .with(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::DEBUG.into())
-                .from_env_lossy(),
-        )
-        .with(flame_layer.with_threads_collapsed(true));
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+        .with(args.profiling.is_none().then_some(default_filter))
+        .init();
 
     let args = {
         let mut args = Args::parse();

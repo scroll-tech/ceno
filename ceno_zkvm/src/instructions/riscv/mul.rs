@@ -53,8 +53,8 @@
 //!
 //! Examples of these ambiguous representations:
 //! - Unsigned/unsigned: for `rs1 = rs2 = 0`, the product should be represented
-//!   by `rd = low = 0`, but can also be represented by `rd = 2^32 - 1` and
-//!   `low = 1`, so that `rd*2^32 + low = 2^64 - 2^32 + 1` which is congruent
+//!   by `hi = low = 0`, but can also be represented by `hi = 2^32 - 1` and
+//!   `low = 1`, so that `hi * 2^32 + low = 2^64 - 2^32 + 1` which is congruent
 //!   to 0 mod the Goldilocks prime.
 //! - Signed/unsigned: for `rs1 = -2^31` and `rs2 = 2^32 - 1`, the product
 //!   `-2^63 + 2^31` should be represented by `rd = -2^31` and `low = 2^31`,
@@ -105,6 +105,12 @@ use core::mem::MaybeUninit;
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
+pub struct MulOp;
+impl RIVInstruction for MulOp {
+    const INST_KIND: InsnKind = InsnKind::MUL;
+}
+pub type MulInstruction<E> = MulhInstructionBase<E, MulOp>;
+
 pub struct MulhOp;
 impl RIVInstruction for MulhOp {
     const INST_KIND: InsnKind = InsnKind::MULH;
@@ -128,11 +134,17 @@ pub struct MulhConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
     rd_written: UInt<E>,
     sign_deps: MulhSignDependencies<E>,
-    prod_low: UInt<E>,
     r_insn: RInstructionConfig<E>,
+    /// The low/high part of the result of multiplying two Uint32.
+    ///
+    /// Whether it's low or high depends on the operation.
+    prod_lo_hi: UInt<E>,
 }
 
 enum MulhSignDependencies<E: ExtensionField> {
+    LL {
+        constrain_rd: IsEqualConfig,
+    },
     UU {
         constrain_rd: IsEqualConfig,
     },
@@ -165,7 +177,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
 
         // 0. Registers and instruction lookup
-
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
@@ -178,13 +189,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             rd_written.register_expr(),
         )?;
 
-        // 1. Compute the signed values associated with `rs1`, `rs2`, and `rd`
-
-        let (rs1_val, rs2_val, rd_val, sign_deps) = match I::INST_KIND {
+        // 1. Compute the signed values associated with `rs1`, `rs2`, `rd` and 2nd half of the prod
+        let (rs1_val, rs2_val, rd_val, sign_deps, prod_lo_hi) = match I::INST_KIND {
             InsnKind::MULH => {
                 let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
                 let rs2_signed = Signed::construct_circuit(circuit_builder, || "rs2", &rs2_read)?;
                 let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
+                let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
 
                 (
                     rs1_signed.expr(),
@@ -195,12 +206,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                         rs2_signed,
                         rd_signed,
                     },
+                    prod_low,
                 )
             }
 
             InsnKind::MULHU => {
+                let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
                 // constrain that rd does not represent 2^32 - 1
-                let rd_avoid = Expression::<E>::from((1u64 << BIT_WIDTH) - 1);
+                let rd_avoid = Expression::<E>::from(u32::MAX);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
                     || "constrain_rd",
@@ -213,15 +226,36 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                     rs2_read.value(),
                     rd_written.value(),
                     MulhSignDependencies::UU { constrain_rd },
+                    prod_low,
+                )
+            }
+            InsnKind::MUL => {
+                // constrain that prod_hi does not represent 2^32 - 1
+                let prod_hi_avoid = Expression::<E>::from(u32::MAX);
+                let prod_hi = UInt::new(|| "prod_hi", circuit_builder)?;
+                let constrain_rd = IsEqualConfig::construct_non_equal(
+                    circuit_builder,
+                    || "constrain_prod_hi",
+                    prod_hi.value(),
+                    prod_hi_avoid,
+                )?;
+
+                (
+                    rs1_read.value(),
+                    rs2_read.value(),
+                    rd_written.value(),
+                    MulhSignDependencies::LL { constrain_rd },
+                    prod_hi,
                 )
             }
 
             InsnKind::MULHSU => {
                 let rs1_signed = Signed::construct_circuit(circuit_builder, || "rs1", &rs1_read)?;
                 let rd_signed = Signed::construct_circuit(circuit_builder, || "rd", &rd_written)?;
+                let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
 
                 // constrain that (signed) rd does not represent 2^31 - 1
-                let rd_avoid = Expression::<E>::from((1u64 << (BIT_WIDTH - 1)) - 1);
+                let rd_avoid = Expression::<E>::from(i32::MAX);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
                     || "constrain_rd",
@@ -238,6 +272,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                         rd_signed,
                         constrain_rd,
                     },
+                    prod_low,
                 )
             }
 
@@ -246,21 +281,28 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         // 2. Verify that the product of signed inputs `rs1` and `rs2` is equal to
         //    the result of interpreting `rd` as the high limb of a 2s complement
-        //    value with some 32-bit low limb
-
-        let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
-        circuit_builder.require_equal(
-            || "validate_prod_high_limb",
-            rs1_val * rs2_val,
-            rd_val * (1u64 << 32) + prod_low.value(),
-        )?;
+        //    value
+        match I::INST_KIND {
+            InsnKind::MUL => circuit_builder.require_equal(
+                || "validate_prod_low_limb",
+                rs1_val * rs2_val,
+                (prod_lo_hi.value() << 32) + rd_val,
+            )?,
+            // MULH families
+            InsnKind::MULHU | InsnKind::MULHSU | InsnKind::MULH => circuit_builder.require_equal(
+                || "validate_prod_high_limb",
+                rs1_val * rs2_val,
+                (rd_val << 32) + prod_lo_hi.value(),
+            )?,
+            _ => unreachable!("Unsupported instruction kind"),
+        }
 
         Ok(MulhConfig {
             rs1_read,
             rs2_read,
             rd_written,
             sign_deps,
-            prod_low,
+            prod_lo_hi,
             r_insn,
         })
     }
@@ -296,7 +338,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             .assign_instance(instance, lk_multiplicity, step)?;
 
         // Assign signed values, if any, and compute low 32-bit limb of product
-        let prod_low = match &config.sign_deps {
+        let prod_lo_hi = match &config.sign_deps {
             MulhSignDependencies::SS {
                 rs1_signed,
                 rs2_signed,
@@ -307,17 +349,27 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let rs2_s = rs2_signed.assign_instance(instance, lk_multiplicity, &rs2_val)?;
                 rd_signed.assign_instance(instance, lk_multiplicity, &rd_val)?;
 
-                let prod = (rs1_s as i64) * (rs2_s as i64);
-                ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
+                // only take the low part of the product
+                rs1_s.wrapping_mul(rs2_s) as u32
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
                 let rd_f = E::BaseField::from(rd as u64);
-                let avoid_f = E::BaseField::from((1u64 << BIT_WIDTH) - 1);
+                let avoid_f = E::BaseField::from(u32::MAX.into());
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
+                // only take the low part of the product
+                rs1.wrapping_mul(rs2)
+            }
+            MulhSignDependencies::LL { constrain_rd } => {
                 let prod = rs1_val.as_u64() * rs2_val.as_u64();
-                (prod % (1u64 << BIT_WIDTH)) as u32
+                let prod_lo = prod as u32;
+                assert_eq!(prod_lo, rd);
+
+                let prod_hi = prod >> BIT_WIDTH;
+                let avoid_f = E::BaseField::from(u32::MAX.into());
+                constrain_rd.assign_instance(instance, E::BaseField::from(prod_hi), avoid_f)?;
+                prod_hi as u32
             }
             MulhSignDependencies::SU {
                 rs1_signed,
@@ -330,20 +382,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
                 // assign nonzero value (i32::MAX - rd)
                 let rd_f = i64_to_base(rd_s as i64);
-                let avoid_f = i64_to_base((1i64 << (BIT_WIDTH - 1)) - 1);
+                let avoid_f = i64_to_base(i32::MAX.into());
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
-                // let nonzero_val = ((1i64 << (BIT_WIDTH - 1)) - 1) - (rd_s as i64);
-                // constrain_rd.assign_instance(instance, i64_to_base(nonzero_val))?;
 
-                let prod = (rs1_s as i64).wrapping_mul(rs2 as i64);
-                ((prod as u64) % (1u64 << BIT_WIDTH)) as u32
+                // only take the low part of the product
+                (rs2).wrapping_mul(rs1_s as u32)
             }
         };
 
-        let prod_low_val = Value::new(prod_low, lk_multiplicity);
+        let prod_lo_hi_val = Value::new(prod_lo_hi, lk_multiplicity);
         config
-            .prod_low
-            .assign_limbs(instance, prod_low_val.as_u16_limbs());
+            .prod_lo_hi
+            .assign_limbs(instance, prod_lo_hi_val.as_u16_limbs());
 
         Ok(())
     }
@@ -406,42 +456,73 @@ mod test {
     };
 
     #[test]
-    fn test_opcode_mulhu() {
-        verify_mulhu(2, 11);
-        verify_mulhu(u32::MAX, u32::MAX);
-        verify_mulhu(u16::MAX as u32, u16::MAX as u32);
+    fn test_opcode_mul() {
+        verify_mulu::<MulOp>("basic", 2, 11);
+        verify_mulu::<MulOp>("2 * 0", 2, 0);
+        verify_mulu::<MulOp>("0 * 0", 0, 0);
+        verify_mulu::<MulOp>("0 * 2", 0, 2);
+        verify_mulu::<MulOp>("0 * u32::MAX", 0, u32::MAX);
+        verify_mulu::<MulOp>("u32::MAX", u32::MAX, u32::MAX);
+        verify_mulu::<MulOp>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
     }
 
-    fn verify_mulhu(rs1: u32, rs2: u32) {
+    #[test]
+    fn test_opcode_mulhu() {
+        verify_mulu::<MulhuOp>("basic", 2, 11);
+        verify_mulu::<MulhuOp>("2 * 0", 2, 0);
+        verify_mulu::<MulhuOp>("0 * 0", 0, 0);
+        verify_mulu::<MulhuOp>("0 * 2", 0, 2);
+        verify_mulu::<MulhuOp>("0 * u32::MAX", 0, u32::MAX);
+        verify_mulu::<MulhuOp>("u32::MAX", u32::MAX, u32::MAX);
+        verify_mulu::<MulhuOp>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
+    }
+
+    fn verify_mulu<I: RIVInstruction>(name: &'static str, rs1: u32, rs2: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mulhu", |cb| Ok(MulhuInstruction::construct_circuit(cb)))
+            .namespace(
+                || format!("{:?}_({name})", I::INST_KIND),
+                |cb| {
+                    Ok(MulhInstructionBase::<GoldilocksExt2, I>::construct_circuit(
+                        cb,
+                    ))
+                },
+            )
             .unwrap()
             .unwrap();
 
-        let a = Value::<'_, u32>::new_unchecked(rs1);
-        let b = Value::<'_, u32>::new_unchecked(rs2);
-        let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
+        let outcome = match I::INST_KIND {
+            InsnKind::MUL => rs1.wrapping_mul(rs2),
+            InsnKind::MULHU => {
+                let a = Value::<'_, u32>::new_unchecked(rs1);
+                let b = Value::<'_, u32>::new_unchecked(rs2);
+                let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
+                value_mul.as_hi_value::<u32>().as_u32()
+            }
+            _ => unreachable!("Unsupported instruction kind"),
+        };
 
         // values assignment
-        let insn_code = encode_rv32(InsnKind::MULHU, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            MulhuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    a.as_u64() as u32,
-                    b.as_u64() as u32,
-                    Change::new(0, value_mul.as_hi_value::<u32>().as_u32()),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let insn_code = encode_rv32(I::INST_KIND, 2, 3, 4, 0);
+        let (raw_witin, lkm) = MulhInstructionBase::<GoldilocksExt2, I>::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                rs1,
+                rs2,
+                Change::new(0, outcome),
+                0,
+            )],
+        )
+        .unwrap();
 
         // verify value write to register, which is only hi
-        let expected_rd_written = UInt::from_const_unchecked(value_mul.as_hi_limb_slice().to_vec());
+        let expected_rd_written =
+            UInt::from_const_unchecked(Value::new_unchecked(outcome).as_u16_limbs().to_vec());
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
             || "assert_rd_written",
