@@ -215,6 +215,44 @@ fn construct_configs(program_params: ProgramParams) -> LargeConfig {
     }
 }
 
+struct WithFixedTraces {
+    large_config: LargeConfig,
+    zkvm_fixed_traces: ZKVMFixedTraces<E>,
+}
+
+fn construct_with_fixed_traces(
+    large_config: LargeConfig,
+    init_mem_state: &InitMemState,
+    program: &Program,
+) -> WithFixedTraces {
+    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
+
+    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+        &large_config.zkvm_cs,
+        &large_config.prog_config,
+        program,
+    );
+
+    large_config
+        .config
+        .generate_fixed_traces(&large_config.zkvm_cs, &mut zkvm_fixed_traces);
+    large_config.mmu_config.generate_fixed_traces(
+        &large_config.zkvm_cs,
+        &mut zkvm_fixed_traces,
+        &init_mem_state.reg,
+        &init_mem_state.mem,
+        &init_mem_state.io.iter().map(|rec| rec.addr).collect_vec(),
+    );
+    large_config
+        .dummy_config
+        .generate_fixed_traces(&large_config.zkvm_cs, &mut zkvm_fixed_traces);
+
+    WithFixedTraces {
+        large_config,
+        zkvm_fixed_traces,
+    }
+}
+
 pub fn run_e2e(
     program: Program,
     platform: Platform,
@@ -244,54 +282,34 @@ pub fn run_e2e(
     // zkvm_cs.register_global_state::<GlobalState>();
 
     let mut large_config = construct_configs(program_params);
-
-    let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-
-    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
-        &large_config.zkvm_cs,
-        &large_config.prog_config,
-        &program,
-    );
-
     // IO is not used in this program, but it must have a particular size at the moment.
     let io_init = mem_padder.padded_sorted(large_config.mmu_config.public_io_len(), vec![]);
     let reg_init = large_config.mmu_config.initial_registers();
 
-    large_config
-        .config
-        .generate_fixed_traces(&large_config.zkvm_cs, &mut zkvm_fixed_traces);
-    large_config.mmu_config.generate_fixed_traces(
-        &large_config.zkvm_cs,
-        &mut zkvm_fixed_traces,
-        &reg_init,
-        &mem_init,
-        &io_init.iter().map(|rec| rec.addr).collect_vec(),
-    );
-    large_config
-        .dummy_config
-        .generate_fixed_traces(&large_config.zkvm_cs, &mut zkvm_fixed_traces);
+    let init_full_mem = InitMemState {
+        mem: mem_init,
+        reg: reg_init,
+        io: io_init,
+        priv_io: vec![],
+    };
 
-    let sim_result = simulate_program(
-        &program,
-        max_steps,
-        InitMemState {
-            io: io_init,
-            reg: reg_init,
-            mem: mem_init,
-            priv_io: vec![],
-        },
-        &platform,
-        hints.clone(),
-    );
+    let with_fixed_traces = construct_with_fixed_traces(large_config, &init_full_mem, &program);
+
+    let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints.clone());
     let cycle_num = sim_result.all_records.len();
 
     // keygen
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let pk = large_config
+    let pk = with_fixed_traces
+        .large_config
         .zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
+        .key_gen::<Pcs>(
+            pp.clone(),
+            vp.clone(),
+            with_fixed_traces.zkvm_fixed_traces.clone(),
+        )
         .expect("keygen failed");
     let vk = pk.get_vk();
 
@@ -302,29 +320,37 @@ pub fn run_e2e(
 
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
-    let dummy_records = large_config
+    let dummy_records = with_fixed_traces
+        .large_config
         .config
         .assign_opcode_circuit(
-            &large_config.zkvm_cs,
+            &with_fixed_traces.large_config.zkvm_cs,
             &mut zkvm_witness,
             sim_result.all_records,
         )
         .unwrap();
-    large_config
+    with_fixed_traces
+        .large_config
         .dummy_config
-        .assign_opcode_circuit(&large_config.zkvm_cs, &mut zkvm_witness, dummy_records)
+        .assign_opcode_circuit(
+            &with_fixed_traces.large_config.zkvm_cs,
+            &mut zkvm_witness,
+            dummy_records,
+        )
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
 
     // assign table circuits
-    large_config
+    with_fixed_traces
+        .large_config
         .config
-        .assign_table_circuit(&large_config.zkvm_cs, &mut zkvm_witness)
+        .assign_table_circuit(&with_fixed_traces.large_config.zkvm_cs, &mut zkvm_witness)
         .unwrap();
-    large_config
+    with_fixed_traces
+        .large_config
         .mmu_config
         .assign_table_circuit(
-            &large_config.zkvm_cs,
+            &with_fixed_traces.large_config.zkvm_cs,
             &mut zkvm_witness,
             &sim_result.final_mem_state.reg,
             &sim_result.final_mem_state.mem,
@@ -340,16 +366,16 @@ pub fn run_e2e(
     // assign program circuit
     zkvm_witness
         .assign_table_circuit::<ExampleProgramTableCircuit<E>>(
-            &large_config.zkvm_cs,
-            &large_config.prog_config,
+            &with_fixed_traces.large_config.zkvm_cs,
+            &with_fixed_traces.large_config.prog_config,
             &program,
         )
         .unwrap();
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(
-            large_config.zkvm_cs,
-            zkvm_fixed_traces,
+            &with_fixed_traces.large_config.zkvm_cs,
+            with_fixed_traces.zkvm_fixed_traces,
             &zkvm_witness,
             &sim_result.pi,
         );
