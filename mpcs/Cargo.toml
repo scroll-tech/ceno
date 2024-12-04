@@ -30,6 +30,7 @@ rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
+whir = { git = "https://github.com/scroll-tech/whir.git", branch = "pcs_trait" }
 
 [dev-dependencies]
 criterion.workspace = true
