@@ -33,7 +33,7 @@ impl RIVInstruction for SltuOp {
 pub type SltuInstruction<E> = SetLessThanInstruction<E, SltuOp>;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
-pub struct SltConfig<E: ExtensionField> {
+pub struct SetLessThanConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 
     rs1_read: UInt<E>,
@@ -50,7 +50,7 @@ enum SetLessThanDependencies<E: ExtensionField> {
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruction<E, I> {
-    type InstructionConfig = SltConfig<E>;
+    type InstructionConfig = SetLessThanConfig<E>;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -90,7 +90,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
             rd_written.register_expr(),
         )?;
 
-        Ok(SltConfig {
+        Ok(SetLessThanConfig {
             r_insn,
             rs1_read,
             rs2_read,
