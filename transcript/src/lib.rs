@@ -5,7 +5,7 @@
 
 pub mod basic;
 pub mod syncronized;
-pub use basic::Transcript;
+pub use basic::{BasicTranscript, ForkableTranscript, Transcript};
 pub use syncronized::TranscriptSyncronized;
 
 mod hasher;

@@ -14,7 +14,7 @@ use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentSche
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
 };
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -126,7 +126,7 @@ fn test_rw_lk_expression_combination() {
 
         // get proof
         let prover = ZKVMProver::new(pk);
-        let mut transcript = Transcript::new(b"test");
+        let mut transcript = BasicTranscript::new(b"test");
         let wits_in = zkvm_witness
             .into_iter_sorted()
             .next()
@@ -157,7 +157,7 @@ fn test_rw_lk_expression_combination() {
 
         // verify proof
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = Transcript::new(b"test");
+        let mut v_transcript = BasicTranscript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -305,12 +305,12 @@ fn test_single_add_instance_e2e() {
         .unwrap();
 
     let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
-    let transcript = Transcript::new(b"riscv");
+    let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let transcript = Transcript::new(b"riscv");
+    let transcript = BasicTranscript::new(b"riscv");
     assert!(
         verifier
             .verify_proof(zkvm_proof, transcript)
@@ -325,7 +325,7 @@ fn test_tower_proof_various_prod_size() {
         let num_vars = ceil_log2(leaf_layer_size);
         let mut rng = test_rng();
         type E = GoldilocksExt2;
-        let mut transcript = Transcript::new(b"test_tower_proof");
+        let mut transcript = BasicTranscript::new(b"test_tower_proof");
         let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)
             .map(|_| E::random(&mut rng))
             .collect_vec()
@@ -348,7 +348,7 @@ fn test_tower_proof_various_prod_size() {
             &mut transcript,
         );
 
-        let mut transcript = Transcript::new(b"test_tower_proof");
+        let mut transcript = BasicTranscript::new(b"test_tower_proof");
         let (rt_tower_v, prod_point_and_eval, _, _) = TowerVerify::verify(
             vec![
                 layers[0]

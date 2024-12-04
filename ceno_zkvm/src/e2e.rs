@@ -22,7 +22,7 @@ use std::{
     panic,
     time::Instant,
 };
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 
 pub fn run_e2e(
     program: Program,
