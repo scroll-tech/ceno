@@ -168,10 +168,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .get(name)
                     .ok_or(ZKVMError::VKNotFound(name.clone()))?;
                 let _rand_point = self.verify_opcode_proof(
-                    &name,
+                    name,
                     &self.vk.vp,
                     circuit_vk,
-                    &opcode_proof,
+                    opcode_proof,
                     pi_evals,
                     transcript,
                     NUM_FANIN,
