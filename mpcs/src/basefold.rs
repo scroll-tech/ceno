@@ -323,7 +323,7 @@ where
         //  (2) The encoding of the coefficient vector (need an interpolation)
         let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
             PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword);
+                let codeword_tree = MerkleTree::from_leaves(codeword);
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -336,7 +336,7 @@ where
                 })
             }
             PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone());
+                let codeword_tree = MerkleTree::from_leaves(evals.clone());
 
                 // All these values are stored in the `CommitmentWithData` because
                 // they are useful in opening, and we don't want to recompute them.
@@ -412,7 +412,7 @@ where
                         }
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
+                let codeword_tree = MerkleTree::from_batch_leaves(codewords);
                 Self::CommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
@@ -432,7 +432,7 @@ where
                         }
                     })
                     .collect::<Vec<_>>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
+                let codeword_tree = MerkleTree::from_batch_leaves(bh_evals.clone());
                 Self::CommitmentWithData {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
