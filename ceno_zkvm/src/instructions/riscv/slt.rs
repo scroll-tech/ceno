@@ -53,7 +53,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
     type InstructionConfig = SltConfig<E>;
 
     fn name() -> String {
-        format!("{:?}", InsnKind::SLT)
+        format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
