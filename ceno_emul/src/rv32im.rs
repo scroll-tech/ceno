@@ -484,6 +484,9 @@ impl Emulator {
         // when we match against the decoded instruction. We should centralise that. And
         // our `step` function here shouldn't need to know anything about how instruction
         // are encoded as numbers.
+        //
+        // One way to centralise is to do the check once when loading the program from the
+        // ELF.
         if word & 0x03 != 0x03 {
             // Opcode must end in 0b11 in RV32IM.
             ctx.trap(TrapCause::IllegalInstruction(word))?;
