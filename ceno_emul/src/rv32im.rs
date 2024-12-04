@@ -477,9 +477,10 @@ impl Emulator {
         };
 
         // TODO(Matthias): our `Program` that we are fetching from should really store
-        // already `DecodedInstruction`s, instead of doing this very weird, very partial checking.
+        // already decoded instructions, instead of doing this weird, partial checking
+        // for `0x03` here.
         //
-        // [Note how we can fail here with an IllegalInstruction, and again further down
+        // Note how we can fail here with an IllegalInstruction, and again further down
         // when we match against the decoded instruction. We should centralise that. And
         // our `step` function here shouldn't need to know anything about how instruction
         // are encoded as numbers.
