@@ -101,7 +101,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let span = entered_span!(
                 "commit to iteration",
                 circuit_name = circuit_name,
-                profiling_2 = true
+                profiling_2 = true,
+                collapsible = true,
             );
             let witness = match num_instances {
                 0 => vec![],
@@ -212,7 +213,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
     #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(skip_all, name = "create_opcode_proof", fields(circuit_name=name,profiling_2), level="trace")]
+    #[tracing::instrument(skip_all, name = "create_opcode_proof", fields(circuit_name=name,profiling_2,collapsible=true), level="trace")]
     pub fn create_opcode_proof(
         &self,
         name: &str,
@@ -658,7 +659,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// support batch prove for logup + product arguments each with different num_vars()
     /// side effect: concurrency will be determine based on min(thread, num_vars()),
     /// so suggest dont batch too small table (size < threads) with large table together
-    #[tracing::instrument(skip_all, name = "create_table_proof", fields(table_name=name, profiling_2), level="trace")]
+    #[tracing::instrument(skip_all, name = "create_table_proof", fields(table_name=name, profiling_2,collapsible=true), level="trace")]
     pub fn create_table_proof(
         &self,
         name: &str,
