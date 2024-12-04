@@ -140,7 +140,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let point_eval = PointAndEval::default();
         let mut transcripts = transcript.fork(self.vk.circuit_vks.len());
 
-        // For each opcode, include the num_instances 
+        // For each opcode, include the num_instances
         // into its corresponding fork of the transcript.
         for ((name, _), transcript) in self
             .vk
@@ -183,8 +183,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().lk_expressions.len();
                 let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
-                let num_padded_instance =
-                    next_pow2_instance_padding(opcode_proof.num_instances) - opcode_proof.num_instances;
+                let num_padded_instance = next_pow2_instance_padding(opcode_proof.num_instances)
+                    - opcode_proof.num_instances;
                 dummy_table_item_multiplicity += num_padded_lks_per_instance
                     * opcode_proof.num_instances
                     + num_lks.next_power_of_two() * num_padded_instance;

@@ -146,7 +146,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             if is_opcode_circuit {
                 transcript.append_field_element(&E::BaseField::from(num_instances as u64));
             }
-            
+
             if witness.is_empty() {
                 assert!(num_instances == 0);
                 continue;
