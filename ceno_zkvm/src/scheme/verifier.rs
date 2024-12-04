@@ -142,11 +142,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // For each opcode, include the num_instances 
         // into its corresponding fork of the transcript.
-        for ((name, _), (_, transcript)) in self
+        for ((name, _), transcript) in self
             .vk
             .circuit_vks
             .iter() // Sorted by key.
-            .zip_eq(transcripts.iter_mut().enumerate())
+            .zip_eq(transcripts.iter_mut())
         {
             // get num_instances from opcode proof
             let opcode_result = vm_proof.opcode_proofs.get(name);
