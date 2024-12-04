@@ -12,14 +12,12 @@ use ceno_emul::{
     ByteAddr, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program, StepRecord, Tracer,
     VMState, WORD_SIZE, WordAddr,
 };
-use ff_ext::{ExtensionField, ff::Field};
-use goldilocks::GoldilocksExt2;
+use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::PolynomialCommitmentScheme;
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
-    time::Instant,
 };
 use transcript::Transcript;
 
@@ -29,43 +27,6 @@ struct FullMemState<Record> {
     reg: Vec<Record>,
     priv_io: Vec<Record>,
 }
-// type E2EWitnessGen<E, PCS> = (
-//     ZKVMProver<E, PCS>,
-//     ZKVMVerifier<E, PCS>,
-//     ZKVMWitnesses<E>,
-//     PublicValues<u32>,
-//     usize,   // number of cycles
-//     Instant, // e2e start, excluding key gen time
-//     Option<u32>,
-// );
-
-// pub fn run_e2e_gen_witness<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-//     program: Program,
-//     platform: Platform,
-//     stack_size: u32,
-//     heap_size: u32,
-//     hints: Vec<u32>,
-//     max_steps: usize,
-// ) -> E2EWitnessGen<E, PCS> {
-//     let stack_addrs = platform.stack_top - stack_size..platform.stack_top;
-
-//     // Detect heap as starting after program data.
-//     let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
-//     let heap_addrs = heap_start..heap_start + heap_size;
-
-//     let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
-
-//     let mem_init = {
-//         let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
-//             addr: *addr,
-//             value: *value,
-//         });
-
-//         let stack = stack_addrs
-//             .iter_addresses()
-//             .map(|addr| MemInitRecord { addr, value: 0 });
-//     }
-// }
 
 type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
@@ -373,7 +334,7 @@ pub fn run_program_to_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     // Simulate program
     let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints);
 
-    // Clone some sim_result fields before consuming
+    // Clone some sim_result fields for future use before consuming
     let pi = sim_result.pi.clone();
     let exit_code = sim_result.exit_code;
 
