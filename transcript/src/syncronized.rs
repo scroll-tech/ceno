@@ -2,7 +2,7 @@ use std::array;
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use ff_ext::ExtensionField;
-//use goldilocks::SmallField;
+// use goldilocks::SmallField;
 
 use crate::{Challenge, Transcript};
 
