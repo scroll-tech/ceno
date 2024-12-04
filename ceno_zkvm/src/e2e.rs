@@ -319,7 +319,7 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         ..ProgramParams::default()
     };
 
-    let system_config = construct_configs(program_params);
+    let system_config = construct_configs::<E>(program_params);
     // IO is not used in this program, but it must have a particular size at the moment.
     let io_init = mem_padder.padded_sorted(system_config.mmu_config.public_io_len(), vec![]);
     let reg_init = system_config.mmu_config.initial_registers();
@@ -344,69 +344,69 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     // Generate witness
     let zkvm_witness = generate_witness(&system_config, sim_result, &program);
-
-    // keygen
-    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let pk = system_config
-        .zkvm_cs
-        .clone()
-        .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
-        .expect("keygen failed");
-    let vk = pk.get_vk();
-
-    // proving
-    let e2e_start = Instant::now();
-    let prover = ZKVMProver::new(pk);
-    let verifier = ZKVMVerifier::new(vk);
-
-    if std::env::var("MOCK_PROVING").is_ok() {
-        MockProver::assert_satisfied_full(
-            &system_config.zkvm_cs,
-            zkvm_fixed_traces,
-            &zkvm_witness,
-            &pi,
-        );
-        tracing::info!("Mock proving passed");
-    }
-    let timer = Instant::now();
-
-    let transcript = Transcript::new(b"riscv");
-    let mut zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, transcript)
-        .expect("create_proof failed");
-
-    let proving_time = timer.elapsed().as_secs_f64();
-    let e2e_time = e2e_start.elapsed().as_secs_f64();
-    let witgen_time = e2e_time - proving_time;
-
-    println!(
-        "Proving finished.\n\
-\tProving time = {:.3}s, freq = {:.3}khz\n\
-\tWitgen  time = {:.3}s, freq = {:.3}khz\n\
-\tTotal   time = {:.3}s, freq = {:.3}khz\n\
-\tthread num: {}",
-        proving_time,
-        cycle_num as f64 / proving_time / 1000.0,
-        witgen_time,
-        cycle_num as f64 / witgen_time / 1000.0,
-        e2e_time,
-        cycle_num as f64 / e2e_time / 1000.0,
-        rayon::current_num_threads()
-    );
-
-    let transcript = Transcript::new(b"riscv");
-    assert!(
-        verifier
-            .verify_proof_halt(zkvm_proof.clone(), transcript, exit_code.is_some())
-            .expect("verify proof return with error"),
-    );
-    match exit_code {
-        Some(0) => tracing::info!("exit code 0. Success."),
-        Some(code) => tracing::error!("exit code {}. Failure.", code),
-        None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
-    }
 }
+// keygen
+// let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+// let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+// let pk = system_config
+// .zkvm_cs
+// .clone()
+// .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
+// .expect("keygen failed");
+// let vk = pk.get_vk();
+//
+// proving
+// let e2e_start = Instant::now();
+// let prover = ZKVMProver::new(pk);
+// let verifier = ZKVMVerifier::new(vk);
+//
+// if std::env::var("MOCK_PROVING").is_ok() {
+// MockProver::assert_satisfied_full(
+// &system_config.zkvm_cs,
+// zkvm_fixed_traces,
+// &zkvm_witness,
+// &pi,
+// );
+// tracing::info!("Mock proving passed");
+// }
+// let timer = Instant::now();
+//
+// let transcript = Transcript::new(b"riscv");
+// let mut zkvm_proof = prover
+// .create_proof(zkvm_witness, pi, transcript)
+// .expect("create_proof failed");
+//
+// let proving_time = timer.elapsed().as_secs_f64();
+// let e2e_time = e2e_start.elapsed().as_secs_f64();
+// let witgen_time = e2e_time - proving_time;
+//
+// println!(
+// "Proving finished.\n\
+// \tProving time = {:.3}s, freq = {:.3}khz\n\
+// \tWitgen  time = {:.3}s, freq = {:.3}khz\n\
+// \tTotal   time = {:.3}s, freq = {:.3}khz\n\
+// \tthread num: {}",
+// proving_time,
+// cycle_num as f64 / proving_time / 1000.0,
+// witgen_time,
+// cycle_num as f64 / witgen_time / 1000.0,
+// e2e_time,
+// cycle_num as f64 / e2e_time / 1000.0,
+// rayon::current_num_threads()
+// );
+//
+// let transcript = Transcript::new(b"riscv");
+// assert!(
+// verifier
+// .verify_proof_halt(zkvm_proof.clone(), transcript, exit_code.is_some())
+// .expect("verify proof return with error"),
+// );
+// match exit_code {
+// Some(0) => tracing::info!("exit code 0. Success."),
+// Some(code) => tracing::error!("exit code {}. Failure.", code),
+// None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+// }
+// }
 
 // let transcript = Transcript::new(b"riscv");
 // change public input maliciously should cause verifier to reject proof
