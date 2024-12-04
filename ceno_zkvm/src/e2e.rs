@@ -1,8 +1,8 @@
 use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
-        PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
-        verifier::ZKVMVerifier,
+        PublicValues, ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::MockProver,
+        prover::ZKVMProver, verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
@@ -19,7 +19,6 @@ use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
-    panic,
     time::Instant,
 };
 use transcript::Transcript;
@@ -30,6 +29,43 @@ struct FullMemState<Record> {
     reg: Vec<Record>,
     priv_io: Vec<Record>,
 }
+// type E2EWitnessGen<E, PCS> = (
+//     ZKVMProver<E, PCS>,
+//     ZKVMVerifier<E, PCS>,
+//     ZKVMWitnesses<E>,
+//     PublicValues<u32>,
+//     usize,   // number of cycles
+//     Instant, // e2e start, excluding key gen time
+//     Option<u32>,
+// );
+
+// pub fn run_e2e_gen_witness<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+//     program: Program,
+//     platform: Platform,
+//     stack_size: u32,
+//     heap_size: u32,
+//     hints: Vec<u32>,
+//     max_steps: usize,
+// ) -> E2EWitnessGen<E, PCS> {
+//     let stack_addrs = platform.stack_top - stack_size..platform.stack_top;
+
+//     // Detect heap as starting after program data.
+//     let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+//     let heap_addrs = heap_start..heap_start + heap_size;
+
+//     let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
+
+//     let mem_init = {
+//         let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
+//             addr: *addr,
+//             value: *value,
+//         });
+
+//         let stack = stack_addrs
+//             .iter_addresses()
+//             .map(|addr| MemInitRecord { addr, value: 0 });
+//     }
+// }
 
 type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
@@ -344,6 +380,65 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     // Generate witness
     let zkvm_witness = generate_witness(&system_config, sim_result, &program);
+
+    if std::env::var("MOCK_PROVING").is_ok() {
+        MockProver::assert_satisfied_full(
+            &system_config.zkvm_cs,
+            zkvm_fixed_traces.clone(),
+            &zkvm_witness,
+            &pi,
+        );
+        tracing::info!("Mock proving passed");
+    }
+
+    // keygen
+    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let pk = system_config
+        .zkvm_cs
+        .clone()
+        .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces)
+        .expect("keygen failed");
+    let vk = pk.get_vk();
+
+    // proving
+    let prover = ZKVMProver::new(pk);
+    let verifier = ZKVMVerifier::new(vk);
+
+    // Run proof phase
+    let zkvm_proof = run_e2e_proof(prover, zkvm_witness, pi);
+    // Run verifier
+    run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps);
+}
+
+pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    prover: ZKVMProver<E, PCS>,
+    zkvm_witness: ZKVMWitnesses<E>,
+    pi: PublicValues<u32>,
+) -> ZKVMProof<E, PCS> {
+    let transcript = Transcript::new(b"riscv");
+    prover
+        .create_proof(zkvm_witness, pi, transcript)
+        .expect("create_proof failed")
+}
+
+pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    verifier: &ZKVMVerifier<E, PCS>,
+    zkvm_proof: ZKVMProof<E, PCS>,
+    exit_code: Option<u32>,
+    max_steps: usize,
+) {
+    let transcript = Transcript::new(b"riscv");
+    assert!(
+        verifier
+            .verify_proof_halt(zkvm_proof, transcript, exit_code.is_some())
+            .expect("verify proof return with error"),
+    );
+    match exit_code {
+        Some(0) => tracing::info!("exit code 0. Success."),
+        Some(code) => tracing::error!("exit code {}. Failure.", code),
+        None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+    }
 }
 // keygen
 // let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
