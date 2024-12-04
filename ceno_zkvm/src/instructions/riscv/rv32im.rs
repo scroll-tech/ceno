@@ -14,7 +14,6 @@ use crate::{
             shift::{SllInstruction, SrlInstruction},
             shift_imm::{SlliInstruction, SraiInstruction, SrliInstruction},
             slti::SltiInstruction,
-            sltu::SltuInstruction,
             *,
         },
     },
@@ -34,7 +33,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mul::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
-use slt::SltInstruction;
+use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
 use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;

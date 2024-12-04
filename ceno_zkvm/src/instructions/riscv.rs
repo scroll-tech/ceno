@@ -22,7 +22,6 @@ pub mod shift;
 pub mod shift_imm;
 pub mod slt;
 pub mod slti;
-pub mod sltu;
 
 mod b_insn;
 mod i_insn;
