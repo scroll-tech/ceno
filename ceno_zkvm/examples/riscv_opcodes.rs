@@ -294,12 +294,7 @@ fn main() {
         trace_report.save_json("report.json");
         trace_report.save_table("report.txt");
 
-        MockProver::assert_satisfied_full(
-            zkvm_cs.clone(),
-            zkvm_fixed_traces.clone(),
-            &zkvm_witness,
-            &pi,
-        );
+        MockProver::assert_satisfied_full(&zkvm_cs, zkvm_fixed_traces.clone(), &zkvm_witness, &pi);
 
         let timer = Instant::now();
 

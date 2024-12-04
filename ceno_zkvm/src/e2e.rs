@@ -253,71 +253,16 @@ fn construct_with_fixed_traces(
     }
 }
 
-pub fn run_e2e(
-    program: Program,
-    platform: Platform,
-    stack_size: u32,
-    heap_size: u32,
-    hints: Vec<u32>,
-    max_steps: usize,
-) {
-    // Detect heap as starting after program data.
-    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
-    let heap_addrs = heap_start..heap_start + heap_size;
-    let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
-    let mem_init = init_mem(&program, &platform, &mut mem_padder, stack_size, heap_size);
+struct WithWitness {
+    with_fixed_traces: WithFixedTraces,
+    zkvm_witnesses: ZKVMWitnesses<E>,
+}
 
-    let program_params = ProgramParams {
-        platform: platform.clone(),
-        program_size: program.instructions.len(),
-        static_memory_len: mem_init.len(),
-        ..ProgramParams::default()
-    };
-    // let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
-
-    // let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
-    // let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
-    // let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
-    // let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
-    // zkvm_cs.register_global_state::<GlobalState>();
-
-    let mut large_config = construct_configs(program_params);
-    // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = mem_padder.padded_sorted(large_config.mmu_config.public_io_len(), vec![]);
-    let reg_init = large_config.mmu_config.initial_registers();
-
-    let init_full_mem = InitMemState {
-        mem: mem_init,
-        reg: reg_init,
-        io: io_init,
-        priv_io: vec![],
-    };
-
-    let with_fixed_traces = construct_with_fixed_traces(large_config, &init_full_mem, &program);
-
-    let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints.clone());
-    let cycle_num = sim_result.all_records.len();
-
-    // keygen
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let pk = with_fixed_traces
-        .large_config
-        .zkvm_cs
-        .clone()
-        .key_gen::<Pcs>(
-            pp.clone(),
-            vp.clone(),
-            with_fixed_traces.zkvm_fixed_traces.clone(),
-        )
-        .expect("keygen failed");
-    let vk = pk.get_vk();
-
-    // proving
-    let e2e_start = Instant::now();
-    let prover = ZKVMProver::new(pk);
-    let verifier = ZKVMVerifier::new(vk);
-
+fn construct_with_witness(
+    with_fixed_traces: WithFixedTraces,
+    sim_result: SimulationResult,
+    program: &Program,
+) -> WithWitness {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
     let dummy_records = with_fixed_traces
@@ -372,12 +317,90 @@ pub fn run_e2e(
         )
         .unwrap();
 
+    WithWitness {
+        with_fixed_traces,
+        zkvm_witnesses: zkvm_witness,
+    }
+}
+
+pub fn run_e2e(
+    program: Program,
+    platform: Platform,
+    stack_size: u32,
+    heap_size: u32,
+    hints: Vec<u32>,
+    max_steps: usize,
+) {
+    // Detect heap as starting after program data.
+    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+    let heap_addrs = heap_start..heap_start + heap_size;
+    let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
+    let mem_init = init_mem(&program, &platform, &mut mem_padder, stack_size, heap_size);
+
+    let program_params = ProgramParams {
+        platform: platform.clone(),
+        program_size: program.instructions.len(),
+        static_memory_len: mem_init.len(),
+        ..ProgramParams::default()
+    };
+    // let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
+
+    // let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    // let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
+    // let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
+    // let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
+    // zkvm_cs.register_global_state::<GlobalState>();
+
+    let large_config = construct_configs(program_params);
+    // IO is not used in this program, but it must have a particular size at the moment.
+    let io_init = mem_padder.padded_sorted(large_config.mmu_config.public_io_len(), vec![]);
+    let reg_init = large_config.mmu_config.initial_registers();
+
+    let init_full_mem = InitMemState {
+        mem: mem_init,
+        reg: reg_init,
+        io: io_init,
+        priv_io: vec![],
+    };
+
+    let with_fixed_traces = construct_with_fixed_traces(large_config, &init_full_mem, &program);
+
+    let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints.clone());
+
+    // Clone some sim_result fields before consuming
+    let pi = sim_result.pi.clone();
+    let exit_code = sim_result.exit_code;
+    let cycle_num = sim_result.all_records.len();
+
+    let with_witness = construct_with_witness(with_fixed_traces, sim_result, &program);
+
+    // keygen
+    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let pk = with_witness
+        .with_fixed_traces
+        .large_config
+        .zkvm_cs
+        .clone()
+        .key_gen::<Pcs>(
+            pp.clone(),
+            vp.clone(),
+            with_witness.with_fixed_traces.zkvm_fixed_traces.clone(),
+        )
+        .expect("keygen failed");
+    let vk = pk.get_vk();
+
+    // proving
+    let e2e_start = Instant::now();
+    let prover = ZKVMProver::new(pk);
+    let verifier = ZKVMVerifier::new(vk);
+
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(
-            &with_fixed_traces.large_config.zkvm_cs,
-            with_fixed_traces.zkvm_fixed_traces,
-            &zkvm_witness,
-            &sim_result.pi,
+            &with_witness.with_fixed_traces.large_config.zkvm_cs,
+            with_witness.with_fixed_traces.zkvm_fixed_traces,
+            &with_witness.zkvm_witnesses,
+            &pi,
         );
         tracing::info!("Mock proving passed");
     }
@@ -385,7 +408,7 @@ pub fn run_e2e(
 
     let transcript = Transcript::new(b"riscv");
     let mut zkvm_proof = prover
-        .create_proof(zkvm_witness, sim_result.pi, transcript)
+        .create_proof(with_witness.zkvm_witnesses, pi, transcript)
         .expect("create_proof failed");
 
     let proving_time = timer.elapsed().as_secs_f64();
@@ -410,14 +433,10 @@ pub fn run_e2e(
     let transcript = Transcript::new(b"riscv");
     assert!(
         verifier
-            .verify_proof_halt(
-                zkvm_proof.clone(),
-                transcript,
-                sim_result.exit_code.is_some()
-            )
+            .verify_proof_halt(zkvm_proof.clone(), transcript, exit_code.is_some())
             .expect("verify proof return with error"),
     );
-    match sim_result.exit_code {
+    match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
