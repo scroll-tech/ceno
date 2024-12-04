@@ -7,7 +7,7 @@ use std::{
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{run_e2e_gen_witness, run_e2e_proof},
+    e2e::{PipelinePrefix, PipelineResult, run_e2e_proof, run_pipeline_prefix},
 };
 use criterion::*;
 
@@ -58,23 +58,30 @@ fn bench_e2e(c: &mut Criterion) {
             |b| {
                 b.iter_with_setup(
                     || {
-                        run_e2e_gen_witness::<E, Pcs>(
+                        run_pipeline_prefix::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             stack_size,
                             heap_size,
                             vec![],
                             max_steps,
+                            PipelinePrefix::UpToWitnessGen,
                         )
                     },
-                    |(prover, _, zkvm_witness, pi, _, _, _)| {
-                        let timer = Instant::now();
-                        let _ = run_e2e_proof(prover, zkvm_witness, pi);
-                        println!(
-                            "Fibonacci::create_proof, max_steps = {}, time = {}",
-                            max_steps,
-                            timer.elapsed().as_secs_f64()
-                        );
+                    |setup_result| {
+                        if let PipelineResult::UpToWitnessGen(prover, zkvm_witness, pi) =
+                            setup_result
+                        {
+                            let timer = Instant::now();
+                            let _ = run_e2e_proof(prover, zkvm_witness, pi);
+                            println!(
+                                "Fibonacci::create_proof, max_steps = {}, time = {}",
+                                max_steps,
+                                timer.elapsed().as_secs_f64()
+                            );
+                        } else {
+                            assert!(false);
+                        }
                     },
                 );
             },

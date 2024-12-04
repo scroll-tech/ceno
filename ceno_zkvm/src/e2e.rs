@@ -295,14 +295,27 @@ fn generate_witness<E: ExtensionField>(
     zkvm_witness
 }
 
-pub fn run_program_to_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub enum PipelinePrefix {
+    UpToWitnessGen,
+    UpToProofGen,
+    Complete,
+}
+
+pub enum PipelineResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    UpToWitnessGen(ZKVMProver<E, PCS>, ZKVMWitnesses<E>, PublicValues<u32>),
+    UpToProofGen(ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>),
+    Complete,
+}
+
+pub fn run_pipeline_prefix<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     program: Program,
     platform: Platform,
     stack_size: u32,
     heap_size: u32,
     hints: Vec<u32>,
     max_steps: usize,
-) -> (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>) {
+    prefix: PipelinePrefix,
+) -> PipelineResult<E, PCS> {
     // Detect heap as starting after program data.
     let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
     let heap_addrs = heap_start..heap_start + heap_size;
@@ -317,6 +330,7 @@ pub fn run_program_to_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     };
 
     let system_config = construct_configs::<E>(program_params);
+
     // IO is not used in this program, but it must have a particular size at the moment.
     let io_init = mem_padder.padded_sorted(system_config.mmu_config.public_io_len(), vec![]);
     let reg_init = system_config.mmu_config.initial_registers();
@@ -334,12 +348,29 @@ pub fn run_program_to_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     // Simulate program
     let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints);
 
-    // Clone some sim_result fields for future use before consuming
+    // Clone some sim_result fields before consuming
     let pi = sim_result.pi.clone();
     let exit_code = sim_result.exit_code;
 
-    // Generate witness
     let zkvm_witness = generate_witness(&system_config, sim_result, &program);
+
+    // keygen
+    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let pk = system_config
+        .zkvm_cs
+        .clone()
+        .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
+        .expect("keygen failed");
+    let vk = pk.get_vk();
+
+    // proving
+    let prover = ZKVMProver::new(pk);
+    let verifier = ZKVMVerifier::new(vk);
+
+    if let PipelinePrefix::UpToWitnessGen = prefix {
+        return PipelineResult::UpToWitnessGen(prover, zkvm_witness, pi);
+    }
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(
@@ -351,23 +382,14 @@ pub fn run_program_to_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
         tracing::info!("Mock proving passed");
     }
 
-    // keygen
-    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let pk = system_config
-        .zkvm_cs
-        .clone()
-        .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces)
-        .expect("keygen failed");
-    let vk = pk.get_vk();
-
-    // proving
-    let prover = ZKVMProver::new(pk);
-    let verifier = ZKVMVerifier::new(vk);
-
     // Run proof phase
     let zkvm_proof = run_e2e_proof(prover, zkvm_witness, pi);
-    (zkvm_proof, verifier, exit_code)
+    if let PipelinePrefix::UpToProofGen = prefix {
+        return PipelineResult::UpToProofGen(zkvm_proof, verifier, exit_code);
+    }
+
+    run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps);
+    PipelineResult::Complete
 }
 
 pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
