@@ -80,7 +80,7 @@ fn main() {
         .without_time();
 
     Registry::default()
-        .with(ForestLayer::default())
+        .with(args.profiling.is_some().then_some(ForestLayer::default()))
         .with(fmt_layer)
         // if some profiling granularity is specified, use the profiling filter,
         // otherwise use the default
