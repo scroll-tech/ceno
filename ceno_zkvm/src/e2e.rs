@@ -24,10 +24,6 @@ use std::{
 };
 use transcript::Transcript;
 
-// type E = GoldilocksExt2;
-// type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-// type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
-
 struct FullMemState<Record> {
     mem: Vec<Record>,
     io: Vec<Record>,
@@ -191,14 +187,17 @@ fn init_mem(
     mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
 }
 
-struct LargeConfig<E: ExtensionField> {
+struct ConstraintSystemConfig<E: ExtensionField> {
     zkvm_cs: ZKVMConstraintSystem<E>,
     config: Rv32imConfig<E>,
     mmu_config: MmuConfig<E>,
     dummy_config: DummyExtraConfig<E>,
     prog_config: ProgramTableConfig,
 }
-fn construct_configs<E: ExtensionField>(program_params: ProgramParams) -> LargeConfig<E> {
+
+fn construct_configs<E: ExtensionField>(
+    program_params: ProgramParams,
+) -> ConstraintSystemConfig<E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
@@ -206,7 +205,7 @@ fn construct_configs<E: ExtensionField>(program_params: ProgramParams) -> LargeC
     let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
-    LargeConfig {
+    ConstraintSystemConfig {
         zkvm_cs,
         config,
         mmu_config,
@@ -215,87 +214,76 @@ fn construct_configs<E: ExtensionField>(program_params: ProgramParams) -> LargeC
     }
 }
 
-struct WithFixedTraces<E: ExtensionField> {
-    large_config: LargeConfig<E>,
-    zkvm_fixed_traces: ZKVMFixedTraces<E>,
-}
+// struct WithFixedTraces<E: ExtensionField> {
+//     system_config: ConstraintSystemConfig<E>,
+//     zkvm_fixed_traces: ZKVMFixedTraces<E>,
+// }
 
-fn construct_with_fixed_traces<E: ExtensionField>(
-    large_config: LargeConfig<E>,
+fn generate_fixed_traces<E: ExtensionField>(
+    system_config: &ConstraintSystemConfig<E>,
     init_mem_state: &InitMemState,
     program: &Program,
-) -> WithFixedTraces<E> {
+) -> ZKVMFixedTraces<E> {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
 
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
-        &large_config.zkvm_cs,
-        &large_config.prog_config,
+        &system_config.zkvm_cs,
+        &system_config.prog_config,
         program,
     );
 
-    large_config
+    system_config
         .config
-        .generate_fixed_traces(&large_config.zkvm_cs, &mut zkvm_fixed_traces);
-    large_config.mmu_config.generate_fixed_traces(
-        &large_config.zkvm_cs,
+        .generate_fixed_traces(&system_config.zkvm_cs, &mut zkvm_fixed_traces);
+    system_config.mmu_config.generate_fixed_traces(
+        &system_config.zkvm_cs,
         &mut zkvm_fixed_traces,
         &init_mem_state.reg,
         &init_mem_state.mem,
         &init_mem_state.io.iter().map(|rec| rec.addr).collect_vec(),
     );
-    large_config
+    system_config
         .dummy_config
-        .generate_fixed_traces(&large_config.zkvm_cs, &mut zkvm_fixed_traces);
+        .generate_fixed_traces(&system_config.zkvm_cs, &mut zkvm_fixed_traces);
 
-    WithFixedTraces {
-        large_config,
-        zkvm_fixed_traces,
-    }
+    zkvm_fixed_traces
 }
 
-struct WithWitness<E: ExtensionField> {
-    with_fixed_traces: WithFixedTraces<E>,
-    zkvm_witnesses: ZKVMWitnesses<E>,
-}
+// struct WithWitness<E: ExtensionField> {
+//     with_fixed_traces: WithFixedTraces<E>,
+//     zkvm_witnesses: ZKVMWitnesses<E>,
+// }
 
-fn construct_with_witness<E: ExtensionField>(
-    with_fixed_traces: WithFixedTraces<E>,
+fn generate_witness<E: ExtensionField>(
+    system_config: &ConstraintSystemConfig<E>,
     sim_result: SimulationResult,
     program: &Program,
-) -> WithWitness<E> {
+) -> ZKVMWitnesses<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
-    let dummy_records = with_fixed_traces
-        .large_config
+    let dummy_records = system_config
         .config
         .assign_opcode_circuit(
-            &with_fixed_traces.large_config.zkvm_cs,
+            &system_config.zkvm_cs,
             &mut zkvm_witness,
             sim_result.all_records,
         )
         .unwrap();
-    with_fixed_traces
-        .large_config
+    system_config
         .dummy_config
-        .assign_opcode_circuit(
-            &with_fixed_traces.large_config.zkvm_cs,
-            &mut zkvm_witness,
-            dummy_records,
-        )
+        .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
 
     // assign table circuits
-    with_fixed_traces
-        .large_config
+    system_config
         .config
-        .assign_table_circuit(&with_fixed_traces.large_config.zkvm_cs, &mut zkvm_witness)
+        .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
         .unwrap();
-    with_fixed_traces
-        .large_config
+    system_config
         .mmu_config
         .assign_table_circuit(
-            &with_fixed_traces.large_config.zkvm_cs,
+            &system_config.zkvm_cs,
             &mut zkvm_witness,
             &sim_result.final_mem_state.reg,
             &sim_result.final_mem_state.mem,
@@ -311,16 +299,13 @@ fn construct_with_witness<E: ExtensionField>(
     // assign program circuit
     zkvm_witness
         .assign_table_circuit::<ProgramTableCircuit<E>>(
-            &with_fixed_traces.large_config.zkvm_cs,
-            &with_fixed_traces.large_config.prog_config,
+            &system_config.zkvm_cs,
+            &system_config.prog_config,
             &program,
         )
         .unwrap();
 
-    WithWitness {
-        with_fixed_traces,
-        zkvm_witnesses: zkvm_witness,
-    }
+    zkvm_witness
 }
 
 pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
@@ -344,10 +329,10 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         ..ProgramParams::default()
     };
 
-    let large_config = construct_configs(program_params);
+    let system_config = construct_configs(program_params);
     // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = mem_padder.padded_sorted(large_config.mmu_config.public_io_len(), vec![]);
-    let reg_init = large_config.mmu_config.initial_registers();
+    let io_init = mem_padder.padded_sorted(system_config.mmu_config.public_io_len(), vec![]);
+    let reg_init = system_config.mmu_config.initial_registers();
 
     let init_full_mem = InitMemState {
         mem: mem_init,
@@ -356,8 +341,10 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         priv_io: vec![],
     };
 
-    let with_fixed_traces = construct_with_fixed_traces(large_config, &init_full_mem, &program);
+    // Generate fixed traces
+    let zkvm_fixed_traces = generate_fixed_traces(&system_config, &init_full_mem, &program);
 
+    // Simulate program
     let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints);
 
     // Clone some sim_result fields before consuming
@@ -365,21 +352,16 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let exit_code = sim_result.exit_code;
     let cycle_num = sim_result.all_records.len();
 
-    let with_witness = construct_with_witness(with_fixed_traces, sim_result, &program);
+    // Generate witness
+    let zkvm_witness = generate_witness(&system_config, sim_result, &program);
 
     // keygen
     let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-    let pk = with_witness
-        .with_fixed_traces
-        .large_config
+    let pk = system_config
         .zkvm_cs
         .clone()
-        .key_gen::<PCS>(
-            pp.clone(),
-            vp.clone(),
-            with_witness.with_fixed_traces.zkvm_fixed_traces.clone(),
-        )
+        .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
 
@@ -390,9 +372,9 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(
-            &with_witness.with_fixed_traces.large_config.zkvm_cs,
-            with_witness.with_fixed_traces.zkvm_fixed_traces,
-            &with_witness.zkvm_witnesses,
+            &system_config.zkvm_cs,
+            zkvm_fixed_traces,
+            &zkvm_witness,
             &pi,
         );
         tracing::info!("Mock proving passed");
@@ -401,7 +383,7 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     let transcript = Transcript::new(b"riscv");
     let mut zkvm_proof = prover
-        .create_proof(with_witness.zkvm_witnesses, pi, transcript)
+        .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
     let proving_time = timer.elapsed().as_secs_f64();
