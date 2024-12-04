@@ -334,14 +334,14 @@ fn generate_witness<E: ExtensionField>(
     zkvm_witness
 }
 
-pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_program_to_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     program: Program,
     platform: Platform,
     stack_size: u32,
     heap_size: u32,
     hints: Vec<u32>,
     max_steps: usize,
-) {
+) -> (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>) {
     // Detect heap as starting after program data.
     let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
     let heap_addrs = heap_start..heap_start + heap_size;
@@ -376,7 +376,6 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     // Clone some sim_result fields before consuming
     let pi = sim_result.pi.clone();
     let exit_code = sim_result.exit_code;
-    let cycle_num = sim_result.all_records.len();
 
     // Generate witness
     let zkvm_witness = generate_witness(&system_config, sim_result, &program);
@@ -407,8 +406,7 @@ pub fn run_e2e<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     // Run proof phase
     let zkvm_proof = run_e2e_proof(prover, zkvm_witness, pi);
-    // Run verifier
-    run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps);
+    (zkvm_proof, verifier, exit_code)
 }
 
 pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
@@ -440,104 +438,6 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
     }
 }
-// keygen
-// let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-// let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
-// let pk = system_config
-// .zkvm_cs
-// .clone()
-// .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
-// .expect("keygen failed");
-// let vk = pk.get_vk();
-//
-// proving
-// let e2e_start = Instant::now();
-// let prover = ZKVMProver::new(pk);
-// let verifier = ZKVMVerifier::new(vk);
-//
-// if std::env::var("MOCK_PROVING").is_ok() {
-// MockProver::assert_satisfied_full(
-// &system_config.zkvm_cs,
-// zkvm_fixed_traces,
-// &zkvm_witness,
-// &pi,
-// );
-// tracing::info!("Mock proving passed");
-// }
-// let timer = Instant::now();
-//
-// let transcript = Transcript::new(b"riscv");
-// let mut zkvm_proof = prover
-// .create_proof(zkvm_witness, pi, transcript)
-// .expect("create_proof failed");
-//
-// let proving_time = timer.elapsed().as_secs_f64();
-// let e2e_time = e2e_start.elapsed().as_secs_f64();
-// let witgen_time = e2e_time - proving_time;
-//
-// println!(
-// "Proving finished.\n\
-// \tProving time = {:.3}s, freq = {:.3}khz\n\
-// \tWitgen  time = {:.3}s, freq = {:.3}khz\n\
-// \tTotal   time = {:.3}s, freq = {:.3}khz\n\
-// \tthread num: {}",
-// proving_time,
-// cycle_num as f64 / proving_time / 1000.0,
-// witgen_time,
-// cycle_num as f64 / witgen_time / 1000.0,
-// e2e_time,
-// cycle_num as f64 / e2e_time / 1000.0,
-// rayon::current_num_threads()
-// );
-//
-// let transcript = Transcript::new(b"riscv");
-// assert!(
-// verifier
-// .verify_proof_halt(zkvm_proof.clone(), transcript, exit_code.is_some())
-// .expect("verify proof return with error"),
-// );
-// match exit_code {
-// Some(0) => tracing::info!("exit code 0. Success."),
-// Some(code) => tracing::error!("exit code {}. Failure.", code),
-// None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
-// }
-// }
-
-// let transcript = Transcript::new(b"riscv");
-// change public input maliciously should cause verifier to reject proof
-// zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-// zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-//
-// capture panic message, if have
-// let default_hook = panic::take_hook();
-// panic::set_hook(Box::new(|_info| {
-// by default it will print msg to stdout/stderr
-// we override it to avoid print msg since we will capture the msg by our own
-// }));
-// let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-// panic::set_hook(default_hook);
-// match result {
-// Ok(res) => {
-// res.expect_err("verify proof should return with error");
-// }
-// Err(err) => {
-// let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
-// message.to_string()
-// } else if let Some(message) = err.downcast_ref::<String>() {
-// message.to_string()
-// } else if let Some(message) = err.downcast_ref::<&String>() {
-// message.to_string()
-// } else {
-// unreachable!()
-// };
-//
-// if !msg.starts_with("0th round's prover message is not consistent with the claim") {
-// println!("unknown panic {msg:?}");
-// panic::resume_unwind(err);
-// };
-// }
-// };
-// }
 
 fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
     let accessed_addrs = vm

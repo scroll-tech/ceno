@@ -1,13 +1,14 @@
 use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_zkvm::{
-    e2e::{run_e2e_gen_witness, run_e2e_proof, run_e2e_verify},
+    e2e::{run_e2e_verify, run_program_to_proof},
+    scheme::{ZKVMProof, verifier::ZKVMVerifier},
     with_panic_hook,
 };
 use clap::{Parser, ValueEnum};
-use ff_ext::ff::Field;
+use ff_ext::{ExtensionField, ff::Field};
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldRSParams};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{fs, panic, time::Instant};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -143,34 +144,13 @@ fn main() {
     type B = Goldilocks;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
-    let (prover, verifier, zkvm_witness, pi, cycle_num, e2e_start, exit_code) =
-        run_e2e_gen_witness::<E, Pcs>(
-            program,
-            platform,
-            args.stack_size,
-            args.heap_size,
-            hints,
-            max_steps,
-        );
-
-    let timer = Instant::now();
-    let mut zkvm_proof = run_e2e_proof(prover, zkvm_witness, pi);
-    let proving_time = timer.elapsed().as_secs_f64();
-    let e2e_time = e2e_start.elapsed().as_secs_f64();
-    let witgen_time = e2e_time - proving_time;
-    println!(
-        "Proving finished.\n\
-\tProving time = {:.3}s, freq = {:.3}khz\n\
-\tWitgen  time = {:.3}s, freq = {:.3}khz\n\
-\tTotal   time = {:.3}s, freq = {:.3}khz\n\
-\tthread num: {}",
-        proving_time,
-        cycle_num as f64 / proving_time / 1000.0,
-        witgen_time,
-        cycle_num as f64 / witgen_time / 1000.0,
-        e2e_time,
-        cycle_num as f64 / e2e_time / 1000.0,
-        rayon::current_num_threads()
+    let (mut zkvm_proof, verifier, exit_code) = run_program_to_proof::<E, Pcs>(
+        program,
+        platform,
+        args.stack_size,
+        args.heap_size,
+        hints,
+        max_steps,
     );
 
     run_e2e_verify(&verifier, zkvm_proof.clone(), exit_code, max_steps);
@@ -207,7 +187,6 @@ fn main() {
         }
     };
 }
-
 fn memory_from_file(path: &Option<String>) -> Vec<u32> {
     path.as_ref()
         .map(|path| {
