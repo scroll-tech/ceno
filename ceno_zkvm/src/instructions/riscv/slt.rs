@@ -244,8 +244,6 @@ mod test {
 
     #[test]
     fn test_sltu_random() {
-        // TODO(Matthias): use property pased testing.
-        // Like eg https://docs.rs/proptest/latest/proptest/
         let mut rng = rand::thread_rng();
         let a: u32 = rng.gen();
         let b: u32 = rng.gen();
