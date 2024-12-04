@@ -214,11 +214,6 @@ fn construct_configs<E: ExtensionField>(
     }
 }
 
-// struct WithFixedTraces<E: ExtensionField> {
-//     system_config: ConstraintSystemConfig<E>,
-//     zkvm_fixed_traces: ZKVMFixedTraces<E>,
-// }
-
 fn generate_fixed_traces<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     init_mem_state: &InitMemState,
@@ -248,11 +243,6 @@ fn generate_fixed_traces<E: ExtensionField>(
 
     zkvm_fixed_traces
 }
-
-// struct WithWitness<E: ExtensionField> {
-//     with_fixed_traces: WithFixedTraces<E>,
-//     zkvm_witnesses: ZKVMWitnesses<E>,
-// }
 
 fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
