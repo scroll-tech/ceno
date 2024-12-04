@@ -1,8 +1,11 @@
 use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word};
-use ceno_zkvm::e2e::{run_e2e_gen_witness, run_e2e_proof, run_e2e_verify};
+use ceno_zkvm::{
+    e2e::{run_e2e_gen_witness, run_e2e_proof, run_e2e_verify},
+    with_panic_hook,
+};
 use clap::{Parser, ValueEnum};
 use ff_ext::ff::Field;
-use goldilocks::GoldilocksExt2;
+use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
 use std::{fs, panic, time::Instant};
@@ -137,6 +140,7 @@ fn main() {
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
     type E = GoldilocksExt2;
+    type B = Goldilocks;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     let (prover, verifier, zkvm_witness, pi, cycle_num, e2e_start, exit_code) =
@@ -174,17 +178,13 @@ fn main() {
     // do sanity check
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![<E as ff_ext::ExtensionField>::BaseField::ONE];
-    zkvm_proof.raw_pi[1] = vec![<E as ff_ext::ExtensionField>::BaseField::ONE];
+    zkvm_proof.raw_pi[0] = vec![B::ONE];
+    zkvm_proof.raw_pi[1] = vec![B::ONE];
 
     // capture panic message, if have
-    let default_hook = panic::take_hook();
-    panic::set_hook(Box::new(|_info| {
-        // by default it will print msg to stdout/stderr
-        // we override it to avoid print msg since we will capture the msg by our own
-    }));
-    let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-    panic::set_hook(default_hook);
+    let result = with_panic_hook(Box::new(|_info| ()), || {
+        panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+    });
     match result {
         Ok(res) => {
             res.expect_err("verify proof should return with error");

@@ -15,12 +15,12 @@ use goldilocks::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
-  name = op_add;
+  name = fibonacci;
   config = Criterion::default().warm_up_time(Duration::from_millis(20000));
   targets = bench_e2e
 }
 
-criterion_main!(op_add);
+criterion_main!(fibonacci);
 
 const NUM_SAMPLES: usize = 10;
 
