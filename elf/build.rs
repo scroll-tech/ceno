@@ -26,12 +26,11 @@ fn build_elfs() {
     if !output.status.success() {
         io::stdout().write_all(&output.stdout).unwrap();
         io::stderr().write_all(&output.stderr).unwrap();
-        panic!("cargo build of examples failed.");
+        panic!("cargo build of guest failed.");
     }
     writeln!(
         dest,
-        r#"#[allow(non_upper_case_globals)]
-        pub const elf: &[u8] =
+        r#"pub const ELF: &[u8] =
             include_bytes!(r"{CARGO_MANIFEST_DIR}/../guest/target/riscv32im-unknown-none-elf/release/guest");"#
     ).expect("failed to write vars.rs");
     let input_path = "../guest/";

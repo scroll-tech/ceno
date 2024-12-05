@@ -46,7 +46,7 @@ fn read_message(state: &VMState, word_offset: u32) -> Vec<u8> {
 }
 
 fn main() {
-    let mut state = VMState::new_from_elf(CENO_PLATFORM, elf::elf).expect("Failed to load ELF");
+    let mut state = VMState::new_from_elf(CENO_PLATFORM, elf::ELF).expect("Failed to load ELF");
     let steps = run(&mut state).expect("Failed to run the program");
     println!("Ran for {} steps.", steps.len());
     let all_messages = read_all_messages(&state);
