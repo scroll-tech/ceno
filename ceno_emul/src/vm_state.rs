@@ -112,9 +112,14 @@ impl VMState {
         for write_op in &effects.witness.mem_writes {
             self.memory.insert(write_op.addr, write_op.value.after);
         }
+
         if let Some(return_value) = effects.return_value {
             self.store_register(Platform::reg_arg0(), return_value)?;
         }
+
+        let next_pc = effects.next_pc.unwrap_or(self.pc + PC_STEP_SIZE as u32);
+        self.set_pc(next_pc.into());
+
         self.tracer.track_syscall(effects);
         Ok(())
     }
@@ -132,9 +137,8 @@ impl EmuContext for VMState {
             Ok(true)
         } else if self.platform.unsafe_ecall_nop {
             if function == KECCAK_PERMUTE {
-                let event = handle_syscall(self, function, arg0)?;
-                self.apply_syscall(event)?;
-                self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
+                let effects = handle_syscall(self, function, arg0)?;
+                self.apply_syscall(effects)?;
                 Ok(true)
             } else {
                 // TODO: remove this example.

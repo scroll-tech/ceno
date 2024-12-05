@@ -13,6 +13,7 @@ pub struct SyscallWitness {
 pub struct SyscallEffects {
     pub witness: SyscallWitness,
     pub return_value: Option<u32>,
+    pub next_pc: Option<u32>,
 }
 
 pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
@@ -35,7 +36,7 @@ const KECCAK_WORDS: usize = 25 * 2;
 /// TODO: test compatibility.
 fn keccak_permute(vm: &VMState, state_ptr: u32) -> SyscallEffects {
     let addrs = (state_ptr..)
-        .step_by(WORD_SIZE as usize)
+        .step_by(WORD_SIZE)
         .take(KECCAK_WORDS)
         .map(WordAddr::from)
         .collect_vec();
@@ -61,5 +62,6 @@ fn keccak_permute(vm: &VMState, state_ptr: u32) -> SyscallEffects {
     SyscallEffects {
         witness: SyscallWitness { mem_writes },
         return_value: None,
+        next_pc: None,
     }
 }
