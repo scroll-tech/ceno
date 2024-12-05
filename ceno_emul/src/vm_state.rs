@@ -6,7 +6,7 @@ use crate::{
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
-    syscalls::{KECCAK_PERMUTE, SyscallEvent, handle_syscall},
+    syscalls::{KECCAK_PERMUTE, SyscallEffects, handle_syscall},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -108,11 +108,15 @@ impl VMState {
         self.halted = true;
     }
 
-    fn apply_syscall(&mut self, event: SyscallEvent) {
-        for write_op in &event.mem_writes {
+    fn apply_syscall(&mut self, effects: SyscallEffects) -> Result<()> {
+        for write_op in &effects.witness.mem_writes {
             self.memory.insert(write_op.addr, write_op.value.after);
         }
-        self.tracer.track_syscall(event);
+        if let Some(return_value) = effects.return_value {
+            self.store_register(Platform::reg_arg0(), return_value)?;
+        }
+        self.tracer.track_syscall(effects);
+        Ok(())
     }
 }
 
@@ -129,7 +133,7 @@ impl EmuContext for VMState {
         } else if self.platform.unsafe_ecall_nop {
             if function == KECCAK_PERMUTE {
                 let event = handle_syscall(self, function, arg0)?;
-                self.apply_syscall(event);
+                self.apply_syscall(event)?;
                 self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
                 Ok(true)
             } else {

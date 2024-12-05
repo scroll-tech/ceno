@@ -5,7 +5,7 @@ use crate::{
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     encode_rv32,
     rv32im::DecodedInstruction,
-    syscalls::SyscallEvent,
+    syscalls::{SyscallEffects, SyscallWitness},
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -32,7 +32,7 @@ pub struct StepRecord {
 
     memory_op: Option<WriteOp>,
 
-    syscall: Option<SyscallEvent>,
+    syscall: Option<SyscallWitness>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -387,9 +387,9 @@ impl Tracer {
         });
     }
 
-    pub fn track_syscall(&mut self, mut event: SyscallEvent) {
+    pub fn track_syscall(&mut self, mut effects: SyscallEffects) {
         let cycle = self.record.cycle + Self::SUBCYCLE_MEM;
-        for op in &mut event.mem_writes {
+        for op in &mut effects.witness.mem_writes {
             op.previous_cycle = self.track_access(op.addr, Self::SUBCYCLE_MEM);
             assert_ne!(
                 op.previous_cycle, cycle,
@@ -399,7 +399,7 @@ impl Tracer {
         }
 
         assert!(self.record.syscall.is_none(), "Only one syscall per step");
-        self.record.syscall = Some(event);
+        self.record.syscall = Some(effects.witness);
     }
 
     /// - Return the cycle when an address was last accessed.
