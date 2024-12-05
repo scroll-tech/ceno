@@ -195,7 +195,7 @@ mod test {
         )
         .unwrap();
 
-        // verify value write to register, which is only hi
+        // verify rd_written
         let expected_rd_written =
             UInt::from_const_unchecked(Value::new_unchecked(outcome).as_u16_limbs().to_vec());
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
