@@ -1,5 +1,5 @@
-use ff::Field;
 use core::assert_eq;
+use ff::Field;
 use std::{
     array,
     cell::RefCell,
@@ -59,14 +59,15 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         }
     }
 
-
     pub fn num_col(&self) -> usize {
         self.num_col
     }
 
     pub fn num_instances(&self) -> usize {
-        //tracing::info!("num_instances... {} {} {}", self.values.len(), self.num_col, self.num_padding_rows);
-        (self.values.len() / self.num_col).checked_sub(self.num_padding_rows).expect("overflow")
+        // tracing::info!("num_instances... {} {} {}", self.values.len(), self.num_col, self.num_padding_rows);
+        (self.values.len() / self.num_col)
+            .checked_sub(self.num_padding_rows)
+            .expect("overflow")
     }
 
     pub fn num_padding_instances(&self) -> usize {
@@ -127,7 +128,9 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         let chunk_num = (self.num_instances() + chunk_rows - 1) / chunk_rows;
         let mut result = Vec::new();
         for i in 0..chunk_num {
-            let mut values: Vec<_> = self.values[(i * chunk_rows * self.num_col)..((i + 1) * chunk_rows*self.num_col)].to_vec();
+            let mut values: Vec<_> = self.values
+                [(i * chunk_rows * self.num_col)..((i + 1) * chunk_rows * self.num_col)]
+                .to_vec();
             let mut num_padding_rows = 0;
 
             // Only last chunk contains padding rows.
@@ -138,17 +141,26 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
                 values.truncate(num_total_rows * self.num_col);
             };
 
-            tracing::info!("chunk_by_num {i}th chunk: num_rows {chunk_rows}, num_padding_rows {num_padding_rows}");
+            tracing::info!(
+                "chunk_by_num {i}th chunk: num_rows {chunk_rows}, num_padding_rows {num_padding_rows}"
+            );
             result.push(Self {
                 num_col: self.num_col,
                 num_padding_rows,
                 values,
             });
         }
-        assert_eq!(self.num_instances(), result.iter().enumerate().map(|(idx, c)| {
-            tracing::info!("{idx}chunk num_instances: {}", c.num_instances());
-            c.num_instances()
-        }).sum::<usize>());
+        assert_eq!(
+            self.num_instances(),
+            result
+                .iter()
+                .enumerate()
+                .map(|(idx, c)| {
+                    tracing::info!("{idx}chunk num_instances: {}", c.num_instances());
+                    c.num_instances()
+                })
+                .sum::<usize>()
+        );
         result
     }
 }

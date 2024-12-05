@@ -1,5 +1,5 @@
-use ff_ext::ExtensionField;
 use core::assert_eq;
+use ff_ext::ExtensionField;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
@@ -36,7 +36,8 @@ use crate::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
     utils::{get_challenge_pows, next_pow2_instance_padding, optimal_sumcheck_threads},
-    virtual_polys::VirtualPolynomials, witness::RowMajorMatrix,
+    virtual_polys::VirtualPolynomials,
+    witness::RowMajorMatrix,
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
@@ -91,17 +92,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
         exit_span!(span);
 
-
         let chunk_size = 1 * 1048576;
 
         // commit to main traces
-        let mut wits_and_commitments: BTreeMap<String, Vec<(RowMajorMatrix<_>, Vec<DenseMultilinearExtension<_>>, PCS::CommitmentWithData)>> = BTreeMap::new();
+        let mut wits_and_commitments: BTreeMap<
+            String,
+            Vec<(
+                RowMajorMatrix<_>,
+                Vec<DenseMultilinearExtension<_>>,
+                PCS::CommitmentWithData,
+            )>,
+        > = BTreeMap::new();
 
         let commit_to_traces_span = entered_span!("commit_to_traces", profiling_1 = true);
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
-            tracing::warn!("committing {} witnesses of size {}..", circuit_name, num_instances);
+            tracing::warn!(
+                "committing {} witnesses of size {}..",
+                circuit_name,
+                num_instances
+            );
             if num_instances == 0 {
                 wits_and_commitments.insert(circuit_name.clone(), Vec::new());
                 continue;
@@ -114,23 +125,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
             let witness_chunks = witness.chunk_by_num(chunk_size);
             if witness_chunks.len() > 1 {
-                tracing::warn!("split {circuit_name} witness into {} chunks", witness_chunks.len());
+                tracing::warn!(
+                    "split {circuit_name} witness into {} chunks",
+                    witness_chunks.len()
+                );
             }
-            let witness_and_commitment: Vec<_> = witness_chunks.into_iter().map(|witness| -> Result<_, ZKVMError> {
-                // TODO: should we store the mle result?
-                tracing::debug!("into mle: {}", witness.num_instances());
-                let witness_clone = witness.clone();
-                tracing::debug!("cloned");
-                let witness_mles = witness_clone.into_mles();
-                tracing::debug!("batch_commit_and_write");
-                let commitment =  PCS::batch_commit_and_write(&self.pk.pp, &witness_mles, &mut transcript).map_err(ZKVMError::PCSError)?;
-                tracing::debug!("done");
-                let arc_mles = witness_mles.into_iter().map(|v| v.into()).collect_vec();
-                Ok((witness, arc_mles, commitment))
-        }).collect::<Result<Vec<_>, _>>()?;
-        wits_and_commitments.insert(circuit_name.clone(), witness_and_commitment);
+            let witness_and_commitment: Vec<_> = witness_chunks
+                .into_iter()
+                .map(|witness| -> Result<_, ZKVMError> {
+                    // TODO: should we store the mle result?
+                    tracing::debug!("into mle: {}", witness.num_instances());
+                    let witness_clone = witness.clone();
+                    tracing::debug!("cloned");
+                    let witness_mles = witness_clone.into_mles();
+                    tracing::debug!("batch_commit_and_write");
+                    let commitment =
+                        PCS::batch_commit_and_write(&self.pk.pp, &witness_mles, &mut transcript)
+                            .map_err(ZKVMError::PCSError)?;
+                    tracing::debug!("done");
+                    let arc_mles = witness_mles.into_iter().map(|v| v.into()).collect_vec();
+                    Ok((witness, arc_mles, commitment))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            wits_and_commitments.insert(circuit_name.clone(), witness_and_commitment);
             exit_span!(span);
-        };
+        }
         exit_span!(commit_to_traces_span);
 
         // squeeze two challenges from transcript
@@ -193,7 +212,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 Ok(proof)
             }).collect::<Result<Vec<_>, _>>()?;
-                
+
                 vm_proof
                     .opcode_proofs
                     .insert(circuit_name.clone(), (i, opcode_proof));
