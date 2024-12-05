@@ -19,7 +19,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
 pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);
@@ -69,7 +68,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -214,7 +213,7 @@ impl<E: ExtensionField> DummyConfig<E> {
 
     fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

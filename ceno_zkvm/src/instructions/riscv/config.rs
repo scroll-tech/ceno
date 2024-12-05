@@ -1,4 +1,3 @@
-use std::mem::MaybeUninit;
 
 use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
 use goldilocks::SmallField;
@@ -25,7 +24,7 @@ pub struct MsbInput<'a> {
 impl MsbInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         config: &MsbConfig,
         lk_multiplicity: &mut LkMultiplicity,
     ) -> (u8, u8) {
@@ -61,7 +60,7 @@ pub struct UIntLtuInput<'a> {
 impl UIntLtuInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         config: &UIntLtuConfig,
         lk_multiplicity: &mut LkMultiplicity,
     ) -> bool {
@@ -138,7 +137,7 @@ pub struct UIntLtInput<'a> {
 impl UIntLtInput<'_> {
     pub fn assign<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         config: &UIntLtConfig,
         lk_multiplicity: &mut LkMultiplicity,
     ) -> bool {

@@ -4,7 +4,6 @@ use std::{
     cmp::max,
     fmt::Display,
     iter::{Product, Sum},
-    mem::MaybeUninit,
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
@@ -756,12 +755,8 @@ impl WitIn {
         )
     }
 
-    pub fn assign<E: ExtensionField>(
-        &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
-        value: E::BaseField,
-    ) {
-        instance[self.id as usize] = MaybeUninit::new(value);
+    pub fn assign<E: ExtensionField>(&self, instance: &mut [E::BaseField], value: E::BaseField) {
+        instance[self.id as usize] = value;
     }
 }
 
