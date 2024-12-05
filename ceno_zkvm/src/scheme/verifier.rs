@@ -478,10 +478,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         tracing::debug!(
-            "[opcode {}] verify opening proof for {} polys at {:?}",
+            "[opcode {}] verify opening proof for {} polys",
             name,
             proof.wits_in_evals.len(),
-            input_opening_point
         );
         PCS::simple_batch_verify(
             vp,
@@ -770,12 +769,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         tracing::debug!(
-            "[table {}] verified opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
+            "[table {}] verified opening proof for {} fixed polys",
             name,
             proof.fixed_in_evals.len(),
-            input_opening_point,
-            proof.fixed_in_evals,
-            circuit_vk.fixed_commit,
         );
 
         PCS::simple_batch_verify(
@@ -788,12 +784,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         )
         .map_err(ZKVMError::PCSError)?;
         tracing::debug!(
-            "[table {}] verified opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            "[table {}] verified opening proof for {} polys",
             name,
             proof.wits_in_evals.len(),
-            input_opening_point,
-            proof.wits_in_evals,
-            proof.wits_commit
         );
 
         Ok(input_opening_point)
@@ -909,7 +902,6 @@ impl TowerVerify {
                     },
                     transcript,
                 );
-                tracing::debug!("verified tower proof at layer {}/{}", round + 1, max_num_variables-1);
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
