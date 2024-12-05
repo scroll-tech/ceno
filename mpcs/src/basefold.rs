@@ -774,6 +774,8 @@ where
         evals: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
+        let polys = &polys[0..comm.num_polys];
+        let evals = &evals[0..comm.num_polys];
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys[0].num_vars();
 

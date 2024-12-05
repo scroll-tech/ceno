@@ -89,12 +89,17 @@ fn bench_add(c: &mut Criterion) {
                         let num_instances = 1 << instance_num_vars;
                         let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
-                            Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
+                            Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in[0..wits_in.len()/2], &mut transcript)
                                 .unwrap();
                         let challenges = [
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,
                         ];
+                        println!(
+                            "AddInstruction::batch_commit_and_write, instance_num_vars = {}, time = {}",
+                            instance_num_vars,
+                            timer.elapsed().as_secs_f64()
+                        );
 
                         let _ = prover
                             .create_opcode_proof(
