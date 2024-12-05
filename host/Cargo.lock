@@ -17,6 +17,7 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 [[package]]
 name = "ceno_emul"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno#43a96174c10891336f95952b990dc5353b6c4863"
 dependencies = [
  "anyhow",
  "elf 0.7.4",
