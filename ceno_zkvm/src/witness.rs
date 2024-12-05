@@ -41,14 +41,14 @@ macro_rules! set_fixed_val {
 }
 
 #[derive(Clone)]
-pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
+pub struct RowMajorMatrix<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,
     num_padding_rows: usize,
     num_col: usize,
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
+impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
         let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
@@ -65,8 +65,8 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     pub fn num_instances(&self) -> usize {
-        tracing::info!("num_instances... {} {} {}", self.values.len(), self.num_col, self.num_padding_rows);
-        self.values.len() / self.num_col - self.num_padding_rows
+        //tracing::info!("num_instances... {} {} {}", self.values.len(), self.num_col, self.num_padding_rows);
+        (self.values.len() / self.num_col).checked_sub(self.num_padding_rows).expect("overflow")
     }
 
     pub fn num_padding_instances(&self) -> usize {
@@ -117,31 +117,36 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     // TODO: should we consume or clone `self`?
-    pub fn chunk_by_num(&self, instance_num_per_chunk: usize) -> Vec<Self> {
-        let chunk_num = (self.num_instances() + instance_num_per_chunk - 1) / instance_num_per_chunk;
+    pub fn chunk_by_num(&self, chunk_rows: usize) -> Vec<Self> {
+        let padded_row_num = self.values.len() / self.num_col;
+        if padded_row_num <= chunk_rows {
+            return vec![self.clone()];
+        }
+        // padded_row_num and instance_num_per_chunk should both be pow of 2.
+        assert_eq!(padded_row_num % chunk_rows, 0);
+        let chunk_num = (self.num_instances() + chunk_rows - 1) / chunk_rows;
         let mut result = Vec::new();
-        let mut offset = 0;
         for i in 0..chunk_num {
-            let num_rows = if i < chunk_num - 1 {
-                instance_num_per_chunk
-            } else {
-                self.num_instances() - instance_num_per_chunk * i
+            let mut values: Vec<_> = self.values[(i * chunk_rows * self.num_col)..((i + 1) * chunk_rows*self.num_col)].to_vec();
+            let mut num_padding_rows = 0;
+
+            // Only last chunk contains padding rows.
+            if i == chunk_num - 1 && self.num_instances() % chunk_rows != 0 {
+                let num_rows = self.num_instances() % chunk_rows;
+                let num_total_rows = next_pow2_instance_padding(num_rows);
+                num_padding_rows = num_total_rows - num_rows;
+                values.truncate(num_total_rows * self.num_col);
             };
-            let mut values: Vec<_> = self.values[offset..offset + num_rows].to_vec();
-            offset += num_rows;
-            let num_total_rows = next_pow2_instance_padding(num_rows);
-            //unsafe { values.resize(num_total_rows, MaybeUninit::uninit()) };
-            unsafe { values.set_len(num_total_rows * self.num_col) };
-            let num_padding_rows = num_total_rows - num_rows;
-            tracing::info!("chunk_by_num {i}th chunk: num_rows {num_rows}, num_total_rows {num_total_rows}, num_padding_rows {num_padding_rows}");
+
+            tracing::info!("chunk_by_num {i}th chunk: num_rows {chunk_rows}, num_padding_rows {num_padding_rows}");
             result.push(Self {
                 num_col: self.num_col,
                 num_padding_rows,
                 values,
             });
         }
-        assert_eq!(self.num_instances(), result.iter().map(|c| {
-            tracing::info!("num_instances {}", c.num_instances());
+        assert_eq!(self.num_instances(), result.iter().enumerate().map(|(idx, c)| {
+            tracing::info!("{idx}chunk num_instances: {}", c.num_instances());
             c.num_instances()
         }).sum::<usize>());
         result
@@ -152,6 +157,7 @@ impl<F: Field> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
+        tracing::info!("before de_interleaving");
         self.de_interleaving().into_mles()
     }
 }

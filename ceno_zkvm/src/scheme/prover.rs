@@ -92,7 +92,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
 
-        let chunk_size = 1048576;
+        let chunk_size = 1 * 1048576;
 
         // commit to main traces
         let mut wits_and_commitments: BTreeMap<String, Vec<(RowMajorMatrix<_>, Vec<DenseMultilinearExtension<_>>, PCS::CommitmentWithData)>> = BTreeMap::new();
@@ -118,8 +118,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }
             let witness_and_commitment: Vec<_> = witness_chunks.into_iter().map(|witness| -> Result<_, ZKVMError> {
                 // TODO: should we store the mle result?
-                tracing::debug!("into mle {}", witness.num_instances());
-                let witness_mles = witness.clone().into_mles();
+                tracing::debug!("into mle: {}", witness.num_instances());
+                let witness_clone = witness.clone();
+                tracing::debug!("cloned");
+                let witness_mles = witness_clone.into_mles();
                 tracing::debug!("batch_commit_and_write");
                 let commitment =  PCS::batch_commit_and_write(&self.pk.pp, &witness_mles, &mut transcript).map_err(ZKVMError::PCSError)?;
                 tracing::debug!("done");

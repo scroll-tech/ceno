@@ -478,6 +478,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
+        for (expr, name) in cs.assert_zero_expressions.iter().zip_eq(cs.assert_zero_expressions_namespace_map.iter()) {    
+            if eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO {
+                tracing::error!("checking zero expression {name} failed.");
+            }
+        }
         if cs.assert_zero_expressions.iter().any(|expr| {
             eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
         }) {
