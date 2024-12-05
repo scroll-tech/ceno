@@ -1,0 +1,12 @@
+[package]
+edition = "2021"
+name = "guest"
+readme = "README.md"
+resolver = "2"
+version = "0.1.0"
+
+[dependencies]
+# TODO(Matthias): use eg git dependencies here.
+ceno_rt = { path = "../../ceno/ceno_rt/" }
+ceno_host = { path = "../../ceno/ceno_host/", default-features = false}
+rkyv = { version = "0.8.9", default-features = false, features = ["alloc", "bytecheck"] }
