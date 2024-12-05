@@ -1,5 +1,6 @@
 use anyhow::Result;
 use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, Platform, StepRecord, VMState};
+use itertools::Itertools;
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -70,6 +71,26 @@ fn test_ceno_rt_io() -> Result<()> {
     assert_eq!(&all_messages[0], "📜📜📜 Hello, World!\n".as_bytes());
     assert_eq!(&all_messages[1], "🌏🌍🌎\n".as_bytes());
     Ok(())
+}
+
+#[test]
+fn test_ceno_rt_syscalls() -> Result<()> {
+    let program_elf = ceno_examples::ceno_rt_syscalls;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let _steps = run(&mut state)?;
+
+    for (&addr, &cycle) in state.tracer().final_accesses().iter().sorted() {
+        let value = state.peek_memory(addr);
+        println!("{:?} = {:08x}  (cycle {})", addr, value, cycle);
+    }
+
+    Ok(())
+}
+
+fn unsafe_platform() -> Platform {
+    let mut platform = CENO_PLATFORM;
+    platform.unsafe_ecall_nop = true;
+    platform
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
