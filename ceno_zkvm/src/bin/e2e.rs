@@ -1,15 +1,14 @@
 use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_zkvm::{
-    e2e::{PipelinePrefix, VerifyingArgs, run_e2e_verify, run_partial},
-    scheme::{ZKVMProof, verifier::ZKVMVerifier},
+    e2e::{PipelinePrefix, run_e2e_verify, run_partial},
     with_panic_hook,
 };
 use clap::{Parser, ValueEnum};
-use ff_ext::{ExtensionField, ff::Field};
+use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use std::{fs, panic, time::Instant};
+use mpcs::{Basefold, BasefoldRSParams};
+use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{

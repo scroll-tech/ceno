@@ -7,7 +7,7 @@ use std::{
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{PipelinePrefix, PipelineResult, ProvingArgs, run_e2e_proof, run_partial},
+    e2e::{PipelinePrefix, run_e2e_proof, run_partial},
 };
 use criterion::*;
 
