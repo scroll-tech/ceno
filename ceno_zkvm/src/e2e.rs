@@ -31,7 +31,7 @@ struct FullMemState<Record> {
 type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
 
-struct SimulationResult {
+pub struct SimulationResult {
     exit_code: Option<u32>,
     all_records: Vec<StepRecord>,
     final_mem_state: FinalMemState,
@@ -184,7 +184,7 @@ fn init_mem(
     mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
 }
 
-struct ConstraintSystemConfig<E: ExtensionField> {
+pub struct ConstraintSystemConfig<E: ExtensionField> {
     zkvm_cs: ZKVMConstraintSystem<E>,
     config: Rv32imConfig<E>,
     mmu_config: MmuConfig<E>,
@@ -241,7 +241,7 @@ fn generate_fixed_traces<E: ExtensionField>(
     zkvm_fixed_traces
 }
 
-fn generate_witness<E: ExtensionField>(
+pub fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     sim_result: SimulationResult,
     program: &Program,
@@ -296,15 +296,18 @@ fn generate_witness<E: ExtensionField>(
 }
 
 pub enum PipelinePrefix {
+    PreWitness,
     PreProving,
     PreVerifying,
     Complete,
 }
 
+pub type WitnessArgs<E> = (ConstraintSystemConfig<E>, SimulationResult, Program);
 pub type ProvingArgs<E, PCS> = (ZKVMProver<E, PCS>, ZKVMWitnesses<E>, PublicValues<u32>);
 pub type VerifyingArgs<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>);
 
 pub enum PipelineResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    PreWitness(WitnessArgs<E>),
     PreProving(ProvingArgs<E, PCS>),
     PreVerifying(VerifyingArgs<E, PCS>),
     Complete,
@@ -354,6 +357,10 @@ pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     // Clone some sim_result fields before consuming
     let pi = sim_result.pi.clone();
     let exit_code = sim_result.exit_code;
+
+    if let PipelinePrefix::PreWitness = prefix {
+        return PipelineResult::PreWitness((system_config, sim_result, program));
+    }
 
     let zkvm_witness = generate_witness(&system_config, sim_result, &program);
 
@@ -471,6 +478,17 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
         if platform.can_write(addr) { "W" } else { "-" },
         if platform.can_execute(addr) { "X" } else { "-" },
     )
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<PipelineResult<E, PCS>>
+    for WitnessArgs<E>
+{
+    fn from(value: PipelineResult<E, PCS>) -> Self {
+        match value {
+            PipelineResult::PreWitness(inner) => inner,
+            _ => panic!("attempted to unpack verifying args from wrong prefix"),
+        }
+    }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<PipelineResult<E, PCS>>
