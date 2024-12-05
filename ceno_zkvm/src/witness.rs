@@ -41,14 +41,14 @@ macro_rules! set_fixed_val {
 }
 
 #[derive(Clone)]
-pub struct RowMajorMatrix<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> {
+pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<MaybeUninit<T>>,
     num_padding_rows: usize,
     num_col: usize,
 }
 
-impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize) -> Self {
         let num_total_rows = next_pow2_instance_padding(num_rows);
         let num_padding_rows = num_total_rows - num_rows;
@@ -57,10 +57,6 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
             num_padding_rows,
             num_col,
         }
-    }
-
-    pub fn num_col(&self) -> usize {
-        self.num_col
     }
 
     pub fn num_instances(&self) -> usize {
@@ -123,16 +119,16 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         }
         // padded_row_num and chunk_rows should both be pow of 2.
         assert_eq!(padded_row_num % shard_rows, 0);
-        let chunk_num = (self.num_instances() + shard_rows - 1) / shard_rows;
+        let shard_num = (self.num_instances() + shard_rows - 1) / shard_rows;
         let mut shards = Vec::new();
-        for i in 0..chunk_num {
+        for i in 0..shard_num {
             let mut values: Vec<_> = self.values
                 [(i * shard_rows * self.num_col)..((i + 1) * shard_rows * self.num_col)]
                 .to_vec();
             let mut num_padding_rows = 0;
 
             // Only last chunk contains padding rows.
-            if i == chunk_num - 1 && self.num_instances() % shard_rows != 0 {
+            if i == shard_num - 1 && self.num_instances() % shard_rows != 0 {
                 let num_rows = self.num_instances() % shard_rows;
                 let num_total_rows = next_pow2_instance_padding(num_rows);
                 num_padding_rows = num_total_rows - num_rows;

@@ -61,7 +61,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         does_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
-        // seems a bit adhoc here..
+        // TODO: make it less adhoc
         let num_instances = vm_proof
             .opcode_proofs
             .get(&HaltInstruction::<E>::name())

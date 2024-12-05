@@ -125,14 +125,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 profiling_2 = true
             );
 
-            let witness_chunks = witness.shard_by_rows(shard_size);
-            if witness_chunks.len() > 1 {
-                tracing::warn!(
-                    "split {circuit_name} witness into {} chunks",
-                    witness_chunks.len()
+            let witness_shards = witness.shard_by_rows(shard_size);
+            if witness_shards.len() > 1 {
+                tracing::info!(
+                    "split {circuit_name} witness into {} shards",
+                    witness_shards.len()
                 );
             }
-            let witness_and_commitment: Vec<_> = witness_chunks
+            let witness_and_commitment: Vec<_> = witness_shards
                 .into_iter()
                 .map(|witness| -> Result<_, ZKVMError> {
                     let witness_mles = witness.clone().into_mles();
@@ -143,7 +143,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     Ok((witness, mles, commitment))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            wits_and_commitments.insert(circuit_name.clone(), witness_and_commitment);
+            wits_and_commitments.insert(circuit_name, witness_and_commitment);
             exit_span!(span);
         }
         exit_span!(commit_to_traces_span);
@@ -200,8 +200,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     &challenges,
                 )?;
                 tracing::info!(
-                    "generated proof for opcode {} with num_instances={}, chunk idx {idx}",
-                    circuit_name, num_instances
+                    "generated proof for opcode {circuit_name} with num_instances={num_instances}, shard idx {idx}"
                 );
                 Ok(proof)
             }).collect::<Result<Vec<_>, _>>()?;
@@ -211,13 +210,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
                 assert_eq!(witness_and_wit.len(), 1);
-                let (witness, arc_mles, wits_commit) = witness_and_wit.remove(0);
+                let (witness, mles, wits_commit) = witness_and_wit.remove(0);
                 let num_instances = witness.num_instances();
                 let (table_proof, pi_in_evals) = self.create_table_proof(
                     circuit_name,
                     &self.pk.pp,
                     pk,
-                    arc_mles.into_iter().map(|v| v.into()).collect_vec(),
+                    mles.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
                     &pi,
                     transcript,

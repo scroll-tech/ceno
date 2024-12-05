@@ -20,10 +20,9 @@ pub fn ceil_log2(x: usize) -> usize {
     usize_bits - (x - 1).leading_zeros() as usize
 }
 
-pub fn create_uninit_vec<T: Sized + Copy + Clone>(len: usize) -> Vec<MaybeUninit<T>> {
+pub fn create_uninit_vec<T: Sized>(len: usize) -> Vec<MaybeUninit<T>> {
     let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
-    vec.resize(len, MaybeUninit::uninit());
-    // unsafe { vec.set_len(len) };
+    unsafe { vec.set_len(len) };
     vec
 }
 
