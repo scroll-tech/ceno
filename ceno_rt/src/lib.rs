@@ -94,4 +94,6 @@ extern "C" {
     static _stack_start: u8;
     // The address of this variable is the start of the heap (growing upwards).
     static _sheap: u8;
+    // The address of this variable is the start of the hints ROM.
+    static _hints_start: u8;
 }

@@ -1,5 +1,6 @@
 
 _stack_start = ORIGIN(REGION_STACK) + LENGTH(REGION_STACK);
+_hints_start = ORIGIN(REGION_HINTS);
 
 SECTIONS
 {
@@ -34,4 +35,10 @@ SECTIONS
     . = ALIGN(4);
     _sheap = .;
   } > RAM
+
+  /* Define a section for runtime-populated EEPROM-like HINTS data */
+  .hints (NOLOAD) : ALIGN(4)
+  {
+    *(.hints .hints.*);
+  } > HINTS
 }
