@@ -1,8 +1,8 @@
 use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
-        PublicValues, constants::MAX_NUM_VARIABLES, mock_prover::MockProver, prover::ZKVMProver,
-        verifier::ZKVMVerifier,
+        PublicValues, ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::MockProver,
+        prover::ZKVMProver, verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
@@ -12,29 +12,34 @@ use ceno_emul::{
     ByteAddr, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program, StepRecord, Tracer,
     VMState, WORD_SIZE, WordAddr,
 };
-use ff_ext::ff::Field;
-use goldilocks::GoldilocksExt2;
+use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain, enumerate};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::PolynomialCommitmentScheme;
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
-    panic,
     time::Instant,
 };
 use transcript::Transcript;
 
-pub fn run_e2e(
+type E2EWitnessGen<E, PCS> = (
+    ZKVMProver<E, PCS>,
+    ZKVMVerifier<E, PCS>,
+    ZKVMWitnesses<E>,
+    PublicValues<u32>,
+    usize,   // number of cycles
+    Instant, // e2e start, excluding key gen time
+    Option<u32>,
+);
+
+pub fn run_e2e_gen_witness<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     program: Program,
     platform: Platform,
     stack_size: u32,
     heap_size: u32,
     hints: Vec<u32>,
     max_steps: usize,
-) {
-    type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-    type ExampleProgramTableCircuit<E> = ProgramTableCircuit<E>;
+) -> E2EWitnessGen<E, PCS> {
     let stack_addrs = platform.stack_top - stack_size..platform.stack_top;
 
     // Detect heap as starting after program data.
@@ -69,8 +74,8 @@ pub fn run_e2e(
     }
 
     // keygen
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: vm.program().instructions.len(),
@@ -82,12 +87,12 @@ pub fn run_e2e(
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
-    let prog_config = zkvm_cs.register_table_circuit::<ExampleProgramTableCircuit<E>>();
+    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
     zkvm_cs.register_global_state::<GlobalState>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
 
-    zkvm_fixed_traces.register_table_circuit::<ExampleProgramTableCircuit<E>>(
+    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &zkvm_cs,
         &prog_config,
         vm.program(),
@@ -109,7 +114,7 @@ pub fn run_e2e(
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
+        .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
 
@@ -230,42 +235,45 @@ pub fn run_e2e(
         .unwrap();
     // assign program circuit
     zkvm_witness
-        .assign_table_circuit::<ExampleProgramTableCircuit<E>>(&zkvm_cs, &prog_config, vm.program())
+        .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, vm.program())
         .unwrap();
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(zkvm_cs, zkvm_fixed_traces, &zkvm_witness, &pi);
         tracing::info!("Mock proving passed");
     }
-    let timer = Instant::now();
+    (
+        prover,
+        verifier,
+        zkvm_witness,
+        pi,
+        cycle_num,
+        e2e_start,
+        exit_code,
+    )
+}
 
+pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    prover: ZKVMProver<E, PCS>,
+    zkvm_witness: ZKVMWitnesses<E>,
+    pi: PublicValues<u32>,
+) -> ZKVMProof<E, PCS> {
     let transcript = Transcript::new(b"riscv");
-    let mut zkvm_proof = prover
+    prover
         .create_proof(zkvm_witness, pi, transcript)
-        .expect("create_proof failed");
+        .expect("create_proof failed")
+}
 
-    let proving_time = timer.elapsed().as_secs_f64();
-    let e2e_time = e2e_start.elapsed().as_secs_f64();
-    let witgen_time = e2e_time - proving_time;
-    println!(
-        "Proving finished.\n\
-\tProving time = {:.3}s, freq = {:.3}khz\n\
-\tWitgen  time = {:.3}s, freq = {:.3}khz\n\
-\tTotal   time = {:.3}s, freq = {:.3}khz\n\
-\tthread num: {}",
-        proving_time,
-        cycle_num as f64 / proving_time / 1000.0,
-        witgen_time,
-        cycle_num as f64 / witgen_time / 1000.0,
-        e2e_time,
-        cycle_num as f64 / e2e_time / 1000.0,
-        rayon::current_num_threads()
-    );
-
+pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    verifier: &ZKVMVerifier<E, PCS>,
+    zkvm_proof: ZKVMProof<E, PCS>,
+    exit_code: Option<u32>,
+    max_steps: usize,
+) {
     let transcript = Transcript::new(b"riscv");
     assert!(
         verifier
-            .verify_proof_halt(zkvm_proof.clone(), transcript, exit_code.is_some())
+            .verify_proof_halt(zkvm_proof, transcript, exit_code.is_some())
             .expect("verify proof return with error"),
     );
     match exit_code {
@@ -273,41 +281,6 @@ pub fn run_e2e(
         Some(code) => tracing::error!("exit code {}. Failure.", code),
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
     }
-
-    let transcript = Transcript::new(b"riscv");
-    // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-    zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-
-    // capture panic message, if have
-    let default_hook = panic::take_hook();
-    panic::set_hook(Box::new(|_info| {
-        // by default it will print msg to stdout/stderr
-        // we override it to avoid print msg since we will capture the msg by our own
-    }));
-    let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-    panic::set_hook(default_hook);
-    match result {
-        Ok(res) => {
-            res.expect_err("verify proof should return with error");
-        }
-        Err(err) => {
-            let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<String>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<&String>() {
-                message.to_string()
-            } else {
-                unreachable!()
-            };
-
-            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
-                println!("unknown panic {msg:?}");
-                panic::resume_unwind(err);
-            };
-        }
-    };
 }
 
 fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
