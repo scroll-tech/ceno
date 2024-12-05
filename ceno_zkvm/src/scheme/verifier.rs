@@ -61,10 +61,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         does_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
+        // seems a bit adhoc here..
         let num_instances = vm_proof
             .opcode_proofs
             .get(&HaltInstruction::<E>::name())
-            .map(|(_, p)| p.num_instances)
+            .map(|(_, p)| p[0].num_instances) 
             .unwrap_or(0);
         if num_instances != (does_halt as usize) {
             return Err(ZKVMError::VerifyError(format!(
@@ -119,8 +120,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {
             tracing::debug!("read {}'s commit", name);
-            PCS::write_commitment(&proof.wits_commit, &mut transcript)
+            for p in proof {
+                PCS::write_commitment(&p.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
+            }
         }
         for (name, (_, proof)) in vm_proof.table_proofs.iter() {
             tracing::debug!("read {}'s commit", name);
@@ -140,7 +143,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let point_eval = PointAndEval::default();
         let mut transcripts = transcript.fork(self.vk.circuit_vks.len());
 
-        for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
+        for (name, (i, opcode_proofs)) in vm_proof.opcode_proofs {
             let transcript = &mut transcripts[i];
 
             let circuit_vk = self
@@ -148,19 +151,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .circuit_vks
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
-            let _rand_point = self.verify_opcode_proof(
-                &name,
-                &self.vk.vp,
-                circuit_vk,
-                &opcode_proof,
-                pi_evals,
-                transcript,
-                NUM_FANIN,
-                &point_eval,
-                &challenges,
-            )?;
+            for opcode_proof in &opcode_proofs {
+                let _rand_point = self.verify_opcode_proof(
+                    &name,
+                    &self.vk.vp,
+                    circuit_vk,
+                    &opcode_proof,
+                    pi_evals,
+                    transcript,
+                    NUM_FANIN,
+                    &point_eval,
+                    &challenges,
+                )?;
+            }
+            
             tracing::info!("verified proof for opcode {}", name);
-
+            for opcode_proof in &opcode_proofs {
             // getting the number of dummy padding item that we used in this opcode circuit
             let num_lks = circuit_vk.get_cs().lk_expressions.len();
             let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
@@ -177,6 +183,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.invert().unwrap();
             logup_sum +=
                 opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.invert().unwrap();
+            }
         }
 
         for (name, (i, table_proof)) in vm_proof.table_proofs {

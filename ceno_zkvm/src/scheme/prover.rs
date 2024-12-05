@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use core::assert_eq;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
@@ -8,7 +9,7 @@ use ff::Field;
 use itertools::{Itertools, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    mle::{IntoMLE, MultilinearExtension},
+    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -35,7 +36,7 @@ use crate::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
     utils::{get_challenge_pows, next_pow2_instance_padding, optimal_sumcheck_threads},
-    virtual_polys::VirtualPolynomials,
+    virtual_polys::VirtualPolynomials, witness::RowMajorMatrix,
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
@@ -90,34 +91,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
         exit_span!(span);
 
+
+        let chunk_size = 1048576;
+
         // commit to main traces
-        let mut commitments = BTreeMap::new();
-        let mut wits = BTreeMap::new();
+        let mut wits_and_commitments: BTreeMap<String, Vec<(RowMajorMatrix<_>, Vec<DenseMultilinearExtension<_>>, PCS::CommitmentWithData)>> = BTreeMap::new();
 
         let commit_to_traces_span = entered_span!("commit_to_traces", profiling_1 = true);
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
+            tracing::warn!("committing {} witnesses of size {}..", circuit_name, num_instances);
+            if num_instances == 0 {
+                wits_and_commitments.insert(circuit_name.clone(), Vec::new());
+                continue;
+            }
             let span = entered_span!(
                 "commit to iteration",
                 circuit_name = circuit_name,
                 profiling_2 = true
             );
-            let witness = match num_instances {
-                0 => vec![],
-                _ => {
-                    let witness = witness.into_mles();
-                    commitments.insert(
-                        circuit_name.clone(),
-                        PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
-                            .map_err(ZKVMError::PCSError)?,
-                    );
-                    witness
-                }
-            };
+
+            let witness_chunks = witness.chunk_by_num(chunk_size);
+            if witness_chunks.len() > 1 {
+                tracing::warn!("split {circuit_name} witness into {} chunks", witness_chunks.len());
+            }
+            let witness_and_commitment: Vec<_> = witness_chunks.into_iter().map(|witness| -> Result<_, ZKVMError> {
+                // TODO: should we store the mle result?
+                tracing::debug!("into mle {}", witness.num_instances());
+                let witness_mles = witness.clone().into_mles();
+                tracing::debug!("batch_commit_and_write");
+                let commitment =  PCS::batch_commit_and_write(&self.pk.pp, &witness_mles, &mut transcript).map_err(ZKVMError::PCSError)?;
+                tracing::debug!("done");
+                let arc_mles = witness_mles.into_iter().map(|v| v.into()).collect_vec();
+                Ok((witness, arc_mles, commitment))
+        }).collect::<Result<Vec<_>, _>>()?;
+        wits_and_commitments.insert(circuit_name.clone(), witness_and_commitment);
             exit_span!(span);
-            wits.insert(circuit_name, (witness, num_instances));
-        }
+        };
         exit_span!(commit_to_traces_span);
 
         // squeeze two challenges from transcript
@@ -135,13 +146,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .iter() // Sorted by key.
             .zip_eq(transcripts.iter_mut().enumerate())
         {
-            let (witness, num_instances) = wits
+            let mut witness_and_wit: Vec<_> = wits_and_commitments
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
-            if witness.is_empty() {
+
+            if witness_and_wit.is_empty() {
                 continue;
             }
-            let wits_commit = commitments.remove(circuit_name).unwrap();
+
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
             let is_opcode_circuit = cs.lk_table_expressions.is_empty()
@@ -160,11 +172,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 for lk_s in &cs.lk_expressions_namespace_map {
                     tracing::debug!("opcode circuit {}: {}", circuit_name, lk_s);
                 }
-                let opcode_proof = self.create_opcode_proof(
+                let opcode_proof: Vec<_> = witness_and_wit.into_iter().enumerate().map(|(idx, (witness, arc_mles, wits_commit))| -> Result<_, ZKVMError> {
+                    let num_instances = witness.num_instances();
+                    let proof = self.create_opcode_proof(
                     circuit_name,
                     &self.pk.pp,
                     pk,
-                    witness.into_iter().map(|w| w.into()).collect_vec(),
+                    arc_mles.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
                     &pi,
                     num_instances,
@@ -172,19 +186,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     &challenges,
                 )?;
                 tracing::info!(
-                    "generated proof for opcode {} with num_instances={}",
-                    circuit_name,
-                    num_instances
+                    "generated proof for opcode {} with num_instances={}, chunk idx {idx}",
+                    circuit_name, num_instances
                 );
+                Ok(proof)
+            }).collect::<Result<Vec<_>, _>>()?;
+                
                 vm_proof
                     .opcode_proofs
                     .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
+                assert_eq!(witness_and_wit.len(), 1);
+                let (witness, arc_mles, wits_commit) = witness_and_wit.remove(0);
+                let num_instances = witness.num_instances();
                 let (table_proof, pi_in_evals) = self.create_table_proof(
                     circuit_name,
                     &self.pk.pp,
                     pk,
-                    witness.into_iter().map(|v| v.into()).collect_vec(),
+                    arc_mles.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
                     &pi,
                     transcript,

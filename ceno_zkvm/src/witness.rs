@@ -1,4 +1,5 @@
 use ff::Field;
+use core::assert_eq;
 use std::{
     array,
     cell::RefCell,
@@ -58,7 +59,13 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         }
     }
 
+
+    pub fn num_col(&self) -> usize {
+        self.num_col
+    }
+
     pub fn num_instances(&self) -> usize {
+        tracing::info!("num_instances... {} {} {}", self.values.len(), self.num_col, self.num_padding_rows);
         self.values.len() / self.num_col - self.num_padding_rows
     }
 
@@ -96,6 +103,7 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     pub fn de_interleaving(mut self) -> Vec<Vec<T>> {
+        tracing::debug!("de_interleaving..");
         (0..self.num_col)
             .map(|i| {
                 self.values
@@ -106,6 +114,37 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
                     .collect::<Vec<T>>()
             })
             .collect()
+    }
+
+    // TODO: should we consume or clone `self`?
+    pub fn chunk_by_num(&self, instance_num_per_chunk: usize) -> Vec<Self> {
+        let chunk_num = (self.num_instances() + instance_num_per_chunk - 1) / instance_num_per_chunk;
+        let mut result = Vec::new();
+        let mut offset = 0;
+        for i in 0..chunk_num {
+            let num_rows = if i < chunk_num - 1 {
+                instance_num_per_chunk
+            } else {
+                self.num_instances() - instance_num_per_chunk * i
+            };
+            let mut values: Vec<_> = self.values[offset..offset + num_rows].to_vec();
+            offset += num_rows;
+            let num_total_rows = next_pow2_instance_padding(num_rows);
+            //unsafe { values.resize(num_total_rows, MaybeUninit::uninit()) };
+            unsafe { values.set_len(num_total_rows * self.num_col) };
+            let num_padding_rows = num_total_rows - num_rows;
+            tracing::info!("chunk_by_num {i}th chunk: num_rows {num_rows}, num_total_rows {num_total_rows}, num_padding_rows {num_padding_rows}");
+            result.push(Self {
+                num_col: self.num_col,
+                num_padding_rows,
+                values,
+            });
+        }
+        assert_eq!(self.num_instances(), result.iter().map(|c| {
+            tracing::info!("num_instances {}", c.num_instances());
+            c.num_instances()
+        }).sum::<usize>());
+        result
     }
 }
 
