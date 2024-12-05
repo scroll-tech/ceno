@@ -5,4 +5,4 @@ max_width = 100
 newline_style = "Unix"
 normalize_comments = true
 style_edition = "2024"
-wrap_comments = false
+wrap_comments = true

@@ -8,6 +8,8 @@ use std::{
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 fn build_elfs() {
+    println!("cargo::rerun-if-env-changed=CARGO_MANIFEST_DIR");
+    println!("cargo::rerun-if-env-changed=OUT_DIR");
     let out_dir = std::env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("vars.rs");
     let mut dest = File::create(dest_path).expect("failed to create vars.rs");

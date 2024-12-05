@@ -1,6 +1,13 @@
 use anyhow::Result;
 use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, StepRecord, VMState};
 
+// TODO(Matthias): much of this is copied from `test_elf.rs` in Ceno.  These are generally useful
+// functions, so we should make them available for importing from the library, instead of copying
+// them here.
+//
+// So in the end, this file should just have a really simple main.
+// See how sproll-evm does it with SP1.
+
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
     let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
     eprintln!("Emulator ran for {} steps.", steps.len());
