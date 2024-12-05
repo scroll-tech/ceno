@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ceno_emul::{ByteAddr, EmuContext, StepRecord, VMState, CENO_PLATFORM};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, StepRecord, VMState};
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
     let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
