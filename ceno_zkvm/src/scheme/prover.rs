@@ -93,10 +93,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         // TODO: is it better to set different size of different opcode?
-        let shard_size = 1 * 1048576;
+        let shard_size = 1048576;
 
         // commit to main traces
         // TODO: (1) is it ok to store mle? (2) replace tuple with struct?
+        #[allow(clippy::type_complexity)]
         let mut wits_and_commitments: BTreeMap<
             String,
             Vec<(
@@ -139,8 +140,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     let commitment =
                         PCS::batch_commit_and_write(&self.pk.pp, &witness_mles, &mut transcript)
                             .map_err(ZKVMError::PCSError)?;
-                    let mles = witness_mles.into_iter().map(|v| v.into()).collect_vec();
-                    Ok((witness, mles, commitment))
+                    Ok((witness, witness_mles, commitment))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             wits_and_commitments.insert(circuit_name, witness_and_commitment);

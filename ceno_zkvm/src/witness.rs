@@ -119,7 +119,7 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         }
         // padded_row_num and chunk_rows should both be pow of 2.
         assert_eq!(padded_row_num % shard_rows, 0);
-        let shard_num = (self.num_instances() + shard_rows - 1) / shard_rows;
+        let shard_num = self.num_instances().div_ceil(shard_rows);
         let mut shards = Vec::new();
         for i in 0..shard_num {
             let mut values: Vec<_> = self.values
