@@ -142,7 +142,7 @@ fn simulate_program(
         })
         .collect_vec();
 
-    return SimulationResult {
+    SimulationResult {
         pi,
         exit_code,
         all_records,
@@ -152,7 +152,7 @@ fn simulate_program(
             mem: mem_final,
             priv_io: priv_io_final,
         },
-    };
+    }
 }
 
 fn init_mem(
@@ -288,7 +288,7 @@ fn generate_witness<E: ExtensionField>(
         .assign_table_circuit::<ProgramTableCircuit<E>>(
             &system_config.zkvm_cs,
             &system_config.prog_config,
-            &program,
+            program,
         )
         .unwrap();
 
