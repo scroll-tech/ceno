@@ -189,22 +189,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let opcode_proof: Vec<_> = witness_and_wit.into_iter().enumerate().map(|(idx, (witness, mles, wits_commit))| -> Result<_, ZKVMError> {
                     let num_instances = witness.num_instances();
                     let proof = self.create_opcode_proof(
-                    circuit_name,
-                    &self.pk.pp,
-                    pk,
-                    mles.into_iter().map(|v| v.into()).collect_vec(),
-                    wits_commit,
-                    &pi,
-                    num_instances,
-                    transcript,
-                    &challenges,
-                )?;
-                tracing::info!(
-                    "generated proof for opcode {circuit_name} with num_instances={num_instances}, shard idx {idx}"
-                );
-                Ok(proof)
-            }).collect::<Result<Vec<_>, _>>()?;
-
+                        circuit_name,
+                        &self.pk.pp,
+                        pk,
+                        mles.into_iter().map(|v| v.into()).collect_vec(),
+                        wits_commit,
+                        &pi,
+                        num_instances,
+                        transcript,
+                        &challenges,
+                    )?;
+                    tracing::info!(
+                        "generated proof for opcode {circuit_name} with num_instances={num_instances}, shard idx {idx}"
+                    );
+                    Ok(proof)
+                }).collect::<Result<Vec<_>, _>>()?;
                 vm_proof
                     .opcode_proofs
                     .insert(circuit_name.clone(), (i, opcode_proof));
