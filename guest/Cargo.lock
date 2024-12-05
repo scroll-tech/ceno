@@ -26,19 +26,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno_host"
-version = "0.1.0"
-dependencies = [
- "itertools",
- "rkyv",
-]
-
-[[package]]
 name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
  "riscv",
- "rkyv",
 ]
 
 [[package]]
@@ -46,12 +37,6 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
-
-[[package]]
-name = "either"
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "embedded-hal"
@@ -63,7 +48,6 @@ checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
 name = "guest"
 version = "0.1.0"
 dependencies = [
- "ceno_host",
  "ceno_rt",
  "rkyv",
 ]
@@ -73,15 +57,6 @@ name = "hashbrown"
 version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
-
-[[package]]
-name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "munge"

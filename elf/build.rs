@@ -29,7 +29,7 @@ fn build_elfs() {
     writeln!(
         dest,
         r#"#[allow(non_upper_case_globals)]
-        pub const {example}: &[u8] =
+        pub const elf: &[u8] =
             include_bytes!(r"{CARGO_MANIFEST_DIR}/../guest/target/riscv32im-unknown-none-elf/release/guest");"#
     ).expect("failed to write vars.rs");
     let input_path = "../guest/";

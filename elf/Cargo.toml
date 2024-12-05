@@ -1,0 +1,4 @@
+[package]
+description = "Build scripts for ceno examples"
+name = "elf"
+edition = "2021"

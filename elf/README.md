@@ -9,11 +9,11 @@ Simply add `ceno-examples` to your dependencies, then reference the correspondin
 # ...
 
 [dev-dependencies]
-ceno-examples = { path = "../examples-builder" }
+ceno-elf = { path = "../elf" }
 # ...
 ```
 
 ```rust
 // foo.rs
-let program_elf = ceno_examples::ceno_rt_io;
+let program_elf = ceno_elf::elf;
 ```

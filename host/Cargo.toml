@@ -1,0 +1,10 @@
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+elf = { path = "../elf" }
+
+ceno_emul = { path = "../../ceno/ceno_emul/", default-features = false}
+anyhow = "1.0.94"
