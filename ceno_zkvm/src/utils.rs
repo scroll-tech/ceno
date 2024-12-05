@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt::Display, hash::Hash};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    hash::Hash,
+    panic::{self, PanicHookInfo},
+};
 
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -199,4 +204,28 @@ pub fn merge_frequency_tables<K: Hash + std::cmp::Eq>(
         *ret.entry(key).or_insert(0) += value;
     });
     ret
+}
+
+/// Temporarily override the panic hook
+///
+/// We restore the original hook after we are done.
+pub fn with_panic_hook<F, R>(
+    hook: Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>,
+    f: F,
+) -> R
+where
+    F: FnOnce() -> R,
+{
+    // Save the current panic hook
+    let original_hook = panic::take_hook();
+
+    // Set the new panic hook
+    panic::set_hook(hook);
+
+    let result = f();
+
+    // Restore the original panic hook
+    panic::set_hook(original_hook);
+
+    result
 }

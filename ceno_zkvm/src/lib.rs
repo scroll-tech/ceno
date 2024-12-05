@@ -25,3 +25,4 @@ mod witness;
 
 pub use structs::ROMType;
 pub use uint::Value;
+pub use utils::with_panic_hook;
