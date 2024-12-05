@@ -296,18 +296,21 @@ fn generate_witness<E: ExtensionField>(
 }
 
 pub enum PipelinePrefix {
-    UpToWitnessGen,
-    UpToProofGen,
+    PreProving,
+    PreVerifying,
     Complete,
 }
+
+pub type ProvingArgs<E, PCS> = (ZKVMProver<E, PCS>, ZKVMWitnesses<E>, PublicValues<u32>);
+pub type VerifyingArgs<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>);
 
 pub enum PipelineResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    UpToWitnessGen(ZKVMProver<E, PCS>, ZKVMWitnesses<E>, PublicValues<u32>),
-    UpToProofGen(ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>),
+    PreProving(ProvingArgs<E, PCS>),
+    PreVerifying(VerifyingArgs<E, PCS>),
     Complete,
 }
 
-pub fn run_pipeline_prefix<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     program: Program,
     platform: Platform,
     stack_size: u32,
@@ -368,8 +371,8 @@ pub fn run_pipeline_prefix<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    if let PipelinePrefix::UpToWitnessGen = prefix {
-        return PipelineResult::UpToWitnessGen(prover, zkvm_witness, pi);
+    if let PipelinePrefix::PreProving = prefix {
+        return PipelineResult::PreProving((prover, zkvm_witness, pi));
     }
 
     if std::env::var("MOCK_PROVING").is_ok() {
@@ -384,8 +387,8 @@ pub fn run_pipeline_prefix<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
 
     // Run proof phase
     let zkvm_proof = run_e2e_proof(prover, zkvm_witness, pi);
-    if let PipelinePrefix::UpToProofGen = prefix {
-        return PipelineResult::UpToProofGen(zkvm_proof, verifier, exit_code);
+    if let PipelinePrefix::PreVerifying = prefix {
+        return PipelineResult::PreVerifying((zkvm_proof, verifier, exit_code));
     }
 
     run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps);
@@ -468,4 +471,26 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
         if platform.can_write(addr) { "W" } else { "-" },
         if platform.can_execute(addr) { "X" } else { "-" },
     )
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<PipelineResult<E, PCS>>
+    for ProvingArgs<E, PCS>
+{
+    fn from(value: PipelineResult<E, PCS>) -> Self {
+        match value {
+            PipelineResult::PreProving(inner) => inner,
+            _ => panic!("attempted to unpack proving args from wrong prefix"),
+        }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<PipelineResult<E, PCS>>
+    for VerifyingArgs<E, PCS>
+{
+    fn from(value: PipelineResult<E, PCS>) -> Self {
+        match value {
+            PipelineResult::PreVerifying(inner) => inner,
+            _ => panic!("attempted to unpack verifying args from wrong prefix"),
+        }
+    }
 }

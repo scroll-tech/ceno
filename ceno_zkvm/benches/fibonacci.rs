@@ -7,7 +7,7 @@ use std::{
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{PipelinePrefix, PipelineResult, run_e2e_proof, run_pipeline_prefix},
+    e2e::{PipelinePrefix, PipelineResult, ProvingArgs, run_e2e_proof, run_partial},
 };
 use criterion::*;
 
@@ -58,30 +58,25 @@ fn bench_e2e(c: &mut Criterion) {
             |b| {
                 b.iter_with_setup(
                     || {
-                        run_pipeline_prefix::<E, Pcs>(
+                        run_partial::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             stack_size,
                             heap_size,
                             vec![],
                             max_steps,
-                            PipelinePrefix::UpToWitnessGen,
+                            PipelinePrefix::PreProving,
                         )
+                        .into()
                     },
-                    |setup_result| {
-                        if let PipelineResult::UpToWitnessGen(prover, zkvm_witness, pi) =
-                            setup_result
-                        {
-                            let timer = Instant::now();
-                            let _ = run_e2e_proof(prover, zkvm_witness, pi);
-                            println!(
-                                "Fibonacci::create_proof, max_steps = {}, time = {}",
-                                max_steps,
-                                timer.elapsed().as_secs_f64()
-                            );
-                        } else {
-                            assert!(false);
-                        }
+                    |(prover, zkvm_witness, pi)| {
+                        let timer = Instant::now();
+                        let _ = run_e2e_proof(prover, zkvm_witness, pi);
+                        println!(
+                            "Fibonacci::create_proof, max_steps = {}, time = {}",
+                            max_steps,
+                            timer.elapsed().as_secs_f64()
+                        );
                     },
                 );
             },
