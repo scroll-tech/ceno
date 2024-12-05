@@ -14,7 +14,7 @@ use std::{
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use rayon::{
-    iter::{IntoParallelRefIterator, ParallelIterator},
+    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use thread_local::ThreadLocal;
@@ -52,7 +52,10 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
         // assert!(false);
         RowMajorMatrix {
-            values: vec![T::default(); num_rows * num_col],
+            values: (0..num_rows * num_col)
+                .into_par_iter()
+                .map(|_| T::default())
+                .collect(),
             num_col,
             padding_strategy,
         }
