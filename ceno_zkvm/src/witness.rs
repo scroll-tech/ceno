@@ -64,7 +64,6 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     pub fn num_instances(&self) -> usize {
-        // tracing::info!("num_instances... {} {} {}", self.values.len(), self.num_col, self.num_padding_rows);
         (self.values.len() / self.num_col)
             .checked_sub(self.num_padding_rows)
             .expect("overflow")
@@ -104,7 +103,6 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     pub fn de_interleaving(mut self) -> Vec<Vec<T>> {
-        tracing::debug!("de_interleaving..");
         (0..self.num_col)
             .map(|i| {
                 self.values
@@ -118,33 +116,29 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     // TODO: should we consume or clone `self`?
-    pub fn chunk_by_num(&self, chunk_rows: usize) -> Vec<Self> {
+    pub fn shard_by_rows(&self, shard_rows: usize) -> Vec<Self> {
         let padded_row_num = self.values.len() / self.num_col;
-        if padded_row_num <= chunk_rows {
+        if padded_row_num <= shard_rows {
             return vec![self.clone()];
         }
-        // padded_row_num and instance_num_per_chunk should both be pow of 2.
-        assert_eq!(padded_row_num % chunk_rows, 0);
-        let chunk_num = (self.num_instances() + chunk_rows - 1) / chunk_rows;
-        let mut result = Vec::new();
+        // padded_row_num and chunk_rows should both be pow of 2.
+        assert_eq!(padded_row_num % shard_rows, 0);
+        let chunk_num = (self.num_instances() + shard_rows - 1) / shard_rows;
+        let mut shards = Vec::new();
         for i in 0..chunk_num {
             let mut values: Vec<_> = self.values
-                [(i * chunk_rows * self.num_col)..((i + 1) * chunk_rows * self.num_col)]
+                [(i * shard_rows * self.num_col)..((i + 1) * shard_rows * self.num_col)]
                 .to_vec();
             let mut num_padding_rows = 0;
 
             // Only last chunk contains padding rows.
-            if i == chunk_num - 1 && self.num_instances() % chunk_rows != 0 {
-                let num_rows = self.num_instances() % chunk_rows;
+            if i == chunk_num - 1 && self.num_instances() % shard_rows != 0 {
+                let num_rows = self.num_instances() % shard_rows;
                 let num_total_rows = next_pow2_instance_padding(num_rows);
                 num_padding_rows = num_total_rows - num_rows;
                 values.truncate(num_total_rows * self.num_col);
             };
-
-            tracing::info!(
-                "chunk_by_num {i}th chunk: num_rows {chunk_rows}, num_padding_rows {num_padding_rows}"
-            );
-            result.push(Self {
+            shards.push(Self {
                 num_col: self.num_col,
                 num_padding_rows,
                 values,
@@ -152,16 +146,9 @@ impl<T: PartialEq + Eq + Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
         }
         assert_eq!(
             self.num_instances(),
-            result
-                .iter()
-                .enumerate()
-                .map(|(idx, c)| {
-                    tracing::info!("{idx}chunk num_instances: {}", c.num_instances());
-                    c.num_instances()
-                })
-                .sum::<usize>()
+            shards.iter().map(|c| { c.num_instances() }).sum::<usize>()
         );
-        result
+        shards
     }
 }
 
@@ -169,7 +156,6 @@ impl<F: Field> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
-        tracing::info!("before de_interleaving");
         self.de_interleaving().into_mles()
     }
 }

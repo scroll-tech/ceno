@@ -9,7 +9,7 @@ use ff::Field;
 use itertools::{Itertools, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, IntoMLE, MultilinearExtension},
+    mle::{DenseMultilinearExtension, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -92,9 +92,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
         exit_span!(span);
 
-        let chunk_size = 1 * 1048576;
+        // TODO: is it better to set different size of different opcode?
+        let shard_size = 1 * 1048576;
 
         // commit to main traces
+        // TODO: (1) is it ok to store mle? (2) replace tuple with struct?
         let mut wits_and_commitments: BTreeMap<
             String,
             Vec<(
@@ -108,7 +110,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, witness) in witnesses.into_iter_sorted() {
             let num_instances = witness.num_instances();
-            tracing::warn!(
+            tracing::debug!(
                 "committing {} witnesses of size {}..",
                 circuit_name,
                 num_instances
@@ -123,7 +125,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 profiling_2 = true
             );
 
-            let witness_chunks = witness.chunk_by_num(chunk_size);
+            let witness_chunks = witness.shard_by_rows(shard_size);
             if witness_chunks.len() > 1 {
                 tracing::warn!(
                     "split {circuit_name} witness into {} chunks",
@@ -133,18 +135,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let witness_and_commitment: Vec<_> = witness_chunks
                 .into_iter()
                 .map(|witness| -> Result<_, ZKVMError> {
-                    // TODO: should we store the mle result?
-                    tracing::debug!("into mle: {}", witness.num_instances());
-                    let witness_clone = witness.clone();
-                    tracing::debug!("cloned");
-                    let witness_mles = witness_clone.into_mles();
-                    tracing::debug!("batch_commit_and_write");
+                    let witness_mles = witness.clone().into_mles();
                     let commitment =
                         PCS::batch_commit_and_write(&self.pk.pp, &witness_mles, &mut transcript)
                             .map_err(ZKVMError::PCSError)?;
-                    tracing::debug!("done");
-                    let arc_mles = witness_mles.into_iter().map(|v| v.into()).collect_vec();
-                    Ok((witness, arc_mles, commitment))
+                    let mles = witness_mles.into_iter().map(|v| v.into()).collect_vec();
+                    Ok((witness, mles, commitment))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             wits_and_commitments.insert(circuit_name.clone(), witness_and_commitment);
@@ -190,13 +186,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     cs.w_expressions.len(),
                     cs.lk_expressions.len(),
                 );
-                let opcode_proof: Vec<_> = witness_and_wit.into_iter().enumerate().map(|(idx, (witness, arc_mles, wits_commit))| -> Result<_, ZKVMError> {
+                let opcode_proof: Vec<_> = witness_and_wit.into_iter().enumerate().map(|(idx, (witness, mles, wits_commit))| -> Result<_, ZKVMError> {
                     let num_instances = witness.num_instances();
                     let proof = self.create_opcode_proof(
                     circuit_name,
                     &self.pk.pp,
                     pk,
-                    arc_mles.into_iter().map(|v| v.into()).collect_vec(),
+                    mles.into_iter().map(|v| v.into()).collect_vec(),
                     wits_commit,
                     &pi,
                     num_instances,

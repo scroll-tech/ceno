@@ -156,11 +156,8 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         polys: &[DenseMultilinearExtension<E>],
         transcript: &mut Transcript<E>,
     ) -> Result<Self::CommitmentWithData, Error> {
-        println!("000");
         let comm = Self::batch_commit(pp, polys)?;
-        println!("001");
         Self::write_commitment(&Self::get_pure_commitment(&comm), transcript)?;
-        println!("002");
         Ok(comm)
     }
 
