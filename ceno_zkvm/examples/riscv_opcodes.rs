@@ -7,6 +7,7 @@ use ceno_zkvm::{
     state::GlobalState,
     structs::ProgramParams,
     tables::{MemFinalRecord, ProgramTableCircuit},
+    with_panic_hook,
 };
 use clap::Parser;
 
@@ -323,13 +324,9 @@ fn main() {
         zkvm_proof.raw_pi[1] = vec![Goldilocks::ONE];
 
         // capture panic message, if have
-        let default_hook = panic::take_hook();
-        panic::set_hook(Box::new(|_info| {
-            // by default it will print msg to stdout/stderr
-            // we override it to avoid print msg since we will capture the msg by our own
-        }));
-        let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-        panic::set_hook(default_hook);
+        let result = with_panic_hook(Box::new(|_info| ()), || {
+            panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+        });
         match result {
             Ok(res) => {
                 res.expect_err("verify proof should return with error");

@@ -62,3 +62,8 @@ riv64 = []
 [[bench]]
 harness = false
 name = "riscv_add"
+
+
+[[bench]]
+harness = false
+name = "fibonacci"
