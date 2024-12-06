@@ -206,7 +206,7 @@ impl IterAddresses for Range<Addr> {
     }
 }
 
-impl<'a, T: GetAddr> IterAddresses for &'a [T] {
+impl<T: GetAddr> IterAddresses for &[T] {
     fn iter_addresses(&self) -> impl ExactSizeIterator<Item = Addr> {
         self.iter().map(T::get_addr)
     }
