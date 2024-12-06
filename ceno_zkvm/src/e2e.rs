@@ -348,16 +348,7 @@ pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     // Generate fixed traces
     let zkvm_fixed_traces = generate_fixed_traces(&system_config, &init_full_mem, &program);
 
-    // Emulate program
-    let emul_result = emulate_program(&program, max_steps, init_full_mem, &platform, hints);
-
-    // Clone some emul_result fields before consuming
-    let pi = emul_result.pi.clone();
-    let exit_code = emul_result.exit_code;
-
-    let zkvm_witness = generate_witness(&system_config, emul_result, &program);
-
-    // keygen
+    // Keygen
     let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
     let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let pk = system_config
@@ -366,6 +357,15 @@ pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
+
+    // Emulate program
+    let emul_result = emulate_program(&program, max_steps, init_full_mem, &platform, hints);
+
+    // Clone some emul_result fields before consuming
+    let pi = emul_result.pi.clone();
+    let exit_code = emul_result.exit_code;
+
+    let zkvm_witness = generate_witness(&system_config, emul_result, &program);
 
     // proving
     let prover = ZKVMProver::new(pk);
