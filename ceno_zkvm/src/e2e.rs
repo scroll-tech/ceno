@@ -295,7 +295,7 @@ fn generate_witness<E: ExtensionField>(
     zkvm_witness
 }
 
-pub enum PipelinePrefix {
+pub enum Checkpoint {
     PreProving,
     PreVerifying,
     Complete,
@@ -304,21 +304,21 @@ pub enum PipelinePrefix {
 pub type ProvingArgs<E, PCS> = (ZKVMProver<E, PCS>, ZKVMWitnesses<E>, PublicValues<u32>);
 pub type VerifyingArgs<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>);
 
-pub enum PipelineResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+pub enum CheckpointOutput<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     PreProving(ProvingArgs<E, PCS>),
     PreVerifying(VerifyingArgs<E, PCS>),
     Complete,
 }
 
-pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     program: Program,
     platform: Platform,
     stack_size: u32,
     heap_size: u32,
     hints: Vec<u32>,
     max_steps: usize,
-    prefix: PipelinePrefix,
-) -> PipelineResult<E, PCS> {
+    checkpoint: Checkpoint,
+) -> CheckpointOutput<E, PCS> {
     // Detect heap as starting after program data.
     let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
     let heap_addrs = heap_start..heap_start + heap_size;
@@ -371,8 +371,8 @@ pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let prover = ZKVMProver::new(pk);
     let verifier = ZKVMVerifier::new(vk);
 
-    if let PipelinePrefix::PreProving = prefix {
-        return PipelineResult::PreProving((prover, zkvm_witness, pi));
+    if let Checkpoint::PreProving = checkpoint {
+        return CheckpointOutput::PreProving((prover, zkvm_witness, pi));
     }
 
     if std::env::var("MOCK_PROVING").is_ok() {
@@ -387,12 +387,12 @@ pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     // Run proof phase
     let zkvm_proof = run_e2e_proof(prover, zkvm_witness, pi);
-    if let PipelinePrefix::PreVerifying = prefix {
-        return PipelineResult::PreVerifying((zkvm_proof, verifier, exit_code));
+    if let Checkpoint::PreVerifying = checkpoint {
+        return CheckpointOutput::PreVerifying((zkvm_proof, verifier, exit_code));
     }
 
     run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps);
-    PipelineResult::Complete
+    CheckpointOutput::Complete
 }
 
 pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
@@ -473,23 +473,23 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
     )
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<PipelineResult<E, PCS>>
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
     for ProvingArgs<E, PCS>
 {
-    fn from(value: PipelineResult<E, PCS>) -> Self {
+    fn from(value: CheckpointOutput<E, PCS>) -> Self {
         match value {
-            PipelineResult::PreProving(inner) => inner,
+            CheckpointOutput::PreProving(inner) => inner,
             _ => panic!("attempted to unpack proving args from wrong prefix"),
         }
     }
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<PipelineResult<E, PCS>>
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
     for VerifyingArgs<E, PCS>
 {
-    fn from(value: PipelineResult<E, PCS>) -> Self {
+    fn from(value: CheckpointOutput<E, PCS>) -> Self {
         match value {
-            PipelineResult::PreVerifying(inner) => inner,
+            CheckpointOutput::PreVerifying(inner) => inner,
             _ => panic!("attempted to unpack verifying args from wrong prefix"),
         }
     }

@@ -1,6 +1,6 @@
 use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_zkvm::{
-    e2e::{PipelinePrefix, run_e2e_verify, run_partial},
+    e2e::{Checkpoint, run_e2e_verify, run_e2e_with_checkpoint},
     with_panic_hook,
 };
 use clap::{Parser, ValueEnum};
@@ -143,14 +143,14 @@ fn main() {
     type B = Goldilocks;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
-    let (mut zkvm_proof, verifier, exit_code) = run_partial::<E, Pcs>(
+    let (mut zkvm_proof, verifier, exit_code) = run_e2e_with_checkpoint::<E, Pcs>(
         program,
         platform,
         args.stack_size,
         args.heap_size,
         hints,
         max_steps,
-        PipelinePrefix::PreVerifying,
+        Checkpoint::PreVerifying,
     )
     .into();
 

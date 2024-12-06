@@ -7,7 +7,7 @@ use std::{
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{PipelinePrefix, run_e2e_proof, run_partial},
+    e2e::{Checkpoint, run_e2e_proof, run_e2e_with_checkpoint},
 };
 use criterion::*;
 
@@ -58,14 +58,14 @@ fn bench_e2e(c: &mut Criterion) {
             |b| {
                 b.iter_with_setup(
                     || {
-                        run_partial::<E, Pcs>(
+                        run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             stack_size,
                             heap_size,
                             vec![],
                             max_steps,
-                            PipelinePrefix::PreProving,
+                            Checkpoint::PreProving,
                         )
                         .into()
                     },
