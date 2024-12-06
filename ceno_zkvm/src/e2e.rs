@@ -31,20 +31,20 @@ struct FullMemState<Record> {
 type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
 
-struct SimulationResult {
+struct EmulationResult {
     exit_code: Option<u32>,
     all_records: Vec<StepRecord>,
     final_mem_state: FinalMemState,
     pi: PublicValues<u32>,
 }
 
-fn simulate_program(
+fn emulate_program(
     program: &Program,
     max_steps: usize,
     init_mem_state: InitMemState,
     platform: &Platform,
     hints: Vec<u32>,
-) -> SimulationResult {
+) -> EmulationResult {
     let InitMemState {
         mem: mem_init,
         io: io_init,
@@ -142,7 +142,7 @@ fn simulate_program(
         })
         .collect_vec();
 
-    SimulationResult {
+    EmulationResult {
         pi,
         exit_code,
         all_records,
@@ -243,7 +243,7 @@ fn generate_fixed_traces<E: ExtensionField>(
 
 fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
-    sim_result: SimulationResult,
+    emul_result: EmulationResult,
     program: &Program,
 ) -> ZKVMWitnesses<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
@@ -253,7 +253,7 @@ fn generate_witness<E: ExtensionField>(
         .assign_opcode_circuit(
             &system_config.zkvm_cs,
             &mut zkvm_witness,
-            sim_result.all_records,
+            emul_result.all_records,
         )
         .unwrap();
     system_config
@@ -272,15 +272,15 @@ fn generate_witness<E: ExtensionField>(
         .assign_table_circuit(
             &system_config.zkvm_cs,
             &mut zkvm_witness,
-            &sim_result.final_mem_state.reg,
-            &sim_result.final_mem_state.mem,
-            &sim_result
+            &emul_result.final_mem_state.reg,
+            &emul_result.final_mem_state.mem,
+            &emul_result
                 .final_mem_state
                 .io
                 .iter()
                 .map(|rec| rec.cycle)
                 .collect_vec(),
-            &sim_result.final_mem_state.priv_io,
+            &emul_result.final_mem_state.priv_io,
         )
         .unwrap();
     // assign program circuit
@@ -348,14 +348,14 @@ pub fn run_partial<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     // Generate fixed traces
     let zkvm_fixed_traces = generate_fixed_traces(&system_config, &init_full_mem, &program);
 
-    // Simulate program
-    let sim_result = simulate_program(&program, max_steps, init_full_mem, &platform, hints);
+    // Emulate program
+    let emul_result = emulate_program(&program, max_steps, init_full_mem, &platform, hints);
 
-    // Clone some sim_result fields before consuming
-    let pi = sim_result.pi.clone();
-    let exit_code = sim_result.exit_code;
+    // Clone some emul_result fields before consuming
+    let pi = emul_result.pi.clone();
+    let exit_code = emul_result.exit_code;
 
-    let zkvm_witness = generate_witness(&system_config, sim_result, &program);
+    let zkvm_witness = generate_witness(&system_config, emul_result, &program);
 
     // keygen
     let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
