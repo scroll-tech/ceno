@@ -276,6 +276,8 @@ dependencies = [
 name = "ceno_host"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "ceno_emul",
  "itertools 0.13.0",
  "rand",
  "rkyv",
