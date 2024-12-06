@@ -1,15 +1,19 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
+use ark_std::test_rng;
 use ceno_emul::{
     CENO_PLATFORM,
     InsnKind::{ADD, EANY},
-    PC_WORD_SIZE, Program, StepRecord, VMState,
+    PC_WORD_SIZE, Platform, Program, StepRecord, VMState,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use multilinear_extensions::{
+    mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
+};
 use transcript::Transcript;
 
 use crate::{
@@ -23,7 +27,8 @@ use crate::{
     },
     set_val,
     structs::{
-        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
+        PointAndEval, RAMType::Register, TowerProver, TowerProverSpec, ZKVMConstraintSystem,
+        ZKVMFixedTraces, ZKVMWitnesses,
     },
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
@@ -33,7 +38,8 @@ use super::{
     PublicValues,
     constants::{MAX_NUM_VARIABLES, NUM_FANIN},
     prover::ZKVMProver,
-    verifier::ZKVMVerifier,
+    utils::infer_tower_product_witness,
+    verifier::{TowerVerify, ZKVMVerifier},
 };
 
 struct TestConfig {
@@ -230,7 +236,7 @@ fn test_single_add_instance_e2e() {
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
 
-    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>();
+    let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
@@ -242,7 +248,7 @@ fn test_single_add_instance_e2e() {
         &(),
     );
 
-    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
+    zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &zkvm_cs,
         &prog_config,
         &program,
@@ -269,7 +275,7 @@ fn test_single_add_instance_e2e() {
         match kind {
             ADD => add_records.push(record),
             EANY => {
-                if record.rs1().unwrap().value == CENO_PLATFORM.ecall_halt() {
+                if record.rs1().unwrap().value == Platform::ecall_halt() {
                     halt_records.push(record);
                 }
             }
@@ -295,11 +301,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
         .unwrap();
     zkvm_witness
-        .assign_table_circuit::<ProgramTableCircuit<E, PROGRAM_SIZE>>(
-            &zkvm_cs,
-            &prog_config,
-            &program,
-        )
+        .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
     let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
@@ -314,4 +316,64 @@ fn test_single_add_instance_e2e() {
             .verify_proof(zkvm_proof, transcript)
             .expect("verify proof return with error"),
     );
+}
+
+/// test various product argument size, starting from minimal leaf size 2
+#[test]
+fn test_tower_proof_various_prod_size() {
+    fn _test_tower_proof_prod_size_2(leaf_layer_size: usize) {
+        let num_vars = ceil_log2(leaf_layer_size);
+        let mut rng = test_rng();
+        type E = GoldilocksExt2;
+        let mut transcript = Transcript::new(b"test_tower_proof");
+        let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)
+            .map(|_| E::random(&mut rng))
+            .collect_vec()
+            .into_mle()
+            .into();
+        let (first, second): (&[E], &[E]) = leaf_layer
+            .get_ext_field_vec()
+            .split_at(leaf_layer.evaluations().len() / 2);
+        let last_layer_splitted_fanin: Vec<ArcMultilinearExtension<E>> = vec![
+            first.to_vec().into_mle().into(),
+            second.to_vec().into_mle().into(),
+        ];
+        let layers = infer_tower_product_witness(num_vars, last_layer_splitted_fanin, 2);
+        let (rt_tower_p, tower_proof) = TowerProver::create_proof(
+            vec![TowerProverSpec {
+                witness: layers.clone(),
+            }],
+            vec![],
+            2,
+            &mut transcript,
+        );
+
+        let mut transcript = Transcript::new(b"test_tower_proof");
+        let (rt_tower_v, prod_point_and_eval, _, _) = TowerVerify::verify(
+            vec![
+                layers[0]
+                    .iter()
+                    .flat_map(|mle| mle.get_ext_field_vec().to_vec())
+                    .collect_vec(),
+            ],
+            vec![],
+            &tower_proof,
+            vec![num_vars],
+            2,
+            &mut transcript,
+        )
+        .unwrap();
+
+        assert_eq!(rt_tower_p, rt_tower_v);
+        assert_eq!(rt_tower_v.len(), num_vars);
+        assert_eq!(prod_point_and_eval.len(), 1);
+        assert_eq!(
+            leaf_layer.evaluate(&rt_tower_v),
+            prod_point_and_eval[0].eval
+        );
+    }
+
+    for leaf_layer_size in 1..10 {
+        _test_tower_proof_prod_size_2(1 << leaf_layer_size);
+    }
 }

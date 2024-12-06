@@ -42,8 +42,41 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
         ZKVMVerifier { vk }
     }
+
+    /// Verify a trace from start to halt.
     #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
+        &self,
+        vm_proof: ZKVMProof<E, PCS>,
+        transcript: Transcript<E>,
+    ) -> Result<bool, ZKVMError> {
+        self.verify_proof_halt(vm_proof, transcript, true)
+    }
+
+    /// Verify a trace from start to optional halt.
+    pub fn verify_proof_halt(
+        &self,
+        vm_proof: ZKVMProof<E, PCS>,
+        transcript: Transcript<E>,
+        does_halt: bool,
+    ) -> Result<bool, ZKVMError> {
+        // require ecall/halt proof to exist, depending whether we expect a halt.
+        let num_instances = vm_proof
+            .opcode_proofs
+            .get(&HaltInstruction::<E>::name())
+            .map(|(_, p)| p.num_instances)
+            .unwrap_or(0);
+        if num_instances != (does_halt as usize) {
+            return Err(ZKVMError::VerifyError(format!(
+                "ecall/halt num_instances={}, expected={}",
+                num_instances, does_halt as usize
+            )));
+        }
+
+        self.verify_proof_validity(vm_proof, transcript)
+    }
+
+    fn verify_proof_validity(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: Transcript<E>,
@@ -52,21 +85,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
-
-        // require ecall/halt proof to exist
-        {
-            if let Some((_, proof)) = vm_proof.opcode_proofs.get(&HaltInstruction::<E>::name()) {
-                if proof.num_instances != 1 {
-                    return Err(ZKVMError::VerifyError(
-                        "ecall/halt num_instances != 1".into(),
-                    ));
-                }
-            } else {
-                return Err(ZKVMError::VerifyError(
-                    "ecall/halt proof does not exist".into(),
-                ));
-            }
-        }
 
         let pi_evals = &vm_proof.pi_evals;
 
@@ -99,11 +117,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        for (_, (_, proof)) in vm_proof.opcode_proofs.iter() {
+        for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {
+            tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
         }
-        for (_, (_, proof)) in vm_proof.table_proofs.iter() {
+        for (name, (_, proof)) in vm_proof.table_proofs.iter() {
+            tracing::debug!("read {}'s commit", name);
             PCS::write_commitment(&proof.wits_commit, &mut transcript)
                 .map_err(ZKVMError::PCSError)?;
         }
@@ -113,7 +133,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::debug!("challenges: {:?}", challenges);
+        tracing::debug!("challenges in verifier: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
@@ -458,10 +478,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         tracing::debug!(
-            "[opcode {}] verify opening proof for {} polys at {:?}",
+            "[opcode {}] verify opening proof for {} polys",
             name,
             proof.wits_in_evals.len(),
-            input_opening_point
         );
         PCS::simple_batch_verify(
             vp,
@@ -520,7 +539,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 [num_vars, num_vars]
             }
             // dynamic: respect prover hint
-            SetTableAddrType::DynamicAddr => {
+            SetTableAddrType::DynamicAddr(_) => {
                 // check number of vars doesn't exceed max len defined in vk
                 // this is important to prevent address overlapping
                 assert!((1 << hint_num_vars) <= r.table_spec.len);
@@ -699,18 +718,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify dynamic address evaluation succinctly
         // TODO we can also skip their mpcs proof
         for r_table in cs.r_table_expressions.iter() {
-            match r_table.table_spec.addr_type {
+            match &r_table.table_spec.addr_type {
                 SetTableAddrType::FixedAddr => (),
-                SetTableAddrType::DynamicAddr => {
-                    let offset = r_table.table_spec.offset;
+                SetTableAddrType::DynamicAddr(spec) => {
                     let expected_eval = eval_wellform_address_vec(
-                        offset as u64,
+                        spec.offset as u64,
                         WORD_SIZE as u64,
                         &input_opening_point,
                     );
-                    if expected_eval
-                        != proof.wits_in_evals[r_table.table_spec.addr_witin_id.unwrap()]
-                    {
+                    if expected_eval != proof.wits_in_evals[spec.addr_witin_id] {
                         return Err(ZKVMError::VerifyError(
                             "dynamic addr evaluate != expected_evals".into(),
                         ));
@@ -753,12 +769,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         tracing::debug!(
-            "[table {}] verified opening proof for {} fixed polys at {:?}: values = {:?}, commit = {:?}",
+            "[table {}] verified opening proof for {} fixed polys",
             name,
             proof.fixed_in_evals.len(),
-            input_opening_point,
-            proof.fixed_in_evals,
-            circuit_vk.fixed_commit,
         );
 
         PCS::simple_batch_verify(
@@ -771,12 +784,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         )
         .map_err(ZKVMError::PCSError)?;
         tracing::debug!(
-            "[table {}] verified opening proof for {} polys at {:?}: values = {:?}, commit = {:?}",
+            "[table {}] verified opening proof for {} polys",
             name,
             proof.wits_in_evals.len(),
-            input_opening_point,
-            proof.wits_in_evals,
-            proof.wits_commit
         );
 
         Ok(input_opening_point)
@@ -831,22 +841,41 @@ impl TowerVerify {
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
         // out_j[rt] := (logup_q{j}[rt])
-        let initial_claim = izip!(prod_out_evals, alpha_pows.iter())
-            .map(|(evals, alpha)| evals.into_mle().evaluate(&initial_rt) * alpha)
-            .sum::<E>()
-            + izip!(logup_out_evals, alpha_pows[num_prod_spec..].chunks(2))
-                .map(|(evals, alpha)| {
-                    let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                    let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
-                    vec![p1, p2].into_mle().evaluate(&initial_rt) * alpha_numerator
-                        + vec![q1, q2].into_mle().evaluate(&initial_rt) * alpha_denominator
-                })
-                .sum::<E>();
 
-        // evaluation in the tower input layer
-        let mut prod_spec_input_layer_eval = vec![PointAndEval::default(); num_prod_spec];
-        let mut logup_spec_p_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
-        let mut logup_spec_q_input_layer_eval = vec![PointAndEval::default(); num_logup_spec];
+        // bookkeeping records of latest (point, evaluation) of each layer
+        // prod argument
+        let mut prod_spec_point_n_eval = prod_out_evals
+            .into_iter()
+            .map(|evals| {
+                PointAndEval::new(initial_rt.clone(), evals.into_mle().evaluate(&initial_rt))
+            })
+            .collect::<Vec<_>>();
+        // logup argument for p, q
+        let (mut logup_spec_p_point_n_eval, mut logup_spec_q_point_n_eval) = logup_out_evals
+            .into_iter()
+            .map(|evals| {
+                let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
+                (
+                    PointAndEval::new(
+                        initial_rt.clone(),
+                        vec![p1, p2].into_mle().evaluate(&initial_rt),
+                    ),
+                    PointAndEval::new(
+                        initial_rt.clone(),
+                        vec![q1, q2].into_mle().evaluate(&initial_rt),
+                    ),
+                )
+            })
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+        let initial_claim = izip!(&prod_spec_point_n_eval, &alpha_pows)
+            .map(|(point_n_eval, alpha)| point_n_eval.eval * alpha)
+            .sum::<E>()
+            + izip!(
+                interleave(&logup_spec_p_point_n_eval, &logup_spec_q_point_n_eval),
+                &alpha_pows[num_prod_spec..]
+            )
+            .map(|(point_n_eval, alpha)| point_n_eval.eval * alpha)
+            .sum::<E>();
 
         let max_num_variables = num_variables.iter().max().unwrap();
 
@@ -873,7 +902,6 @@ impl TowerVerify {
                     },
                     transcript,
                 );
-                tracing::debug!("verified tower proof at layer {}/{}", round + 1, max_num_variables-1);
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
@@ -937,7 +965,7 @@ impl TowerVerify {
                             .map(|(a, b)| *a * b)
                             .sum::<E>();
                             // this will keep update until round > evaluation
-                            prod_spec_input_layer_eval[spec_index] = PointAndEval::new(rt_prime.clone(), evals);
+                            prod_spec_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), evals);
                             if next_round < max_round -1 {
                                 *alpha * evals
                             } else {
@@ -970,8 +998,8 @@ impl TowerVerify {
                             .sum::<E>();
 
                             // this will keep update until round > evaluation
-                            logup_spec_p_input_layer_eval[spec_index] = PointAndEval::new(rt_prime.clone(), p_evals);
-                            logup_spec_q_input_layer_eval[spec_index] = PointAndEval::new(rt_prime.clone(), q_evals);
+                            logup_spec_p_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), p_evals);
+                            logup_spec_q_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), q_evals);
 
                             if next_round < max_round -1 {
                                 *alpha_numerator * p_evals + *alpha_denominator * q_evals
@@ -994,9 +1022,9 @@ impl TowerVerify {
 
         Ok((
             next_rt.point,
-            prod_spec_input_layer_eval,
-            logup_spec_p_input_layer_eval,
-            logup_spec_q_input_layer_eval,
+            prod_spec_point_n_eval,
+            logup_spec_p_point_n_eval,
+            logup_spec_q_point_n_eval,
         ))
     }
 }

@@ -3,5 +3,8 @@ target
 *.log
 log.txt
 logs/
+report.txt
+report.json
 table_cache_dev_*
 .DS_Store
+.env

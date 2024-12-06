@@ -1065,7 +1065,7 @@ where
                 curr_right += query.right_ext() * coeffs[*index];
             });
 
-            let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
+            let (x0, x1, w) = Spec::EncodingScheme::verifier_folding_coeffs(
                 vp,
                 num_vars + Spec::get_rate_log() - i - 1,
                 left_index >> 1,

@@ -8,13 +8,16 @@ use crate::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
         UINT_LIMBS,
     },
-    structs::{RAMType, ROMType},
+    structs::{ProgramParams, RAMType, ROMType},
     tables::InsnRecord,
 };
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
-        Self { cs }
+        Self::new_with_params(cs, ProgramParams::default())
+    }
+    pub fn new_with_params(cs: &'a mut ConstraintSystem<E>, params: ProgramParams) -> Self {
+        Self { cs, params }
     }
 
     pub fn create_witin<NR, N>(&mut self, name_fn: N) -> WitIn
@@ -321,7 +324,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         cb: impl FnOnce(&mut CircuitBuilder<E>) -> Result<T, ZKVMError>,
     ) -> Result<T, ZKVMError> {
         self.cs.namespace(name_fn, |cs| {
-            let mut inner_circuit_builder = CircuitBuilder::new(cs);
+            let mut inner_circuit_builder =
+                CircuitBuilder::new_with_params(cs, self.params.clone());
             cb(&mut inner_circuit_builder)
         })
     }

@@ -22,11 +22,11 @@ use transcript::{Challenge, Transcript, TranscriptSyncronized};
 use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
 
 use crate::{
-    entered_span, exit_span,
+    macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
     util::{
         AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
-        merge_sumcheck_polys_v2,
+        merge_sumcheck_polys_v2, serial_extrapolate,
     },
 };
 
@@ -35,7 +35,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
     /// This is experiment features. It's preferable that we move parallel level up more to
     /// "bould_poly" so it can be more isolation
-    #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys")]
+    #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys", level = "trace")]
     pub fn prove_batch_polys(
         max_thread_id: usize,
         mut polys: Vec<VirtualPolynomialV2<'a, E>>,
@@ -80,65 +80,65 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             })
             .collect::<Vec<_>>();
 
+        // spawn extra #(max_thread_id - 1) work threads
+        let num_worker_threads = max_thread_id - 1;
+        // whereas the main-thread be the last work thread
+        let main_thread_id = num_worker_threads;
+        let span = entered_span!("spawn loop", profiling_4 = true);
         let scoped_fn = |s: &Scope<'a>| {
-            // spawn extra #(max_thread_id - 1) work threads, whereas the main-thread be the last
-            // work thread
-            for (thread_id, poly) in polys.iter_mut().enumerate().take(max_thread_id - 1) {
+            for (thread_id, poly) in polys.iter_mut().enumerate().take(num_worker_threads) {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
                     mem::take(poly),
                     extrapolation_aux.clone(),
                 );
                 let tx_prover_state = tx_prover_state.clone();
                 let mut thread_based_transcript = thread_based_transcript.clone();
-                let current_span = tracing::Span::current();
-                // NOTE: Apply the span.in_scope(||) pattern to record work of spawned thread inside
-                // span of parent thread.
                 s.spawn(move |_| {
-                    current_span.in_scope(|| {
-                        let mut challenge = None;
-                        let span = entered_span!("prove_rounds");
-                        for _ in 0..num_variables {
-                            let prover_msg = IOPProverStateV2::prove_round_and_update_state(
-                                &mut prover_state,
-                                &challenge,
-                            );
-                            thread_based_transcript
-                                .append_field_element_exts(&prover_msg.evaluations);
+                    let mut challenge = None;
+                    // Note: This span is not nested into the "spawn loop" span, although lexically it looks so.
+                    // Nesting is possible, but then `tracing-forest` does the wrong thing when measuring duration.
+                    // TODO: investigate possibility of nesting with correct duration of parent span
+                    let span = entered_span!("prove_rounds", profiling_5 = true);
+                    for _ in 0..num_variables {
+                        let prover_msg = IOPProverStateV2::prove_round_and_update_state(
+                            &mut prover_state,
+                            &challenge,
+                        );
+                        thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
-                            challenge = Some(
-                                thread_based_transcript.get_and_append_challenge(b"Internal round"),
-                            );
-                            thread_based_transcript.commit_rolling();
-                        }
-                        exit_span!(span);
-                        // pushing the last challenge point to the state
-                        if let Some(p) = challenge {
-                            prover_state.challenges.push(p);
-                            // fix last challenge to collect final evaluation
-                            prover_state
-                                .poly
-                                .flattened_ml_extensions
-                                .iter_mut()
-                                .for_each(|mle| {
-                                    let mle = Arc::get_mut(mle).unwrap();
-                                    if mle.num_vars() > 0 {
-                                        mle.fix_variables_in_place(&[p.elements]);
-                                    }
-                                });
-                            tx_prover_state
-                                .send(Some((thread_id, prover_state)))
-                                .unwrap();
-                        } else {
-                            tx_prover_state.send(None).unwrap();
-                        }
-                    })
-                });
+                        challenge = Some(
+                            thread_based_transcript.get_and_append_challenge(b"Internal round"),
+                        );
+                        thread_based_transcript.commit_rolling();
+                    }
+                    exit_span!(span);
+                    // pushing the last challenge point to the state
+                    if let Some(p) = challenge {
+                        prover_state.challenges.push(p);
+                        // fix last challenge to collect final evaluation
+                        prover_state
+                            .poly
+                            .flattened_ml_extensions
+                            .iter_mut()
+                            .for_each(|mle| {
+                                let mle = Arc::get_mut(mle).unwrap();
+                                if mle.num_vars() > 0 {
+                                    mle.fix_variables_in_place(&[p.elements]);
+                                }
+                            });
+                        tx_prover_state
+                            .send(Some((thread_id, prover_state)))
+                            .unwrap();
+                    } else {
+                        tx_prover_state.send(None).unwrap();
+                    }
+                })
             }
+            exit_span!(span);
 
             let mut prover_msgs = Vec::with_capacity(num_variables);
-            let thread_id = max_thread_id - 1;
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
-                mem::take(&mut polys[thread_id]),
+                mem::take(&mut polys[main_thread_id]),
                 extrapolation_aux.clone(),
             );
             let tx_prover_state = tx_prover_state.clone();
@@ -152,13 +152,13 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
             for _ in 0..num_variables {
                 let prover_msg =
                     IOPProverStateV2::prove_round_and_update_state(&mut prover_state, &challenge);
-                thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
                 // for each round, we must collect #SIZE prover message
                 let mut evaluations = AdditiveVec::new(max_degree + 1);
 
                 // sum for all round poly evaluations vector
-                for _ in 0..max_thread_id {
+                evaluations += AdditiveVec(prover_msg.evaluations);
+                for _ in 0..num_worker_threads {
                     let round_poly_coeffs = thread_based_transcript.read_field_element_exts();
                     evaluations += AdditiveVec(round_poly_coeffs);
                 }
@@ -167,7 +167,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                 transcript.append_field_element_exts(&evaluations.0);
 
                 let next_challenge = transcript.get_and_append_challenge(b"Internal round");
-                (0..max_thread_id).for_each(|_| {
+                (0..num_worker_threads).for_each(|_| {
                     thread_based_transcript.send_challenge(next_challenge.elements);
                 });
 
@@ -177,8 +177,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     evaluations: evaluations.0,
                 });
 
-                challenge =
-                    Some(thread_based_transcript.get_and_append_challenge(b"Internal round"));
+                challenge = Some(next_challenge);
                 thread_based_transcript.commit_rolling();
             }
             exit_span!(main_thread_span);
@@ -210,7 +209,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                         }
                     });
                 tx_prover_state
-                    .send(Some((thread_id, prover_state)))
+                    .send(Some((main_thread_id, prover_state)))
                     .unwrap();
             } else {
                 tx_prover_state.send(None).unwrap();
@@ -555,11 +554,10 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
 
                 let span = entered_span!("extrapolation");
                 let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
-                    .into_par_iter()
                     .map(|i| {
                         let (points, weights) = &self.extrapolation_aux[products.len() - 1];
                         let at = E::from((products.len() + 1 + i) as u64);
-                        extrapolate(points, weights, &sum, &at)
+                        serial_extrapolate(points, weights, &sum, &at)
                     })
                     .collect::<Vec<_>>();
                 sum.extend(extrapolation);
