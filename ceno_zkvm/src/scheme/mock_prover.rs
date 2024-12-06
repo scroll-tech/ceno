@@ -746,7 +746,7 @@ Hints:
     }
 
     pub fn assert_satisfied_full(
-        cs: ZKVMConstraintSystem<E>,
+        cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
         pi: &PublicValues<u32>,
