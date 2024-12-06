@@ -19,9 +19,11 @@ criterion_group! {
 criterion_main!(fibonacci);
 
 const NUM_SAMPLES: usize = 10;
+type Pcs = BasefoldDefault<E>;
+type E = GoldilocksExt2;
 
-fn fibonacci_witness(c: &mut Criterion) {
-    type Pcs = BasefoldDefault<E>;
+// Relevant init data for fibonacci run
+fn setup() -> (Program, Platform, u32, u32) {
     let mut file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     file_path.push("examples/fibonacci.elf");
     let stack_size = 32768;
@@ -29,7 +31,6 @@ fn fibonacci_witness(c: &mut Criterion) {
     let elf_bytes = fs::read(&file_path).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
 
-    // use sp1 platform
     let platform = Platform {
         // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
         stack_top: 0x0020_0400,
@@ -40,16 +41,22 @@ fn fibonacci_witness(c: &mut Criterion) {
         ..CENO_PLATFORM
     };
 
+    (program, platform, stack_size, heap_size)
+}
+
+fn fibonacci_witness(c: &mut Criterion) {
+    let (program, platform, stack_size, heap_size) = setup();
+
     for max_steps in [1usize << 30] {
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("fibonacci_max_steps_{}", max_steps));
+        let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
         group.bench_function(
             BenchmarkId::new(
                 "fibonacci_witness",
-                format!("fibonacci_max_steps_{}", max_steps),
+                format!("fib_wit_max_steps_{}", max_steps),
             ),
             |b| {
                 b.iter_with_setup(
