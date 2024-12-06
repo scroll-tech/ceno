@@ -4,10 +4,11 @@
 #![feature(generic_arg_infer)]
 
 pub mod basic;
+mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
+pub use statistics::BasicTranscriptWitStat;
 pub use syncronized::TranscriptSyncronized;
-
 mod hasher;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
