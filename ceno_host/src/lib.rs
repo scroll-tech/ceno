@@ -60,7 +60,9 @@ impl CenoStdin {
     }
 }
 
-// TODO: clean up, don't copy and paste.
+// TODO(Matthias): much of this is copied from `test_elf.rs` in Ceno.  These are generally useful
+// functions, so we should make them available for both crates, instead of copy-and-pasting here.
+
 const WORD_SIZE: usize = 4;
 const INFO_OUT_ADDR: u32 = 0xC000_0000;
 
