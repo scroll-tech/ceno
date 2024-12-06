@@ -150,7 +150,7 @@ fn main() {
         args.heap_size,
         hints,
         max_steps,
-        Checkpoint::PreVerifying,
+        Checkpoint::PrepVerifying,
     )
     .into();
 

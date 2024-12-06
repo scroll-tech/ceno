@@ -65,13 +65,32 @@ fn bench_e2e(c: &mut Criterion) {
                             heap_size,
                             vec![],
                             max_steps,
-                            Checkpoint::PreProving,
+                            Checkpoint::PrepEmulToProving,
                         )
                         .into()
                     },
-                    |(prover, zkvm_witness, pi)| {
+                    |(
+                        program,
+                        max_steps,
+                        init_full_mem,
+                        platform,
+                        hints,
+                        system_config,
+                        pk,
+                        zkvm_fixed_traces,
+                    )| {
                         let timer = Instant::now();
-                        let _ = run_e2e_proof(prover, zkvm_witness, pi);
+
+                        let _ = run_e2e_proof(
+                            program,
+                            max_steps,
+                            init_full_mem,
+                            platform,
+                            hints,
+                            &system_config,
+                            pk,
+                            zkvm_fixed_traces,
+                        );
                         println!(
                             "Fibonacci::create_proof, max_steps = {}, time = {}",
                             max_steps,
