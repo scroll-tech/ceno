@@ -1,7 +1,3 @@
-// See `make_stdin` and `consume` for the main entry points, and how this would look
-// for the host and guest respectively for the user of our library.
-// Everything else in here would be hidden.
-
 use std::iter::zip;
 
 use anyhow::Result;
