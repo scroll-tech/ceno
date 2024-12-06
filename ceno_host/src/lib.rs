@@ -22,9 +22,7 @@ impl CenoStdin {
         &mut self,
         item: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
     ) -> Result<(), Error> {
-        let bytes = to_bytes::<Error>(item)?;
-        self.write_slice(bytes);
-        Ok(())
+        to_bytes::<Error>(item).map(|bytes| self.write_slice(bytes))
     }
 
     pub fn finalise(&self) -> Vec<u32> {
