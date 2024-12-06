@@ -13,8 +13,6 @@ pub struct CenoStdin {
     pub items: Vec<AlignedVec>,
 }
 
-pub struct SerialisedCenoStdin(pub AlignedVec);
-
 impl CenoStdin {
     pub fn write_slice(&mut self, bytes: AlignedVec) {
         self.items.push(bytes);
