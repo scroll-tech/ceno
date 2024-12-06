@@ -1279,9 +1279,9 @@ checksum = "bda66fc9667c18cb2758a2ac84d1167245054bcf85d5d1aaa6923f45801bdd02"
 
 [[package]]
 name = "plonky2"
-version = "0.2.2"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85f26b090b989aebdeaf6a4eed748c1fbcabf67e7273a22e4e0c877b63846d0f"
+checksum = "5f856aea4c9a5a8632f310cd830005e612c563391a4cdb33d34c7f523edf1dc8"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1304,9 +1304,9 @@ dependencies = [
 
 [[package]]
 name = "plonky2_field"
-version = "0.2.2"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a1dca60ad900d81b1fe2df3d0b88d43345988e2935e6709176e96573f4bcf5d"
+checksum = "b3ddfe8817d0c5c2d4557979c51c5253dab1b555ecc19833e5b7ea7dd86f39b8"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -1320,18 +1320,18 @@ dependencies = [
 
 [[package]]
 name = "plonky2_maybe_rayon"
-version = "0.2.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ff44a90aaca13e10e7ddf8fab815ba1b404c3f7c3ca82aaf11c46beabaa923"
+checksum = "9e1e554181dc95243b8d9948ae7bae5759c7fb2502fed28f671f95ef38079406"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "plonky2_util"
-version = "0.2.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b16136f5f3019c1e83035af76cccddd56d789a5e2933306270185c3f99f12259"
+checksum = "c32c137808ca984ab2458b612b7eb0462d853ee041a3136e83d54b96074c7610"
 
 [[package]]
 name = "plotters"
