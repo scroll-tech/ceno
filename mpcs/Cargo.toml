@@ -32,7 +32,7 @@ serde.workspace = true
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-criterion.workspace = true
+criterion2.workspace = true
 
 [features]
 benchmark = ["parallel"]

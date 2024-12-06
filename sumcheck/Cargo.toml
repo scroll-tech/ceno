@@ -24,7 +24,7 @@ multilinear_extensions = { path = "../multilinear_extensions", features = ["para
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
-criterion.workspace = true
+criterion2.workspace = true
 
 [[bench]]
 harness = false

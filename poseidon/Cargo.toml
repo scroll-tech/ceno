@@ -10,7 +10,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-criterion.workspace = true
+criterion2.workspace = true
 ff.workspace = true
 goldilocks.workspace = true
 serde.workspace = true
