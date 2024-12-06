@@ -17,6 +17,6 @@ fn main() {
     println!("📜📜📜 Hello, World!");
     println!("🌏🌍🌎");
     println!("🚀🚀🚀");
-    println!("{msg}");
+    println!("This message is a hint: {msg}");
     println!("I know the factors for {product}.");
 }
