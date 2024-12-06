@@ -1,5 +1,5 @@
 use ceno_emul::CENO_PLATFORM;
-use ceno_host::CenoStdin;
+use ceno_host::{run, CenoStdin};
 
 // TODO(Matthias): much of this is copied from `test_elf.rs` in Ceno.  These are generally useful
 // functions, so we should make them available for importing from the library, instead of copying
@@ -14,7 +14,7 @@ fn main() {
     hints.write(&1997_u32).unwrap();
     hints.write(&1999_u32).unwrap();
 
-    let all_messages = ceno_host::run(CENO_PLATFORM, elf::ELF, &hints);
+    let all_messages = run(CENO_PLATFORM, elf::ELF, &hints);
 
     for msg in &all_messages {
         print!("{msg}");
