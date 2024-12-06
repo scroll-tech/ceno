@@ -138,15 +138,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let (witness, num_instances) = wits
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
-            if witness.is_empty() {
-                continue;
-            }
-            let wits_commit = commitments.remove(circuit_name).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
             let is_opcode_circuit = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
+            if is_opcode_circuit {
+                transcript.append_field_element(&E::BaseField::from(num_instances as u64));
+            }
+
+            if witness.is_empty() {
+                assert!(num_instances == 0);
+                continue;
+            }
+            let wits_commit = commitments.remove(circuit_name).unwrap();
 
             if is_opcode_circuit {
                 tracing::debug!(

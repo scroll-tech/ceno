@@ -140,43 +140,63 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let point_eval = PointAndEval::default();
         let mut transcripts = transcript.fork(self.vk.circuit_vks.len());
 
-        for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
-            let transcript = &mut transcripts[i];
+        // For each opcode, include the num_instances
+        // into its corresponding fork of the transcript.
+        for ((name, _), transcript) in self
+            .vk
+            .circuit_vks
+            .iter() // Sorted by key.
+            .zip_eq(transcripts.iter_mut())
+        {
+            // get num_instances from opcode proof
+            let opcode_result = vm_proof.opcode_proofs.get(name);
+            let num_instances = opcode_result.map(|(_, p)| p.num_instances).unwrap_or(0);
+            if opcode_result.is_some() {
+                transcript.append_field_element(&E::BaseField::from(num_instances as u64));
+            }
+        }
 
-            let circuit_vk = self
-                .vk
-                .circuit_vks
-                .get(&name)
-                .ok_or(ZKVMError::VKNotFound(name.clone()))?;
-            let _rand_point = self.verify_opcode_proof(
-                &name,
-                &self.vk.vp,
-                circuit_vk,
-                &opcode_proof,
-                pi_evals,
-                transcript,
-                NUM_FANIN,
-                &point_eval,
-                &challenges,
-            )?;
-            tracing::info!("verified proof for opcode {}", name);
+        for (name, (i, opcode_proof)) in &vm_proof.opcode_proofs {
+            let transcript = &mut transcripts[*i];
+            let num_instances = opcode_proof.num_instances;
 
-            // getting the number of dummy padding item that we used in this opcode circuit
-            let num_lks = circuit_vk.get_cs().lk_expressions.len();
-            let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
-            let num_padded_instance =
-                next_pow2_instance_padding(opcode_proof.num_instances) - opcode_proof.num_instances;
-            dummy_table_item_multiplicity += num_padded_lks_per_instance
-                * opcode_proof.num_instances
-                + num_lks.next_power_of_two() * num_padded_instance;
+            if num_instances != 0 {
+                let opcode_proof = &vm_proof.opcode_proofs.get(name).unwrap().1;
+                let circuit_vk = self
+                    .vk
+                    .circuit_vks
+                    .get(name)
+                    .ok_or(ZKVMError::VKNotFound(name.clone()))?;
+                let _rand_point = self.verify_opcode_proof(
+                    name,
+                    &self.vk.vp,
+                    circuit_vk,
+                    opcode_proof,
+                    pi_evals,
+                    transcript,
+                    NUM_FANIN,
+                    &point_eval,
+                    &challenges,
+                )?;
+                tracing::info!("verified proof for opcode {}", name);
 
-            prod_r *= opcode_proof.record_r_out_evals.iter().product::<E>();
-            prod_w *= opcode_proof.record_w_out_evals.iter().product::<E>();
+                // getting the number of dummy padding item that we used in this opcode circuit
+                let num_lks = circuit_vk.get_cs().lk_expressions.len();
+                let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
+                let num_padded_instance = next_pow2_instance_padding(opcode_proof.num_instances)
+                    - opcode_proof.num_instances;
+                dummy_table_item_multiplicity += num_padded_lks_per_instance
+                    * opcode_proof.num_instances
+                    + num_lks.next_power_of_two() * num_padded_instance;
 
-            logup_sum +=
-                opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.invert().unwrap();
-            logup_sum +=
-                opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.invert().unwrap();
+                prod_r *= opcode_proof.record_r_out_evals.iter().product::<E>();
+                prod_w *= opcode_proof.record_w_out_evals.iter().product::<E>();
+
+                logup_sum +=
+                    opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.invert().unwrap();
+                logup_sum +=
+                    opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.invert().unwrap();
+            }
         }
 
         for (name, (i, table_proof)) in vm_proof.table_proofs {
