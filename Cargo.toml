@@ -1,15 +1,16 @@
 [workspace]
 exclude = ["guest"]
-members = [
-  "elf",
-  "host",
-]
+members = ["elf", "host"]
 resolver = "2"
 
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
+readme = "README.markdown"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+repository = "https://github.com/scroll-tech/ceno"
 
 [profile.dev]
 lto = "thin"

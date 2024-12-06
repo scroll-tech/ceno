@@ -71,7 +71,7 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "elf"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "elf"
@@ -98,7 +98,7 @@ dependencies = [
  "anyhow",
  "ceno_emul",
  "ceno_host",
- "elf 0.0.0",
+ "elf 0.1.0",
 ]
 
 [[package]]

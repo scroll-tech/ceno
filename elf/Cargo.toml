@@ -2,3 +2,9 @@
 description = "Build scripts for ceno examples"
 name = "elf"
 edition = "2021"
+version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
