@@ -11,9 +11,9 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+ceno_emul = { path = "../ceno_emul" }
 itertools.workspace = true
 rkyv = { version = "0.8.9", default-features = false, features = ["alloc", "bytecheck"] }
-ceno_emul = { path = "../ceno_emul" }
 
 [dev-dependencies]
 rand.workspace = true
