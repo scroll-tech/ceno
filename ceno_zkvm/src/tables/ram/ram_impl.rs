@@ -296,7 +296,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        let addr = cb.create_witin(|| "addr");
+        /// let addr = cb.create_witin(|| "addr");
+        let addr = cb.create_structural_witin(|| addr);
 
         let final_v = (0..DVRAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))

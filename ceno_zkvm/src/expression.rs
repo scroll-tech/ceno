@@ -25,6 +25,9 @@ use crate::{
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
+    /// StructWitness(StructWitnessId)
+    /// same as witin, but it's structual witness and be evaluated by verifier succinctly.
+    StructuralWitness(WitnessId),
     /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values

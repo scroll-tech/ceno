@@ -235,6 +235,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
+    structual_witnesses: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E; N],
@@ -243,6 +244,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
+        |witness_id| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> =

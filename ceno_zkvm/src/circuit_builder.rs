@@ -106,9 +106,11 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
-    // pub platform: Platform,
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
+
+    pub num_structural_witin: WitnessId,
+    pub num_structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
