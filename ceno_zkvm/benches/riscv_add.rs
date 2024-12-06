@@ -95,6 +95,11 @@ fn bench_add(c: &mut Criterion) {
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,
                         ];
+                        println!(
+                            "AddInstruction::batch_commit_and_write, instance_num_vars = {}, time = {}",
+                            instance_num_vars,
+                            timer.elapsed().as_secs_f64()
+                        );
 
                         let _ = prover
                             .create_opcode_proof(
