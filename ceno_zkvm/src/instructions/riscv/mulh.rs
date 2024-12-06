@@ -90,9 +90,12 @@ use crate::{
     expression::Expression,
     gadgets::{IsEqualConfig, Signed},
     instructions::{
+        Instruction,
         riscv::{
-            constants::{UInt, BIT_WIDTH}, r_insn::RInstructionConfig, RIVInstruction
-        }, Instruction
+            RIVInstruction,
+            constants::{BIT_WIDTH, UInt},
+            r_insn::RInstructionConfig,
+        },
     },
     uint::Value,
     utils::i64_to_base,
