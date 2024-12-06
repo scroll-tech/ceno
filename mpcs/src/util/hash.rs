@@ -9,7 +9,7 @@ use poseidon::poseidon::Poseidon;
 
 pub fn write_digest_to_transcript<E: ExtensionField>(
     digest: &Digest<E::BaseField>,
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
 ) {
     digest
         .0

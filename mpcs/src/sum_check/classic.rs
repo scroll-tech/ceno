@@ -186,7 +186,7 @@ pub trait ClassicSumCheckProver<E: ExtensionField>: Clone + Debug {
 pub trait ClassicSumCheckRoundMessage<E: ExtensionField>: Sized + Debug {
     type Auxiliary: Default;
 
-    fn write(&self, transcript: &mut Transcript<E>) -> Result<(), Error>;
+    fn write(&self, transcript: &mut impl Transcript<E>) -> Result<(), Error>;
 
     fn sum(&self) -> E;
 
@@ -234,7 +234,7 @@ where
         num_vars: usize,
         virtual_poly: VirtualPolynomial<E>,
         sum: E,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(Vec<E>, Vec<E>, SumcheckProof<E, Self::RoundMessage>), Error> {
         let _timer = start_timer!(|| {
             let degree = virtual_poly.expression.degree();
@@ -290,7 +290,7 @@ where
         degree: usize,
         sum: E,
         proof: &SumcheckProof<E, P::RoundMessage>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(E, Vec<E>), Error> {
         let (msgs, challenges) = {
             let mut msgs = Vec::with_capacity(num_vars);
@@ -321,7 +321,7 @@ mod tests {
         sum_check::eq_xy_eval,
         util::{arithmetic::inner_product, expression::Query, poly_iter_ext},
     };
-    use transcript::Transcript;
+    use transcript::BasicTranscript;
 
     use super::*;
     use goldilocks::{Goldilocks as Fr, GoldilocksExt2 as E};
@@ -368,7 +368,7 @@ mod tests {
                 &build_eq_x_r_vec(&points[1]),
             ) * Fr::from(4)
                 * Fr::from(2); // The third polynomial is summed twice because the hypercube is larger
-        let mut transcript = Transcript::<E>::new(b"sumcheck");
+        let mut transcript = BasicTranscript::<E>::new(b"sumcheck");
         let (challenges, evals, proof) =
             <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::prove(
                 &(),
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(polys[1].evaluate(&challenges), evals[1]);
         assert_eq!(polys[2].evaluate(&challenges[..1]), evals[2]);
 
-        let mut transcript = Transcript::<E>::new(b"sumcheck");
+        let mut transcript = BasicTranscript::<E>::new(b"sumcheck");
 
         let (new_sum, verifier_challenges) = <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<
             E,
@@ -400,7 +400,7 @@ mod tests {
                 + evals[2] * eq_xy_eval(&points[1], &challenges[..1]) * Fr::from(4)
         );
 
-        let mut transcript = Transcript::<E>::new(b"sumcheck");
+        let mut transcript = BasicTranscript::<E>::new(b"sumcheck");
 
         <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::verify(
             &(),

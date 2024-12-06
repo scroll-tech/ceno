@@ -62,7 +62,7 @@ where
         num_vars: usize,
         virtual_poly: VirtualPolynomial<E>,
         sum: E,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<SumCheckProverOutput<E, Self>, Error>;
 
     fn verify(
@@ -71,7 +71,7 @@ where
         degree: usize,
         sum: E,
         proof: &SumcheckProof<E, Self::RoundMessage>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(E, Vec<E>), Error>;
 }
 

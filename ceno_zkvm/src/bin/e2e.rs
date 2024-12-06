@@ -14,7 +14,7 @@ use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]

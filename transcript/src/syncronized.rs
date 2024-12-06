@@ -2,9 +2,9 @@ use std::array;
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+// use goldilocks::SmallField;
 
-use crate::Challenge;
+use crate::{Challenge, Transcript};
 
 #[derive(Clone)]
 pub struct TranscriptSyncronized<E: ExtensionField> {
@@ -42,36 +42,24 @@ impl<E: ExtensionField> TranscriptSyncronized<E> {
     }
 }
 
-impl<E: ExtensionField> TranscriptSyncronized<E> {
-    // Append the message to the transcript.
-    pub fn append_message(&mut self, msg: &[u8]) {
-        let msg_f = E::BaseField::bytes_to_field_elements(msg);
-        self.bf_append_tx[self.rolling_index].send(msg_f).unwrap();
-    }
-
-    pub fn append_field_element_ext(&mut self, element: &E) {
-        self.ef_append_tx[self.rolling_index]
-            .send(vec![*element])
-            .unwrap();
-    }
-
-    pub fn append_field_element_exts(&mut self, element: &[E]) {
-        self.ef_append_tx[self.rolling_index]
-            .send(element.to_vec())
-            .unwrap();
-    }
-
-    pub fn append_field_element(&mut self, element: &E::BaseField) {
+impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
+    fn append_field_element(&mut self, element: &E::BaseField) {
         self.bf_append_tx[self.rolling_index]
             .send(vec![*element])
             .unwrap();
     }
 
-    pub fn append_challenge(&mut self, _challenge: Challenge<E>) {
+    fn append_field_element_exts(&mut self, element: &[E]) {
+        self.ef_append_tx[self.rolling_index]
+            .send(element.to_vec())
+            .unwrap();
+    }
+
+    fn append_challenge(&mut self, _challenge: Challenge<E>) {
         unimplemented!()
     }
 
-    pub fn get_and_append_challenge(&mut self, _label: &'static [u8]) -> Challenge<E> {
+    fn get_and_append_challenge(&mut self, _label: &'static [u8]) -> Challenge<E> {
         Challenge {
             elements: self.challenge_rx[self.rolling_index].recv().unwrap(),
         }
@@ -91,29 +79,25 @@ impl<E: ExtensionField> TranscriptSyncronized<E> {
         // }
     }
 
-    pub fn read_field_element_ext(&self) -> E {
-        self.ef_append_rx[self.rolling_index].recv().unwrap()[0]
-    }
-
-    pub fn read_field_element_exts(&self) -> Vec<E> {
+    fn read_field_element_exts(&self) -> Vec<E> {
         self.ef_append_rx[self.rolling_index].recv().unwrap()
     }
 
-    pub fn read_field_element(&self) -> E::BaseField {
+    fn read_field_element(&self) -> E::BaseField {
         self.bf_append_rx[self.rolling_index].recv().unwrap()[0]
     }
 
-    pub fn read_challenge(&self, _challenge: Challenge<E>) {
+    fn read_challenge(&mut self) -> Challenge<E> {
         unimplemented!()
     }
 
-    pub fn send_challenge(&self, challenge: E) {
+    fn send_challenge(&self, challenge: E) {
         self.challenge_tx[self.rolling_index]
             .send(challenge)
             .unwrap();
     }
 
-    pub fn commit_rolling(&mut self) {
+    fn commit_rolling(&mut self) {
         self.rolling_index = (self.rolling_index + 1) % 2
     }
 }

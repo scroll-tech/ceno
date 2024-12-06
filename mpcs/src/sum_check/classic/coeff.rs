@@ -37,7 +37,7 @@ pub struct Coefficients<E: ExtensionField>(FieldType<E>);
 impl<E: ExtensionField> ClassicSumCheckRoundMessage<E> for Coefficients<E> {
     type Auxiliary = ();
 
-    fn write(&self, transcript: &mut Transcript<E>) -> Result<(), Error> {
+    fn write(&self, transcript: &mut impl Transcript<E>) -> Result<(), Error> {
         match &self.0 {
             FieldType::Ext(coeffs) => transcript.append_field_element_exts(coeffs),
             FieldType::Base(coeffs) => coeffs

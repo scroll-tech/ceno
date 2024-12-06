@@ -16,7 +16,7 @@ use multilinear_extensions::{
     util::max_usable_threads,
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2 as VirtualPolynomial},
 };
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 
 criterion_group!(benches, sumcheck_fn, devirgo_sumcheck_fn,);
 criterion_main!(benches);

@@ -13,7 +13,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         claimed_sum: E,
         proof: &IOPProof<E>,
         aux_info: &VPAuxInfo<E>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> SumCheckSubClaim<E> {
         if aux_info.num_variables == 0 {
             return SumCheckSubClaim {
@@ -66,7 +66,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
     pub(crate) fn verify_round_and_update_state(
         &mut self,
         prover_msg: &IOPProverMessage<E>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Challenge<E> {
         let start =
             start_timer!(|| format!("sum check verify {}-th round and update state", self.round));

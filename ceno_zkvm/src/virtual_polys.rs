@@ -177,7 +177,7 @@ mod tests {
         virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
     };
     use sumcheck::structs::{IOPProverStateV2, IOPVerifierState};
-    use transcript::Transcript;
+    use transcript::BasicTranscript as Transcript;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},

@@ -15,7 +15,7 @@ use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
@@ -87,7 +87,7 @@ fn bench_add(c: &mut Criterion) {
                     |wits_in| {
                         let timer = Instant::now();
                         let num_instances = 1 << instance_num_vars;
-                        let mut transcript = Transcript::new(b"riscv");
+                        let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
                             Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
                                 .unwrap();
