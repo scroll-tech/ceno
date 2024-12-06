@@ -1,0 +1,12 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "ceno_host"
+version.workspace = true
+
+[dependencies]
+itertools.workspace = true
+rkyv = { version = "0.8.9", default-features = false, features = ["alloc", "bytecheck"] }
+
+[dev-dependencies]
+rand.workspace = true

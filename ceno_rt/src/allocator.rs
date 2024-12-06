@@ -1,6 +1,8 @@
 //! A bump allocator.
 //! Based on https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html
 
+// Plan: do the same memory trickery as for the allocator.
+
 use core::alloc::{GlobalAlloc, Layout};
 
 struct SimpleAllocator {

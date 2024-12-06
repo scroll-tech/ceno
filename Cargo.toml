@@ -2,14 +2,15 @@
 exclude = ["examples"]
 members = [
   "ceno_emul",
-  "examples-builder",
+  "ceno_host",
   "ceno_rt",
+  "ceno_zkvm",
+  "examples-builder",
   "mpcs",
   "multilinear_extensions",
+  "poseidon",
   "sumcheck",
   "transcript",
-  "ceno_zkvm",
-  "poseidon",
 ]
 resolver = "2"
 
