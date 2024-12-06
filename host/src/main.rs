@@ -1,13 +1,6 @@
 use ceno_emul::CENO_PLATFORM;
 use ceno_host::{CenoStdin, run};
 
-// TODO(Matthias): much of this is copied from `test_elf.rs` in Ceno.  These are generally useful
-// functions, so we should make them available for importing from the library, instead of copying
-// them here.
-//
-// So in the end, this file should just have a really simple main.
-// See how sproll-evm does it with SP1.
-
 fn main() {
     let mut hints = CenoStdin::default();
     hints.write(&"This is my hint string.".to_string()).unwrap();
