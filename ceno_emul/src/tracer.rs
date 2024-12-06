@@ -327,6 +327,9 @@ impl Tracer {
         self.record.pc.after = pc;
     }
 
+    // TODO(Matthias): this should perhaps record `DecodedInstruction`s instead
+    // of raw codes, or perhaps only the pc, because we can always look up the
+    // instruction in the program.
     pub fn fetch(&mut self, pc: WordAddr, value: Word) {
         self.record.pc.before = pc.baddr();
         self.record.insn_code = value;
