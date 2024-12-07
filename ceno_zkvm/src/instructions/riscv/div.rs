@@ -108,12 +108,12 @@ enum InternalDivRem<E: ExtensionField> {
     Signed {
         dividend_signed: Signed<E>,
         divisor_signed: Signed<E>,
+        quotient_signed: Signed<E>,
+        remainder_signed: Signed<E>,
         negative_division: WitIn,
         is_dividend_max_negative: IsEqualConfig,
         is_divisor_minus_one: IsEqualConfig,
         is_signed_overflow: WitIn,
-        quotient_signed: Signed<E>,
-        remainder_signed: Signed<E>,
         remainder_nonnegative: AssertLTConfig,
     },
 }
@@ -157,15 +157,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
         assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
-        
+
         let dividend = UInt::new_unchecked(|| "dividend", cb)?; // 32-bit value from rs1
         let divisor = UInt::new_unchecked(|| "divisor", cb)?; // 32-bit value from rs2
         let quotient = UInt::new(|| "quotient", cb)?;
         let remainder = UInt::new(|| "remainder", cb)?;
 
-        // `rem_e` and `div_e` are expressions verified to be nonnegative, which
-        // must be validated as either 0 <= rem_e < div_e, or div_e == 0 with
-        // appropriate divide by zero outputs
+        // `rem_e` and `div_e` are expressions representing the remainder and
+        // divisor from the signed or unsigned division operation, with signs
+        // renormalized to be nonnegative, so that correct values must satisfy
+        // either `0 <= rem_e < div_e` or `div_e == 0`.  The `rem_e` value
+        // should be constrained to be nonnegative before being returned from
+        // this block, while the checks `rem_e < div_e` or `div_e == 0` are
+        // done later.
         let (internal_config, rem_e, div_e) = match I::INST_KIND {
             InsnKind::DIVU | InsnKind::REMU => {
                 cb.require_equal(
@@ -182,8 +186,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     Signed::construct_circuit(cb, || "dividend_signed", &dividend)?;
                 let divisor_signed: Signed<E> =
                     Signed::construct_circuit(cb, || "divisor_signed", &divisor)?;
+                let quotient_signed: Signed<E> =
+                    Signed::construct_circuit(cb, || "quotient_signed", &quotient)?;
+                let remainder_signed: Signed<E> =
+                    Signed::construct_circuit(cb, || "remainder_signed", &quotient)?;
 
-                // quotient and remainder can be interpreted as non-positive
+                // The quotient and remainder can be interpreted as non-positive
                 // values when exactly one of dividend and divisor is negative
                 let neg_div_expr: Expression<E> = {
                     let a_neg = dividend_signed.is_negative.expr();
@@ -193,12 +201,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 };
                 let negative_division = cb.flatten_expr(|| "neg_division", neg_div_expr)?;
 
-                let quotient_signed: Signed<E> =
-                    Signed::construct_circuit(cb, || "quotient_signed", &quotient)?;
-                let remainder_signed: Signed<E> =
-                    Signed::construct_circuit(cb, || "remainder_signed", &quotient)?;
-
-                // check for signed division overflow: i32::MIN / -1
+                // Check for signed division overflow: i32::MIN / -1
                 let is_dividend_max_negative = IsEqualConfig::construct_circuit(
                     cb,
                     || "is_dividend_max_negative",
@@ -265,12 +268,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     InternalDivRem::Signed {
                         dividend_signed,
                         divisor_signed,
+                        quotient_signed,
+                        remainder_signed,
                         negative_division,
                         is_dividend_max_negative,
                         is_divisor_minus_one,
                         is_signed_overflow,
-                        quotient_signed,
-                        remainder_signed,
                         remainder_nonnegative,
                     },
                     remainder_pos_orientation,
