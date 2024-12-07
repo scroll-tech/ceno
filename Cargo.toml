@@ -33,7 +33,7 @@ itertools = "0.13"
 num-derive = "0.4"
 num-traits = "0.2"
 paste = "1"
-plonky2 = "0.2"
+plonky2 = "1"
 poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
