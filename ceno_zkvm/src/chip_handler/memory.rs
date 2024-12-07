@@ -9,8 +9,8 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 
-impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
-    for CircuitBuilder<'a, E>
+impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
+    for CircuitBuilder<'_, E>
 {
     fn memory_read(
         &mut self,
