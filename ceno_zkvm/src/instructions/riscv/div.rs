@@ -1,3 +1,72 @@
+//! Circuit implementations for DIVU, REMU, DIV, and REM RISC-V opcodes
+//!
+//! The signed and unsigned division and remainder opcodes are handled by
+//! simulating the division algorithm expression:
+//!
+//! `dividend = divisor * quotient + remainder` (1)
+//!
+//! where `remainder` is constrained to be between 0 and the divisor in a way
+//! that suitably respects signed values, except for the case of division by 0.
+//! Of particular note for this implememntation is the fact that in the
+//! Goldilocks field, the right hand side of (1) does not wrap around under
+//! modular arithmetic for either unsigned or signed 32-bit range-checked
+//! values of `divisor`, `quotient`, and `remainder`, taking values between `0`
+//! and `2^64 - 2^32` in the unsigned case, and between `-2^62` and `2^62 +
+//! 2^31 - 1` in the signed case.
+//!
+//! This means that in either the unsigned or the signed setting, equation
+//! (1) can be checked directly using native field expressions without
+//! ambiguity due to modular field arithmetic.
+//!
+//! The remainder of the complexity of this circuit comes about because of two
+//! edge cases in the opcodes: division by zero, and signed division overflow.
+//! For division by zero, equation (1) still holds, but an extra constraint is
+//! imposed on the value of `quotient` to be `u32::MAX` in the unsigned case,
+//! or `-1` in the unsigned case (the 32-bit vector with all 1s for both).
+//!
+//! Signed division overflow occurs when `dividend` is set to `i32::MIN
+//! = -2^31`, and `divisor` is set to `-1`.  In this case, the natural value of
+//! `quotient` is `2^31`, but this value cannot be properly represented as a
+//! signed 32-bit integer, so an error output must be enforced with `quotient =
+//! i32::MIN`, and `remainder = 0`.  In this one case, the proper RISC-V values
+//! for `dividend`, `divisor`, `quotient`, and `remainder` do not satisfy the
+//! division algorithm expression (1), so the proper values of `quotient` and
+//! `remainder` can be enforced by instead imposing the variant constraint
+//!
+//! `2^31 = divisor * quotient + remainder` (2)
+//!
+//! Once (1) or (2) is appropriately satisfied, an inequality condition is
+//! imposed on remainder, which varies depending on signs of the inputs.  In
+//! the case of unsigned inputs, this is just
+//!
+//! `0 <= remainder < divisor` (3)
+//!
+//! for signed inputs, the inequality is a little more complicated: for
+//! `dividend` and `divisor` with the same sign, quotient and remainder are
+//! non-negative, and we require
+//!
+//! `0 <= remainder < |divisor|` (4)
+//!
+//! When `dividend` and `divisor` have different signs, `quotient` and
+//! `remainder` are non-positive values, and we instead require
+//!
+//! `-|divisor| < remainder <= 0` (5)
+//!
+//! To handle these variations of the remainder inequalities in a uniform
+//! manner, we derive expressions representing the "positively oriented" values
+//! with signs set so that the inequalities are always of the form (3).  Note
+//! that it is not enough to just take absolute values, as this would allow
+//! values with an incorrect sign, e.g. for 10 divided by -6, one could witness
+//! `10 = -6 * 2 + 2` instead of the correct expression `10 = -6 * 1 - 4`.
+//!
+//! The inequality condition (5) is properly satisfied by `divisor` and the
+//! appropriate value of `remainder` in the case of signed division overflow,
+//! so no special treatment is needed in this case.  On the other hand, these
+//! inequalities cannot be satisfied when `divisor` is `0`, so we require that
+//! exactly one of `remainder < divisor` and `divisor = 0` holds.
+//! Specifically, since these conditions are expressed as 0/1-valued booleans,
+//! we require just that the sum of these booleans is equal to 1.
+
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -49,71 +118,6 @@ enum InternalDivRem<E: ExtensionField> {
     },
 }
 
-/// The signed and unsigned division and remainder opcodes are handled by
-/// simulating the division algorithm expression:
-///
-/// `dividend = divisor * quotient + remainder` (1)
-///
-/// where `remainder` is constrained to be between 0 and the divisor in a way
-/// that suitably respects signed values.  Of particular note is the fact that
-/// in the Goldilocks field, the right hand side of (1) does not wrap around
-/// under modular arithmetic for either unsigned or signed 32-bit range-checked
-/// values of `divisor`, `quotient`, and `remainder`, taking values between `0`
-/// and `2^64 - 2^32` in the unsigned case, and between `-2^62` and `2^62 +
-/// 2^31 - 1` in the signed case.
-///
-/// This means that in either the unsigned or the signed setting, equation
-/// (1) can be checked directly using native field expressions without
-/// ambiguity due to modular field arithmetic.
-///
-/// The remainder of the complexity of this circuit comes about because of two
-/// edge cases in the opcodes: division by zero, and signed division overflow.
-/// For division by zero, equation (1) still holds, but an extra constraint is
-/// imposed on the value of `quotient` to be `u32::MAX` in the unsigned case,
-/// or `-1` in the unsigned case (the 32-bit vector with all 1s for both).
-///
-/// Signed division overflow occurs when `dividend` is set to `i32::MIN
-/// = -2^31`, and `divisor` is set to `-1`.  In this case, the natural value of
-/// `quotient` is `2^31`, but this value cannot be properly represented as a
-/// signed 32-bit integer, so an error output must be enforced with `quotient =
-/// i32::MIN`, and `remainder = 0`.  In this one case, the proper RISC-V values
-/// for `dividend`, `divisor`, `quotient`, and `remainder` do not satisfy the
-/// division algorithm expression (1), so the proper values of `quotient` and
-/// `remainder` can be enforced by instead imposing the variant constraint
-///
-/// `2^31 = divisor * quotient + remainder` (2)
-///
-/// Once (1) or (2) is appropriately satisfied, an inequality condition is
-/// imposed on remainder, which varies depending on signs of the inputs.  In
-/// the case of unsigned inputs, this is just
-///
-/// `0 <= remainder < divisor` (3)
-///
-/// for signed inputs, the inequality is a little more complicated: for
-/// `dividend` and `divisor` with the same sign, quotient and remainder are
-/// non-negative, and we require
-///
-/// `0 <= remainder < |divisor|` (4)
-///
-/// When `dividend` and `divisor` have different signs, `quotient` and
-/// `remainder` are non-positive values, and we instead require
-///
-/// `-|divisor| < remainder <= 0` (5)
-///
-/// To handle these variations of the remainder inequalities in a uniform
-/// manner, we derive expressions representing the "positively oriented" values
-/// with signs set so that the inequalities are always of the form (3).  Note
-/// that it is not enough to just take absolute values, as this would allow
-/// values with an incorrect sign, e.g. for 10 divided by -6, one could witness
-/// `10 = -6 * 2 + 2` instead of the correct expression `10 = -6 * 1 - 4`.
-///
-/// The inequality condition (5) is properly satisfied by `divisor` and the
-/// appropriate value of `remainder` in the case of signed division overflow,
-/// so no special treatment is needed in this case.  On the other hand, these
-/// inequalities cannot be satisfied when `divisor` is `0`, so we require that
-/// exactly one of `remainder < divisor` and `divisor = 0` holds.
-/// Specifically, since these conditions are expressed as 0/1-valued booleans,
-/// we require just that the sum of these booleans is equal to 1.
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
 pub struct DivuOp;
@@ -148,8 +152,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        // quotient = dividend / divisor + remainder
-        // => dividend = divisor * quotient + remainder
+        // The soundness analysis for these constraints is only valid for
+        // 32-bit registers represented over the Goldilocks field, so verify
+        // these parameters
+        assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
+        assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
+        
         let dividend = UInt::new_unchecked(|| "dividend", cb)?; // 32-bit value from rs1
         let divisor = UInt::new_unchecked(|| "divisor", cb)?; // 32-bit value from rs2
         let quotient = UInt::new(|| "quotient", cb)?;
@@ -492,7 +500,7 @@ mod test {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             instructions::{
                 Instruction,
-                riscv::{constants::UInt, divu::DivuInstruction},
+                riscv::{constants::UInt, div::DivuInstruction},
             },
             scheme::mock_prover::{MOCK_PC_START, MockProver},
         };

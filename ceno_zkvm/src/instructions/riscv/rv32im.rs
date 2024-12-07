@@ -7,7 +7,7 @@ use crate::{
             branch::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
-            divu::{DivuInstruction, RemuInstruction, DivInstruction, RemInstruction},
+            div::{DivuInstruction, RemuInstruction, DivInstruction, RemInstruction},
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
