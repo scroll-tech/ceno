@@ -15,12 +15,13 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain, enumerate};
 use mpcs::PolynomialCommitmentScheme;
+use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
     time::Instant,
 };
-use transcript::BasicTranscript as Transcript;
+use transcript::{BasicTranscript as Transcript, BasicTranscriptWitStat as TranscriptWithStat, StatisticRecorder};
 
 type E2EWitnessGen<E, PCS> = (
     ZKVMProver<E, PCS>,
@@ -270,12 +271,15 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     exit_code: Option<u32>,
     max_steps: usize,
 ) {
-    let transcript = Transcript::new(b"riscv");
+    let stat_recorder = StatisticRecorder::new();
+    let transcript = TranscriptWithStat::new(stat_recorder.clone(), b"riscv");
     assert!(
         verifier
             .verify_proof_halt(zkvm_proof, transcript, exit_code.is_some())
             .expect("verify proof return with error"),
     );
+    println!("proof hashes count {}", stat_recorder.borrow().field_appended_num);
+
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),

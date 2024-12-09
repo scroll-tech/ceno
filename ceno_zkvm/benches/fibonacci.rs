@@ -7,7 +7,7 @@ use std::{
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{run_e2e_gen_witness, run_e2e_proof},
+    e2e::{run_e2e_gen_witness, run_e2e_proof, run_e2e_verify},
 };
 use criterion::*;
 
@@ -56,20 +56,30 @@ fn bench_e2e(c: &mut Criterion) {
                 format!("fibonacci_max_steps_{}", max_steps),
             ),
             |b| {
+                use itertools::Itertools;
+                let mut iter_verifier = Option::<_>::None;
+                let mut iter_proof = Option::<_>::None;
+
                 b.iter_with_setup(
                     || {
-                        run_e2e_gen_witness::<E, Pcs>(
+                        let (prover, verifier, zkvm_witness, pi, _, _, _) = run_e2e_gen_witness::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             stack_size,
                             heap_size,
                             vec![],
                             max_steps,
-                        )
+                        );
+
+                        iter_verifier.replace(verifier);
+                        (prover, zkvm_witness, pi)
                     },
-                    |(prover, _, zkvm_witness, pi, _, _, _)| {
+                    |(prover, zkvm_witness, pi)| {
                         let timer = Instant::now();
-                        let _ = run_e2e_proof(prover, zkvm_witness, pi);
+                        let proof = run_e2e_proof(prover, zkvm_witness, pi);
+                        if iter_proof.is_none() {
+                            iter_proof.replace(proof);
+                        }
                         println!(
                             "Fibonacci::create_proof, max_steps = {}, time = {}",
                             max_steps,
@@ -77,6 +87,13 @@ fn bench_e2e(c: &mut Criterion) {
                         );
                     },
                 );
+
+                for (proof, verifier) in iter_proof.into_iter().zip_eq(iter_verifier) {
+                    let serialize_size = bincode::serialize(&proof).unwrap().len();
+                    println!("proof size {}", serialize_size);
+                    run_e2e_verify(&verifier, proof, None, 0);
+                }
+                
             },
         );
 
