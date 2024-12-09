@@ -241,7 +241,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
-    lk_mlts: BTreeMap<String, LkMultiplicity>,
+    lk_mlts: BTreeMap<String, Vec<LkMultiplicity>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
@@ -284,18 +284,27 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let mut combined_lk_mlt = vec![];
         let keys = self.lk_mlts.keys().cloned().collect_vec();
         for name in keys {
-            let lk_mlt = self.lk_mlts.remove(&name).unwrap().into_finalize_result();
-            if combined_lk_mlt.is_empty() {
-                combined_lk_mlt = lk_mlt.to_vec();
-            } else {
-                combined_lk_mlt
-                    .iter_mut()
-                    .zip_eq(lk_mlt.iter())
-                    .for_each(|(m1, m2)| {
-                        for (key, value) in m2 {
-                            *m1.entry(*key).or_insert(0) += value;
-                        }
-                    });
+            let lk_mlt_vec = self
+                .lk_mlts
+                .remove(&name)
+                .unwrap()
+                .into_iter()
+                .map(|lkm| lkm.into_finalize_result())
+                .collect_vec();
+
+            for lk_mlt in lk_mlt_vec {
+                if combined_lk_mlt.is_empty() {
+                    combined_lk_mlt = lk_mlt.to_vec();
+                } else {
+                    combined_lk_mlt
+                        .iter_mut()
+                        .zip_eq(lk_mlt.iter())
+                        .for_each(|(m1, m2)| {
+                            for (key, value) in m2 {
+                                *m1.entry(*key).or_insert(0) += value;
+                            }
+                        });
+                }
             }
         }
 
