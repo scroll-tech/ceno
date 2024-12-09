@@ -547,46 +547,22 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
     )
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
-    for EmulToProvingArgs<E, PCS>
-{
-    fn from(value: CheckpointOutput<E, PCS>) -> Self {
-        match value {
-            CheckpointOutput::PrepEmulToProving(inner) => inner,
-            _ => panic!("attempted to unpack proving args from wrong prefix"),
+macro_rules! impl_from_checkpoint_output {
+    ($target:ty, $variant:ident) => {
+        impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
+            for $target
+        {
+            fn from(value: CheckpointOutput<E, PCS>) -> Self {
+                match value {
+                    CheckpointOutput::$variant(inner) => inner,
+                    _ => panic!("attempted to unpack proving args from wrong prefix"),
+                }
+            }
         }
-    }
+    };
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
-    for ProvingArgs<E, PCS>
-{
-    fn from(value: CheckpointOutput<E, PCS>) -> Self {
-        match value {
-            CheckpointOutput::PrepProving(inner) => inner,
-            _ => panic!("attempted to unpack proving args from wrong prefix"),
-        }
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
-    for WitnessGenArgs<E>
-{
-    fn from(value: CheckpointOutput<E, PCS>) -> Self {
-        match value {
-            CheckpointOutput::PrepWitnessGen(inner) => inner,
-            _ => panic!("attempted to unpack proving args from wrong prefix"),
-        }
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
-    for VerifyingArgs<E, PCS>
-{
-    fn from(value: CheckpointOutput<E, PCS>) -> Self {
-        match value {
-            CheckpointOutput::PrepVerifying(inner) => inner,
-            _ => panic!("attempted to unpack verifying args from wrong prefix"),
-        }
-    }
-}
+impl_from_checkpoint_output!(EmulToProvingArgs<E, PCS>, PrepEmulToProving);
+impl_from_checkpoint_output!(ProvingArgs<E, PCS>, PrepProving);
+impl_from_checkpoint_output!(WitnessGenArgs<E>, PrepWitnessGen);
+impl_from_checkpoint_output!(VerifyingArgs<E, PCS>, PrepVerifying);
