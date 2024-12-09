@@ -58,15 +58,6 @@ pub trait Transcript<E: ExtensionField> {
         self.append_field_element_ext(&challenge.elements)
     }
 
-    // // Append the message to the transcript.
-    // pub fn append_serializable_element<S: Serialize>(
-    //     &mut self,
-    //     _label: &'static [u8],
-    //     _element: &S,
-    // ) {
-    //     unimplemented!()
-    // }
-
     /// Generate the challenge from the current transcript
     /// and append it to the transcript.
     ///
@@ -89,9 +80,7 @@ pub trait Transcript<E: ExtensionField> {
 
     fn send_challenge(&self, challenge: E);
 
-    fn commit_rolling(&mut self) {
-        // do nothing
-    }
+    fn commit_rolling(&mut self);
 }
 
 /// Forkable Transcript trait, enable fork method

@@ -48,6 +48,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     fn send_challenge(&self, _challenge: E) {
         unimplemented!()
     }
+
+    fn commit_rolling(&mut self) {
+        // do nothing
+    }
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}
