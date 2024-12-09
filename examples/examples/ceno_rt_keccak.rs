@@ -1,3 +1,7 @@
+//! Compute the Keccak permutation using a syscall.
+//!
+//! Iterate multiple times and log the state after each iteration.
+
 #![no_main]
 #![no_std]
 extern crate ceno_rt;

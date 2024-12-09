@@ -75,11 +75,12 @@ fn test_ceno_rt_io() -> Result<()> {
 }
 
 #[test]
-fn test_ceno_rt_syscalls() -> Result<()> {
-    let program_elf = ceno_examples::ceno_rt_syscalls;
+fn test_ceno_rt_keccak() -> Result<()> {
+    let program_elf = ceno_examples::ceno_rt_keccak;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
     let _steps = run(&mut state)?;
 
+    // Expect the program to have written successive states between Keccak permutations.
     const ITERATIONS: usize = 3;
     let keccak_outs = sample_keccak_f(ITERATIONS);
 
