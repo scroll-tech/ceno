@@ -34,7 +34,7 @@ pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     comm: &BasefoldCommitmentWithData<E>,
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
@@ -180,7 +180,7 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     comms: &[BasefoldCommitmentWithData<E>],
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
     coeffs: &[E],
@@ -351,7 +351,7 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     point: &[E],
     batch_coeffs: &[E],
     comm: &BasefoldCommitmentWithData<E>,
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)

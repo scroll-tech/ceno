@@ -136,6 +136,7 @@ mod test {
 
     use super::*;
     use crate::{
+        chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
         scheme::mock_prover::{MOCK_PC_START, MockProver},
@@ -143,177 +144,68 @@ mod test {
 
     #[test]
     fn test_opcode_add() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "add",
-                |cb| {
-                    let config = AddInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    11,
-                    0xfffffffe,
-                    Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
-                    0,
-                ),
-            ])
-            .unwrap();
-
-        let expected_rd_written = UInt::from_const_unchecked(
-            Value::new_unchecked(11_u32.wrapping_add(0xfffffffe))
-                .as_u16_limbs()
-                .to_vec(),
-        );
-
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    #[test]
-    fn test_opcode_add_overflow() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "add",
-                |cb| {
-                    let config = AddInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            AddInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    u32::MAX - 1,
-                    u32::MAX - 1,
-                    Change::new(0, (u32::MAX - 1).wrapping_add(u32::MAX - 1)),
-                    0,
-                ),
-            ])
-            .unwrap();
-
-        let expected_rd_written = UInt::from_const_unchecked(
-            Value::new_unchecked((u32::MAX - 1).wrapping_add(u32::MAX - 1))
-                .as_u16_limbs()
-                .to_vec(),
-        );
-
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        verify::<AddOp>("basic", 11, 2);
+        verify::<AddOp>("0 + 0", 0, 0);
+        verify::<AddOp>("0 + 1", 0, 1);
+        verify::<AddOp>("u16::MAX", u16::MAX as u32, 2);
+        verify::<AddOp>("overflow: u32::MAX", u32::MAX - 1, 2);
+        verify::<AddOp>("overflow: u32::MAX x 2", u32::MAX - 1, u32::MAX - 1);
     }
 
     #[test]
     fn test_opcode_sub() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "sub",
-                |cb| {
-                    let config = SubInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
-        let (raw_witin, lkm) =
-            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    11,
-                    2,
-                    Change::new(0, 11_u32.wrapping_sub(2)),
-                    0,
-                ),
-            ])
-            .unwrap();
-
-        let expected_rd_written = UInt::from_const_unchecked(
-            Value::new_unchecked(11_u32.wrapping_sub(2))
-                .as_u16_limbs()
-                .to_vec(),
-        );
-
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        verify::<SubOp>("basic", 11, 2);
+        verify::<SubOp>("0 - 0", 0, 0);
+        verify::<SubOp>("1 - 0", 1, 0);
+        verify::<SubOp>("1 - 1", 1, 1);
+        verify::<SubOp>("underflow", 3, 11);
     }
 
-    #[test]
-    fn test_opcode_sub_underflow() {
+    fn verify<I: RIVInstruction>(name: &'static str, rs1: u32, rs2: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
             .namespace(
-                || "sub",
-                |cb| {
-                    let config = SubInstruction::construct_circuit(cb);
-                    Ok(config)
-                },
+                || format!("{:?}_({name})", I::INST_KIND),
+                |cb| Ok(ArithInstruction::<GoldilocksExt2, I>::construct_circuit(cb)),
             )
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
-        let (raw_witin, _) =
-            SubInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                StepRecord::new_r_instruction(
-                    3,
-                    MOCK_PC_START,
-                    insn_code,
-                    3,
-                    11,
-                    Change::new(0, 3_u32.wrapping_sub(11)),
-                    0,
-                ),
-            ])
-            .unwrap();
+        let outcome = match I::INST_KIND {
+            InsnKind::ADD => rs1.wrapping_add(rs2),
+            InsnKind::SUB => rs1.wrapping_sub(rs2),
+            _ => unreachable!("Unsupported instruction kind"),
+        };
 
-        let expected_rd_written = UInt::from_const_unchecked(
-            Value::new_unchecked(3_u32.wrapping_sub(11))
-                .as_u16_limbs()
-                .to_vec(),
-        );
+        // values assignment
+        let insn_code = encode_rv32(I::INST_KIND, 2, 3, 4, 0);
+        let (raw_witin, lkm) = ArithInstruction::<GoldilocksExt2, I>::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                rs1,
+                rs2,
+                Change::new(0, outcome),
+                0,
+            )],
+        )
+        .unwrap();
 
-        config
-            .rd_written
-            .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
-            .unwrap();
+        // verify rd_written
+        let expected_rd_written =
+            UInt::from_const_unchecked(Value::new_unchecked(outcome).as_u16_limbs().to_vec());
+        let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
+        cb.require_equal(
+            || "assert_rd_written",
+            rd_written_expr,
+            expected_rd_written.value(),
+        )
+        .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, None);
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }
