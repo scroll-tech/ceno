@@ -1,6 +1,6 @@
 use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_zkvm::{
-    e2e::{Checkpoint, run_e2e_verify, run_e2e_with_checkpoint},
+    e2e::{Checkpoint, run_e2e_with_checkpoint},
     with_panic_hook,
 };
 use clap::{Parser, ValueEnum};
@@ -143,18 +143,17 @@ fn main() {
     type B = Goldilocks;
     type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
-    let (mut zkvm_proof, verifier, exit_code) = run_e2e_with_checkpoint::<E, Pcs>(
+    let (state, _) = run_e2e_with_checkpoint::<E, Pcs>(
         program,
         platform,
         args.stack_size,
         args.heap_size,
         hints,
         max_steps,
-        Checkpoint::PrepVerifying,
-    )
-    .into();
+        Checkpoint::PrepSanityCheck,
+    );
 
-    run_e2e_verify(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+    let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
     // do sanity check
     let transcript = Transcript::new(b"riscv");

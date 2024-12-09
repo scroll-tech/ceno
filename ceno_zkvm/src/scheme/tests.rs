@@ -261,7 +261,7 @@ fn test_single_add_instance_e2e() {
     let vk = pk.get_vk();
 
     // single instance
-    let mut vm = VMState::new(CENO_PLATFORM, program.clone());
+    let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
     let all_records = vm
         .iter_until_halt()
         .collect::<Result<Vec<StepRecord>, _>>()

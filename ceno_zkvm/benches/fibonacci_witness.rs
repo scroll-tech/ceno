@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf, time::Duration};
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, generate_witness, run_e2e_with_checkpoint},
+    e2e::{Checkpoint, run_e2e_with_checkpoint},
 };
 use criterion::*;
 
@@ -47,40 +47,37 @@ fn setup() -> (Program, Platform, u32, u32) {
 fn fibonacci_witness(c: &mut Criterion) {
     let (program, platform, stack_size, heap_size) = setup();
 
-    for max_steps in [1usize << 30] {
-        // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
-        group.sample_size(NUM_SAMPLES);
+    let max_steps = usize::MAX;
+    let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
+    group.sample_size(NUM_SAMPLES);
 
-        // Benchmark the proving time
-        group.bench_function(
-            BenchmarkId::new(
-                "fibonacci_witness",
-                format!("fib_wit_max_steps_{}", max_steps),
-            ),
-            |b| {
-                b.iter_with_setup(
-                    || {
-                        run_e2e_with_checkpoint::<E, Pcs>(
-                            program.clone(),
-                            platform.clone(),
-                            stack_size,
-                            heap_size,
-                            vec![],
-                            max_steps,
-                            Checkpoint::PrepWitnessGen,
-                        )
-                        .into()
-                    },
-                    |(system_config, simulation_result, program)| {
-                        let _ = generate_witness(&system_config, simulation_result, &program);
-                    },
-                );
-            },
-        );
+    // Benchmark the proving time
+    group.bench_function(
+        BenchmarkId::new(
+            "fibonacci_witness",
+            format!("fib_wit_max_steps_{}", max_steps),
+        ),
+        |b| {
+            b.iter_with_setup(
+                || {
+                    run_e2e_with_checkpoint::<E, Pcs>(
+                        program.clone(),
+                        platform.clone(),
+                        stack_size,
+                        heap_size,
+                        vec![],
+                        max_steps,
+                        Checkpoint::PrepWitnessGen,
+                    )
+                },
+                |(_, generate_witness)| {
+                    generate_witness();
+                },
+            );
+        },
+    );
 
-        group.finish();
-    }
+    group.finish();
 
     type E = GoldilocksExt2;
 }

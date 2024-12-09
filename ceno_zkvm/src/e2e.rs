@@ -6,8 +6,7 @@ use crate::{
     },
     state::GlobalState,
     structs::{
-        ProgramParams, ProvingKey, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey,
-        ZKVMWitnesses,
+        ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMWitnesses,
     },
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
@@ -21,6 +20,8 @@ use mpcs::PolynomialCommitmentScheme;
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
+    ops::Deref,
+    sync::Arc,
 };
 use transcript::Transcript;
 
@@ -42,7 +43,7 @@ pub struct EmulationResult {
 }
 
 fn emulate_program(
-    program: &Program,
+    program: Arc<Program>,
     max_steps: usize,
     init_mem_state: InitMemState,
     platform: &Platform,
@@ -55,7 +56,7 @@ fn emulate_program(
         priv_io: _,
     } = init_mem_state;
 
-    let mut vm: VMState = VMState::new(platform.clone(), program.clone());
+    let mut vm: VMState = VMState::new(platform.clone(), program);
 
     for (addr, value) in zip(platform.hints.iter_addresses(), &hints) {
         vm.init_memory(addr.into(), *value);
@@ -298,33 +299,31 @@ pub fn generate_witness<E: ExtensionField>(
     zkvm_witness
 }
 
-// Describes a checkpoint at which we want the e2e pipeline to stop and return some state
-// Naming convention: "Prep{X}" means "execute necessary work to then run phase X"
-// Complete runs everything end-to-end
+// Encodes useful early return points of the e2e pipeline
 pub enum Checkpoint {
-    PrepEmulToProving,
+    PrepE2EProving,
     PrepWitnessGen,
-    PrepProving,
-    PrepVerifying,
+    PrepSanityCheck,
     Complete,
 }
 
-// Return type counterpart to Checkpoint type.
-// "Prep{X}" variant returns "state/args necessary to execute phase X"
+// Currently handles state required by the sanity check in `bin/e2e.rs`
+// Future cases would require this to be an enum
+pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 
-pub enum CheckpointOutput<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    PrepEmulToProving(EmulToProvingArgs<E, PCS>),
-    PrepWitnessGen(WitnessGenArgs<E>),
-    PrepProving(ProvingArgs<E, PCS>),
-    PrepVerifying(VerifyingArgs<E, PCS>),
-    Complete,
-}
+// Runs end-to-end pipeline, stopping at a certain checkpoint and yielding useful state.
+//
+// The return type is a pair of:
+// 1. Explicit state
+// 2. A no-input-no-ouptut closure
+//
+// (2.) is useful when you want to setup a certain action and run it
+// elsewhere (i.e, in a benchmark)
+// (1.) is useful for exposing state which must be further combined with
+// state external to this pipeline (e.g, sanity check in bin/e2e.rs)
 
-pub type WitnessGenArgs<E> = (ConstraintSystemConfig<E>, EmulationResult, Program);
-pub type ProvingArgs<E, PCS> = (ZKVMProver<E, PCS>, ZKVMWitnesses<E>, PublicValues<u32>);
-pub type VerifyingArgs<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>);
-
-pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+#[allow(clippy::type_complexity)]
+pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
     program: Program,
     platform: Platform,
     stack_size: u32,
@@ -332,7 +331,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
     hints: Vec<u32>,
     max_steps: usize,
     checkpoint: Checkpoint,
-) -> CheckpointOutput<E, PCS> {
+) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
     // Detect heap as starting after program data.
     let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
     let heap_addrs = heap_start..heap_start + heap_size;
@@ -346,6 +345,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
         ..ProgramParams::default()
     };
 
+    let program = Arc::new(program);
     let system_config = construct_configs::<E>(program_params);
 
     // IO is not used in this program, but it must have a particular size at the moment.
@@ -372,28 +372,36 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
         .expect("keygen failed");
     let vk = pk.get_vk();
 
-    if let Checkpoint::PrepEmulToProving = checkpoint {
-        return CheckpointOutput::PrepEmulToProving((
-            program,
-            max_steps,
-            init_full_mem,
-            platform,
-            hints,
-            system_config,
-            pk,
-            zkvm_fixed_traces,
-        ));
+    if let Checkpoint::PrepE2EProving = checkpoint {
+        return (
+            None,
+            Box::new(move || {
+                _ = run_e2e_proof(
+                    program,
+                    max_steps,
+                    init_full_mem,
+                    platform,
+                    hints,
+                    &system_config,
+                    pk,
+                    zkvm_fixed_traces,
+                )
+            }),
+        );
     }
 
     // Emulate program
-    let emul_result = emulate_program(&program, max_steps, init_full_mem, &platform, hints);
+    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
 
     // Clone some emul_result fields before consuming
     let pi = emul_result.pi.clone();
     let exit_code = emul_result.exit_code;
 
     if let Checkpoint::PrepWitnessGen = checkpoint {
-        return CheckpointOutput::PrepWitnessGen((system_config, emul_result, program));
+        return (
+            None,
+            Box::new(move || _ = generate_witness(&system_config, emul_result, program.deref())),
+        );
     }
 
     // Generate witness
@@ -401,10 +409,6 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
 
     // proving
     let prover = ZKVMProver::new(pk);
-
-    if let Checkpoint::PrepProving = checkpoint {
-        return CheckpointOutput::PrepProving((prover, zkvm_witness, pi));
-    }
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(
@@ -423,27 +427,20 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
         .expect("create_proof failed");
 
     let verifier = ZKVMVerifier::new(vk);
-    if let Checkpoint::PrepVerifying = checkpoint {
-        return CheckpointOutput::PrepVerifying((zkvm_proof, verifier, exit_code));
+
+    run_e2e_verify(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+
+    if let Checkpoint::PrepSanityCheck = checkpoint {
+        return (Some((zkvm_proof, verifier)), Box::new(|| ()));
     }
 
-    run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps);
-    CheckpointOutput::Complete
+    (None, Box::new(|| ()))
 }
 
-type EmulToProvingArgs<E, PCS> = (
-    Program,
-    usize,
-    InitMemState,
-    Platform,
-    Vec<u32>,
-    ConstraintSystemConfig<E>,
-    ZKVMProvingKey<E, PCS>,
-    ZKVMFixedTraces<E>,
-);
-
+// Runs program emulation + witness generation + proving
+#[allow(clippy::too_many_arguments)]
 pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-    program: Program,
+    program: Arc<Program>,
     max_steps: usize,
     init_full_mem: InitMemState,
     platform: Platform,
@@ -453,13 +450,13 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
 ) -> ZKVMProof<E, PCS> {
     // Emulate program
-    let emul_result = emulate_program(&program, max_steps, init_full_mem, &platform, hints);
+    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
 
     // clone pi before consuming
     let pi = emul_result.pi.clone();
 
     // Generate witness
-    let zkvm_witness = generate_witness(&system_config, emul_result, &program);
+    let zkvm_witness = generate_witness(system_config, emul_result, program.deref());
 
     // proving
     let prover = ZKVMProver::new(pk);
@@ -546,23 +543,3 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
         if platform.can_execute(addr) { "X" } else { "-" },
     )
 }
-
-macro_rules! impl_from_checkpoint_output {
-    ($target:ty, $variant:ident) => {
-        impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
-            for $target
-        {
-            fn from(value: CheckpointOutput<E, PCS>) -> Self {
-                match value {
-                    CheckpointOutput::$variant(inner) => inner,
-                    _ => panic!("attempted to unpack proving args from wrong prefix"),
-                }
-            }
-        }
-    };
-}
-
-impl_from_checkpoint_output!(EmulToProvingArgs<E, PCS>, PrepEmulToProving);
-impl_from_checkpoint_output!(ProvingArgs<E, PCS>, PrepProving);
-impl_from_checkpoint_output!(WitnessGenArgs<E>, PrepWitnessGen);
-impl_from_checkpoint_output!(VerifyingArgs<E, PCS>, PrepVerifying);

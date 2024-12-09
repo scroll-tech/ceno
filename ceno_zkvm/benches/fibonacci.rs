@@ -7,7 +7,7 @@ use std::{
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, run_e2e_proof, run_e2e_with_checkpoint},
+    e2e::{Checkpoint, run_e2e_with_checkpoint},
 };
 use criterion::*;
 
@@ -72,32 +72,13 @@ fn fibonacci_prove(c: &mut Criterion) {
                             heap_size,
                             vec![],
                             max_steps,
-                            Checkpoint::PrepEmulToProving,
+                            Checkpoint::PrepE2EProving,
                         )
-                        .into()
                     },
-                    |(
-                        program,
-                        max_steps,
-                        init_full_mem,
-                        platform,
-                        hints,
-                        system_config,
-                        pk,
-                        zkvm_fixed_traces,
-                    )| {
+                    |(_, run_e2e_proof)| {
                         let timer = Instant::now();
 
-                        let _ = run_e2e_proof(
-                            program,
-                            max_steps,
-                            init_full_mem,
-                            platform,
-                            hints,
-                            &system_config,
-                            pk,
-                            zkvm_fixed_traces,
-                        );
+                        run_e2e_proof();
                         println!(
                             "Fibonacci::create_proof, max_steps = {}, time = {}",
                             max_steps,
