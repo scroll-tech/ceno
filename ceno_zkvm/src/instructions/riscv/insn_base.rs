@@ -1,6 +1,7 @@
-use ceno_emul::{StepRecord, Word};
+use ceno_emul::{Cycle, StepRecord, Word, WriteOp};
 use ff::Field;
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 use itertools::Itertools;
 
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
@@ -332,17 +333,24 @@ impl WriteMEM {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(
-            instance,
-            self.prev_ts,
-            step.memory_op().unwrap().previous_cycle
-        );
+        let op = step.memory_op().unwrap();
+        self.assign_op(instance, lk_multiplicity, step.cycle(), &op)
+    }
+
+    pub fn assign_op<F: SmallField>(
+        &self,
+        instance: &mut [MaybeUninit<F>],
+        lk_multiplicity: &mut LkMultiplicity,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) -> Result<(), ZKVMError> {
+        set_val!(instance, self.prev_ts, op.previous_cycle);
 
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.memory_op().unwrap().previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            cycle + Tracer::SUBCYCLE_MEM,
         )?;
 
         Ok(())
