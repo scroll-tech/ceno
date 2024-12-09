@@ -61,9 +61,9 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.values.len()
-    }
+    // pub fn len(&self) -> usize {
+    //     self.values.len()
+    // }
 
     pub fn values(&mut self) -> &mut Vec<T> {
         &mut self.values
@@ -98,7 +98,6 @@ impl<F: Field> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
-        let start = Instant::now();
         let padding_row = match self.padding_strategy {
             // If asked to repeat and actually have content to repeat
             InstancePaddingStrategy::RepeatLast if self.values.len() > 0 => {
@@ -122,11 +121,6 @@ impl<F: Field> RowMajorMatrix<F> {
                     .into_mle()
             })
             .collect();
-        let size = self.num_col * self.len();
-        if size > 1000 * 1000 {
-            let duration = start.elapsed().as_secs_f64();
-            println!("Time taken: {:?}, size: {:?}", duration, size);
-        }
         result
     }
 }
