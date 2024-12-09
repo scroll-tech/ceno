@@ -67,3 +67,7 @@ name = "riscv_add"
 [[bench]]
 harness = false
 name = "fibonacci"
+
+[[bench]]
+harness = false
+name = "fibonacci_witness"

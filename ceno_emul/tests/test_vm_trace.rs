@@ -1,6 +1,9 @@
 #![allow(clippy::unusual_byte_groupings)]
 use anyhow::Result;
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use ceno_emul::{
     CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, Platform, Program, StepRecord, Tracer,
@@ -15,7 +18,7 @@ fn test_vm_trace() -> Result<()> {
         program_fibonacci_20(),
         Default::default(),
     );
-    let mut ctx = VMState::new(CENO_PLATFORM, program);
+    let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(program));
 
     let steps = run(&mut ctx)?;
 
@@ -43,7 +46,7 @@ fn test_empty_program() -> Result<()> {
         vec![],
         BTreeMap::new(),
     );
-    let mut ctx = VMState::new(CENO_PLATFORM, empty_program);
+    let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(empty_program));
     let res = run(&mut ctx);
     assert!(matches!(res, Err(e) if e.to_string().contains("InstructionAccessFault")),);
     Ok(())

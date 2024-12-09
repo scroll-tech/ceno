@@ -29,9 +29,8 @@ impl VMState {
     /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
     pub const REG_COUNT: usize = 32 + 1;
 
-    pub fn new(platform: Platform, program: Program) -> Self {
+    pub fn new(platform: Platform, program: Arc<Program>) -> Self {
         let pc = program.entry;
-        let program = Arc::new(program);
 
         let mut vm = Self {
             pc,
@@ -52,7 +51,7 @@ impl VMState {
     }
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
-        let program = Program::load_elf(elf, u32::MAX)?;
+        let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
         Ok(Self::new(platform, program))
     }
 
