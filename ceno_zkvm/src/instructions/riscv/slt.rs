@@ -139,6 +139,8 @@ mod test {
 
     use rand::Rng;
 
+    use proptest::prelude::*;
+
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -244,10 +246,9 @@ mod test {
 
     #[test]
     fn test_sltu_random() {
-        let mut rng = rand::thread_rng();
-        let a: u32 = rng.gen();
-        let b: u32 = rng.gen();
-        verify::<SltuOp>("random 1", a, b, (a < b) as u32);
-        verify::<SltuOp>("random 2", b, a, (a >= b) as u32);
+        proptest::proptest!(|(a in any::<u32>(), b in any::<u32>())| {
+            verify::<SltuOp>("random 1", a, b, (a < b) as u32);
+            verify::<SltuOp>("random 2", b, a, (a >= b) as u32);
+        });
     }
 }
