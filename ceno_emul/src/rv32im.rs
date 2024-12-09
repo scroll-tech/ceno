@@ -172,7 +172,6 @@ pub enum InsnKind {
     SH,
     SW,
     ECALL,
-    EBREAK,
 }
 use InsnKind::*;
 
@@ -187,7 +186,7 @@ impl From<InsnKind> for InsnCategory {
             JAL | JALR => Compute,
             LB | LH | LW | LBU | LHU => Load,
             SB | SH | SW => Store,
-            ECALL | EBREAK => System,
+            ECALL => System,
         }
     }
 }
@@ -204,7 +203,7 @@ impl From<InsnKind> for InsnFormat {
             JALR => I,
             LB | LH | LW | LBU | LHU => I,
             SB | SH | SW => S,
-            ECALL | EBREAK => I,
+            ECALL => I,
             INVALID => I,
         }
     }
@@ -523,7 +522,6 @@ impl Emulator {
     ) -> Result<bool> {
         match kind {
             InsnKind::ECALL => ctx.ecall(),
-            InsnKind::EBREAK => ctx.trap(TrapCause::Breakpoint),
             _ => ctx.trap(TrapCause::IllegalInstruction(decoded.raw)),
         }
     }

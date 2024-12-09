@@ -292,14 +292,7 @@ impl InstructionProcessor for InstructionTranspiler {
     }
 
     fn process_ebreak(&mut self) -> Self::InstructionResult {
-        Instruction {
-            kind: InsnKind::EBREAK,
-            rd: 0,
-            rs1: 0,
-            rs2: 0,
-            imm: 0,
-            raw: self.word,
-        }
+        Instruction::unimp(self.word)
     }
 
     fn process_mul(&mut self, dec_insn: RType) -> Self::InstructionResult {

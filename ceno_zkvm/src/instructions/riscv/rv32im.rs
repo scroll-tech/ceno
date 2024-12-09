@@ -307,8 +307,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness: &mut ZKVMWitnesses<E>,
         steps: Vec<StepRecord>,
     ) -> Result<GroupedSteps, ZKVMError> {
-        let mut all_records: BTreeMap<usize, Vec<StepRecord>> = InsnKind::iter()
-            .map(|insn_kind| ((insn_kind as usize), Vec::new()))
+        let mut all_records: BTreeMap<InsnKind, Vec<StepRecord>> = InsnKind::iter()
+            .map(|insn_kind| (insn_kind, Vec::new()))
             .collect();
         let mut halt_records = Vec::new();
         steps.into_iter().for_each(|record| {
@@ -320,7 +320,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 }
                 // other type of ecalls are handled by dummy ecall instruction
                 _ => {
-                    let insn_kind = insn_kind as usize;
                     // it's safe to unwrap as all_records are initialized with Vec::new()
                     all_records.get_mut(&insn_kind).unwrap().push(record);
                 }
@@ -342,7 +341,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 witness.assign_opcode_circuit::<$instruction>(
                     cs,
                     &self.$config,
-                    all_records.remove(&($insn_kind as usize)).unwrap(),
+                    all_records.remove(&($insn_kind)).unwrap(),
                 )?;
             };
         }
@@ -398,9 +397,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [INVALID, DIV, REM, REMU, ECALL, EBREAK]
+            [INVALID, DIV, REM, REMU, ECALL]
                 .into_iter()
-                .map(|insn_kind| insn_kind as usize)
                 .collect::<BTreeSet<_>>(),
         );
         Ok(GroupedSteps(all_records))
@@ -426,7 +424,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 }
 
 /// Opaque type to pass unimplemented instructions from Rv32imConfig to DummyExtraConfig.
-pub struct GroupedSteps(BTreeMap<usize, Vec<StepRecord>>);
+pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
 
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
@@ -474,7 +472,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
                 witness.assign_opcode_circuit::<$instruction>(
                     cs,
                     &self.$config,
-                    steps.remove(&($insn_kind as usize)).unwrap(),
+                    steps.remove(&($insn_kind)).unwrap(),
                 )?;
             };
         }
@@ -483,10 +481,10 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         assign_opcode!(REM, RemDummy<E>, rem_config);
         assign_opcode!(REMU, RemuDummy<E>, remu_config);
         assign_opcode!(ECALL, EcallDummy<E>, ecall_config);
-        assign_opcode!(EBREAK, EcallDummy<E>, ecall_config);
 
-        let _ = steps.remove(&(INVALID as usize));
-        assert!(steps.is_empty());
+        let _ = steps.remove(&INVALID);
+        let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();
+        assert!(steps.is_empty(), "unimplemented opcodes: {:?}", keys);
         Ok(())
     }
 }
