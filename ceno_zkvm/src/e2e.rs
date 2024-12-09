@@ -23,7 +23,7 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,

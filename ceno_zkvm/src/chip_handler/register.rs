@@ -11,8 +11,8 @@ use crate::{
 
 use super::{RegisterChipOperations, RegisterExpr};
 
-impl<'a, E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperations<E, NR, N>
-    for CircuitBuilder<'a, E>
+impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperations<E, NR, N>
+    for CircuitBuilder<'_, E>
 {
     fn register_read(
         &mut self,
