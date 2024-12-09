@@ -54,6 +54,10 @@ fn fibonacci_prove(c: &mut Criterion) {
                 format!("fibonacci_max_steps_{}", max_steps),
             ),
             |b| {
+                use itertools::Itertools;
+                let mut iter_verifier = Option::<_>::None;
+                let mut iter_proof = Option::<_>::None;
+
                 b.iter_with_setup(
                     || {
                         run_e2e_with_checkpoint::<E, Pcs>(
@@ -75,6 +79,13 @@ fn fibonacci_prove(c: &mut Criterion) {
                         );
                     },
                 );
+
+                // for (proof, verifier) in iter_proof.into_iter().zip_eq(iter_verifier) {
+                //     let serialize_size = bincode::serialize(&proof).unwrap().len();
+                //     println!("proof size {}", serialize_size);
+                //     run_e2e_verify(&verifier, proof, None, 0);
+                // }
+                
             },
         );
 

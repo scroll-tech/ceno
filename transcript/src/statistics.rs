@@ -1,21 +1,31 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
 use ff_ext::ExtensionField;
 use std::rc::Rc;
+use std::cell::RefCell;
 
 #[derive(Debug, Default)]
 pub struct StatisticRecorder {
-    field_appended_num: u32,
+    pub field_appended_num: u32,
+}
+
+type SharedStatisticRecorder=RefCell<StatisticRecorder>;
+
+impl StatisticRecorder {
+
+    pub fn new() -> Rc<SharedStatisticRecorder> {
+        Rc::new(RefCell::new(Default::default()))
+    }
 }
 
 #[derive(Clone)]
 pub struct BasicTranscriptWitStat<E: ExtensionField> {
     inner: BasicTranscript<E>,
-    stat: Rc<StatisticRecorder>,
+    stat: Rc<SharedStatisticRecorder>,
     field_appended_num: u32,
 }
 
 impl<E: ExtensionField> BasicTranscriptWitStat<E> {
-    pub fn new(stat: Rc<StatisticRecorder>, label: &'static [u8]) -> Self {
+    pub fn new(stat: Rc<SharedStatisticRecorder>, label: &'static [u8]) -> Self {
         Self {
             inner: BasicTranscript::<_>::new(label),
             stat: stat.clone(),
@@ -25,9 +35,7 @@ impl<E: ExtensionField> BasicTranscriptWitStat<E> {
 
     fn sync_stat(&mut self) {
         let cur_num = self.field_appended_num;
-        Rc::<_>::get_mut(&mut self.stat)
-            .expect("no other reference")
-            .field_appended_num += cur_num;
+        self.stat.borrow_mut().field_appended_num += cur_num;
         self.field_appended_num = 0;
     }
 }
@@ -58,6 +66,11 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWitStat<E> {
     fn send_challenge(&self, challenge: E) {
         self.inner.send_challenge(challenge)
     }
+
+    fn commit_rolling(&mut self) {
+        self.inner.commit_rolling()
+    }
+
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWitStat<E> {

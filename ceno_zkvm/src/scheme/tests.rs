@@ -14,7 +14,7 @@ use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentSche
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
 };
-use transcript::{BasicTranscript, Transcript};
+use transcript::{BasicTranscript, BasicTranscriptWitStat, StatisticRecorder, Transcript};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -155,8 +155,9 @@ fn test_rw_lk_expression_combination() {
             .expect("create_proof failed");
 
         // verify proof
+        let static_recorder = StatisticRecorder::new();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscript::new(b"test");
+        let mut v_transcript = BasicTranscriptWitStat::new(static_recorder.clone(), b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -178,6 +179,9 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
+
+        drop(v_transcript);
+        println!("hashed fields {}", static_recorder.borrow().field_appended_num);
     }
 
     // <lookup count, rw count>
@@ -289,12 +293,18 @@ fn test_single_add_instance_e2e() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let transcript = BasicTranscript::new(b"riscv");
-    assert!(
-        verifier
-            .verify_proof(zkvm_proof, transcript)
-            .expect("verify proof return with error"),
-    );
+    let encoded_bin = bincode::serialize(&zkvm_proof).unwrap();
+
+    let static_recorder = StatisticRecorder::new();
+    {
+        let transcript = BasicTranscriptWitStat::new(static_recorder.clone(), b"riscv");
+        assert!(
+            verifier
+                .verify_proof(zkvm_proof, transcript)
+                .expect("verify proof return with error"),
+        );
+    }
+    println!("encoded zkvm proof size: {}, hash_num: {}", encoded_bin.len(), static_recorder.borrow().field_appended_num);
 }
 
 /// test various product argument size, starting from minimal leaf size 2
