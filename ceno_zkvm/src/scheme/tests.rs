@@ -8,7 +8,7 @@ use ceno_emul::{
 };
 use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
+use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -25,6 +25,7 @@ use crate::{
         Instruction,
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
+    scheme::prover::{SparkWitness, mem_in_the_head},
     set_val,
     structs::{
         PointAndEval, RAMType::Register, TowerProver, TowerProverSpec, ZKVMConstraintSystem,
@@ -37,7 +38,7 @@ use crate::{
 use super::{
     PublicValues,
     constants::{MAX_NUM_VARIABLES, NUM_FANIN},
-    prover::ZKVMProver,
+    prover::{SparkProver, ZKVMProver},
     utils::infer_tower_product_witness,
     verifier::{TowerVerify, ZKVMVerifier},
 };
@@ -376,4 +377,63 @@ fn test_tower_proof_various_prod_size() {
     for leaf_layer_size in 1..10 {
         _test_tower_proof_prod_size_2(1 << leaf_layer_size);
     }
+}
+
+#[test]
+fn test_spark_prove_n_verify() {
+    type E = GoldilocksExt2;
+    type Pcs = BasefoldDefault<E>;
+    let mut rng = test_rng();
+    let num_var = 10;
+    let read_write_log2_len = 32;
+    let repeat_log2 = 4;
+
+    // this addr represent full leng of read, but its value range just within [0, 1 << read_write_log2_len/2]
+    let addr_row: ArcMultilinearExtension<E> = (0..1 << repeat_log2)
+        .flat_map(|_| {
+            (0..1 << (read_write_log2_len / 2))
+                .map(Goldilocks::from)
+                .collect_vec()
+        })
+        .collect_vec()
+        .into_mle()
+        .into();
+
+    let addr_col: ArcMultilinearExtension<E> = (0..1 << repeat_log2)
+        .flat_map(|_| {
+            (1 << (read_write_log2_len / 2)..0)
+                .map(Goldilocks::from)
+                .collect_vec()
+        })
+        .collect_vec()
+        .into_mle()
+        .into();
+
+    let value = (0..addr_col.evaluations().len())
+        .map(|_| Goldilocks::random(&mut rng))
+        .collect_vec();
+
+    let mut transcript = Transcript::new(b"test_tower_proof");
+    let ((read_ts_row, _, audit_ts_row), (read_ts_col, _, audit_ts_col)) = (
+        mem_in_the_head(num_var, &addr_row),
+        mem_in_the_head(num_var, &addr_col),
+    );
+    let witnesses: Vec<SparkWitness<E>> = vec![SparkWitness {
+        row_index: addr_row,
+        col_index: addr_col,
+        value: value.into_mle().into(),
+        read_ts_row: read_ts_row.into_mle().into(),
+        read_ts_col: read_ts_col.into_mle().into(),
+        audit_ts_row: audit_ts_row.into_mle().into(),
+        audit_ts_col: audit_ts_col.into_mle().into(),
+    }];
+
+    // pcs setup
+    let param = Pcs::setup(1 << 13).unwrap();
+    let (pp, _vp) = Pcs::trim(param, 1 << 13).unwrap();
+    let point_n_evals = vec![PointAndEval {
+        point: (0..num_var).map(|_| E::random(&mut rng)).collect_vec(),
+        eval: E::random(&mut rng),
+    }];
+    SparkProver::create_proof::<E, Pcs>(pp, &point_n_evals, &witnesses, &mut transcript);
 }
