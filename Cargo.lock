@@ -1356,6 +1356,8 @@ name = "mpcs"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "ark-ff",
+ "ark-serialize",
  "ark-std 0.4.0",
  "bitvec",
  "criterion",
@@ -1376,6 +1378,7 @@ dependencies = [
  "serde",
  "transcript",
  "whir",
+ "zeroize",
 ]
 
 [[package]]

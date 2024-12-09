@@ -319,6 +319,7 @@ pub use basefold::{
     EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
     one_level_interp_hc,
 };
+mod whir;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 
 fn validate_input<E: ExtensionField>(

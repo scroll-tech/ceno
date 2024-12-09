@@ -31,6 +31,9 @@ rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
 whir = { git = "https://github.com/scroll-tech/whir.git", branch = "pcs_trait" }
+ark-ff = "0.5"
+ark-serialize = "0.5"
+zeroize = "1.8"
 
 [dev-dependencies]
 criterion.workspace = true
