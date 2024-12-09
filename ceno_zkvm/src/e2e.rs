@@ -20,7 +20,7 @@ use std::{
     iter::zip,
     time::Instant,
 };
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 
 type E2EWitnessGen<E, PCS> = (
     ZKVMProver<E, PCS>,
