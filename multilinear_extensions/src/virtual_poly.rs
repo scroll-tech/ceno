@@ -313,7 +313,7 @@ impl<E: ExtensionField> VirtualPolynomial<E> {
         let mut flattened_ml_extensions = vec![];
         let mut hm = HashMap::new();
         for mle in self.flattened_ml_extensions.iter() {
-            let mle_ptr = Arc::as_ptr(&mle) as usize;
+            let mle_ptr = Arc::as_ptr(mle) as usize;
             let index = self.raw_pointers_lookup_table.get(&mle_ptr).unwrap();
 
             let mle_ext_field = mle.as_ref().to_ext_field();

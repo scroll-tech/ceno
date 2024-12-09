@@ -9,7 +9,6 @@ use std::{
     ops::Index,
     slice::{Chunks, ChunksMut},
     sync::Arc,
-    time::Instant,
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
@@ -61,16 +60,8 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
         }
     }
 
-    // pub fn len(&self) -> usize {
-    //     self.values.len()
-    // }
-
-    pub fn values(&mut self) -> &mut Vec<T> {
-        &mut self.values
-    }
-
     pub fn num_padding_instances(&self) -> usize {
-        return next_pow2_instance_padding(self.num_instances()) - self.num_instances();
+        next_pow2_instance_padding(self.num_instances()) - self.num_instances()
     }
 
     pub fn num_instances(&self) -> usize {
@@ -100,7 +91,7 @@ impl<F: Field> RowMajorMatrix<F> {
     ) -> Vec<DenseMultilinearExtension<E>> {
         let padding_row = match self.padding_strategy {
             // If asked to repeat and actually have content to repeat
-            InstancePaddingStrategy::RepeatLast if self.values.len() > 0 => {
+            InstancePaddingStrategy::RepeatLast if !self.values.is_empty() => {
                 self.values[self.values.len() - self.num_col..].to_vec()
             }
             // Otherwise zeros
@@ -116,7 +107,7 @@ impl<F: Field> RowMajorMatrix<F> {
                     .skip(*i)
                     .step_by(self.num_col)
                     .chain(&mut iter::repeat(&padding_row[*i]).take(num_padding))
-                    .map(|val| *val)
+                    .copied()
                     .collect::<Vec<_>>()
                     .into_mle()
             })

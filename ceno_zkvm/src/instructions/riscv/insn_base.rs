@@ -470,7 +470,6 @@ impl<E: ExtensionField> MemAddr<E> {
 mod test {
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
     use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         ROMType,

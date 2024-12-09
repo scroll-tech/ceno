@@ -1,9 +1,6 @@
 use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::RowMajorMatrix};
-use ff::Field;
 use ff_ext::ExtensionField;
-use multilinear_extensions::util::max_usable_threads;
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::{collections::HashMap, mem::MaybeUninit};
+use std::collections::HashMap;
 mod range;
 pub use range::*;
 

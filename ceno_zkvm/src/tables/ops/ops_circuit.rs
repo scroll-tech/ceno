@@ -51,9 +51,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         num_fixed: usize,
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
-        let table = config.generate_fixed_traces(num_fixed, OP::content());
-        // Self::padding_zero(&mut table, num_fixed).expect("padding error");
-        table
+        config.generate_fixed_traces(num_fixed, OP::content())
     }
 
     fn assign_instances(
