@@ -161,8 +161,9 @@ pub trait DynVolatileRamTable {
     fn name() -> &'static str;
 
     fn max_len(params: &ProgramParams) -> usize {
-        let max_size = (Self::end_addr(params) - Self::offset_addr(params)) as usize;
-        let max_len: usize = max_size.next_power_of_two().div_ceil(WORD_SIZE);
+        let max_size = (Self::end_addr(params) as usize).div_ceil(WORD_SIZE)
+            - (Self::offset_addr(params) as usize) / WORD_SIZE;
+        let max_len: usize = max_size.next_power_of_two();
         assert!(
             max_size <= max_len,
             "Did not round up {max_size} correctly, got {max_len}, which is smaller."
