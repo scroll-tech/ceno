@@ -9,8 +9,8 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit},
 };
 use ceno_emul::{
-    ByteAddr, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program, StepRecord, Tracer,
-    VMState, WORD_SIZE, WordAddr,
+    ByteAddr, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord, Tracer, VMState,
+    WORD_SIZE, WordAddr,
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain, enumerate};
@@ -132,7 +132,7 @@ pub fn run_e2e_gen_witness<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     let cycle_num = all_records.len();
     tracing::info!("Proving {} execution steps", cycle_num);
     for (i, step) in enumerate(&all_records).rev().take(5).rev() {
-        tracing::trace!("Step {i}: {:?} - {:?}\n", step.insn().codes().kind, step);
+        tracing::trace!("Step {i}: {:?} - {:?}\n", step.insn().kind, step);
     }
 
     // Find the exit code from the HALT step, if halting at all.
@@ -140,7 +140,7 @@ pub fn run_e2e_gen_witness<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
         .iter()
         .rev()
         .find(|record| {
-            record.insn().codes().kind == EANY
+            record.insn().kind == InsnKind::ECALL
                 && record.rs1().unwrap().value == Platform::ecall_halt()
         })
         .and_then(|halt_record| halt_record.rs2())
@@ -324,9 +324,8 @@ fn format_segments(
 
 fn format_segment(platform: &Platform, addr: u32) -> String {
     format!(
-        "{}{}{}",
+        "{}{}",
         if platform.can_read(addr) { "R" } else { "-" },
         if platform.can_write(addr) { "W" } else { "-" },
-        if platform.can_execute(addr) { "X" } else { "-" },
     )
 }

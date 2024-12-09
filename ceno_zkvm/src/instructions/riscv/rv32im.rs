@@ -39,10 +39,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use strum::IntoEnumIterator;
 
 use super::{
-    arith::AddInstruction,
-    branch::BltuInstruction,
-    ecall::HaltInstruction,
-    jump::{JalInstruction, LuiInstruction},
+    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
     memory::LwInstruction,
 };
 
@@ -88,8 +85,6 @@ pub struct Rv32imConfig<E: ExtensionField> {
     // Jump Opcodes
     pub jal_config: <JalInstruction<E> as Instruction<E>>::InstructionConfig,
     pub jalr_config: <JalrInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub auipc_config: <AuipcInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub lui_config: <LuiInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // Memory Opcodes
     pub lw_config: <LwInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -155,10 +150,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let bgeu_config = cs.register_opcode_circuit::<BgeuInstruction<E>>();
 
         // jump opcodes
-        let lui_config = cs.register_opcode_circuit::<LuiInstruction<E>>();
         let jal_config = cs.register_opcode_circuit::<JalInstruction<E>>();
         let jalr_config = cs.register_opcode_circuit::<JalrInstruction<E>>();
-        let auipc_config = cs.register_opcode_circuit::<AuipcInstruction<E>>();
 
         // memory opcodes
         let lw_config = cs.register_opcode_circuit::<LwInstruction<E>>();
@@ -218,10 +211,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             bge_config,
             bgeu_config,
             // jump opcodes
-            lui_config,
             jal_config,
             jalr_config,
-            auipc_config,
             // memory opcodes
             sw_config,
             sh_config,
@@ -287,8 +278,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // jump
         fixed.register_opcode_circuit::<JalInstruction<E>>(cs);
         fixed.register_opcode_circuit::<JalrInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<AuipcInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<LuiInstruction<E>>(cs);
         // memory
         fixed.register_opcode_circuit::<SwInstruction<E>>(cs);
         fixed.register_opcode_circuit::<ShInstruction<E>>(cs);
@@ -323,10 +312,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .collect();
         let mut halt_records = Vec::new();
         steps.into_iter().for_each(|record| {
-            let insn_kind = record.insn().codes().kind;
+            let insn_kind = record.insn.kind;
             match insn_kind {
                 // ecall / halt
-                EANY if record.rs1().unwrap().value == Platform::ecall_halt() => {
+                InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
                     halt_records.push(record);
                 }
                 // other type of ecalls are handled by dummy ecall instruction
@@ -393,8 +382,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // jump
         assign_opcode!(JAL, JalInstruction<E>, jal_config);
         assign_opcode!(JALR, JalrInstruction<E>, jalr_config);
-        assign_opcode!(AUIPC, AuipcInstruction<E>, auipc_config);
-        assign_opcode!(LUI, LuiInstruction<E>, lui_config);
         // memory
         assign_opcode!(LW, LwInstruction<E>, lw_config);
         assign_opcode!(LB, LbInstruction<E>, lb_config);
@@ -411,7 +398,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [INVALID, DIV, REM, REMU, EANY]
+            [INVALID, DIV, REM, REMU, ECALL, EBREAK]
                 .into_iter()
                 .map(|insn_kind| insn_kind as usize)
                 .collect::<BTreeSet<_>>(),
@@ -495,7 +482,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         assign_opcode!(DIV, DivDummy<E>, div_config);
         assign_opcode!(REM, RemDummy<E>, rem_config);
         assign_opcode!(REMU, RemuDummy<E>, remu_config);
-        assign_opcode!(EANY, EcallDummy<E>, ecall_config);
+        assign_opcode!(ECALL, EcallDummy<E>, ecall_config);
+        assign_opcode!(EBREAK, EcallDummy<E>, ecall_config);
 
         let _ = steps.remove(&(INVALID as usize));
         assert!(steps.is_empty());

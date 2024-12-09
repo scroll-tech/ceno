@@ -5,7 +5,7 @@ use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
-    rv32im::{DecodedInstruction, Emulator, TrapCause},
+    rv32im::{Emulator, Instruction, TrapCause},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -78,7 +78,7 @@ impl VMState {
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
-        let emu = Emulator::new();
+        let emu = Emulator::default();
         from_fn(move || {
             if self.halted() {
                 None
@@ -122,7 +122,7 @@ impl EmuContext for VMState {
             // Treat unknown ecalls as all powerful instructions:
             // Read two registers, write one register, write one memory word, and branch.
             tracing::warn!("ecall ignored: syscall_id={}", function);
-            self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
+            self.store_register(Instruction::RD_NULL as RegIdx, 0)?;
             // Example ecall effect - any writable address will do.
             let addr = (self.platform.stack_top - WORD_SIZE as u32).into();
             self.store_memory(addr, self.peek_memory(addr))?;
@@ -137,7 +137,7 @@ impl EmuContext for VMState {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }
 
-    fn on_normal_end(&mut self, _decoded: &DecodedInstruction) {
+    fn on_normal_end(&mut self, _decoded: &Instruction) {
         self.tracer.store_pc(ByteAddr(self.pc));
     }
 
@@ -190,8 +190,7 @@ impl EmuContext for VMState {
         *self.memory.get(&addr).unwrap_or(&0)
     }
 
-    // TODO(Matthias): this should really return `Result<DecodedInstruction>`
-    fn fetch(&mut self, pc: WordAddr) -> Option<Word> {
+    fn fetch(&mut self, pc: WordAddr) -> Option<Instruction> {
         let byte_pc: ByteAddr = pc.into();
         let relative_pc = byte_pc.0.wrapping_sub(self.program.base_address);
         let idx = (relative_pc / WORD_SIZE as u32) as usize;
@@ -206,9 +205,5 @@ impl EmuContext for VMState {
 
     fn check_data_store(&self, addr: ByteAddr) -> bool {
         self.platform.can_write(addr.0)
-    }
-
-    fn check_insn_load(&self, addr: ByteAddr) -> bool {
-        self.platform.can_execute(addr.0)
     }
 }

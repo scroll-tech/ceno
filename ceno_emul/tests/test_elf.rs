@@ -15,7 +15,7 @@ fn test_ceno_rt_panic() -> Result<()> {
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let steps = run(&mut state)?;
     let last = steps.last().unwrap();
-    assert_eq!(last.insn().codes().kind, InsnKind::EANY);
+    assert_eq!(last.insn().kind, InsnKind::ECALL);
     assert_eq!(last.rs1().unwrap().value, Platform::ecall_halt());
     assert_eq!(last.rs2().unwrap().value, 1); // panic / halt(1)
     Ok(())
