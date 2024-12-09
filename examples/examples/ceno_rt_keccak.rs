@@ -6,7 +6,7 @@
 #![no_std]
 extern crate ceno_rt;
 use ceno_rt::{info_out, syscall_keccak_permute};
-use core::{ptr::read_volatile, slice};
+use core::slice;
 
 const ITERATIONS: usize = 3;
 
@@ -22,7 +22,7 @@ fn main() {
 
 fn log_state(state: &[u64; 25]) {
     let out = unsafe {
-        slice::from_raw_parts_mut(state.as_ptr() as *mut u8, state.len() * size_of::<u64>())
+        slice::from_raw_parts(state.as_ptr() as *const u8, state.len() * size_of::<u64>())
     };
     info_out().write_frame(out);
 }

@@ -286,6 +286,10 @@ impl StepRecord {
     pub fn is_busy_loop(&self) -> bool {
         self.pc.before == self.pc.after
     }
+
+    pub fn syscall(&self) -> Option<&SyscallWitness> {
+        self.syscall.as_ref()
+    }
 }
 
 #[derive(Debug)]
