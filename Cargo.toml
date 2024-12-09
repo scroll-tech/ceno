@@ -35,7 +35,7 @@ num-traits = "0.2"
 paste = "1"
 plonky2 = "0.2"
 poseidon = { path = "./poseidon" }
-pprof = { version = "0.13", features = ["flamegraph"] }
+pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
 proptest = "1"
 rand = "0.8"
@@ -50,7 +50,7 @@ strum_macros = "0.26"
 tracing = { version = "0.1", features = [
   "attributes",
 ] }
-tracing-flame = "0.2"
+tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.release]

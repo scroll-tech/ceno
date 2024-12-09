@@ -54,7 +54,7 @@ fn test_empty_program() -> Result<()> {
     );
     let mut ctx = VMState::new(CENO_PLATFORM, empty_program);
     let res = run(&mut ctx);
-    assert!(matches!(res, Err(e) if e.to_string().contains("IllegalInstruction(0)")));
+    assert!(matches!(res, Err(e) if e.to_string().contains("InstructionAccessFault")),);
     Ok(())
 }
 

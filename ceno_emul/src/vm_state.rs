@@ -190,10 +190,14 @@ impl EmuContext for VMState {
         *self.memory.get(&addr).unwrap_or(&0)
     }
 
-    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        let value = self.peek_memory(pc);
-        self.tracer.fetch(pc, value);
-        Ok(value)
+    // TODO(Matthias): this should really return `Result<DecodedInstruction>`
+    fn fetch(&mut self, pc: WordAddr) -> Option<Word> {
+        let byte_pc: ByteAddr = pc.into();
+        let relative_pc = byte_pc.0.wrapping_sub(self.program.base_address);
+        let idx = (relative_pc / WORD_SIZE as u32) as usize;
+        let word = self.program.instructions.get(idx).copied()?;
+        self.tracer.fetch(pc, word);
+        Some(word)
     }
 
     fn check_data_load(&self, addr: ByteAddr) -> bool {
