@@ -6,7 +6,7 @@ use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
@@ -21,7 +21,7 @@ fn test_sumcheck<E: ExtensionField>(
     num_products: usize,
 ) {
     let mut rng = test_rng();
-    let mut transcript = Transcript::new(b"test");
+    let mut transcript = BasicTranscript::new(b"test");
 
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
@@ -29,7 +29,7 @@ fn test_sumcheck<E: ExtensionField>(
     #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
 
-    let mut transcript = Transcript::new(b"test");
+    let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
     assert!(
         poly.evaluate(
@@ -58,7 +58,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;
 
-    let mut transcript = Transcript::new(b"test");
+    let mut transcript = BasicTranscript::new(b"test");
 
     transcript.append_message(b"initializing transcript for testing");
 
@@ -145,7 +145,7 @@ fn test_extract_sum() {
 
 fn test_extract_sum_helper<E: ExtensionField>() {
     let mut rng = test_rng();
-    let mut transcript = Transcript::<E>::new(b"test");
+    let mut transcript = BasicTranscript::<E>::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
     #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly, &mut transcript);

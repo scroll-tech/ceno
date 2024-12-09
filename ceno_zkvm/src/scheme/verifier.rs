@@ -12,7 +12,7 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
-use transcript::Transcript;
+use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
     circuit_builder::SetTableAddrType,
@@ -48,7 +48,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
-        transcript: Transcript<E>,
+        transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
         self.verify_proof_halt(vm_proof, transcript, true)
     }
@@ -57,7 +57,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     pub fn verify_proof_halt(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
-        transcript: Transcript<E>,
+        transcript: impl ForkableTranscript<E>,
         does_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
@@ -79,7 +79,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     fn verify_proof_validity(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
-        mut transcript: Transcript<E>,
+        mut transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
@@ -255,7 +255,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         circuit_vk: &VerifyingKey<E, PCS>,
         proof: &ZKVMOpcodeProof<E, PCS>,
         pi: &[E],
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
@@ -504,7 +504,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         proof: &ZKVMTableProof<E, PCS>,
         raw_pi: &[Vec<E::BaseField>],
         pi: &[E],
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2],
@@ -812,7 +812,7 @@ impl TowerVerify {
         tower_proofs: &TowerProofs<E>,
         num_variables: Vec<usize>,
         num_fanin: usize,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> TowerVerifyResult<E> {
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
