@@ -1,13 +1,9 @@
-use std::{
-    fs,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{fs, path::PathBuf, time::Duration};
 
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, run_e2e_proof, run_e2e_with_checkpoint},
+    e2e::{PipelinePrefix, generate_witness, run_partial},
 };
 use criterion::*;
 
@@ -17,13 +13,12 @@ use mpcs::BasefoldDefault;
 criterion_group! {
   name = fibonacci;
   config = Criterion::default().warm_up_time(Duration::from_millis(20000));
-  targets = fibonacci_prove, fibonacci_witness_1
+  targets = fibonacci_witness
 }
 
 criterion_main!(fibonacci);
 
 const NUM_SAMPLES: usize = 10;
-
 type Pcs = BasefoldDefault<E>;
 type E = GoldilocksExt2;
 
@@ -49,7 +44,7 @@ fn setup() -> (Program, Platform, u32, u32) {
     (program, platform, stack_size, heap_size)
 }
 
-fn fibonacci_witness_1(c: &mut Criterion) {
+fn fibonacci_witness(c: &mut Criterion) {
     let (program, platform, stack_size, heap_size) = setup();
 
     for max_steps in [1usize << 30] {
@@ -86,67 +81,6 @@ fn fibonacci_witness_1(c: &mut Criterion) {
 
         group.finish();
     }
-}
 
-fn fibonacci_prove(c: &mut Criterion) {
-    let (program, platform, stack_size, heap_size) = setup();
-    for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
-        // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("fibonacci_max_steps_{}", max_steps));
-        group.sample_size(NUM_SAMPLES);
-
-        // Benchmark the proving time
-        group.bench_function(
-            BenchmarkId::new(
-                "prove_fibonacci",
-                format!("fibonacci_max_steps_{}", max_steps),
-            ),
-            |b| {
-                b.iter_with_setup(
-                    || {
-                        run_e2e_with_checkpoint::<E, Pcs>(
-                            program.clone(),
-                            platform.clone(),
-                            stack_size,
-                            heap_size,
-                            vec![],
-                            max_steps,
-                            Checkpoint::PrepEmulToProving,
-                        )
-                        .into()
-                    },
-                    |(
-                        program,
-                        max_steps,
-                        init_full_mem,
-                        platform,
-                        hints,
-                        system_config,
-                        pk,
-                        zkvm_fixed_traces,
-                    )| {
-                        let timer = Instant::now();
-
-                        let _ = run_e2e_proof(
-                            program,
-                            max_steps,
-                            init_full_mem,
-                            platform,
-                            hints,
-                            &system_config,
-                            pk,
-                            zkvm_fixed_traces,
-                        );
-                        println!(
-                            "Fibonacci::create_proof, max_steps = {}, time = {}",
-                            max_steps,
-                            timer.elapsed().as_secs_f64()
-                        );
-                    },
-                );
-            },
-        );
-
-        group.finish();
-    }
+    type E = GoldilocksExt2;
 }

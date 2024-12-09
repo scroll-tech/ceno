@@ -34,7 +34,7 @@ pub struct FullMemState<Record> {
 type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
 
-struct EmulationResult {
+pub struct EmulationResult {
     exit_code: Option<u32>,
     all_records: Vec<StepRecord>,
     final_mem_state: FinalMemState,
@@ -244,7 +244,7 @@ fn generate_fixed_traces<E: ExtensionField>(
     zkvm_fixed_traces
 }
 
-fn generate_witness<E: ExtensionField>(
+pub fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     emul_result: EmulationResult,
     program: &Program,
