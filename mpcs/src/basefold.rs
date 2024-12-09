@@ -451,7 +451,7 @@ where
 
     fn write_commitment(
         comm: &Self::Commitment,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         write_digest_to_transcript(&comm.root(), transcript);
         Ok(())
@@ -470,7 +470,7 @@ where
         comm: &Self::CommitmentWithData,
         point: &[E],
         _eval: &E, // Opening does not need eval, except for sanity check
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         let timer = start_timer!(|| "Basefold::open");
 
@@ -550,7 +550,7 @@ where
         comms: &[Self::CommitmentWithData],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
@@ -772,7 +772,7 @@ where
         comm: &Self::CommitmentWithData,
         point: &[E],
         evals: &[E],
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         let timer = start_timer!(|| "Basefold::batch_open");
         let num_vars = polys[0].num_vars();
@@ -858,7 +858,7 @@ where
         point: &[E],
         eval: &E,
         proof: &Self::Proof,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
 
@@ -944,7 +944,7 @@ where
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
         proof: &Self::Proof,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::batch_verify");
         // 	let key = "RAYON_NUM_THREADS";
@@ -1071,7 +1071,7 @@ where
         point: &[E],
         evals: &[E],
         proof: &Self::Proof,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::simple batch verify");
         let batch_size = evals.len();
