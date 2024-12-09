@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, Platform, StepRecord, VMState};
-use itertools::Itertools;
+use itertools::{Itertools, izip};
+use tiny_keccak::keccakf;
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -79,9 +80,16 @@ fn test_ceno_rt_syscalls() -> Result<()> {
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
     let _steps = run(&mut state)?;
 
-    for (&addr, &cycle) in state.tracer().final_accesses().iter().sorted() {
-        let value = state.peek_memory(addr);
-        println!("{:?} = {:08x}  (cycle {})", addr, value, cycle);
+    const ITERATIONS: usize = 3;
+    let keccak_outs = sample_keccak_f(ITERATIONS);
+
+    let all_messages = read_all_messages(&state);
+    for (got, expect) in izip!(&all_messages, keccak_outs) {
+        let got = got
+            .chunks_exact(8)
+            .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
+            .collect_vec();
+        assert_eq!(got, expect);
     }
 
     Ok(())
@@ -91,6 +99,18 @@ fn unsafe_platform() -> Platform {
     let mut platform = CENO_PLATFORM;
     platform.unsafe_ecall_nop = true;
     platform
+}
+
+fn sample_keccak_f(count: usize) -> Vec<Vec<u64>> {
+    let input = [0_u64; 25];
+    let mut state = input.clone();
+
+    (0..count)
+        .map(|_| {
+            keccakf(&mut state);
+            state.into()
+        })
+        .collect_vec()
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {

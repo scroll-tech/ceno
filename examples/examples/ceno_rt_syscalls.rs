@@ -1,21 +1,26 @@
 #![no_main]
 #![no_std]
-use core::ptr::{addr_of, read_volatile};
-
 extern crate ceno_rt;
+use ceno_rt::info_out;
+use core::{ptr::read_volatile, slice};
 
-static mut OUTPUT: u32 = 0;
+const ITERATIONS: usize = 3;
 
 ceno_rt::entry!(main);
 fn main() {
     let mut state = [0_u64; 25];
 
-    syscalls::syscall_keccak_permute(&mut state);
+    for _ in 0..ITERATIONS {
+        syscalls::syscall_keccak_permute(&mut state);
+        log_state(&state);
+    }
 }
 
-/// Prevent compiler optimizations.
-fn black_box<T>(x: *const T) -> T {
-    unsafe { read_volatile(x) }
+fn log_state(state: &[u64; 25]) {
+    let out = unsafe {
+        slice::from_raw_parts_mut(state.as_ptr() as *mut u8, state.len() * size_of::<u64>())
+    };
+    info_out().write_frame(out);
 }
 
 mod syscalls {
