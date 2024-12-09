@@ -1,6 +1,7 @@
 use crate::{Change, EmuContext, VMState, WORD_SIZE, WordAddr, WriteOp};
 use anyhow::Result;
 use itertools::{Itertools, izip};
+use tiny_keccak::keccakf;
 
 /// A syscall event, available to the circuit witness generators.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -26,7 +27,8 @@ pub fn handle_syscall(vm: &VMState, function_code: u32, arg0: u32) -> Result<Sys
     }
 }
 
-const KECCAK_WORDS: usize = 25 * 2;
+const KECCAK_CELLS: usize = 25; // u64 cells
+const KECCAK_WORDS: usize = KECCAK_CELLS * 2; // u32 words
 
 /// Trace the execution of a Keccak permutation.
 ///
@@ -47,8 +49,17 @@ fn keccak_permute(vm: &VMState, state_ptr: u32) -> SyscallEffects {
         .map(|&addr| vm.peek_memory(addr))
         .collect::<Vec<_>>();
 
-    // TODO: Compute Keccak permutation.
-    let output = input.clone();
+    // Compute Keccak permutation.
+    let output = {
+        let mut state = [0_u64; KECCAK_CELLS];
+        izip!(state.iter_mut(), input.chunks_exact(2)).for_each(|(cell, chunk)| {
+            let lo = chunk[0] as u64;
+            let hi = chunk[1] as u64;
+            *cell = lo | hi << 32;
+        });
+        keccakf(&mut state);
+        state.into_iter().flat_map(|c| [c as u32, (c >> 32) as u32])
+    };
 
     // Write permuted state.
     let mem_writes = izip!(addrs, input, output)
@@ -59,6 +70,7 @@ fn keccak_permute(vm: &VMState, state_ptr: u32) -> SyscallEffects {
         })
         .collect_vec();
 
+    assert_eq!(mem_writes.len(), KECCAK_WORDS);
     SyscallEffects {
         witness: SyscallWitness { mem_writes },
         return_value: None,

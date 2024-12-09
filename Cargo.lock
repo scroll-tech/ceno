@@ -246,6 +246,7 @@ dependencies = [
  "num-traits",
  "strum",
  "strum_macros",
+ "tiny-keccak",
  "tracing",
 ]
 
