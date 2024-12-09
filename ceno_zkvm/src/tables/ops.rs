@@ -112,24 +112,21 @@ mod tests {
     };
     use goldilocks::{GoldilocksExt2 as E, SmallField};
 
-    // #[test]
-    // fn test_ops_pow_table_assign() {
-    //     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
-    //     let mut cb = CircuitBuilder::new(&mut cs);
+    #[test]
+    fn test_ops_pow_table_assign() {
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
 
-    //     let config = PowTableCircuit::<E>::construct_circuit(&mut cb).unwrap();
+        let config = PowTableCircuit::<E>::construct_circuit(&mut cb).unwrap();
 
-    //     let fixed = PowTableCircuit::<E>::generate_fixed_traces(&config, cb.cs.num_fixed, &());
+        let fixed = PowTableCircuit::<E>::generate_fixed_traces(&config, cb.cs.num_fixed, &());
 
-    //     for (i, row) in fixed.iter_rows().enumerate() {
-    //         let (base, exp) = PowTable::unpack(i as u64);
-    //         assert_eq!(PowTable::pack(base, exp), i as u64);
-    //         assert_eq!(base, unsafe { row[0].assume_init() }.to_canonical_u64());
-    //         assert_eq!(exp, unsafe { row[1].assume_init() }.to_canonical_u64());
-    //         assert_eq!(
-    //             base.pow(exp.try_into().unwrap()),
-    //             unsafe { row[2].assume_init() }.to_canonical_u64()
-    //         );
-    //     }
-    // }
+        for (i, row) in fixed.iter_rows().enumerate() {
+            let (base, exp) = PowTable::unpack(i as u64);
+            assert_eq!(PowTable::pack(base, exp), i as u64);
+            assert_eq!(base, row[0].to_canonical_u64());
+            assert_eq!(exp, row[1].to_canonical_u64());
+            assert_eq!(base.pow(exp.try_into().unwrap()), row[2].to_canonical_u64());
+        }
+    }
 }
