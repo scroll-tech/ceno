@@ -12,6 +12,9 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
+mod syscalls;
+pub use syscalls::*;
+
 #[cfg(not(test))]
 mod panic_handler {
     use core::panic::PanicInfo;
