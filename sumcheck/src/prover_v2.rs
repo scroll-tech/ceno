@@ -39,7 +39,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     pub fn prove_batch_polys(
         max_thread_id: usize,
         mut polys: Vec<VirtualPolynomialV2<'a, E>>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
@@ -604,7 +604,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     #[tracing::instrument(skip_all, name = "sumcheck::prove_parallel")]
     pub fn prove_parallel(
         poly: VirtualPolynomialV2<'a, E>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         let (num_variables, max_degree) =
             (poly.aux_info.max_num_variables, poly.aux_info.max_degree);

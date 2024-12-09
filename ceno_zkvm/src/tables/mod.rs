@@ -11,7 +11,7 @@ mod ops;
 pub use ops::*;
 
 mod program;
-pub use program::{InsnRecord, ProgramTableCircuit};
+pub use program::{InsnRecord, ProgramTableCircuit, ProgramTableConfig};
 
 mod ram;
 pub use ram::*;
