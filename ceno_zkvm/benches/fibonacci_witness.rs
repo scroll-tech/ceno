@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf, time::Duration};
 use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
 use ceno_zkvm::{
     self,
-    e2e::{PipelinePrefix, generate_witness, run_partial},
+    e2e::{Checkpoint, generate_witness, run_e2e_with_checkpoint},
 };
 use criterion::*;
 
@@ -61,14 +61,14 @@ fn fibonacci_witness(c: &mut Criterion) {
             |b| {
                 b.iter_with_setup(
                     || {
-                        run_partial::<E, Pcs>(
+                        run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             stack_size,
                             heap_size,
                             vec![],
                             max_steps,
-                            PipelinePrefix::PreWitness,
+                            Checkpoint::PrepWitnessGen,
                         )
                         .into()
                     },

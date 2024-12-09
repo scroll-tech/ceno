@@ -303,6 +303,7 @@ pub fn generate_witness<E: ExtensionField>(
 // Complete runs everything end-to-end
 pub enum Checkpoint {
     PrepEmulToProving,
+    PrepWitnessGen,
     PrepProving,
     PrepVerifying,
     Complete,
@@ -313,11 +314,13 @@ pub enum Checkpoint {
 
 pub enum CheckpointOutput<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     PrepEmulToProving(EmulToProvingArgs<E, PCS>),
+    PrepWitnessGen(WitnessGenArgs<E>),
     PrepProving(ProvingArgs<E, PCS>),
     PrepVerifying(VerifyingArgs<E, PCS>),
     Complete,
 }
 
+pub type WitnessGenArgs<E> = (ConstraintSystemConfig<E>, EmulationResult, Program);
 pub type ProvingArgs<E, PCS> = (ZKVMProver<E, PCS>, ZKVMWitnesses<E>, PublicValues<u32>);
 pub type VerifyingArgs<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>, Option<u32>);
 
@@ -388,6 +391,10 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
     // Clone some emul_result fields before consuming
     let pi = emul_result.pi.clone();
     let exit_code = emul_result.exit_code;
+
+    if let Checkpoint::PrepWitnessGen = checkpoint {
+        return CheckpointOutput::PrepWitnessGen((system_config, emul_result, program));
+    }
 
     // Generate witness
     let zkvm_witness = generate_witness(&system_config, emul_result, &program);
@@ -557,6 +564,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutpu
     fn from(value: CheckpointOutput<E, PCS>) -> Self {
         match value {
             CheckpointOutput::PrepProving(inner) => inner,
+            _ => panic!("attempted to unpack proving args from wrong prefix"),
+        }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> From<CheckpointOutput<E, PCS>>
+    for WitnessGenArgs<E>
+{
+    fn from(value: CheckpointOutput<E, PCS>) -> Self {
+        match value {
+            CheckpointOutput::PrepWitnessGen(inner) => inner,
             _ => panic!("attempted to unpack proving args from wrong prefix"),
         }
     }

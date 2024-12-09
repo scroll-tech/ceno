@@ -15,12 +15,12 @@ use goldilocks::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
-  name = fibonacci;
+  name = fibonacci_prove_group;
   config = Criterion::default().warm_up_time(Duration::from_millis(20000));
-  targets = fibonacci_prove, fibonacci_witness_1
+  targets = fibonacci_prove,
 }
 
-criterion_main!(fibonacci);
+criterion_main!(fibonacci_prove_group);
 
 const NUM_SAMPLES: usize = 10;
 
@@ -47,45 +47,6 @@ fn setup() -> (Program, Platform, u32, u32) {
     };
 
     (program, platform, stack_size, heap_size)
-}
-
-fn fibonacci_witness_1(c: &mut Criterion) {
-    let (program, platform, stack_size, heap_size) = setup();
-
-    for max_steps in [1usize << 30] {
-        // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
-        group.sample_size(NUM_SAMPLES);
-
-        // Benchmark the proving time
-        group.bench_function(
-            BenchmarkId::new(
-                "fibonacci_witness",
-                format!("fib_wit_max_steps_{}", max_steps),
-            ),
-            |b| {
-                b.iter_with_setup(
-                    || {
-                        run_partial::<E, Pcs>(
-                            program.clone(),
-                            platform.clone(),
-                            stack_size,
-                            heap_size,
-                            vec![],
-                            max_steps,
-                            PipelinePrefix::PreWitness,
-                        )
-                        .into()
-                    },
-                    |(system_config, simulation_result, program)| {
-                        let _ = generate_witness(&system_config, simulation_result, &program);
-                    },
-                );
-            },
-        );
-
-        group.finish();
-    }
 }
 
 fn fibonacci_prove(c: &mut Criterion) {
