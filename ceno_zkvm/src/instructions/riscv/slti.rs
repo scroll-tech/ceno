@@ -20,7 +20,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {
@@ -96,7 +95,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

@@ -101,7 +101,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
@@ -309,7 +308,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -423,7 +422,7 @@ impl<E: ExtensionField> Signed<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
     ) -> Result<i32, ZKVMError> {

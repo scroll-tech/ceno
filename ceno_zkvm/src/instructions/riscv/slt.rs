@@ -16,7 +16,6 @@ use crate::{
     uint::Value,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 pub struct SetLessThanInstruction<E, I>(PhantomData<(E, I)>);
 
@@ -101,7 +100,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
