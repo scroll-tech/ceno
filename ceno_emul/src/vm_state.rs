@@ -108,12 +108,12 @@ impl VMState {
     }
 
     fn apply_syscall(&mut self, effects: SyscallEffects) -> Result<()> {
-        for write_op in &effects.witness.mem_writes {
-            self.memory.insert(write_op.addr, write_op.value.after);
+        for (addr, value) in effects.iter_mem_values() {
+            self.memory.insert(addr, value);
         }
 
-        for reg_access in &effects.witness.reg_accesses {
-            self.registers[reg_access.register_index()] = reg_access.value.after;
+        for (idx, value) in effects.iter_reg_values() {
+            self.registers[idx] = value;
         }
 
         let next_pc = effects.next_pc.unwrap_or(self.pc + PC_STEP_SIZE as u32);

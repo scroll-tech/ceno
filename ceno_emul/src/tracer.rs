@@ -1,7 +1,5 @@
 use std::{collections::HashMap, fmt, mem};
 
-use itertools::chain;
-
 use crate::{
     CENO_PLATFORM, InsnKind, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
@@ -405,29 +403,18 @@ impl Tracer {
         });
     }
 
-    pub fn track_syscall(&mut self, mut effects: SyscallEffects) {
-        // Keep track of the cycles of registers and memory accesses.
-        for op in chain(
-            &mut effects.witness.reg_accesses,
-            &mut effects.witness.mem_writes,
-        ) {
-            op.previous_cycle = self.track_access(op.addr, 0);
-            assert_ne!(
-                op.previous_cycle, self.record.cycle,
-                "Address {:?} was accessed twice in the same cycle",
-                op.addr
-            );
-        }
+    pub fn track_syscall(&mut self, effects: SyscallEffects) {
+        let witness = effects.finalize(self);
 
         assert!(self.record.syscall.is_none(), "Only one syscall per step");
-        self.record.syscall = Some(effects.witness);
+        self.record.syscall = Some(witness);
     }
 
     /// - Return the cycle when an address was last accessed.
     /// - Return 0 if this is the first access.
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
-    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+    pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         self.latest_accesses
             .insert(addr, self.record.cycle + subcycle)
             .unwrap_or(0)
