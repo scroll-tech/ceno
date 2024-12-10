@@ -96,7 +96,7 @@ impl<F: Field> RowMajorMatrix<F> {
             _ => vec![F::ZERO; self.num_col],
         };
         let num_padding = self.num_padding_instances();
-        let result = (0..self.num_col)
+        (0..self.num_col)
             .into_par_iter()
             .map(|i| {
                 self.values
@@ -108,8 +108,7 @@ impl<F: Field> RowMajorMatrix<F> {
                     .collect::<Vec<_>>()
                     .into_mle()
             })
-            .collect();
-        result
+            .collect()
     }
 }
 

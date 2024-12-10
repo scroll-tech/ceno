@@ -61,8 +61,6 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
-        let table = config.assign_instances(num_witin, multiplicity, OP::len())?;
-        // Self::padding_zero(&mut table, num_witin)?;
-        Ok(table)
+        config.assign_instances(num_witin, multiplicity, OP::len())
     }
 }
