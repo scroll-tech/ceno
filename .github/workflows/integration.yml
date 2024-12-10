@@ -56,12 +56,12 @@ jobs:
       - name: Run example
         env:
           RAYON_NUM_THREADS: 2
-          RUSTFLAGS: "-C opt-level=3 -C lto=thin"
+          RUSTFLAGS: "-C opt-level=3"
         run: cargo run --package ceno_zkvm --example riscv_opcodes --target ${{ matrix.target }} -- --start 10 --end 11
 
       - name: Run fibonacci
         env:
           RAYON_NUM_THREADS: 8
           RUST_LOG: debug
-          RUSTFLAGS: "-C opt-level=3 -C lto=thin"
+          RUSTFLAGS: "-C opt-level=3"
         run: cargo run --package ceno_zkvm --bin e2e --target ${{ matrix.target }} -- --platform=sp1 ceno_zkvm/examples/fibonacci.elf
