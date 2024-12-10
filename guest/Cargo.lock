@@ -28,7 +28,7 @@ dependencies = [
 [[package]]
 name = "ceno_rt"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?branch=matthias%2Fceno_host#7f67dae5d11865a005e6b15213388f1639a8c05c"
+source = "git+https://github.com/scroll-tech/ceno?branch=matthias%2Fceno_host#1ba96925b0516006a28774fda916ef529081ce81"
 dependencies = [
  "riscv",
  "rkyv",
