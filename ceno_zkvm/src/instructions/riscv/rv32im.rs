@@ -384,9 +384,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
         assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
         assign_opcode!(DIVU, DivuInstruction<E>, divu_config);
-        assign_opcode!(REMU, RemuInstruction<E>, divu_config);
-        assign_opcode!(DIV, DivInstruction<E>, divu_config);
-        assign_opcode!(REM, RemInstruction<E>, divu_config);
+        assign_opcode!(REMU, RemuInstruction<E>, remu_config);
+        assign_opcode!(DIV, DivInstruction<E>, div_config);
+        assign_opcode!(REM, RemInstruction<E>, rem_config);
         // alu with imm
         assign_opcode!(ADDI, AddiInstruction<E>, addi_config);
         assign_opcode!(ANDI, AndiInstruction<E>, andi_config);
@@ -425,7 +425,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [INVALID, DIV, REM, REMU, EANY]
+            [INVALID, EANY]
                 .into_iter()
                 .map(|insn_kind| insn_kind as usize)
                 .collect::<BTreeSet<_>>(),
