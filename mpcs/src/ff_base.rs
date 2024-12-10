@@ -1,7 +1,7 @@
-use ark_ff::{AdditiveGroup, BigInt, Field, LegendreSymbol, One};
+use ark_ff::{AdditiveGroup, BigInt, Field, LegendreSymbol};
 use ark_serialize::{
     CanonicalDeserialize, CanonicalDeserializeWithFlags, CanonicalSerialize,
-    CanonicalSerializeWithFlags, Flags, SerializationError,
+    CanonicalSerializeWithFlags, Flags,
 };
 use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
@@ -203,7 +203,7 @@ where
 impl<E: FfExtField> FromStr for BaseFieldWrapper<E> {
     type Err = ();
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
         todo!()
     }
 }
@@ -252,11 +252,11 @@ where
         Self::BigInt::new([((E::BaseField::MODULUS_U64 - 1) / (1 << E::BaseField::S) - 1) / 2]);
 
     fn from_bigint(repr: Self::BigInt) -> Option<Self> {
-        todo!()
+        Some(Self::from(repr))
     }
 
     fn into_bigint(self) -> Self::BigInt {
-        todo!()
+        self.into()
     }
 }
 
@@ -272,7 +272,9 @@ where
         1
     }
 
-    fn to_base_prime_field_elements(&self) -> impl Iterator<Item = Self::BasePrimeField> + '_ {
+    fn to_base_prime_field_elements(
+        &self,
+    ) -> impl Iterator<Item = <Self as ark_ff::Field>::BasePrimeField> {
         std::iter::once(*self)
     }
 
@@ -324,7 +326,7 @@ where
         &[E::BaseField::MODULUS_U64]
     }
 
-    fn from_random_bytes_with_flags<F: Flags>(bytes: &[u8]) -> Option<(Self, F)> {
+    fn from_random_bytes_with_flags<F: Flags>(_bytes: &[u8]) -> Option<(Self, F)> {
         todo!()
     }
 
@@ -548,22 +550,22 @@ impl<E: FfExtField> ark_serialize::Valid for BaseFieldWrapper<E> {
 impl<E: FfExtField> CanonicalSerialize for BaseFieldWrapper<E> {
     fn serialize_with_mode<W: std::io::Write>(
         &self,
-        writer: W,
-        compress: ark_serialize::Compress,
+        _writer: W,
+        _compress: ark_serialize::Compress,
     ) -> Result<(), ark_serialize::SerializationError> {
         todo!()
     }
 
-    fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
+    fn serialized_size(&self, _compress: ark_serialize::Compress) -> usize {
         todo!()
     }
 }
 
 impl<E: FfExtField> CanonicalDeserialize for BaseFieldWrapper<E> {
     fn deserialize_with_mode<R: std::io::Read>(
-        reader: R,
-        compress: ark_serialize::Compress,
-        validate: ark_serialize::Validate,
+        _reader: R,
+        _compress: ark_serialize::Compress,
+        _validate: ark_serialize::Validate,
     ) -> Result<Self, ark_serialize::SerializationError> {
         todo!()
     }
@@ -572,8 +574,8 @@ impl<E: FfExtField> CanonicalDeserialize for BaseFieldWrapper<E> {
 impl<E: FfExtField> CanonicalSerializeWithFlags for BaseFieldWrapper<E> {
     fn serialize_with_flags<W: ark_serialize::Write, F: ark_serialize::Flags>(
         &self,
-        writer: W,
-        flags: F,
+        _writer: W,
+        _flags: F,
     ) -> Result<(), ark_serialize::SerializationError> {
         todo!()
     }
@@ -585,7 +587,7 @@ impl<E: FfExtField> CanonicalSerializeWithFlags for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> CanonicalDeserializeWithFlags for BaseFieldWrapper<E> {
     fn deserialize_with_flags<R: std::io::Read, F: ark_serialize::Flags>(
-        reader: R,
+        _reader: R,
     ) -> Result<(Self, F), ark_serialize::SerializationError> {
         todo!()
     }
