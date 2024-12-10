@@ -5,6 +5,7 @@ use crate::{
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     encode_rv32,
     rv32im::DecodedInstruction,
+    syscalls::{SyscallEffects, SyscallWitness},
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -30,6 +31,8 @@ pub struct StepRecord {
     rd: Option<WriteOp>,
 
     memory_op: Option<WriteOp>,
+
+    syscall: Option<SyscallWitness>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -242,6 +245,7 @@ impl StepRecord {
                 previous_cycle,
             }),
             memory_op,
+            syscall: None,
         }
     }
 
@@ -281,6 +285,10 @@ impl StepRecord {
 
     pub fn is_busy_loop(&self) -> bool {
         self.pc.before == self.pc.after
+    }
+
+    pub fn syscall(&self) -> Option<&SyscallWitness> {
+        self.syscall.as_ref()
     }
 }
 
@@ -384,6 +392,21 @@ impl Tracer {
             value,
             previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
         });
+    }
+
+    pub fn track_syscall(&mut self, mut effects: SyscallEffects) {
+        let cycle = self.record.cycle + Self::SUBCYCLE_MEM;
+        for op in &mut effects.witness.mem_writes {
+            op.previous_cycle = self.track_access(op.addr, Self::SUBCYCLE_MEM);
+            assert_ne!(
+                op.previous_cycle, cycle,
+                "Memory address {:?} was accessed twice in the same cycle",
+                op.addr
+            );
+        }
+
+        assert!(self.record.syscall.is_none(), "Only one syscall per step");
+        self.record.syscall = Some(effects.witness);
     }
 
     /// - Return the cycle when an address was last accessed.
