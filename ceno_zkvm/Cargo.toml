@@ -52,12 +52,9 @@ pprof2.workspace = true
 glob = "0.3"
 
 [features]
-default = ["riv32", "forbid_overflow"]
+default = ["forbid_overflow"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
-non_pow2_rayon_thread = []
-riv32 = []
-riv64 = []
 
 [[bench]]
 harness = false

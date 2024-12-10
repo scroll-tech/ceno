@@ -14,10 +14,8 @@ pub const PUBLIC_IO_IDX: usize = 6;
 pub const LIMB_BITS: usize = 16;
 pub const LIMB_MASK: u32 = 0xFFFF;
 
-#[cfg(feature = "riv32")]
 pub const BIT_WIDTH: usize = 32usize;
-#[cfg(feature = "riv64")]
-pub const BIT_WIDTH: usize = 64usize;
+
 pub type UInt<E> = UIntLimbs<BIT_WIDTH, LIMB_BITS, E>;
 pub type UIntMul<E> = UIntLimbs<{ 2 * BIT_WIDTH }, LIMB_BITS, E>;
 /// use UInt<x> for x bits limb size
