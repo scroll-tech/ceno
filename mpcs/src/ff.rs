@@ -550,45 +550,57 @@ impl<E: FfExtField> ark_serialize::Valid for ExtensionFieldWrapper<E> {
 impl<E: FfExtField> CanonicalSerialize for ExtensionFieldWrapper<E> {
     fn serialize_with_mode<W: std::io::Write>(
         &self,
-        _writer: W,
+        writer: W,
         _compress: ark_serialize::Compress,
     ) -> Result<(), ark_serialize::SerializationError> {
-        todo!()
+        self.serialize_with_flags(writer, ark_serialize::EmptyFlags)
     }
 
     fn serialized_size(&self, _compress: ark_serialize::Compress) -> usize {
-        todo!()
+        self.serialized_size_with_flags::<ark_serialize::EmptyFlags>()
     }
 }
 
 impl<E: FfExtField> CanonicalDeserialize for ExtensionFieldWrapper<E> {
     fn deserialize_with_mode<R: std::io::Read>(
-        _reader: R,
-        _compress: ark_serialize::Compress,
-        _validate: ark_serialize::Validate,
+        mut reader: R,
+        compress: ark_serialize::Compress,
+        validate: ark_serialize::Validate,
     ) -> Result<Self, ark_serialize::SerializationError> {
-        todo!()
+        let c0: BaseFieldWrapper<E> =
+            CanonicalDeserialize::deserialize_with_mode(&mut reader, compress, validate)?;
+        let c1: BaseFieldWrapper<E> =
+            CanonicalDeserialize::deserialize_with_mode(&mut reader, compress, validate)?;
+        Ok(Self(E::from_bases(&[c0.0, c1.0])))
     }
 }
 
 impl<E: FfExtField> CanonicalSerializeWithFlags for ExtensionFieldWrapper<E> {
     fn serialize_with_flags<W: ark_serialize::Write, F: ark_serialize::Flags>(
         &self,
-        _writer: W,
-        _flags: F,
+        mut writer: W,
+        flags: F,
     ) -> Result<(), ark_serialize::SerializationError> {
-        todo!()
+        let bases = self.0.as_bases();
+        BaseFieldWrapper::<E>(bases[0]).serialize_compressed(&mut writer)?;
+        BaseFieldWrapper::<E>(bases[1]).serialize_with_flags(&mut writer, flags)?;
+        Ok(())
     }
 
     fn serialized_size_with_flags<F: Flags>(&self) -> usize {
-        todo!()
+        let bases = self.0.as_bases();
+        BaseFieldWrapper::<E>(bases[0]).compressed_size()
+            + BaseFieldWrapper::<E>(bases[1]).serialized_size_with_flags::<F>()
     }
 }
 
 impl<E: FfExtField> CanonicalDeserializeWithFlags for ExtensionFieldWrapper<E> {
     fn deserialize_with_flags<R: std::io::Read, F: ark_serialize::Flags>(
-        _reader: R,
+        mut reader: R,
     ) -> Result<(Self, F), ark_serialize::SerializationError> {
-        todo!()
+        let c0: BaseFieldWrapper<E> = CanonicalDeserialize::deserialize_compressed(&mut reader)?;
+        let (c1, flags): (BaseFieldWrapper<E>, F) =
+            CanonicalDeserializeWithFlags::deserialize_with_flags(&mut reader)?;
+        Ok((Self(E::from_bases(&[c0.0, c1.0])), flags))
     }
 }
