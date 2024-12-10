@@ -29,6 +29,3 @@ criterion.workspace = true
 [[bench]]
 harness = false
 name = "devirgo_sumcheck"
-
-[features]
-non_pow2_rayon_thread = []
