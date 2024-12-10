@@ -69,10 +69,6 @@ impl CenoStdin {
     }
 }
 
-// TODO(Matthias): much of this is copied from `test_elf.rs` in Ceno.  These are generally useful
-// functions, so we should make them available for both crates, instead of copy-and-pasting here.
-
-// TODO(Matthias): also return exit code (if any)
 pub fn run(platform: Platform, elf: &[u8], hints: &CenoStdin) -> Vec<String> {
     let hints: Vec<u32> = hints.finalise();
 
