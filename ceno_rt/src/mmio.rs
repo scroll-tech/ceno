@@ -17,7 +17,7 @@ static mut NEXT_HINT_LEN_AT: *const u8 = &raw const _hints_start;
 pub fn read_slice<'a>() -> &'a [u8] {
     unsafe {
         let len: u32 = core::ptr::read(NEXT_HINT_LEN_AT as *const u32);
-        NEXT_HINT_LEN_AT = NEXT_HINT_LEN_AT.wrapping_add(4);
+        NEXT_HINT_LEN_AT = NEXT_HINT_LEN_AT.add(4);
 
         let hints_region = {
             let total_length = (&raw const _hints_end).offset_from(&_hints_start) as usize;
