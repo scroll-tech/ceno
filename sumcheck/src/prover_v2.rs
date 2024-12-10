@@ -232,13 +232,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         {
             rayon::in_place_scope(scoped_fn)
         } else {
-            {
-                panic!(
-                    "rayon global thread pool size {} mismatch with desired poly size {}.",
-                    rayon::current_num_threads(),
-                    polys.len()
-                );
-            }
+            panic!(
+                "rayon global thread pool size {} mismatch with desired poly size {}.",
+                rayon::current_num_threads(),
+                polys.len()
+            );
         };
 
         if log2_max_thread_id == 0 {

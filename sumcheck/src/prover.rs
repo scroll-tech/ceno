@@ -116,13 +116,11 @@ impl<E: ExtensionField> IOPProverState<E> {
             if rayon::current_num_threads() >= max_thread_id {
                 rayon::spawn(spawn_task);
             } else {
-                {
-                    panic!(
-                        "rayon global thread pool size {} mismatch with desired poly size {}.",
-                        rayon::current_num_threads(),
-                        polys.len()
-                    );
-                }
+                panic!(
+                    "rayon global thread pool size {} mismatch with desired poly size {}.",
+                    rayon::current_num_threads(),
+                    polys.len()
+                );
             }
         }
 
