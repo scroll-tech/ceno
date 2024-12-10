@@ -1,4 +1,3 @@
-
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 

@@ -1,4 +1,3 @@
-
 use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
 use goldilocks::SmallField;
 use itertools::Itertools;
