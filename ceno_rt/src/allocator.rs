@@ -7,16 +7,6 @@ struct SimpleAllocator {
     next_alloc: *mut u8,
 }
 
-extern "C" {
-    // The address of this variable is the start of the heap (growing upwards).
-    static mut _sheap: u8;
-}
-
-#[global_allocator]
-static mut HEAP: SimpleAllocator = SimpleAllocator {
-    next_alloc: &raw mut _sheap,
-};
-
 unsafe impl GlobalAlloc for SimpleAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Single threaded, so nothing else can touch this while we're working.
@@ -29,7 +19,7 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         heap_pos = heap_pos.add(heap_pos.align_offset(align));
 
         let ptr = heap_pos;
-        // Panic on overflow.  We don't want to wrap around, and overwrite stack etc.
+        // We don't want to wrap around, and overwrite stack etc.
         // (We could also return a null pointer, but only malicious programs would ever hit this.)
         heap_pos = heap_pos.add(layout.size());
 
@@ -44,3 +34,15 @@ unsafe impl GlobalAlloc for SimpleAllocator {
     /// Never deallocate.
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
+
+extern "C" {
+    /// The address of this variable is the start of the heap (growing upwards).
+    ///
+    /// It is defined in the linker script.
+    static mut _sheap: u8;
+}
+
+#[global_allocator]
+static mut HEAP: SimpleAllocator = SimpleAllocator {
+    next_alloc: &raw mut _sheap,
+};
