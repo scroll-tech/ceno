@@ -195,8 +195,8 @@ where
 impl<E: FfExtField> FromStr for BaseFieldWrapper<E> {
     type Err = ();
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        todo!()
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(u64::from_str(s).map_err(|_| ())?))
     }
 }
 
@@ -342,6 +342,9 @@ where
             let mut last_bytes_mask = [0u8; 9];
             last_bytes_mask[..8].copy_from_slice(&last_limb_mask);
 
+            let mut bytes_with_flag = [0u8; 9];
+            bytes_with_flag[0..8].copy_from_slice(bytes);
+
             // Length of the buffer containing the field element and the flag.
             let output_byte_size = ark_serialize::buffer_byte_size(64 + F::BIT_SIZE);
             // Location of the flag is the last byte of the serialized
@@ -352,8 +355,7 @@ where
             let flag_location_in_last_limb = flag_location;
 
             // Take all but the last 9 bytes.
-            let mut last_bytes = bytes[..9].to_vec();
-            let last_bytes = last_bytes.iter_mut();
+            let last_bytes = bytes_with_flag.iter_mut();
 
             // The mask only has the last `F::BIT_SIZE` bits set
             let flags_mask = u8::MAX.checked_shl(8 - (F::BIT_SIZE as u32)).unwrap_or(0);
@@ -593,45 +595,80 @@ impl<E: FfExtField> ark_serialize::Valid for BaseFieldWrapper<E> {
 impl<E: FfExtField> CanonicalSerialize for BaseFieldWrapper<E> {
     fn serialize_with_mode<W: std::io::Write>(
         &self,
-        _writer: W,
-        _compress: ark_serialize::Compress,
+        writer: W,
+        compress: ark_serialize::Compress,
     ) -> Result<(), ark_serialize::SerializationError> {
-        todo!()
+        self.0
+            .to_canonical_u64()
+            .serialize_with_mode(writer, compress)
     }
 
-    fn serialized_size(&self, _compress: ark_serialize::Compress) -> usize {
-        todo!()
+    fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
+        self.0.to_canonical_u64().serialized_size(compress)
     }
 }
 
 impl<E: FfExtField> CanonicalDeserialize for BaseFieldWrapper<E> {
     fn deserialize_with_mode<R: std::io::Read>(
-        _reader: R,
-        _compress: ark_serialize::Compress,
-        _validate: ark_serialize::Validate,
+        reader: R,
+        compress: ark_serialize::Compress,
+        validate: ark_serialize::Validate,
     ) -> Result<Self, ark_serialize::SerializationError> {
-        todo!()
+        Ok(Self(E::BaseField::from(
+            CanonicalDeserialize::deserialize_with_mode(reader, compress, validate)?,
+        )))
     }
 }
 
 impl<E: FfExtField> CanonicalSerializeWithFlags for BaseFieldWrapper<E> {
     fn serialize_with_flags<W: ark_serialize::Write, F: ark_serialize::Flags>(
         &self,
-        _writer: W,
-        _flags: F,
+        mut writer: W,
+        flags: F,
     ) -> Result<(), ark_serialize::SerializationError> {
-        todo!()
+        // All reasonable `Flags` should be less than 8 bits in size
+        // (256 values are enough for anyone!)
+        if F::BIT_SIZE > 8 {
+            return Err(ark_serialize::SerializationError::NotEnoughSpace);
+        }
+
+        writer.write_all(self.0.to_canonical_u64().to_le_bytes().as_ref())?;
+        if F::BIT_SIZE > 0 {
+            writer.write_all(&[flags.u8_bitmask()])?;
+        }
+        Ok(())
     }
 
     fn serialized_size_with_flags<F: Flags>(&self) -> usize {
-        todo!()
+        ark_serialize::buffer_byte_size(64 as usize + F::BIT_SIZE)
     }
 }
 
 impl<E: FfExtField> CanonicalDeserializeWithFlags for BaseFieldWrapper<E> {
     fn deserialize_with_flags<R: std::io::Read, F: ark_serialize::Flags>(
-        _reader: R,
+        mut reader: R,
     ) -> Result<(Self, F), ark_serialize::SerializationError> {
-        todo!()
+        // All reasonable `Flags` should be less than 8 bits in size
+        // (256 values are enough for anyone!)
+        if F::BIT_SIZE > 8 {
+            return Err(ark_serialize::SerializationError::NotEnoughSpace);
+        }
+        // Calculate the number of bytes required to represent a field element
+        // serialized with `flags`.
+        let output_byte_size = Self::zero().serialized_size_with_flags::<F>();
+        let mut masked_bytes = vec![0u8; output_byte_size];
+        reader.read_exact(masked_bytes.as_mut_slice())?;
+
+        let flags = F::from_u8_remove_flags(&mut masked_bytes[output_byte_size - 1])
+            .ok_or(ark_serialize::SerializationError::UnexpectedFlags)?;
+
+        Ok((
+            Self(E::BaseField::from(u64::from_le_bytes(
+                masked_bytes[0..8]
+                    .try_into()
+                    .map_err(|_| ark_serialize::SerializationError::InvalidData)?,
+            ))),
+            flags,
+        ))
     }
 }
