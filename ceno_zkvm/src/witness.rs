@@ -1,5 +1,4 @@
 use ff::Field;
-use itertools::Itertools;
 use std::{
     array,
     cell::RefCell,
@@ -13,7 +12,7 @@ use std::{
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    iter::{IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use thread_local::ThreadLocal;
@@ -49,7 +48,6 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
 
 impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
-        // assert!(false);
         RowMajorMatrix {
             values: (0..num_rows * num_col)
                 .into_par_iter()
@@ -90,23 +88,22 @@ impl<F: Field> RowMajorMatrix<F> {
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
         let padding_row = match self.padding_strategy {
-            // If asked to repeat and actually have content to repeat
+            // Repeat last row if it exists
             InstancePaddingStrategy::RepeatLast if !self.values.is_empty() => {
                 self.values[self.values.len() - self.num_col..].to_vec()
             }
-            // Otherwise zeros
+            // Otherwise use zeroes
             _ => vec![F::ZERO; self.num_col],
         };
         let num_padding = self.num_padding_instances();
         let result = (0..self.num_col)
-            .collect_vec()
-            .par_iter()
+            .into_par_iter()
             .map(|i| {
                 self.values
                     .iter()
-                    .skip(*i)
+                    .skip(i)
                     .step_by(self.num_col)
-                    .chain(&mut iter::repeat(&padding_row[*i]).take(num_padding))
+                    .chain(&mut iter::repeat(&padding_row[i]).take(num_padding))
                     .copied()
                     .collect::<Vec<_>>()
                     .into_mle()

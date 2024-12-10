@@ -159,7 +159,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let pc_base = program.base_address;
         assert!(num_instructions <= config.program_size);
 
-        // dbg!(config.program_size, num_fixed);
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
             num_fixed,
@@ -181,7 +180,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                 }
             });
 
-        // Self::padding_zero(&mut fixed, num_fixed).expect("padding error");
         fixed
     }
 
@@ -199,7 +197,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             prog_mlt[i] = *mlt;
         }
 
-        // dbg!(config.program_size, num_witin);
         let mut witness = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
             num_witin,
@@ -213,7 +210,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
             });
 
-        // Self::padding_zero(&mut witness, num_witin).expect("padding error");
         Ok(witness)
     }
 }

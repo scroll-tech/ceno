@@ -48,7 +48,6 @@ impl OpTableConfig {
         num_fixed: usize,
         content: Vec<[u64; 3]>,
     ) -> RowMajorMatrix<F> {
-        //dbg!(content.len(), num_fixed);
         let mut fixed =
             RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Zero);
 
@@ -71,7 +70,6 @@ impl OpTableConfig {
         multiplicity: &HashMap<u64, usize>,
         length: usize,
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        //dbg!(length, num_witin);
         let mut witness =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Zero);
 

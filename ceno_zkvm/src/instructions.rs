@@ -53,7 +53,6 @@ pub trait Instruction<E: ExtensionField> {
         }
         .max(1);
         let lk_multiplicity = LkMultiplicity::default();
-        // dbg!(steps.len(), num_witin);
         let mut raw_witin =
             RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
