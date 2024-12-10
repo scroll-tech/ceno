@@ -307,8 +307,16 @@ where
         Self(self.0 * elem.0)
     }
 
-    fn from_random_bytes_with_flags<F: Flags>(_bytes: &[u8]) -> Option<(Self, F)> {
-        todo!()
+    fn from_random_bytes_with_flags<F: Flags>(bytes: &[u8]) -> Option<(Self, F)> {
+        let split_at = bytes.len() / 2;
+        if let Some(c0) = BaseFieldWrapper::<E>::from_random_bytes(&bytes[..split_at]) {
+            if let Some((c1, flags)) =
+                BaseFieldWrapper::<E>::from_random_bytes_with_flags(&bytes[split_at..])
+            {
+                return Some((Self(E::from_bases(&[c0.0, c1.0])), flags));
+            }
+        }
+        None
     }
 
     fn sqrt(&self) -> Option<Self> {
