@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "Multilinear Polynomial Commitment Scheme"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "mpcs"
+readme.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]
@@ -38,11 +43,7 @@ sanity-check = []
 
 [[bench]]
 harness = false
-name = "commit_open_verify_rs"
-
-[[bench]]
-harness = false
-name = "commit_open_verify_basecode"
+name = "basefold"
 
 [[bench]]
 harness = false

@@ -87,13 +87,12 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
 
     pub fn par_batch_iter_padding_mut(
         &mut self,
-        num_instances: Option<usize>,
-        batch_size: usize,
+        num_rows: usize,
     ) -> rayon::slice::ChunksMut<'_, MaybeUninit<T>> {
-        let num_instances = num_instances.unwrap_or(self.num_instances());
-        self.values[num_instances * self.num_col..]
+        let valid_instance = self.num_instances();
+        self.values[valid_instance * self.num_col..]
             .as_mut()
-            .par_chunks_mut(batch_size * self.num_col)
+            .par_chunks_mut(num_rows * self.num_col)
     }
 
     pub fn de_interleaving(mut self) -> Vec<Vec<T>> {

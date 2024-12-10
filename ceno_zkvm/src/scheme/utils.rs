@@ -77,9 +77,7 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
                             .with_min_len(MIN_PAR_SIZE)
                             .for_each(|(value, instance)| {
                                 assert_eq!(instance.len(), per_instance_size);
-                                instance[i] = <<E as ff_ext::ExtensionField>::BaseField as Into<
-                                    E,
-                                >>::into(*value);
+                                instance[i] = E::from(*value);
                             }),
                         _ => unreachable!(),
                     });

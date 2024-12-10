@@ -746,7 +746,7 @@ Hints:
     }
 
     pub fn assert_satisfied_full(
-        cs: ZKVMConstraintSystem<E>,
+        cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
         pi: &PublicValues<u32>,
@@ -1336,9 +1336,7 @@ mod tests {
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                    Box::new(Expression::Constant(
-                        <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::from(U5 as u64)
-                    )),
+                    Box::new(Expression::Constant(Goldilocks::from(U5 as u64))),
                 )),
                 Box::new(Expression::Challenge(
                     0,

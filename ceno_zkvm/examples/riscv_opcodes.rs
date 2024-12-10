@@ -1,4 +1,4 @@
-use std::{panic, time::Instant};
+use std::{panic, sync::Arc, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
@@ -7,6 +7,7 @@ use ceno_zkvm::{
     state::GlobalState,
     structs::ProgramParams,
     tables::{MemFinalRecord, ProgramTableCircuit},
+    with_panic_hook,
 };
 use clap::Parser;
 
@@ -21,13 +22,12 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
-use goldilocks::GoldilocksExt2;
+use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use sumcheck::{entered_span, exit_span};
-use tracing_flame::FlameLayer;
+use sumcheck::macros::{entered_span, exit_span};
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
@@ -93,7 +93,6 @@ fn main() {
     let mem_addresses = CENO_PLATFORM.ram.clone();
     let io_addresses = CENO_PLATFORM.public_io.clone();
 
-    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
     let mut fmt_layer = fmt::layer()
         .compact()
         .with_span_events(FmtSpan::CLOSE)
@@ -107,10 +106,7 @@ fn main() {
     // Example: RUST_LOG="[sumcheck]" cargo run.. to get only events under the "sumcheck" span
     let filter = EnvFilter::from_default_env();
 
-    let subscriber = Registry::default()
-        .with(fmt_layer)
-        .with(filter)
-        .with(flame_layer.with_threads_collapsed(true));
+    let subscriber = Registry::default().with(fmt_layer).with(filter);
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let top_level = entered_span!("TOPLEVEL");
@@ -181,7 +177,7 @@ fn main() {
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         let public_io_init = init_public_io(&[1, u32::MAX, step_loop]);
 
-        let mut vm = VMState::new(CENO_PLATFORM, program.clone());
+        let mut vm = VMState::new(CENO_PLATFORM, Arc::new(program.clone()));
 
         // init memory mapped IO
         for record in &public_io_init {
@@ -275,6 +271,7 @@ fn main() {
                 &reg_final,
                 &mem_final,
                 &public_io_final,
+                &[],
             )
             .unwrap();
 
@@ -293,12 +290,7 @@ fn main() {
         trace_report.save_json("report.json");
         trace_report.save_table("report.txt");
 
-        MockProver::assert_satisfied_full(
-            zkvm_cs.clone(),
-            zkvm_fixed_traces.clone(),
-            &zkvm_witness,
-            &pi,
-        );
+        MockProver::assert_satisfied_full(&zkvm_cs, zkvm_fixed_traces.clone(), &zkvm_witness, &pi);
 
         let timer = Instant::now();
 
@@ -323,17 +315,13 @@ fn main() {
 
         let transcript = Transcript::new(b"riscv");
         // change public input maliciously should cause verifier to reject proof
-        zkvm_proof.raw_pi[0] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
-        zkvm_proof.raw_pi[1] = vec![<GoldilocksExt2 as ff_ext::ExtensionField>::BaseField::ONE];
+        zkvm_proof.raw_pi[0] = vec![Goldilocks::ONE];
+        zkvm_proof.raw_pi[1] = vec![Goldilocks::ONE];
 
         // capture panic message, if have
-        let default_hook = panic::take_hook();
-        panic::set_hook(Box::new(|_info| {
-            // by default it will print msg to stdout/stderr
-            // we override it to avoid print msg since we will capture the msg by our own
-        }));
-        let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-        panic::set_hook(default_hook);
+        let result = with_panic_hook(Box::new(|_info| ()), || {
+            panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+        });
         match result {
             Ok(res) => {
                 res.expect_err("verify proof should return with error");

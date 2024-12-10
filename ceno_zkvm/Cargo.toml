@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "Ceno ZKVM"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "ceno_zkvm"
+readme.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]
@@ -28,7 +33,7 @@ prettytable-rs.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 tracing.workspace = true
-tracing-flame.workspace = true
+tracing-forest.workspace = true
 tracing-subscriber.workspace = true
 
 
@@ -41,14 +46,14 @@ thread_local = "1.1"
 [dev-dependencies]
 cfg-if.workspace = true
 criterion.workspace = true
-pprof.workspace = true
+pprof2.workspace = true
 
 [build-dependencies]
 glob = "0.3"
 
 [features]
 default = ["riv32", "forbid_overflow"]
-flamegraph = ["pprof/flamegraph", "pprof/criterion"]
+flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 non_pow2_rayon_thread = []
 riv32 = []
@@ -57,3 +62,12 @@ riv64 = []
 [[bench]]
 harness = false
 name = "riscv_add"
+
+
+[[bench]]
+harness = false
+name = "fibonacci"
+
+[[bench]]
+harness = false
+name = "fibonacci_witness"

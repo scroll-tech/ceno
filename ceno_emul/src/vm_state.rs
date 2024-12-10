@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::rv32im::EmuContext;
 use crate::{
-    PC_STEP_SIZE, Program,
+    PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
@@ -29,9 +29,8 @@ impl VMState {
     /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
     pub const REG_COUNT: usize = 32 + 1;
 
-    pub fn new(platform: Platform, program: Program) -> Self {
+    pub fn new(platform: Platform, program: Arc<Program>) -> Self {
         let pc = program.entry;
-        let program = Arc::new(program);
 
         let mut vm = Self {
             pc,
@@ -52,7 +51,7 @@ impl VMState {
     }
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
-        let program = Program::load_elf(elf, u32::MAX)?;
+        let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
         Ok(Self::new(platform, program))
     }
 
@@ -123,7 +122,8 @@ impl EmuContext for VMState {
             // Read two registers, write one register, write one memory word, and branch.
             tracing::warn!("ecall ignored: syscall_id={}", function);
             self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
-            let addr = self.platform.ram.start.into();
+            // Example ecall effect - any writable address will do.
+            let addr = (self.platform.stack_top - WORD_SIZE as u32).into();
             self.store_memory(addr, self.peek_memory(addr))?;
             self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
@@ -189,10 +189,14 @@ impl EmuContext for VMState {
         *self.memory.get(&addr).unwrap_or(&0)
     }
 
-    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        let value = self.peek_memory(pc);
-        self.tracer.fetch(pc, value);
-        Ok(value)
+    // TODO(Matthias): this should really return `Result<DecodedInstruction>`
+    fn fetch(&mut self, pc: WordAddr) -> Option<Word> {
+        let byte_pc: ByteAddr = pc.into();
+        let relative_pc = byte_pc.0.wrapping_sub(self.program.base_address);
+        let idx = (relative_pc / WORD_SIZE as u32) as usize;
+        let word = self.program.instructions.get(idx).copied()?;
+        self.tracer.fetch(pc, word);
+        Some(word)
     }
 
     fn check_data_load(&self, addr: ByteAddr) -> bool {

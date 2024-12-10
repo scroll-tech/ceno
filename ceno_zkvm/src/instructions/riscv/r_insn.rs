@@ -61,7 +61,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
