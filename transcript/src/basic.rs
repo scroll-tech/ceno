@@ -32,11 +32,11 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 
     fn read_challenge(&mut self) -> Challenge<E> {
-        // notice `from_bases` and `from_limbs` has the same behavior but 
+        // notice `from_bases` and `from_limbs` has the same behavior but
         // `from_bases` has a sanity check for length of input slices
         // while `from_limbs` use the first two fields silently
         // we select `from_base` here to make it being more clear that
-        // we only use the first 2 fields here to construct the 
+        // we only use the first 2 fields here to construct the
         // extension field (i.e. the challenge)
         let r = E::from_bases(&self.permutation.squeeze()[..2]);
 
