@@ -8,6 +8,14 @@ use rkyv::{
     util::AlignedVec,
 };
 
+// We want to get access to the default value of `AlignedVec::ALIGNMENT`, and using it directly like this
+//   pub const RKVY_ALIGNMENT: usize = rkyv::util::AlignedVec::ALIGNMENT;
+// doesn't work:
+pub const RKYV_ALIGNMENT: usize = {
+    type AlignedVec = rkyv::util::AlignedVec;
+    AlignedVec::ALIGNMENT
+};
+
 #[derive(Default)]
 pub struct CenoStdin {
     pub items: Vec<AlignedVec>,
@@ -26,32 +34,30 @@ impl CenoStdin {
     }
 
     pub fn finalise(&self) -> Vec<u32> {
-        // TODO: perhaps don't hardcode 16 here.
-        // It's from rkyv's format, so we can probably take it from there somehow?
-        // TODO: clean this up.
-        let initial_offset = (size_of::<u32>() * self.items.len()).next_multiple_of(16);
-        // println!("offset: {}", initial_offset);
+        let initial_offset = (size_of::<u32>() * self.items.len()).next_multiple_of(RKYV_ALIGNMENT);
         let offsets: Vec<u32> = self
             .items
             .iter()
             .scan(initial_offset, |acc, bytes| {
                 let output = (*acc + bytes.len()) as u32;
-                // print!("len: {}\t", bytes.len());
-                *acc += bytes.len().next_multiple_of(16);
-                // println!("acc: {}", *acc);
+                *acc += bytes.len().next_multiple_of(RKYV_ALIGNMENT);
                 Some(output)
             })
             .collect();
         let offsets_u8: Vec<u8> = offsets.iter().copied().flat_map(u32::to_le_bytes).collect();
         let mut buf: AlignedVec = AlignedVec::new();
         buf.extend_from_slice(&offsets_u8);
-        // println!("buf.len() after offsets: {}", buf.len());
-        buf.extend_from_slice(&vec![0; buf.len().next_multiple_of(16) - buf.len()]);
-        // println!("buf.len() after offset padding: {}", buf.len());
+        buf.extend_from_slice(&vec![
+            0;
+            buf.len().next_multiple_of(RKYV_ALIGNMENT) - buf.len()
+        ]);
         for (offset, item) in izip!(offsets, &self.items) {
             buf.extend_from_slice(item);
-            buf.extend_from_slice(&vec![0; buf.len().next_multiple_of(16) - buf.len()]);
-            assert_eq!(buf.len(), offset.next_multiple_of(16) as usize);
+            buf.extend_from_slice(&vec![
+                0;
+                buf.len().next_multiple_of(RKYV_ALIGNMENT) - buf.len()
+            ]);
+            assert_eq!(buf.len(), offset.next_multiple_of(RKYV_ALIGNMENT) as usize);
         }
         let (prefix, hints, postfix): (_, &[u32], _) = unsafe { buf.align_to() };
         assert_eq!(prefix, &[]);
