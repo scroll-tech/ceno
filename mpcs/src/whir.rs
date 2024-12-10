@@ -6,8 +6,8 @@ use std::marker::PhantomData;
 use whir::whir::{PolynomialCommitmentScheme as WhirPCS, pcs::Whir as WhirInner};
 
 mod ff;
+mod ff_base;
 use ff::ExtensionFieldWrapper as FieldWrapper;
-// mod fp;
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Whir<E: ExtensionField> {

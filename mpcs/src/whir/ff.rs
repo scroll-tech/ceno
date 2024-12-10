@@ -17,7 +17,7 @@ use std::{
 };
 use zeroize::Zeroize;
 
-use crate::ff_base::BaseFieldWrapper;
+use super::ff_base::BaseFieldWrapper;
 
 #[derive(
     PartialEq, PartialOrd, Eq, Ord, Default, Copy, Clone, Debug, Hash, Serialize, Deserialize,
