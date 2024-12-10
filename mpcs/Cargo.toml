@@ -28,11 +28,11 @@ poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
-serde.workspace = true
+serde = { version = "1.0", features = ["derive"] }
+ark-serialize = { version = "0.5", features = ["derive"] }
 transcript = { path = "../transcript" }
 whir = { git = "https://github.com/scroll-tech/whir.git", branch = "pcs_trait" }
 ark-ff = "0.5"
-ark-serialize = "0.5"
 zeroize = "1.8"
 
 [dev-dependencies]

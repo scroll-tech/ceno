@@ -82,13 +82,16 @@ impl<E: ExtensionField> QuadExtConfig for QuadExtConfigOf<E> {
 
     type BaseField = Self::BasePrimeField;
 
-    type FrobCoeff;
+    type FrobCoeff = Self::BaseField;
 
-    const DEGREE_OVER_BASE_PRIME_FIELD: usize;
+    const DEGREE_OVER_BASE_PRIME_FIELD: usize = 2;
 
-    const NONRESIDUE: Self::BaseField;
+    const NONRESIDUE: Self::BaseField = Self::BaseField::from_bigint(BigInt::new([2])).unwrap();
 
-    const FROBENIUS_COEFF_C1: &'static [Self::FrobCoeff];
+    const FROBENIUS_COEFF_C1: &'static [Self::FrobCoeff] = &[
+        Self::BaseField::from_bigint(BigInt::new([1])).unwrap(),
+        Self::BaseField::from_bigint(BigInt::new([0])).unwrap(),
+    ];
 
     fn mul_base_field_by_frob_coeff(fe: &mut Self::BaseField, power: usize) {
         todo!()

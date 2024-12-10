@@ -1,49 +1,77 @@
 use super::PolynomialCommitmentScheme;
 use ark_ff::{FftField, Field, PrimeField};
 use ff_ext::ExtensionField;
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use whir::whir::pcs::Whir as WhirInner;
+use whir::whir::{PolynomialCommitmentScheme as WhirPCS, pcs::Whir as WhirInner};
 
 mod ff;
-mod fp;
+use ff::ExtensionFieldWrapper as FieldWrapper;
+// mod fp;
 
-#[derive(Default, Clone, Debug)]
-pub struct Whir<E: ExtensionField>(PhantomData<E>);
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+pub struct Whir<E: ExtensionField> {
+    _marker: PhantomData<E>,
+    inner: WhirInner<E>,
+}
 
 impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E> {
-    type Param;
-    type ProverParam;
-    type VerifierParam;
-    type CommitmentWithData;
-    type Commitment;
-    type CommitmentChunk;
-    type Proof;
+    type Param = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
+    type ProverParam = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
+    type VerifierParam = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
+    type Commitment = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Commitment;
+    type Proof = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Proof;
+    type CommitmentWithData =
+        <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::CommitmentWithData;
+    type CommitmentChunk =
+        <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::CommitmentChunk;
 
     fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
-        todo!()
+        Ok(WhirInner::default())
     }
 
     fn trim(
         param: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        todo!()
+        Ok((param.clone(), param))
     }
 
     fn commit(
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
-    ) -> Result<Self::CommitmentWithData, crate::Error> {
-        todo!()
+    ) -> Result<Self::Commitment, crate::Error> {
+        Ok(pp.clone())
     }
 
     fn write_commitment(
         comm: &Self::Commitment,
         transcript: &mut transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        todo!()
+        Ok(())
     }
 
+    fn open(
+        pp: &Self::ProverParam,
+        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+        comm: &Self::Commitment,
+        point: &[E],
+        eval: &E,
+        transcript: &mut transcript::Transcript<E>,
+    ) -> Result<Self::Proof, crate::Error> {
+        Ok(pp.clone())
+    }
+
+    fn verify(
+        vp: &Self::VerifierParam,
+        comm: &Self::Commitment,
+        point: &[E],
+        eval: &E,
+        proof: &Self::Proof,
+        transcript: &mut transcript::Transcript<E>,
+    ) -> Result<(), crate::Error> {
+        Ok(())
+    }
     fn get_pure_commitment(comm: &Self::CommitmentWithData) -> Self::Commitment {
         todo!()
     }
@@ -52,17 +80,6 @@ impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E> {
         pp: &Self::ProverParam,
         polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithData, crate::Error> {
-        todo!()
-    }
-
-    fn open(
-        pp: &Self::ProverParam,
-        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
-        comm: &Self::CommitmentWithData,
-        point: &[E],
-        eval: &E,
-        transcript: &mut transcript::Transcript<E>,
-    ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
 
@@ -85,17 +102,6 @@ impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E> {
         evals: &[E],
         transcript: &mut transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        todo!()
-    }
-
-    fn verify(
-        vp: &Self::VerifierParam,
-        comm: &Self::Commitment,
-        point: &[E],
-        eval: &E,
-        proof: &Self::Proof,
-        transcript: &mut transcript::Transcript<E>,
-    ) -> Result<(), crate::Error> {
         todo!()
     }
 
