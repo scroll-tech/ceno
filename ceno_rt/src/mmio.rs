@@ -9,6 +9,7 @@ extern "C" {
     ///
     /// It is defined in the linker script.
     static _hints_start: u8;
+    static _hints_end: u8;
 }
 
 static mut NEXT_HINT_LEN_AT: *const u8 = &raw const _hints_start;
@@ -18,7 +19,12 @@ pub fn read_slice<'a>() -> &'a [u8] {
         let len: u32 = core::ptr::read(NEXT_HINT_LEN_AT as *const u32);
         NEXT_HINT_LEN_AT = NEXT_HINT_LEN_AT.wrapping_add(4);
 
-        &from_raw_parts(&_hints_start, 1 << 30)[..len as usize]
+        let hints_region = {
+            let total_length = (&raw const _hints_end).offset_from(&_hints_start) as usize;
+            from_raw_parts(&_hints_start, total_length)
+        };
+
+        &hints_region[..len as usize]
     }
 }
 
