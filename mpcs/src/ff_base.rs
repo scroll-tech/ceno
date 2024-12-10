@@ -238,15 +238,18 @@ where
 {
     type BigInt = BigInt<1>;
 
-    const MODULUS: Self::BigInt;
+    const MODULUS: Self::BigInt = Self::BigInt::new([E::BaseField::MODULUS_U64]);
 
-    const MODULUS_MINUS_ONE_DIV_TWO: Self::BigInt;
+    const MODULUS_MINUS_ONE_DIV_TWO: Self::BigInt =
+        Self::BigInt::new([(E::BaseField::MODULUS_U64 - 1) / 2]);
 
-    const MODULUS_BIT_SIZE: u32;
+    const MODULUS_BIT_SIZE: u32 = 64;
 
-    const TRACE: Self::BigInt;
+    const TRACE: Self::BigInt =
+        Self::BigInt::new([(E::BaseField::MODULUS_U64 - 1) / (1 << E::BaseField::S)]);
 
-    const TRACE_MINUS_ONE_DIV_TWO: Self::BigInt;
+    const TRACE_MINUS_ONE_DIV_TWO: Self::BigInt =
+        Self::BigInt::new([((E::BaseField::MODULUS_U64 - 1) / (1 << E::BaseField::S) - 1) / 2]);
 
     fn from_bigint(repr: Self::BigInt) -> Option<Self> {
         todo!()
@@ -266,42 +269,43 @@ where
     const ONE: Self = Self(<E::BaseField as FfField>::ONE);
 
     fn extension_degree() -> u64 {
-        E::extension_degree()
+        1
     }
 
     fn to_base_prime_field_elements(&self) -> impl Iterator<Item = Self::BasePrimeField> + '_ {
-        self.0.to_base_prime_field_elements()
+        std::iter::once(*self)
     }
 
     fn from_base_prime_field_elems(
         elems: impl IntoIterator<Item = Self::BasePrimeField>,
     ) -> Option<Self> {
-        E::from_base_prime_field_elems(elems).map(Self)
+        elems.into_iter().next()
     }
 
     fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
-        Self(E::from_base_prime_field(elem))
+        elem
     }
 
     fn legendre(&self) -> LegendreSymbol {
-        self.0.legendre()
+        todo!()
     }
 
     fn square(&self) -> Self {
-        self.square()
+        Self(self.0.square())
     }
 
     fn square_in_place(&mut self) -> &mut Self {
-        self.square_in_place();
+        self.0 = self.0.square();
         self
     }
 
     fn inverse(&self) -> Option<Self> {
-        self.0.inverse().map(Self)
+        self.0.invert().map(Self).into_option()
     }
 
     fn inverse_in_place(&mut self) -> Option<&mut Self> {
-        if let Some(_) = self.0.inverse_in_place() {
+        if let Some(v) = self.0.invert().into_option() {
+            self.0 = v;
             Some(self)
         } else {
             None
@@ -309,23 +313,19 @@ where
     }
 
     fn frobenius_map_in_place(&mut self, power: usize) {
-        self.0.frobenius_map_in_place(power)
+        self.0 = self.0.pow([power as u64])
     }
 
     fn mul_by_base_prime_field(&self, elem: &Self::BasePrimeField) -> Self {
-        Self(self.0.mul_by_base_prime_field(elem))
+        Self(self.0 * elem.0)
     }
 
     fn characteristic() -> &'static [u64] {
-        E::characteristic()
-    }
-
-    fn from_random_bytes(bytes: &[u8]) -> Option<Self> {
-        E::from_random_bytes(bytes).map(Self)
+        &[E::BaseField::MODULUS_U64]
     }
 
     fn from_random_bytes_with_flags<F: Flags>(bytes: &[u8]) -> Option<(Self, F)> {
-        E::from_random_bytes_with_flags(bytes).map(|(e, flags)| (Self(e), flags))
+        todo!()
     }
 
     fn sqrt(&self) -> Option<Self> {
@@ -361,7 +361,7 @@ where
     }
 
     fn pow_with_table<S: AsRef<[u64]>>(powers_of_2: &[Self], exp: S) -> Option<Self> {
-        let mut res = E::ONE;
+        let mut res = E::BaseField::ONE;
         for (pow, bit) in ark_ff::BitIteratorLE::without_trailing_zeros(exp).enumerate() {
             if bit {
                 res *= powers_of_2.get(pow)?.0;
@@ -375,10 +375,9 @@ impl<E: FfExtField> ark_ff::FftField for BaseFieldWrapper<E>
 where
     Standard: Distribution<E::BaseField>,
 {
-    const GENERATOR: Self = Self::from_base(<E::BaseField as PrimeField>::MULTIPLICATIVE_GENERATOR);
+    const GENERATOR: Self = Self(<E::BaseField as PrimeField>::MULTIPLICATIVE_GENERATOR);
     const TWO_ADICITY: u32 = <E::BaseField as PrimeField>::S;
-    const TWO_ADIC_ROOT_OF_UNITY: Self =
-        Self::from_base(<E::BaseField as PrimeField>::ROOT_OF_UNITY);
+    const TWO_ADIC_ROOT_OF_UNITY: Self = Self(<E::BaseField as PrimeField>::ROOT_OF_UNITY);
     const SMALL_SUBGROUP_BASE: Option<u32> = None;
     const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> = None;
     const LARGE_SUBGROUP_ROOT_OF_UNITY: Option<Self> = None;
@@ -386,7 +385,7 @@ where
 
 impl<E: FfExtField> Zeroize for BaseFieldWrapper<E> {
     fn zeroize(&mut self) {
-        self.0 = E::ZERO;
+        self.0 = E::BaseField::ZERO;
     }
 }
 
@@ -518,36 +517,25 @@ impl<'a, E: FfExtField> MulAssign<&'a mut Self> for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> Sum for BaseFieldWrapper<E> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(Self(E::ZERO), |acc, x| Self(acc.0 + x.0))
+        iter.fold(Self(E::BaseField::ZERO), |acc, x| Self(acc.0 + x.0))
     }
 }
 
 impl<'a, E: FfExtField> Sum<&'a Self> for BaseFieldWrapper<E> {
     fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
-        iter.fold(Self(E::ZERO), |acc, x| Self(acc.0 + x.0))
+        iter.fold(Self(E::BaseField::ZERO), |acc, x| Self(acc.0 + x.0))
     }
 }
 
 impl<E: FfExtField> Product for BaseFieldWrapper<E> {
     fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(Self(E::ONE), |acc, x| Self(acc.0 * x.0))
+        iter.fold(Self(E::BaseField::ONE), |acc, x| Self(acc.0 * x.0))
     }
 }
 
 impl<'a, E: FfExtField> Product<&'a Self> for BaseFieldWrapper<E> {
     fn product<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
-        iter.fold(Self(E::ONE), |acc, x| Self(acc.0 * x.0))
-    }
-}
-
-impl<E: FfExtField> FromStr for BaseFieldWrapper<E>
-where
-    E: FromStr,
-{
-    type Err = E::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        E::from_str(s).map(Self)
+        iter.fold(Self(E::BaseField::ONE), |acc, x| Self(acc.0 * x.0))
     }
 }
 
@@ -563,11 +551,11 @@ impl<E: FfExtField> CanonicalSerialize for BaseFieldWrapper<E> {
         writer: W,
         compress: ark_serialize::Compress,
     ) -> Result<(), ark_serialize::SerializationError> {
-        self.0.serialize_with_mode(writer, compress)
+        todo!()
     }
 
     fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
-        self.0.serialized_size(compress)
+        todo!()
     }
 }
 
@@ -577,7 +565,7 @@ impl<E: FfExtField> CanonicalDeserialize for BaseFieldWrapper<E> {
         compress: ark_serialize::Compress,
         validate: ark_serialize::Validate,
     ) -> Result<Self, ark_serialize::SerializationError> {
-        E::deserialize_with_mode(reader, compress, validate).map(Self)
+        todo!()
     }
 }
 
@@ -587,11 +575,11 @@ impl<E: FfExtField> CanonicalSerializeWithFlags for BaseFieldWrapper<E> {
         writer: W,
         flags: F,
     ) -> Result<(), ark_serialize::SerializationError> {
-        self.0.serialize_with_flags(writer, flags)
+        todo!()
     }
 
     fn serialized_size_with_flags<F: Flags>(&self) -> usize {
-        self.0.serialized_size_with_flags::<F>()
+        todo!()
     }
 }
 
@@ -599,6 +587,6 @@ impl<E: FfExtField> CanonicalDeserializeWithFlags for BaseFieldWrapper<E> {
     fn deserialize_with_flags<R: std::io::Read, F: ark_serialize::Flags>(
         reader: R,
     ) -> Result<(Self, F), ark_serialize::SerializationError> {
-        E::deserialize_with_flags(reader).map(|(inner, flags)| (Self(inner), flags))
+        todo!()
     }
 }
