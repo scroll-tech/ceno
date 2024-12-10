@@ -19,3 +19,5 @@ pub use elf::Program;
 
 mod rv32im_encode;
 pub use rv32im_encode::encode_rv32;
+
+pub mod host_utils;
