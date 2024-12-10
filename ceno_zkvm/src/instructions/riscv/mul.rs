@@ -483,13 +483,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| {
-                    Ok(MulhInstructionBase::<GoldilocksExt2, I>::construct_circuit(
-                        cb,
-                    ))
-                },
+                MulhInstructionBase::<GoldilocksExt2, I>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let outcome = match I::INST_KIND {
@@ -560,8 +555,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mulh", |cb| Ok(MulhInstruction::construct_circuit(cb)))
-            .unwrap()
+            .namespace(|| "mulh", MulhInstruction::construct_circuit)
             .unwrap();
 
         let signed_prod_high = ((rs1 as i64).wrapping_mul(rs2 as i64) >> 32) as u32;
@@ -622,11 +616,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(
-                || "mulhsu",
-                |cb| Ok(MulhsuInstruction::construct_circuit(cb)),
-            )
-            .unwrap()
+            .namespace(|| "mulhsu", MulhsuInstruction::construct_circuit)
             .unwrap();
 
         let signed_unsigned_prod_high = ((rs1 as i64).wrapping_mul(rs2 as i64) >> 32) as u32;

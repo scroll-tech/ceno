@@ -167,9 +167,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| Ok(ArithInstruction::<GoldilocksExt2, I>::construct_circuit(cb)),
+                ArithInstruction::<GoldilocksExt2, I>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let outcome = match I::INST_KIND {
