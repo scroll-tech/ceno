@@ -33,11 +33,6 @@ args = [
 command = "cargo"
 workspace = false
 
-[tasks.fmt-all-check]
-args = ["fmt", "--all", "--", "--check"]
-command = "cargo"
-workspace = false
-
 [tasks.clippy-all]
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
 command = "cargo"
