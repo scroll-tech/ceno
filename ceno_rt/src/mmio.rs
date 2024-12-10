@@ -26,5 +26,5 @@ pub fn read<'a, T>() -> &'a T
 where
     T: Portable + for<'c> CheckBytes<HighValidator<'c, Failure>>,
 {
-    rkyv::access::<T, Failure>(read_slice()).unwrap()
+    rkyv::access::<T, Failure>(read_slice()).expect("Deserialised access failed.")
 }
