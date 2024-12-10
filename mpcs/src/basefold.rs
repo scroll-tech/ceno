@@ -947,8 +947,6 @@ where
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::batch_verify");
-        // 	let key = "RAYON_NUM_THREADS";
-        // 	env::set_var(key, "32");
         let comms = comms.iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
