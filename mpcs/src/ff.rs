@@ -48,6 +48,35 @@ impl<E: FfExtField> ExtensionFieldWrapper<E> {
     fn square_in_place(&mut self) {
         self.0 = self.0.square();
     }
+
+    fn norm(&self) -> BaseFieldWrapper<E> {
+        assert!(E::DEGREE == 2);
+        // t1 = c0.square() - P::NON_RESIDUE * c1^2
+        let bases = self.0.as_bases();
+        let mut result = bases[1].square();
+        Self::sub_and_mul_base_field_by_nonresidue(&mut result, &bases[0].square());
+        BaseFieldWrapper(result)
+    }
+
+    /// A specializable method for multiplying an element of the base field by
+    /// the quadratic non-residue. This is used in Karatsuba multiplication
+    /// and in complex squaring.
+    #[inline(always)]
+    fn mul_base_field_by_nonresidue_in_place(fe: &mut E::BaseField) -> &mut E::BaseField {
+        *fe *= &E::NONRESIDUE;
+        fe
+    }
+
+    /// A specializable method for computing x - mul_base_field_by_nonresidue(y)
+    /// This allows for optimizations when the non-residue is
+    /// canonically negative in the field.
+    #[inline(always)]
+    fn sub_and_mul_base_field_by_nonresidue(y: &mut E::BaseField, x: &E::BaseField) {
+        Self::mul_base_field_by_nonresidue_in_place(y);
+        let mut result = *x;
+        result -= &*y;
+        *y = result;
+    }
 }
 
 impl<E: FfExtField> Zero for ExtensionFieldWrapper<E> {
@@ -235,7 +264,17 @@ where
     }
 
     fn legendre(&self) -> LegendreSymbol {
-        todo!()
+        // The LegendreSymbol in a field of order q for an element x can be
+        // computed as x^((q-1)/2).
+        // Since we are in a quadratic extension of a field F_p,
+        // we have that q = p^2.
+        // Notice then that (q-1)/2 = ((p-1)/2) * (1 + p).
+        // This implies that we can compute the symbol as (x^(1+p))^((p-1)/2).
+        // Recall that computing x^(1 + p) is equivalent to taking the norm of x,
+        // and it will output an element in the base field F_p.
+        // Then exponentiating by (p-1)/2 in the base field is equivalent to computing
+        // the legendre symbol in the base field.
+        self.norm().legendre()
     }
 
     fn square(&self) -> Self {

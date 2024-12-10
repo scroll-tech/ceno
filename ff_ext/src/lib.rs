@@ -28,6 +28,7 @@ pub trait ExtensionField:
     const DEGREE: usize;
     const MULTIPLICATIVE_GENERATOR: Self;
     const TWO_ADIC_ROOT_OF_UNITY: Self;
+    const NONRESIDUE: Self::BaseField;
 
     type BaseField: SmallField + FromUniformBytes<64> + Poseidon + Ord;
 
@@ -52,6 +53,7 @@ mod impl_goldilocks {
         const MULTIPLICATIVE_GENERATOR: Self =
             <GoldilocksExt2 as PrimeField>::MULTIPLICATIVE_GENERATOR;
         const TWO_ADIC_ROOT_OF_UNITY: Self = <GoldilocksExt2 as PrimeField>::ROOT_OF_UNITY;
+        const NONRESIDUE: Self::BaseField = Goldilocks(7);
 
         type BaseField = Goldilocks;
 
