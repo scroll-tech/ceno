@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euxo pipefail
+
+target_file="/home/matthias/scroll/prog/standalone-guest/guest/.cargo/riscv32im-mozak-mozakvm-elf.json"
+cat "$target_file"
+cargo check \
+        --target "${target_file}" \
+        -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+        -Zbuild-std-features=compiler-builtins-mem \
