@@ -112,8 +112,8 @@ impl VMState {
             self.memory.insert(write_op.addr, write_op.value.after);
         }
 
-        if let Some(return_value) = effects.return_value {
-            self.store_register(Platform::reg_arg0(), return_value)?;
+        for reg_access in &effects.witness.reg_accesses {
+            self.registers[reg_access.register_index()] = reg_access.value.after;
         }
 
         let next_pc = effects.next_pc.unwrap_or(self.pc + PC_STEP_SIZE as u32);
@@ -128,14 +128,13 @@ impl EmuContext for VMState {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(Platform::reg_ecall())?;
-        let arg0 = self.load_register(Platform::reg_arg0())?;
         if function == Platform::ecall_halt() {
-            tracing::debug!("halt with exit_code={}", arg0);
-
+            let exit_code = self.load_register(Platform::reg_arg0())?;
+            tracing::debug!("halt with exit_code={}", exit_code);
             self.halt();
             Ok(true)
         } else {
-            match handle_syscall(self, function, arg0) {
+            match handle_syscall(self, function) {
                 Ok(effects) => {
                     self.apply_syscall(effects)?;
                     Ok(true)
@@ -145,6 +144,7 @@ impl EmuContext for VMState {
                     // TODO: remove this example.
                     // Treat unknown ecalls as all powerful instructions:
                     // Read two registers, write one register, write one memory word, and branch.
+                    let _arg0 = self.load_register(Platform::reg_arg0())?;
                     self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
                     // Example ecall effect - any writable address will do.
                     let addr = (self.platform.stack_top - WORD_SIZE as u32).into();

@@ -1,4 +1,4 @@
-use crate::{Change, EmuContext, VMState, WORD_SIZE, WordAddr, WriteOp};
+use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, WordAddr, WriteOp};
 use anyhow::Result;
 use itertools::{Itertools, izip};
 use tiny_keccak::keccakf;
@@ -7,22 +7,22 @@ use tiny_keccak::keccakf;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyscallWitness {
     pub mem_writes: Vec<WriteOp>,
+    pub reg_accesses: Vec<WriteOp>,
 }
 
 /// The effects of a syscall to apply on the VM.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyscallEffects {
     pub witness: SyscallWitness,
-    pub return_value: Option<u32>,
     pub next_pc: Option<u32>,
 }
 
 pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
 
 /// Trace the inputs and effects of a syscall.
-pub fn handle_syscall(vm: &VMState, function_code: u32, arg0: u32) -> Result<SyscallEffects> {
+pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects> {
     match function_code {
-        KECCAK_PERMUTE => Ok(keccak_permute(vm, arg0)),
+        KECCAK_PERMUTE => Ok(keccak_permute(vm)),
         _ => Err(anyhow::anyhow!("Unknown syscall: {}", function_code)),
     }
 }
@@ -36,7 +36,16 @@ const KECCAK_WORDS: usize = KECCAK_CELLS * 2; // u32 words
 /// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/precompiles/keccak256/permute.rs
 ///
 /// TODO: test compatibility.
-fn keccak_permute(vm: &VMState, state_ptr: u32) -> SyscallEffects {
+fn keccak_permute(vm: &VMState) -> SyscallEffects {
+    let state_ptr = vm.peek_register(Platform::reg_arg0());
+
+    // Read the argument `state_ptr`.
+    let reg_accesses = vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(state_ptr, state_ptr),
+        0, // Set later by Tracer.
+    )];
+
     let addrs = (state_ptr..)
         .step_by(WORD_SIZE)
         .take(KECCAK_WORDS)
@@ -72,8 +81,10 @@ fn keccak_permute(vm: &VMState, state_ptr: u32) -> SyscallEffects {
 
     assert_eq!(mem_writes.len(), KECCAK_WORDS);
     SyscallEffects {
-        witness: SyscallWitness { mem_writes },
-        return_value: None,
+        witness: SyscallWitness {
+            mem_writes,
+            reg_accesses,
+        },
         next_pc: None,
     }
 }

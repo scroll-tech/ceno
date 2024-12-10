@@ -100,8 +100,13 @@ fn test_ceno_rt_keccak() -> Result<()> {
 
     // Check the syscall effects.
     for (witness, expect) in izip!(syscalls, keccak_outs) {
-        assert_eq!(witness.mem_writes.len(), expect.len() * 2);
+        assert_eq!(witness.reg_accesses.len(), 1);
+        assert_eq!(
+            witness.reg_accesses[0].register_index(),
+            Platform::reg_arg0()
+        );
 
+        assert_eq!(witness.mem_writes.len(), expect.len() * 2);
         let got = witness
             .mem_writes
             .chunks_exact(2)

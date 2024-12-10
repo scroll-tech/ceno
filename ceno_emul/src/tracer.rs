@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fmt, mem};
 
+use itertools::chain;
+
 use crate::{
     CENO_PLATFORM, InsnKind, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
@@ -47,6 +49,15 @@ pub struct MemOp<T> {
 }
 
 impl<T> MemOp<T> {
+    pub fn new_register_op(idx: RegIdx, value: T, previous_cycle: Cycle) -> MemOp<T> {
+        let addr = Platform::register_vma(idx).into();
+        MemOp {
+            addr,
+            value,
+            previous_cycle,
+        }
+    }
+
     /// Get the register index of this operation.
     pub fn register_index(&self) -> RegIdx {
         Platform::register_index(self.addr.into())
@@ -395,12 +406,15 @@ impl Tracer {
     }
 
     pub fn track_syscall(&mut self, mut effects: SyscallEffects) {
-        let cycle = self.record.cycle + Self::SUBCYCLE_MEM;
-        for op in &mut effects.witness.mem_writes {
-            op.previous_cycle = self.track_access(op.addr, Self::SUBCYCLE_MEM);
+        // Keep track of the cycles of registers and memory accesses.
+        for op in chain(
+            &mut effects.witness.reg_accesses,
+            &mut effects.witness.mem_writes,
+        ) {
+            op.previous_cycle = self.track_access(op.addr, 0);
             assert_ne!(
-                op.previous_cycle, cycle,
-                "Memory address {:?} was accessed twice in the same cycle",
+                op.previous_cycle, self.record.cycle,
+                "Address {:?} was accessed twice in the same cycle",
                 op.addr
             );
         }
