@@ -8,7 +8,9 @@ struct SimpleAllocator {
 }
 
 extern "C" {
-    // The address of this variable is the start of the heap (growing upwards).
+    /// The address of this variable is the start of the heap (growing upwards).
+    ///
+    /// It is defined in the linker script.
     static mut _sheap: u8;
 }
 
