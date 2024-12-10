@@ -29,7 +29,7 @@ use super::{
 };
 
 pub fn prover_query_phase<E: ExtensionField>(
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
     trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
@@ -65,7 +65,7 @@ where
 }
 
 pub fn batch_prover_query_phase<E: ExtensionField>(
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     codeword_size: usize,
     comms: &[BasefoldCommitmentWithData<E>],
     trees: &[MerkleTree<E>],
@@ -102,7 +102,7 @@ where
 }
 
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
     trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
