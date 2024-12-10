@@ -280,8 +280,19 @@ where
         elem
     }
 
+    #[inline]
     fn legendre(&self) -> LegendreSymbol {
-        todo!()
+        use ark_ff::fields::LegendreSymbol::*;
+
+        // s = self^((MODULUS - 1) // 2)
+        let s = self.pow(<Self as ark_ff::PrimeField>::MODULUS_MINUS_ONE_DIV_TWO);
+        if s.is_zero() {
+            Zero
+        } else if s.is_one() {
+            QuadraticResidue
+        } else {
+            QuadraticNonResidue
+        }
     }
 
     fn square(&self) -> Self {
@@ -306,9 +317,9 @@ where
         }
     }
 
-    fn frobenius_map_in_place(&mut self, power: usize) {
-        self.0 = self.0.pow([power as u64])
-    }
+    /// The Frobenius map has no effect in a prime field.
+    #[inline]
+    fn frobenius_map_in_place(&mut self, _: usize) {}
 
     fn mul_by_base_prime_field(&self, elem: &Self::BasePrimeField) -> Self {
         Self(self.0 * elem.0)
@@ -318,8 +329,48 @@ where
         &[E::BaseField::MODULUS_U64]
     }
 
-    fn from_random_bytes_with_flags<F: Flags>(_bytes: &[u8]) -> Option<(Self, F)> {
-        todo!()
+    #[inline]
+    fn from_random_bytes_with_flags<F: Flags>(bytes: &[u8]) -> Option<(Self, F)> {
+        if F::BIT_SIZE > 8 {
+            None
+        } else {
+            let shave_bits = 0;
+            // This mask retains everything in the last limb
+            // that is below `P::MODULUS_BIT_SIZE`.
+            let last_limb_mask =
+                (u64::MAX.checked_shr(shave_bits as u32).unwrap_or(0)).to_le_bytes();
+            let mut last_bytes_mask = [0u8; 9];
+            last_bytes_mask[..8].copy_from_slice(&last_limb_mask);
+
+            // Length of the buffer containing the field element and the flag.
+            let output_byte_size = ark_serialize::buffer_byte_size(64 + F::BIT_SIZE);
+            // Location of the flag is the last byte of the serialized
+            // form of the field element.
+            let flag_location = output_byte_size - 1;
+
+            // At which byte is the flag located in the last limb?
+            let flag_location_in_last_limb = flag_location;
+
+            // Take all but the last 9 bytes.
+            let mut last_bytes = bytes[..9].to_vec();
+            let last_bytes = last_bytes.iter_mut();
+
+            // The mask only has the last `F::BIT_SIZE` bits set
+            let flags_mask = u8::MAX.checked_shl(8 - (F::BIT_SIZE as u32)).unwrap_or(0);
+
+            // Mask away the remaining bytes, and try to reconstruct the
+            // flag
+            let mut flags: u8 = 0;
+            for (i, (b, m)) in last_bytes.zip(&last_bytes_mask).enumerate() {
+                if i == flag_location_in_last_limb {
+                    flags = *b & flags_mask
+                }
+                *b &= m;
+            }
+            Self::deserialize_compressed(&bytes[..8])
+                .ok()
+                .and_then(|f| F::from_u8(flags).map(|flag| (f, flag)))
+        }
     }
 
     fn sqrt(&self) -> Option<Self> {
