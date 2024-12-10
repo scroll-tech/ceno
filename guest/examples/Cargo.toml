@@ -1,12 +1,11 @@
 [package]
-name = "examples"
-readme = "README.md"
-
 categories.workspace = true
 description = "Ceno runtime library"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
+name = "examples"
+readme = "README.md"
 repository.workspace = true
 version.workspace = true
 
