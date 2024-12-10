@@ -5,7 +5,9 @@ use rkyv::{Portable, api::high::HighValidator, bytecheck::CheckBytes, rancor::Fa
 use core::slice::from_raw_parts;
 
 extern "C" {
-    // The address of this variable is the start of the hints ROM.
+    /// The address of this variable is the start of the hints ROM.
+    ///
+    /// It is defined in the linker script.
     static _hints_start: u8;
 }
 
