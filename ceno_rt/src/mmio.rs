@@ -9,9 +9,7 @@ extern "C" {
     static _hints_start: u8;
 }
 
-static mut NEXT_HINT_LEN_AT: *const u8 = unsafe { &_hints_start };
-// next_alloc: &raw crate::_hints_start;
-// unsafe { core::ptr::from_ref::<u8>(&_hints_start).cast::<u8>() };
+static mut NEXT_HINT_LEN_AT: *const u8 = &raw const _hints_start;
 
 pub fn read_slice<'a>() -> &'a [u8] {
     unsafe {
