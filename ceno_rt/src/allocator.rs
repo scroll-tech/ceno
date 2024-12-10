@@ -31,7 +31,7 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         heap_pos = heap_pos.add(heap_pos.align_offset(align));
 
         let ptr = heap_pos;
-        // Panic on overflow.  We don't want to wrap around, and overwrite stack etc.
+        // We don't want to wrap around, and overwrite stack etc.
         // (We could also return a null pointer, but only malicious programs would ever hit this.)
         heap_pos = heap_pos.add(layout.size());
 
