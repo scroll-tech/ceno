@@ -1,9 +1,18 @@
-use crate::{
-    Change, EmuContext, Platform, RegIdx, Tracer, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
-};
+use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
-use itertools::{Itertools, chain, izip};
-use tiny_keccak::keccakf;
+use itertools::chain;
+
+mod keccak_permute;
+
+pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
+
+/// Trace the inputs and effects of a syscall.
+pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects> {
+    match function_code {
+        KECCAK_PERMUTE => Ok(keccak_permute::keccak_permute(vm)),
+        _ => Err(anyhow::anyhow!("Unknown syscall: {}", function_code)),
+    }
+}
 
 /// A syscall event, available to the circuit witness generators.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -45,77 +54,5 @@ impl SyscallEffects {
             op.previous_cycle = tracer.track_access(op.addr, 0);
         }
         self.witness
-    }
-}
-
-pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
-
-/// Trace the inputs and effects of a syscall.
-pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects> {
-    match function_code {
-        KECCAK_PERMUTE => Ok(keccak_permute(vm)),
-        _ => Err(anyhow::anyhow!("Unknown syscall: {}", function_code)),
-    }
-}
-
-const KECCAK_CELLS: usize = 25; // u64 cells
-const KECCAK_WORDS: usize = KECCAK_CELLS * 2; // u32 words
-
-/// Trace the execution of a Keccak permutation.
-///
-/// Compatible with:
-/// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/precompiles/keccak256/permute.rs
-///
-/// TODO: test compatibility.
-fn keccak_permute(vm: &VMState) -> SyscallEffects {
-    let state_ptr = vm.peek_register(Platform::reg_arg0());
-
-    // Read the argument `state_ptr`.
-    let reg_accesses = vec![WriteOp::new_register_op(
-        Platform::reg_arg0(),
-        Change::new(state_ptr, state_ptr),
-        0, // Set later by Tracer.
-    )];
-
-    let addrs = (state_ptr..)
-        .step_by(WORD_SIZE)
-        .take(KECCAK_WORDS)
-        .map(WordAddr::from)
-        .collect_vec();
-
-    // Read Keccak state.
-    let input = addrs
-        .iter()
-        .map(|&addr| vm.peek_memory(addr))
-        .collect::<Vec<_>>();
-
-    // Compute Keccak permutation.
-    let output = {
-        let mut state = [0_u64; KECCAK_CELLS];
-        izip!(state.iter_mut(), input.chunks_exact(2)).for_each(|(cell, chunk)| {
-            let lo = chunk[0] as u64;
-            let hi = chunk[1] as u64;
-            *cell = lo | hi << 32;
-        });
-        keccakf(&mut state);
-        state.into_iter().flat_map(|c| [c as u32, (c >> 32) as u32])
-    };
-
-    // Write permuted state.
-    let mem_writes = izip!(addrs, input, output)
-        .map(|(addr, before, after)| WriteOp {
-            addr,
-            value: Change { before, after },
-            previous_cycle: 0, // Set later by Tracer.
-        })
-        .collect_vec();
-
-    assert_eq!(mem_writes.len(), KECCAK_WORDS);
-    SyscallEffects {
-        witness: SyscallWitness {
-            mem_writes,
-            reg_accesses,
-        },
-        next_pc: None,
     }
 }

@@ -48,9 +48,8 @@ pub struct MemOp<T> {
 
 impl<T> MemOp<T> {
     pub fn new_register_op(idx: RegIdx, value: T, previous_cycle: Cycle) -> MemOp<T> {
-        let addr = Platform::register_vma(idx).into();
         MemOp {
-            addr,
+            addr: Platform::register_vma(idx).into(),
             value,
             previous_cycle,
         }
