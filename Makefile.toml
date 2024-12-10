@@ -43,11 +43,6 @@ args = ["fmt", "--all"]
 command = "cargo"
 workspace = false
 
-[tasks.clippy-all]
-args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
-command = "cargo"
-workspace = false
-
 [tasks.fmt]
 args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 command = "cargo"
