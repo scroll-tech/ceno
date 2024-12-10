@@ -20,11 +20,9 @@ pub fn read_all_messages(state: &VMState) -> Vec<String> {
 fn read_message(state: &VMState, offset: WordAddr) -> String {
     let out_addr = INFO_OUT_ADDR + offset;
     let byte_len = state.peek_memory(out_addr) as usize;
-    let word_len_up = byte_len.div_ceil(4);
 
     String::from_utf8_lossy(
         &(out_addr + 1_usize..)
-            .take(word_len_up)
             .map(|memory| state.peek_memory(memory))
             .flat_map(u32::to_le_bytes)
             .take(byte_len)
