@@ -57,7 +57,10 @@ impl CenoStdin {
                 0;
                 buf.len().next_multiple_of(RKYV_ALIGNMENT) - buf.len()
             ]);
-            assert_eq!(buf.len(), offset.next_multiple_of(RKYV_ALIGNMENT) as usize);
+            assert_eq!(
+                buf.len(),
+                (offset as usize).next_multiple_of(RKYV_ALIGNMENT)
+            );
         }
         let (prefix, hints, postfix): (_, &[u32], _) = unsafe { buf.align_to() };
         assert_eq!(prefix, &[]);

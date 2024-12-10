@@ -1,6 +1,6 @@
 //! Memory-mapped I/O (MMIO) functions.
 
-use rkyv::{Portable, api::high::HighValidator, bytecheck::CheckBytes, rancor::Error};
+use rkyv::{Portable, api::high::HighValidator, bytecheck::CheckBytes, rancor::Failure};
 
 use core::slice::from_raw_parts;
 
@@ -24,7 +24,7 @@ pub fn read_slice<'a>() -> &'a [u8] {
 
 pub fn read<'a, T>() -> &'a T
 where
-    T: Portable + for<'c> CheckBytes<HighValidator<'c, Error>>,
+    T: Portable + for<'c> CheckBytes<HighValidator<'c, Failure>>,
 {
-    rkyv::access::<T, Error>(read_slice()).unwrap()
+    rkyv::access::<T, Failure>(read_slice()).unwrap()
 }
