@@ -6,7 +6,7 @@ use crate::{
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{DecodedInstruction, Emulator, TrapCause},
-    syscalls::{KECCAK_PERMUTE, SyscallEffects, handle_syscall},
+    syscalls::{SyscallEffects, handle_syscall},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -134,25 +134,29 @@ impl EmuContext for VMState {
 
             self.halt();
             Ok(true)
-        } else if self.platform.unsafe_ecall_nop {
-            if function == KECCAK_PERMUTE {
-                let effects = handle_syscall(self, function, arg0)?;
-                self.apply_syscall(effects)?;
-                Ok(true)
-            } else {
-                // TODO: remove this example.
-                // Treat unknown ecalls as all powerful instructions:
-                // Read two registers, write one register, write one memory word, and branch.
-                tracing::warn!("ecall ignored: syscall_id={}", function);
-                self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
-                // Example ecall effect - any writable address will do.
-                let addr = (self.platform.stack_top - WORD_SIZE as u32).into();
-                self.store_memory(addr, self.peek_memory(addr))?;
-                self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
-                Ok(true)
-            }
         } else {
-            self.trap(TrapCause::EcallError)
+            match handle_syscall(self, function, arg0) {
+                Ok(effects) => {
+                    self.apply_syscall(effects)?;
+                    Ok(true)
+                }
+                Err(err) if self.platform.unsafe_ecall_nop => {
+                    tracing::warn!("ecall ignored with unsafe_ecall_nop: {:?}", err);
+                    // TODO: remove this example.
+                    // Treat unknown ecalls as all powerful instructions:
+                    // Read two registers, write one register, write one memory word, and branch.
+                    self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
+                    // Example ecall effect - any writable address will do.
+                    let addr = (self.platform.stack_top - WORD_SIZE as u32).into();
+                    self.store_memory(addr, self.peek_memory(addr))?;
+                    self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
+                    Ok(true)
+                }
+                Err(err) => {
+                    tracing::error!("ecall error: {:?}", err);
+                    self.trap(TrapCause::EcallError)
+                }
+            }
         }
     }
 
