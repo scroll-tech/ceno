@@ -1,3 +1,4 @@
+use core::assert_eq;
 use ff::Field;
 use std::{
     array,
@@ -59,7 +60,9 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     pub fn num_instances(&self) -> usize {
-        self.values.len() / self.num_col - self.num_padding_rows
+        (self.values.len() / self.num_col)
+            .checked_sub(self.num_padding_rows)
+            .expect("overflow")
     }
 
     pub fn num_padding_instances(&self) -> usize {
@@ -106,6 +109,42 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
                     .collect::<Vec<T>>()
             })
             .collect()
+    }
+
+    // TODO: should we consume or clone `self`?
+    pub fn shard_by_rows(&self, shard_rows: usize) -> Vec<Self> {
+        let padded_row_num = self.values.len() / self.num_col;
+        if padded_row_num <= shard_rows {
+            return vec![self.clone()];
+        }
+        // padded_row_num and chunk_rows should both be pow of 2.
+        assert_eq!(padded_row_num % shard_rows, 0);
+        let shard_num = self.num_instances().div_ceil(shard_rows);
+        let mut shards = Vec::new();
+        for i in 0..shard_num {
+            let mut values: Vec<_> = self.values
+                [(i * shard_rows * self.num_col)..((i + 1) * shard_rows * self.num_col)]
+                .to_vec();
+            let mut num_padding_rows = 0;
+
+            // Only last chunk contains padding rows.
+            if i == shard_num - 1 && self.num_instances() % shard_rows != 0 {
+                let num_rows = self.num_instances() % shard_rows;
+                let num_total_rows = next_pow2_instance_padding(num_rows);
+                num_padding_rows = num_total_rows - num_rows;
+                values.truncate(num_total_rows * self.num_col);
+            };
+            shards.push(Self {
+                num_col: self.num_col,
+                num_padding_rows,
+                values,
+            });
+        }
+        assert_eq!(
+            self.num_instances(),
+            shards.iter().map(|c| { c.num_instances() }).sum::<usize>()
+        );
+        shards
     }
 }
 
