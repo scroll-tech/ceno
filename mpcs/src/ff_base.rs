@@ -7,6 +7,7 @@ use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use ff::{Field as FfField, PrimeField};
 use ff_ext::ExtensionField as FfExtField;
+use goldilocks::SmallField;
 use num_bigint::BigUint;
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
@@ -209,25 +210,25 @@ impl<E: FfExtField> FromStr for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> From<BigUint> for BaseFieldWrapper<E> {
     fn from(b: BigUint) -> Self {
-        Self(E::BaseField::from(b))
+        Self(E::BaseField::from(b.to_u64_digits()[0]))
     }
 }
 
 impl<E: FfExtField> Into<BigUint> for BaseFieldWrapper<E> {
     fn into(self) -> BigUint {
-        todo!()
+        BigUint::from(self.0.to_canonical_u64())
     }
 }
 
 impl<E: FfExtField> From<BigInt<1>> for BaseFieldWrapper<E> {
     fn from(b: BigInt<1>) -> Self {
-        Self(E::BaseField::from(b))
+        Self(E::BaseField::from(b.0[0]))
     }
 }
 
 impl<E: FfExtField> Into<BigInt<1>> for BaseFieldWrapper<E> {
     fn into(self) -> BigInt<1> {
-        todo!()
+        BigInt([self.0.to_canonical_u64()])
     }
 }
 
