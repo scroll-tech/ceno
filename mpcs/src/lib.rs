@@ -322,6 +322,7 @@ pub use basefold::{
 // mod whir;
 use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
 mod ff;
+mod ff_base;
 fn validate_input<E: ExtensionField>(
     function: &str,
     param_num_vars: usize,
