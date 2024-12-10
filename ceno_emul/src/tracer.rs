@@ -1,10 +1,9 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    CENO_PLATFORM, InsnKind, PC_STEP_SIZE, Platform,
+    CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     encode_rv32,
-    rv32im::DecodedInstruction,
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -22,7 +21,7 @@ use crate::{
 pub struct StepRecord {
     cycle: Cycle,
     pc: Change<ByteAddr>,
-    insn_code: Word,
+    pub insn: Instruction,
 
     rs1: Option<ReadOp>,
     rs2: Option<ReadOp>,
@@ -57,7 +56,7 @@ impl StepRecord {
     pub fn new_r_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: u32,
+        insn_code: Instruction,
         rs1_read: Word,
         rs2_read: Word,
         rd: Change<Word>,
@@ -79,7 +78,7 @@ impl StepRecord {
     pub fn new_b_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: u32,
+        insn_code: Instruction,
         rs1_read: Word,
         rs2_read: Word,
         prev_cycle: Cycle,
@@ -99,7 +98,7 @@ impl StepRecord {
     pub fn new_i_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: u32,
+        insn_code: Instruction,
         rs1_read: Word,
         rd: Change<Word>,
         prev_cycle: Cycle,
@@ -119,7 +118,7 @@ impl StepRecord {
     pub fn new_im_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: u32,
+        insn_code: Instruction,
         rs1_read: Word,
         rd: Change<Word>,
         mem_op: ReadOp,
@@ -148,7 +147,7 @@ impl StepRecord {
     pub fn new_u_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: u32,
+        insn_code: Instruction,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
@@ -159,7 +158,7 @@ impl StepRecord {
     pub fn new_j_instruction(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: u32,
+        insn_code: Instruction,
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
@@ -169,7 +168,7 @@ impl StepRecord {
     pub fn new_s_instruction(
         cycle: Cycle,
         pc: ByteAddr,
-        insn_code: u32,
+        insn_code: Instruction,
         rs1_read: Word,
         rs2_read: Word,
         memory_op: WriteOp,
@@ -194,7 +193,7 @@ impl StepRecord {
         Self::new_insn(
             cycle,
             Change::new(pc, pc + PC_STEP_SIZE),
-            encode_rv32(InsnKind::EANY, 0, 0, 0, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
             Some(value),
             Some(value),
             Some(Change::new(value, value)),
@@ -214,25 +213,23 @@ impl StepRecord {
     fn new_insn(
         cycle: Cycle,
         pc: Change<ByteAddr>,
-        insn_code: u32,
+        insn: Instruction,
         rs1_read: Option<Word>,
         rs2_read: Option<Word>,
         rd: Option<Change<Word>>,
         memory_op: Option<WriteOp>,
         previous_cycle: Cycle,
     ) -> StepRecord {
-        let insn = DecodedInstruction::new(insn_code);
         StepRecord {
             cycle,
             pc,
-            insn_code,
             rs1: rs1_read.map(|rs1| ReadOp {
-                addr: Platform::register_vma(insn.rs1() as RegIdx).into(),
+                addr: Platform::register_vma(insn.rs1).into(),
                 value: rs1,
                 previous_cycle,
             }),
             rs2: rs2_read.map(|rs2| ReadOp {
-                addr: Platform::register_vma(insn.rs2() as RegIdx).into(),
+                addr: Platform::register_vma(insn.rs2).into(),
                 value: rs2,
                 previous_cycle,
             }),
@@ -241,6 +238,7 @@ impl StepRecord {
                 value: rd,
                 previous_cycle,
             }),
+            insn,
             memory_op,
         }
     }
@@ -253,14 +251,9 @@ impl StepRecord {
         self.pc
     }
 
-    /// The instruction as a raw code.
-    pub fn insn_code(&self) -> Word {
-        self.insn_code
-    }
-
     /// The instruction as a decoded structure.
-    pub fn insn(&self) -> DecodedInstruction {
-        DecodedInstruction::new(self.insn_code)
+    pub fn insn(&self) -> Instruction {
+        self.insn
     }
 
     pub fn rs1(&self) -> Option<ReadOp> {
@@ -327,12 +320,9 @@ impl Tracer {
         self.record.pc.after = pc;
     }
 
-    // TODO(Matthias): this should perhaps record `DecodedInstruction`s instead
-    // of raw codes, or perhaps only the pc, because we can always look up the
-    // instruction in the program.
-    pub fn fetch(&mut self, pc: WordAddr, value: Word) {
+    pub fn fetch(&mut self, pc: WordAddr, value: Instruction) {
         self.record.pc.before = pc.baddr();
-        self.record.insn_code = value;
+        self.record.insn = value;
     }
 
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {

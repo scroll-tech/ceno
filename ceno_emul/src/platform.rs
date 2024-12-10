@@ -73,10 +73,6 @@ impl Platform {
         self.is_ram(addr)
     }
 
-    pub fn can_execute(&self, addr: Addr) -> bool {
-        self.is_rom(addr)
-    }
-
     // Environment calls.
 
     /// Register containing the ecall function code. (x5, t0)
@@ -113,7 +109,6 @@ mod tests {
     #[test]
     fn test_no_overlap() {
         let p = CENO_PLATFORM;
-        assert!(p.can_execute(p.pc_base()));
         // ROM and RAM do not overlap.
         assert!(!p.is_rom(p.ram.start));
         assert!(!p.is_rom(p.ram.end - WORD_SIZE as Addr));

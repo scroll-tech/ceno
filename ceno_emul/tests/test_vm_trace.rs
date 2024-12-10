@@ -6,8 +6,8 @@ use std::{
 };
 
 use ceno_emul::{
-    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Platform, Program, StepRecord, Tracer, VMState,
-    WORD_SIZE, WordAddr,
+    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, Platform, Program, StepRecord, Tracer,
+    VMState, WordAddr, encode_rv32,
 };
 
 #[test]
@@ -15,17 +15,8 @@ fn test_vm_trace() -> Result<()> {
     let program = Program::new(
         CENO_PLATFORM.pc_base(),
         CENO_PLATFORM.pc_base(),
-        PROGRAM_FIBONACCI_20.to_vec(),
-        PROGRAM_FIBONACCI_20
-            .iter()
-            .enumerate()
-            .map(|(insn_idx, &insn)| {
-                (
-                    CENO_PLATFORM.pc_base() + (WORD_SIZE * insn_idx) as u32,
-                    insn,
-                )
-            })
-            .collect(),
+        program_fibonacci_20(),
+        Default::default(),
     );
     let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(program));
 
@@ -36,7 +27,7 @@ fn test_vm_trace() -> Result<()> {
     assert_eq!(ctx.peek_register(2), x2);
     assert_eq!(ctx.peek_register(3), x3);
 
-    let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().codes().kind).collect();
+    let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().kind).collect();
     assert_eq!(ops, expected_ops_fibonacci_20());
 
     assert_eq!(
@@ -66,27 +57,25 @@ fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
 }
 
 /// Example in RISC-V bytecode and assembly.
-const PROGRAM_FIBONACCI_20: [u32; 7] = [
-    // x1 = 10;
-    // x3 = 1;
-    // immediate    rs1  f3   rd   opcode
-    0b_000000001010_00000_000_00001_0010011, // addi x1, x0, 10
-    0b_000000000001_00000_000_00011_0010011, // addi x3, x0, 1
-    // loop {
-    //     x1 -= 1;
-    // immediate    rs1  f3   rd   opcode
-    0b_111111111111_00001_000_00001_0010011, // addi x1, x1, -1
-    //     x2 += x3;
-    //     x3 += x2;
-    // zeros   rs2   rs1   f3  rd    opcode
-    0b_0000000_00011_00010_000_00010_0110011, // add x2, x2, x3
-    0b_0000000_00011_00010_000_00011_0110011, // add x3, x2, x3
-    //     if x1 == 0 { break }
-    // imm      rs2   rs1   f3  imm    opcode
-    0b_1_111111_00000_00001_001_1010_1_1100011, // bne x1, x0, -12
-    // ecall HALT, SUCCESS
-    0b_000000000000_00000_000_00000_1110011,
-];
+pub fn program_fibonacci_20() -> Vec<Instruction> {
+    vec![
+        // x1 = 10;
+        // x3 = 1;
+        encode_rv32(InsnKind::ADDI, 0, 0, 1, 10),
+        encode_rv32(InsnKind::ADDI, 0, 0, 3, 1),
+        // loop {
+        //     x1 -= 1;
+        encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+        //     x2 += x3;
+        //     x3 += x2;
+        encode_rv32(InsnKind::ADD, 2, 3, 2, 0),
+        encode_rv32(InsnKind::ADD, 2, 3, 3, 0),
+        //     if x1 == 0 { break }
+        encode_rv32(InsnKind::BNE, 1, 0, 0, -12),
+        // ecall HALT, SUCCESS
+        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+    ]
+}
 
 /// Rust version of the example. Reconstruct the output.
 fn expected_fibonacci_20() -> (u32, u32, u32) {
@@ -115,7 +104,7 @@ fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
     for _ in 0..10 {
         ops.extend(&[ADDI, ADD, ADD, BNE]);
     }
-    ops.push(EANY);
+    ops.push(ECALL);
     ops
 }
 

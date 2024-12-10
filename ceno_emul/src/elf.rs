@@ -18,7 +18,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 
-use crate::addr::WORD_SIZE;
+use crate::{addr::WORD_SIZE, disassemble::transpile, rv32im::Instruction};
 use anyhow::{Context, Result, anyhow, bail};
 use elf::{
     ElfBytes,
@@ -35,7 +35,7 @@ pub struct Program {
     /// This is the lowest address of the program's executable code
     pub base_address: u32,
     /// The instructions of the program
-    pub instructions: Vec<u32>,
+    pub instructions: Vec<Instruction>,
     /// The initial memory image
     pub image: BTreeMap<u32, u32>,
 }
@@ -45,7 +45,7 @@ impl Program {
     pub fn new(
         entry: u32,
         base_address: u32,
-        instructions: Vec<u32>,
+        instructions: Vec<Instruction>,
         image: BTreeMap<u32, u32>,
     ) -> Program {
         Self {
@@ -161,6 +161,8 @@ impl Program {
         let base_address = base_address.unwrap();
         assert!(entry >= base_address);
         assert!((entry - base_address) as usize <= instructions.len() * WORD_SIZE);
+
+        let instructions = transpile(base_address, &instructions);
 
         Ok(Program {
             entry,
