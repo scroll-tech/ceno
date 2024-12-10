@@ -25,10 +25,6 @@ use crate::ff_base::BaseFieldWrapper;
 pub struct ExtensionFieldWrapper<E: FfExtField>(E);
 
 impl<E: FfExtField> ExtensionFieldWrapper<E> {
-    const fn from_base(inner: E::BaseField) -> Self {
-        Self(E::from(inner))
-    }
-
     pub fn inner(&self) -> &E {
         &self.0
     }
@@ -323,10 +319,9 @@ impl<E: FfExtField> ark_ff::FftField for ExtensionFieldWrapper<E>
 where
     Standard: Distribution<E> + Distribution<E::BaseField>,
 {
-    const GENERATOR: Self = Self::from_base(<E::BaseField as PrimeField>::MULTIPLICATIVE_GENERATOR);
+    const GENERATOR: Self = Self(<E as FfExtField>::MULTIPLICATIVE_GENERATOR);
     const TWO_ADICITY: u32 = <E::BaseField as PrimeField>::S;
-    const TWO_ADIC_ROOT_OF_UNITY: Self =
-        Self::from_base(<E::BaseField as PrimeField>::ROOT_OF_UNITY);
+    const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::TWO_ADIC_ROOT_OF_UNITY);
     const SMALL_SUBGROUP_BASE: Option<u32> = None;
     const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> = None;
     const LARGE_SUBGROUP_ROOT_OF_UNITY: Option<Self> = None;

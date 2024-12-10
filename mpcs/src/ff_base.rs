@@ -40,14 +40,6 @@ impl<E: FfExtField> BaseFieldWrapper<E> {
     fn double_in_place(&mut self) {
         self.0 = self.0.double();
     }
-
-    fn square(&self) -> Self {
-        Self(self.0.square())
-    }
-
-    fn square_in_place(&mut self) {
-        self.0 = self.0.square();
-    }
 }
 
 impl<E: FfExtField> Zero for BaseFieldWrapper<E> {

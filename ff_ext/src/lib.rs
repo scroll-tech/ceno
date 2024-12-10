@@ -26,6 +26,8 @@ pub trait ExtensionField:
     + std::hash::Hash
 {
     const DEGREE: usize;
+    const MULTIPLICATIVE_GENERATOR: Self;
+    const TWO_ADIC_ROOT_OF_UNITY: Self;
 
     type BaseField: SmallField + FromUniformBytes<64> + Poseidon + Ord;
 
@@ -42,10 +44,14 @@ pub trait ExtensionField:
 
 mod impl_goldilocks {
     use crate::ExtensionField;
+    use ff::PrimeField;
     use goldilocks::{ExtensionField as GoldilocksEF, Goldilocks, GoldilocksExt2};
 
     impl ExtensionField for GoldilocksExt2 {
         const DEGREE: usize = 2;
+        const MULTIPLICATIVE_GENERATOR: Self =
+            <GoldilocksExt2 as PrimeField>::MULTIPLICATIVE_GENERATOR;
+        const TWO_ADIC_ROOT_OF_UNITY: Self = <GoldilocksExt2 as PrimeField>::ROOT_OF_UNITY;
 
         type BaseField = Goldilocks;
 
