@@ -291,7 +291,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 lt_config.assign_instance(instance, lkm, Into::<u64>::into(*carry), max_carry)?;
             }
         }
-        Ok(())
+        Ok::<(), ZKVMError>(())
     }
 
     /// conversion is needed for lt/ltu
@@ -394,7 +394,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         })
                         .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
                 );
-                Ok(())
+                Ok::<_, ZKVMError>(())
             })?;
         }
         Ok(())
@@ -417,14 +417,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 };
                 self.carries = Some(
                     (0..carries_len)
-                        .map(|i| {
-                            let c = cb.create_witin(|| format!("carry_{i}"));
-                            Ok(c)
-                        })
-                        .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                        .map(|i| cb.create_witin(|| format!("carry_{i}")))
+                        .collect(),
                 );
-                Ok(())
-            })?;
+            });
         }
         Ok(())
     }

@@ -161,8 +161,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         // check if the new witness equals the existing expression
                         izip!(u.expr(), existing_expr).try_for_each(|(lhs, rhs)| {
                             cb.require_equal(|| "new_witin_equal_expr".to_string(), lhs, rhs)
-                        })?;
-                        Ok(())
+                        })
                     },
                 )?;
             }

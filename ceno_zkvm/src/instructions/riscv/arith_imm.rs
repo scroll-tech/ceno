@@ -102,12 +102,8 @@ mod test {
         let config = cb
             .namespace(
                 || "addi",
-                |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                    Ok(config)
-                },
+                AddiInstruction::<GoldilocksExt2>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(3));
@@ -135,12 +131,8 @@ mod test {
         let config = cb
             .namespace(
                 || "addi",
-                |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
-                    Ok(config)
-                },
+                AddiInstruction::<GoldilocksExt2>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(-3));

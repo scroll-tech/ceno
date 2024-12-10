@@ -22,14 +22,7 @@ fn impl_opcode_beq(equal: bool) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "beq",
-            |cb| {
-                let config = BeqInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "beq", BeqInstruction::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, imm_b(8));
@@ -60,14 +53,7 @@ fn impl_opcode_bne(equal: bool) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
-        .namespace(
-            || "bne",
-            |cb| {
-                let config = BneInstruction::construct_circuit(cb);
-                Ok(config)
-            },
-        )
-        .unwrap()
+        .namespace(|| "bne", BneInstruction::construct_circuit)
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::BNE, 2, 3, 0, imm_b(8));

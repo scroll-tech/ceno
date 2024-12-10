@@ -152,12 +152,8 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{}/{name}", I::INST_KIND),
-                |cb| {
-                    let config = SetLessThanInstruction::<_, I>::construct_circuit(cb);
-                    Ok(config)
-                },
+                SetLessThanInstruction::<_, I>::construct_circuit,
             )
-            .unwrap()
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::SLT, 2, 3, 4, 0);
