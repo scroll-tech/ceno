@@ -32,7 +32,7 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 
     fn read_challenge(&mut self) -> Challenge<E> {
-        let r = E::from_bases(self.permutation.squeeze());
+        let r = E::from_bases(&self.permutation.squeeze()[..2]);
 
         Challenge { elements: r }
     }
