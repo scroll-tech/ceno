@@ -4,7 +4,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 
 struct SimpleAllocator {
-    next_alloc: usize,
+    next_alloc: *mut u8,
 }
 
 unsafe impl GlobalAlloc for SimpleAllocator {
@@ -14,16 +14,14 @@ unsafe impl GlobalAlloc for SimpleAllocator {
 
         let align = layout.align();
         // `Layout` contract forbids making a `Layout` with align=0, or align not power of 2.
-        // So we can safely use subtraction and a mask to ensure alignment without worrying about UB.
-        let offset = heap_pos & (align - 1);
-        if offset != 0 {
-            heap_pos = heap_pos.strict_add(align.strict_sub(offset));
-        }
+        core::hint::assert_unchecked(align.is_power_of_two());
+        core::hint::assert_unchecked(align != 0);
+        heap_pos = heap_pos.map_addr(|a| a.next_multiple_of(align));
 
-        let ptr = heap_pos as *mut u8;
+        let ptr = heap_pos;
         // Panic on overflow.  We don't want to wrap around, and overwrite stack etc.
         // (We could also return a null pointer, but only malicious programs would ever hit this.)
-        heap_pos = heap_pos.strict_add(layout.size());
+        heap_pos = heap_pos.add(layout.size());
 
         HEAP.next_alloc = heap_pos;
         ptr
@@ -41,9 +39,10 @@ unsafe impl GlobalAlloc for SimpleAllocator {
 // We initialize `next_alloc` to 0xFFFF_FFFF to indicate that the heap has not been initialized.
 // The value is chosen to make any premature allocation fail.
 static mut HEAP: SimpleAllocator = SimpleAllocator {
-    next_alloc: 0xFFFF_FFFF,
+    next_alloc: &raw mut _sheap,
 };
 
-pub unsafe fn init_heap() {
-    HEAP.next_alloc = core::ptr::from_ref::<u8>(&crate::_sheap).cast::<u8>() as usize;
+extern "C" {
+    // The address of this variable is the start of the heap (growing upwards).
+    static mut _sheap: u8;
 }

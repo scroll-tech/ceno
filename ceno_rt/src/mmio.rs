@@ -4,21 +4,21 @@ use rkyv::{Portable, api::high::HighValidator, bytecheck::CheckBytes, rancor::Fa
 
 use core::slice::from_raw_parts;
 
-use crate::_hints_start;
-
-static mut NEXT_HINT_LEN_AT: usize = 0x4000_0000;
-
-pub unsafe fn init_hints() {
-    NEXT_HINT_LEN_AT = core::ptr::from_ref::<u8>(&_hints_start).cast::<u8>() as usize;
+extern "C" {
+    // The address of this variable is the start of the hints ROM.
+    static _hints_start: u8;
 }
+
+static mut NEXT_HINT_LEN_AT: *const u8 = unsafe { &_hints_start };
+// next_alloc: &raw crate::_hints_start;
+// unsafe { core::ptr::from_ref::<u8>(&_hints_start).cast::<u8>() };
 
 pub fn read_slice<'a>() -> &'a [u8] {
     unsafe {
         let len: u32 = core::ptr::read(NEXT_HINT_LEN_AT as *const u32);
-        NEXT_HINT_LEN_AT += 4;
+        NEXT_HINT_LEN_AT = NEXT_HINT_LEN_AT.wrapping_add(4);
 
-        let start: *const u8 = core::ptr::from_ref::<u8>(&crate::_hints_start).cast::<u8>();
-        &from_raw_parts(start, 1 << 30)[..len as usize]
+        &from_raw_parts(&_hints_start, 1 << 30)[..len as usize]
     }
 }
 
