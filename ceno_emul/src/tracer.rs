@@ -47,6 +47,14 @@ pub struct MemOp<T> {
 }
 
 impl<T> MemOp<T> {
+    pub fn new_register_op(idx: RegIdx, value: T, previous_cycle: Cycle) -> MemOp<T> {
+        MemOp {
+            addr: Platform::register_vma(idx).into(),
+            value,
+            previous_cycle,
+        }
+    }
+
     /// Get the register index of this operation.
     pub fn register_index(&self) -> RegIdx {
         Platform::register_index(self.addr.into())
@@ -394,26 +402,18 @@ impl Tracer {
         });
     }
 
-    pub fn track_syscall(&mut self, mut effects: SyscallEffects) {
-        let cycle = self.record.cycle + Self::SUBCYCLE_MEM;
-        for op in &mut effects.witness.mem_writes {
-            op.previous_cycle = self.track_access(op.addr, Self::SUBCYCLE_MEM);
-            assert_ne!(
-                op.previous_cycle, cycle,
-                "Memory address {:?} was accessed twice in the same cycle",
-                op.addr
-            );
-        }
+    pub fn track_syscall(&mut self, effects: SyscallEffects) {
+        let witness = effects.finalize(self);
 
         assert!(self.record.syscall.is_none(), "Only one syscall per step");
-        self.record.syscall = Some(effects.witness);
+        self.record.syscall = Some(witness);
     }
 
     /// - Return the cycle when an address was last accessed.
     /// - Return 0 if this is the first access.
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
-    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+    pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         self.latest_accesses
             .insert(addr, self.record.cycle + subcycle)
             .unwrap_or(0)
