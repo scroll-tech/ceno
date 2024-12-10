@@ -44,8 +44,8 @@ fn build_elfs() {
                 include_bytes!(r"{CARGO_MANIFEST_DIR}/../guest/examples/target/riscv32im-unknown-none-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
-    let input_path = "../guest/examples/";
-    let elfs_path = "../guest/examples/target/riscv32im-unknown-none-elf/release/examples/";
+    let input_path = "../guest/";
+    let elfs_path = "../guest/target/riscv32im-unknown-none-elf/release/examples/";
 
     println!("cargo:rerun-if-changed={input_path}");
     println!("cargo:rerun-if-changed={elfs_path}");
