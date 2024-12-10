@@ -1,0 +1,14 @@
+[package]
+name = "examples"
+readme = "README.md"
+
+categories.workspace = true
+description = "Ceno runtime library"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+ceno_rt = { path = "../ceno_rt" }
