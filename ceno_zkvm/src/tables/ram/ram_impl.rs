@@ -9,7 +9,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use crate::{
     circuit_builder::{CircuitBuilder, DynamicAddr, SetTableAddrType, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, ToExpr, WitIn},
+    expression::{Expression, Fixed, ToExpr, WitIn, StructuralWitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
@@ -170,6 +170,14 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
 
         Ok(final_table)
     }
+
+    pub fn assign_structural_instances<F: SmallField>(
+        &self,
+        _num_witness: usize,
+        _final_mem: &[MemFinalRecord],
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+        Ok(RowMajorMatrix::<F>::new(0, 0))
+    }
 }
 
 /// define public io
@@ -277,13 +285,21 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
 
         Ok(final_table)
     }
+
+    pub fn assign_structural_instances<F: SmallField>(
+        &self,
+        _num_witness: usize,
+        _final_cycles: &[Cycle],
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+        Ok(RowMajorMatrix::<F>::new(0, 0))
+    }
 }
 
 /// volatile with all init value as 0
 /// dynamic address as witin, relied on augment of knowledge to prove address form
 #[derive(Clone, Debug)]
 pub struct DynVolatileRamTableConfig<DVRAM: DynVolatileRamTable + Send + Sync + Clone> {
-    addr: WitIn,
+    addr: StructuralWitIn,
 
     final_v: Vec<WitIn>,
     final_cycle: WitIn,
@@ -296,8 +312,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        /// let addr = cb.create_witin(|| "addr");
-        let addr = cb.create_structural_witin(|| addr);
+        let addr = cb.create_structural_witin(|| "addr");
 
         let final_v = (0..DVRAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
@@ -379,7 +394,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .enumerate()
             .for_each(|(i, (row, rec))| {
                 assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
-                set_val!(row, self.addr, rec.addr as u64);
+                // set_val!(row, self.addr, rec.addr as u64);
 
                 if self.final_v.len() == 1 {
                     // Assign value directly.
@@ -397,16 +412,47 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         // set padding with well-form address
         final_table
             .par_iter_mut()
-            .enumerate()
             .skip(final_mem.len())
             .with_min_len(MIN_PAR_SIZE)
-            .for_each(|(i, row)| {
+            .for_each(|row| {
                 // Assign value limbs.
                 self.final_v.iter().for_each(|limb| {
                     set_val!(row, limb, 0u64);
                 });
-                set_val!(row, self.addr, DVRAM::addr(&self.params, i) as u64);
                 set_val!(row, self.final_cycle, 0_u64);
+            });
+
+        Ok(final_table)
+    }
+
+    pub fn assign_structural_instances<F: SmallField>(
+        &self,
+        num_structural_witness: usize,
+        final_mem: &[MemFinalRecord],
+    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
+        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
+        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        let mut final_table = RowMajorMatrix::<F>::new(final_mem.len(), num_structural_witness);
+
+        final_table
+            .par_iter_mut()
+            .with_min_len(MIN_PAR_SIZE)
+            .zip(final_mem.into_par_iter())
+            .enumerate()
+            .for_each(|(i, (row, rec))| {
+                assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
+                set_val!(row, self.addr, rec.addr as u64);
+            });
+
+        // set padding with well-form address
+        final_table
+            .par_iter_mut()
+            .enumerate()
+            .skip(final_mem.len())
+            .with_min_len(MIN_PAR_SIZE)
+            .for_each(|(i, row)| {
+                set_val!(row, self.addr, DVRAM::addr(&self.params, i) as u64);
+               
             });
 
         Ok(final_table)

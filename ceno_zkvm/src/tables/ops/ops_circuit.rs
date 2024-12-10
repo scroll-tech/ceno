@@ -67,4 +67,13 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         Self::padding_zero(&mut table, num_witin)?;
         Ok(table)
     }
+
+    fn assign_structural_instances(
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        _final_v: &Self::WitnessInput,
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>{
+        Ok(RowMajorMatrix::new(0, 0))
+    }
 }

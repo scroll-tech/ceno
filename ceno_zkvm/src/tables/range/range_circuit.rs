@@ -60,4 +60,13 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         Self::padding_zero(&mut table, num_witin).expect("padding error");
         Ok(table)
     }
+
+    fn assign_structural_instances(
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        _input: &(),
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>{
+        Ok(RowMajorMatrix::new(0, 0))
+    }
 }

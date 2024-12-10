@@ -225,12 +225,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let initial_global_state = eval_by_expr_with_instance(
             &[],
             &[],
+            &[],
             pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
         );
         prod_w *= initial_global_state;
         let finalize_global_state = eval_by_expr_with_instance(
+            &[],
             &[],
             &[],
             pi_evals,
@@ -433,6 +435,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                                 * eval_by_expr_with_instance(
                                     &[],
                                     &proof.wits_in_evals,
+                                    &[],
                                     pi,
                                     challenges,
                                     expr,
@@ -461,7 +464,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .chain(proof.lk_records_in_evals[..lk_counts_per_instance].iter()),
             )
             .any(|(expr, expected_evals)| {
-                eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr)
+                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
                     != *expected_evals
             })
         {
@@ -472,7 +475,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
         if cs.assert_zero_expressions.iter().any(|expr| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
+            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr) != E::ZERO
         }) {
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
@@ -705,6 +708,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             eval_by_expr_with_instance(
                 &proof.fixed_in_evals,
                 &proof.wits_in_evals,
+                &[],
                 pi,
                 challenges,
                 expr,
@@ -748,6 +752,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             tracing::debug!(
                 "[table {name}] verified public inputs on index {idx} with point {input_opening_point:?}",
             );
+        }
+
+        for var in proof.rw_hints_num_vars.iter() {
+            transcript.append_message(&var.to_le_bytes());
         }
 
         // do optional check of fixed_commitment openings by vk

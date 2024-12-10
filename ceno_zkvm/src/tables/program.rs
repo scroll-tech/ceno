@@ -222,6 +222,15 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         Ok(witness)
     }
+
+    fn assign_structural_instances(
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        _final_v: &Self::WitnessInput,
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>{
+        Ok(RowMajorMatrix::new(0, 0))
+    }
 }
 
 #[cfg(test)]
