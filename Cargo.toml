@@ -1,9 +1,8 @@
 [workspace]
-exclude = ["examples"]
+exclude = ["guest"]
 members = [
   "ceno_emul",
   "examples-builder",
-  "ceno_rt",
   "mpcs",
   "multilinear_extensions",
   "sumcheck",
