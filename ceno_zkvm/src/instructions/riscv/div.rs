@@ -293,7 +293,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "quotient_zero_division",
             is_divisor_zero.expr(),
             quotient.value(),
-            ((1u64 << UInt::<E>::TOTAL_BITS) - 1).into(),
+            u32::MAX.into(),
             quotient.value(),
         )?;
 
