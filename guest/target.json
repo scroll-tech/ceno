@@ -1,0 +1,6 @@
+{
+  "arch": "riscv32im",
+  "data-layout": "e-m:e-p:32:32-i64:64-n32-S128",
+  "llvm-target": "riscv32",
+  "target-pointer-width": "32"
+}

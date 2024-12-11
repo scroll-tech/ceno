@@ -1,0 +1,21 @@
+{
+  "arch": "riscv32im",
+  "cpu": "generic-rv32",
+  "crt-objects-fallback": "false",
+  "data-layout": "e-m:e-p:32:32-i64:64-n32-S128",
+  "eh-frame-header": false,
+  "emit-debug-gdb-scripts": false,
+  "executables": true,
+  "features": "+m",
+  "linker": "rust-lld",
+  "linker-flavor": "ld.lld",
+  "llvm-target": "riscv32",
+  "max-atomic-width": 32,
+  "os": "mozakvm",
+  "panic-strategy": "abort",
+  "relocation-model": "static",
+  "singlethread": true,
+  "target-pointer-width": "32",
+  "vendor": "mozak",
+  "main-needs-argc-argv": false
+}
