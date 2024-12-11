@@ -360,13 +360,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let divisor_v = Value::new_unchecked(divisor);
 
         let (quotient, remainder) = match &config.internal_config {
-            InternalDivRem::Unsigned => {
-                if divisor == 0 {
-                    (u32::MAX, dividend)
-                } else {
-                    (dividend / divisor, dividend % divisor)
-                }
-            }
+            InternalDivRem::Unsigned => (
+                dividend.checked_div(divisor).unwrap_or(u32::MAX),
+                dividend.checked_rem(divisor).unwrap_or(dividend),
+            ),
             InternalDivRem::Signed { .. } => {
                 let dividend_s = dividend as i32;
                 let divisor_s = divisor as i32;
