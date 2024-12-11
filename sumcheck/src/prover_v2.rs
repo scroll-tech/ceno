@@ -18,9 +18,6 @@ use rayon::{
 };
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
-#[cfg(feature = "non_pow2_rayon_thread")]
-use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
-
 use crate::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
@@ -235,26 +232,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         {
             rayon::in_place_scope(scoped_fn)
         } else {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "rayon global thread pool size {} mismatch with desired poly size {}, add
-            --features non_pow2_rayon_thread",
-                    rayon::current_num_threads(),
-                    polys.len()
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            unsafe {
-                create_local_pool_once(max_thread_id, true);
-
-                if let Some(pool) = LOCAL_THREAD_POOL.as_ref() {
-                    pool.scope(scoped_fn)
-                } else {
-                    panic!("empty local pool")
-                }
-            }
+            panic!(
+                "rayon global thread pool size {} mismatch with desired poly size {}.",
+                rayon::current_num_threads(),
+                polys.len()
+            );
         };
 
         if log2_max_thread_id == 0 {
