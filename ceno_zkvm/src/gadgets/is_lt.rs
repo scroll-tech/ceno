@@ -20,9 +20,9 @@ use super::SignedExtendConfig;
 
 // TODO rename to AssertLtConfig (LT -> Lt) to fit naming conventions
 #[derive(Debug, Clone)]
-pub struct AssertLTConfig(InnerLtConfig);
+pub struct AssertLtConfig(InnerLtConfig);
 
-impl AssertLTConfig {
+impl AssertLtConfig {
     pub fn construct_circuit<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,

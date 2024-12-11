@@ -6,7 +6,7 @@ mod signed_ext;
 
 pub use div::DivConfig;
 pub use is_lt::{
-    AssertLTConfig, AssertSignedLtConfig, InnerLtConfig, IsLtConfig, SignedLtConfig, cal_lt_diff,
+    AssertLtConfig, AssertSignedLtConfig, InnerLtConfig, IsLtConfig, SignedLtConfig, cal_lt_diff,
 };
 pub use is_zero::{IsEqualConfig, IsZeroConfig};
 pub use signed::Signed;

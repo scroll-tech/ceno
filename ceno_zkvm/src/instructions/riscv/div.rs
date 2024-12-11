@@ -80,7 +80,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
+    gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
     set_val,
     uint::Value,
@@ -114,7 +114,7 @@ enum InternalDivRem<E: ExtensionField> {
         is_dividend_max_negative: IsEqualConfig,
         is_divisor_minus_one: IsEqualConfig,
         is_signed_overflow: WitIn,
-        remainder_nonnegative: AssertLTConfig,
+        remainder_nonnegative: AssertLtConfig,
     },
 }
 
@@ -256,7 +256,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     - Expression::<E>::from(2) * divisor_signed.is_negative.expr())
                     * divisor_signed.expr();
 
-                let remainder_nonnegative = AssertLTConfig::construct_circuit(
+                let remainder_nonnegative = AssertLtConfig::construct_circuit(
                     cb,
                     || "oriented_remainder_nonnegative",
                     (-1).into(),
