@@ -364,24 +364,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             .assign_limbs(instance, divisor_v.as_u16_limbs());
 
         let (quotient, remainder) = match &config.internal_config {
-            InternalDivRem::Unsigned => {
-                if divisor == 0 {
-                    (u32::MAX, dividend)
-                } else {
-                    (dividend / divisor, dividend % divisor)
-                }
-            }
+            InternalDivRem::Unsigned => (
+                dividend.checked_div(divisor).unwrap_or(u32::MAX),
+                dividend.checked_rem(divisor).unwrap_or(dividend),
+            ),
             InternalDivRem::Signed { .. } => {
-                let dividend_s = dividend as i32;
-                let divisor_s = divisor as i32;
+                let dividend = dividend as i32;
+                let divisor = divisor as i32;
 
-                let (quotient_s, remainder_s) = if divisor_s == 0 {
-                    (-1i32, dividend_s)
+                let (quotient_s, remainder_s) = if divisor == 0 {
+                    (-1, dividend)
                 } else {
                     // these correctly handle signed division overflow
                     (
-                        dividend_s.wrapping_div(divisor_s),
-                        dividend_s.wrapping_rem(divisor_s),
+                        dividend.wrapping_div(divisor),
+                        dividend.wrapping_rem(divisor),
                     )
                 };
 
@@ -425,12 +422,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 is_dividend_max_negative.assign_instance(
                     instance,
                     (dividend as u64).into(),
-                    ((i32::MIN as u32) as u64).into(),
+                    (i32::MIN as u32 as u64).into(),
                 )?;
                 is_divisor_minus_one.assign_instance(
                     instance,
                     (divisor as u64).into(),
-                    ((-1i32 as u32) as u64).into(),
+                    (-1i32 as u32 as u64).into(),
                 )?;
 
                 let signed_div_overflow_b = dividend_s == i32::MIN && divisor_s == -1i32;
