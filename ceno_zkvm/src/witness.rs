@@ -3,7 +3,6 @@ use std::{
     array,
     cell::RefCell,
     collections::HashMap,
-    iter,
     mem::{self},
     ops::Index,
     slice::{Chunks, ChunksMut},
@@ -46,7 +45,7 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     padding_strategy: InstancePaddingStrategy,
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
         RowMajorMatrix {
             values: (0..num_rows * num_col)
@@ -66,6 +65,10 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
         self.values.len() / self.num_col
     }
 
+    pub fn row(&self, row: usize) -> &[T] {
+        &self.values[row * self.num_col..(row + 1) * self.num_col]
+    }
+
     pub fn iter_rows(&self) -> Chunks<T> {
         self.values.chunks(self.num_col)
     }
@@ -83,31 +86,36 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default> RowMajorMatrix<T> {
     }
 }
 
-impl<F: Field> RowMajorMatrix<F> {
+impl<F: Field + From<u64>> RowMajorMatrix<F> {
+    // Returns column number `column`, padded appropriately according to the stored strategy
+    pub fn column_padded(&self, column: usize) -> Vec<F> {
+        let num_instances = self.num_instances();
+        let num_padding_instances = self.num_padding_instances();
+        let last_element = self.row(num_instances - 1)[column];
+
+        let padding_iter = (num_instances..num_instances + num_padding_instances).map(|i| {
+            match &self.padding_strategy {
+                InstancePaddingStrategy::Custom(fun) => F::from(fun(i as u64, column as u64)),
+                InstancePaddingStrategy::RepeatLast => last_element,
+                _ => F::ZERO,
+            }
+        });
+
+        self.values
+            .iter()
+            .skip(column)
+            .step_by(self.num_col)
+            .copied()
+            .chain(padding_iter)
+            .collect::<Vec<_>>()
+    }
+
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
-        let padding_row = match self.padding_strategy {
-            // Repeat last row if it exists
-            InstancePaddingStrategy::RepeatLast if !self.values.is_empty() => {
-                self.values[self.values.len() - self.num_col..].to_vec()
-            }
-            // Otherwise use zeroes
-            _ => vec![F::ZERO; self.num_col],
-        };
-        let num_padding = self.num_padding_instances();
         (0..self.num_col)
             .into_par_iter()
-            .map(|i| {
-                self.values
-                    .iter()
-                    .skip(i)
-                    .step_by(self.num_col)
-                    .chain(&mut iter::repeat(&padding_row[i]).take(num_padding))
-                    .copied()
-                    .collect::<Vec<_>>()
-                    .into_mle()
-            })
+            .map(|i| self.column_padded(i).into_mle())
             .collect()
     }
 }

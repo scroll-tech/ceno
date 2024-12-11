@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use ceno_emul::{Addr, Cycle};
 use ff_ext::ExtensionField;
@@ -388,8 +388,23 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
-        let mut final_table =
-            RowMajorMatrix::<F>::new(final_mem.len(), num_witness, InstancePaddingStrategy::Zero);
+
+        let params = self.params.clone();
+        // TODO: make this more robust
+        let addr_column = 0;
+        let padding_fn = move |row: u64, col: u64| {
+            if col == addr_column {
+                DVRAM::addr(&params, row as usize) as u64
+            } else {
+                0u64
+            }
+        };
+
+        let mut final_table = RowMajorMatrix::<F>::new(
+            final_mem.len(),
+            num_witness,
+            InstancePaddingStrategy::Custom(Arc::new(padding_fn)),
+        );
 
         final_table
             .par_iter_mut()
@@ -414,5 +429,62 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             });
 
         Ok(final_table)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::iter::successors;
+
+    use crate::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        structs::ProgramParams,
+        tables::{DynVolatileRamTable, HintsCircuit, HintsTable, MemFinalRecord, TableCircuit},
+        utils::next_pow2_instance_padding,
+        witness::LkMultiplicity,
+    };
+
+    use ceno_emul::WORD_SIZE;
+    use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
+    use itertools::Itertools;
+
+    #[test]
+    fn test_well_formed_address_padding() {
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = HintsCircuit::construct_circuit(&mut cb).unwrap();
+
+        let def_params = ProgramParams::default();
+        let lkm = LkMultiplicity::default().into_finalize_result();
+
+        // ensure non-empty padding is required
+        let some_non_2_pow = 26;
+        let input = (0..some_non_2_pow)
+            .map(|i| MemFinalRecord {
+                addr: HintsTable::addr(&def_params, i),
+                cycle: 0,
+                value: 0,
+            })
+            .collect_vec();
+        let wit =
+            HintsCircuit::<E>::assign_instances(&config, cb.cs.num_witin as usize, &lkm, &input)
+                .unwrap();
+
+        let addr_column = cb
+            .cs
+            .witin_namespace_map
+            .iter()
+            .position(|name| name == "riscv/RAM_Memory_HintsTable/addr")
+            .unwrap();
+
+        let addr_padded_view = wit.column_padded(addr_column);
+        // Expect addresses to proceed consecutively inside the padding as well
+        let expected = successors(Some(addr_padded_view[0]), |idx| {
+            Some(*idx + F::from(WORD_SIZE as u64))
+        })
+        .take(next_pow2_instance_padding(wit.num_instances()))
+        .collect::<Vec<_>>();
+
+        assert_eq!(addr_padded_view, expected)
     }
 }

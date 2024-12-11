@@ -5,6 +5,7 @@ use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
+use std::sync::Arc;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -18,6 +19,10 @@ pub mod riscv;
 pub enum InstancePaddingStrategy {
     Zero,
     RepeatLast,
+    // Custom strategy consists of a closure
+    // `pad(i, j) = padding value for cell at row i, column j`
+    // pad should be able to cross thread boundaries
+    Custom(Arc<dyn Fn(u64, u64) -> u64 + Send + Sync>),
 }
 
 pub trait Instruction<E: ExtensionField> {
