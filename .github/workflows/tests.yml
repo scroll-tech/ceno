@@ -31,13 +31,6 @@ jobs:
     timeout-minutes: 30
     runs-on: [self-hosted, Linux, X64]
 
-    strategy:
-      matrix:
-        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
-        # Exclude the riscv32im-unknown-none-elf target
-        exclude:
-          - target: riscv32im-unknown-none-elf
-
     steps:
       - uses: actions/checkout@v2
       - uses: dtolnay/rust-toolchain@master
@@ -61,6 +54,4 @@ jobs:
         run: |
           cargo make --version || cargo install cargo-make
       - name: run test
-        env:
-          TARGET: ${{ matrix.target }}
         run: cargo make tests
