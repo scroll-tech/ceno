@@ -16,6 +16,7 @@
 
 use std::{
     fmt,
+    iter::Step,
     ops::{self, Range},
 };
 
@@ -103,6 +104,18 @@ impl ByteAddr {
 impl WordAddr {
     pub const fn baddr(self) -> ByteAddr {
         ByteAddr(self.0 * WORD_SIZE as u32)
+    }
+}
+
+impl Step for WordAddr {
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
+        u32::steps_between(&start.0, &end.0)
+    }
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        u32::forward_checked(start.0, count).map(Self)
+    }
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        u32::backward_checked(start.0, count).map(Self)
     }
 }
 

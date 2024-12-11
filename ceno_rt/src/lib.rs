@@ -6,6 +6,9 @@ use core::arch::{asm, global_asm};
 
 mod allocator;
 
+mod mmio;
+pub use mmio::{read, read_slice};
+
 mod io;
 pub use io::info_out;
 
