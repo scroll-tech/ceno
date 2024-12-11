@@ -5,6 +5,7 @@ use crate::{
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     encode_rv32,
     rv32im::DecodedInstruction,
+    syscalls::{SyscallEffects, SyscallWitness},
 };
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -30,6 +31,8 @@ pub struct StepRecord {
     rd: Option<WriteOp>,
 
     memory_op: Option<WriteOp>,
+
+    syscall: Option<SyscallWitness>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -44,6 +47,14 @@ pub struct MemOp<T> {
 }
 
 impl<T> MemOp<T> {
+    pub fn new_register_op(idx: RegIdx, value: T, previous_cycle: Cycle) -> MemOp<T> {
+        MemOp {
+            addr: Platform::register_vma(idx).into(),
+            value,
+            previous_cycle,
+        }
+    }
+
     /// Get the register index of this operation.
     pub fn register_index(&self) -> RegIdx {
         Platform::register_index(self.addr.into())
@@ -242,6 +253,7 @@ impl StepRecord {
                 previous_cycle,
             }),
             memory_op,
+            syscall: None,
         }
     }
 
@@ -281,6 +293,10 @@ impl StepRecord {
 
     pub fn is_busy_loop(&self) -> bool {
         self.pc.before == self.pc.after
+    }
+
+    pub fn syscall(&self) -> Option<&SyscallWitness> {
+        self.syscall.as_ref()
     }
 }
 
@@ -386,11 +402,18 @@ impl Tracer {
         });
     }
 
+    pub fn track_syscall(&mut self, effects: SyscallEffects) {
+        let witness = effects.finalize(self);
+
+        assert!(self.record.syscall.is_none(), "Only one syscall per step");
+        self.record.syscall = Some(witness);
+    }
+
     /// - Return the cycle when an address was last accessed.
     /// - Return 0 if this is the first access.
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
-    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+    pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         self.latest_accesses
             .insert(addr, self.record.cycle + subcycle)
             .unwrap_or(0)
