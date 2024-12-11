@@ -531,6 +531,17 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UI
     }
 }
 
+#[test]
+fn test_div() {
+    for (a, b) in [(10_i32, 3_i32), (10, 0), (i32::MIN, -1)] {
+        let q = a.checked_div(b);
+        let r = a.checked_rem(b);
+        eprintln!("a: {a}\tb: {b}\tq: {q:?}\tr: {r:?}");
+    }
+
+    // assert_eq!(i32::MIN as u32 as u64, i32::MIN as u64);
+}
+
 impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<M, C, E> {
     type Output = Vec<Expression<E>>;
     fn expr(&self) -> Vec<Expression<E>> {

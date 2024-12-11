@@ -68,8 +68,9 @@
 //! we require just that the sum of these booleans is equal to 1.
 
 use ceno_emul::{InsnKind, StepRecord};
+use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use goldilocks::{Goldilocks, SmallField};
 
 use super::{
     RIVInstruction,
@@ -84,6 +85,7 @@ use crate::{
     instructions::Instruction,
     set_val,
     uint::Value,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -436,23 +438,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 quotient_signed.assign_instance(instance, lkm, &quotient_v)?;
                 remainder_signed.assign_instance(instance, lkm, &remainder_v)?;
 
-                let remainder_pos_orientation = if negative_division_b {
-                    -(remainder_s as i64)
-                } else {
-                    remainder_s as i64
-                };
-                let divisor_pos_orientation = if divisor_s < 0 {
-                    -(divisor_s as i64)
-                } else {
-                    divisor_s as i64
-                };
+                let neg_if = |b: bool, x: i32| if b { -x } else { x };
+
+                let remainder_pos_orientation = neg_if(negative_division_b, remainder_s) as i64;
+                let divisor_pos_orientation = neg_if(divisor_s < 0, divisor_s) as i64;
 
                 remainder_nonnegative.assign_instance(
                     instance,
                     lkm,
-                    <E::BaseField as SmallField>::MODULUS_U64.wrapping_add_signed(-1),
-                    <E::BaseField as SmallField>::MODULUS_U64
-                        .wrapping_add_signed(remainder_pos_orientation),
+                    (-Goldilocks::ONE).to_canonical_u64(),
+                    i64_to_base::<Goldilocks>(remainder_pos_orientation).to_canonical_u64(),
                 )?;
 
                 (
