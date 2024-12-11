@@ -158,14 +158,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
         assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
 
-        let dividend = UInt::new_unchecked(|| "dividend", cb)?; // 32-bit value from rs1
-        let divisor = UInt::new_unchecked(|| "divisor", cb)?; // 32-bit value from rs2
+        // 32-bit value from rs1
+        let dividend = UInt::new_unchecked(|| "dividend", cb)?;
+        // 32-bit value from rs2
+        let divisor = UInt::new_unchecked(|| "divisor", cb)?;
         let quotient = UInt::new(|| "quotient", cb)?;
         let remainder = UInt::new(|| "remainder", cb)?;
 
         // `rem_e` and `div_e` are expressions representing the remainder and
         // divisor from the signed or unsigned division operation, with signs
-        // renormalized to be nonnegative, so that correct values must satisfy
+        // normalized to be nonnegative, so that correct values must satisfy
         // either `0 <= rem_e < div_e` or `div_e == 0`.  The `rem_e` value
         // should be constrained to be nonnegative before being returned from
         // this block, while the checks `rem_e < div_e` or `div_e == 0` are
@@ -196,8 +198,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let neg_div_expr: Expression<E> = {
                     let a_neg = dividend_signed.is_negative.expr();
                     let b_neg = divisor_signed.is_negative.expr();
-                    // a_neg * (1 - b_neg) + (1 - a_neg) * b_neg
-                    (a_neg.clone() + b_neg.clone()) - (Expression::<E>::from(2) * a_neg * b_neg)
+                    &a_neg * (1 - &b_neg) + (1 - &a_neg) * &b_neg
                 };
                 let negative_division = cb.flatten_expr(|| "neg_division", neg_div_expr)?;
 
@@ -414,12 +415,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 is_dividend_max_negative.assign_instance(
                     instance,
                     (dividend as u64).into(),
-                    ((i32::MIN as u32) as u64).into(),
+                    (i32::MIN as u32 as u64).into(),
                 )?;
                 is_divisor_minus_one.assign_instance(
                     instance,
                     (divisor as u64).into(),
-                    ((-1i32 as u32) as u64).into(),
+                    (-1i32 as u32 as u64).into(),
                 )?;
 
                 let signed_div_overflow_b = dividend_s == i32::MIN && divisor_s == -1i32;
@@ -428,16 +429,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 quotient_signed.assign_instance(instance, lkm, &quotient_v)?;
                 remainder_signed.assign_instance(instance, lkm, &remainder_v)?;
 
-                let remainder_pos_orientation = if negative_division_b {
-                    -(remainder_s as i64)
-                } else {
-                    remainder_s as i64
-                };
-                let divisor_pos_orientation = if divisor_s < 0 {
-                    -(divisor_s as i64)
-                } else {
-                    divisor_s as i64
-                };
+                let negate_if = |b: bool, x: i32| if b { -(x as i64) } else { x as i64 };
+
+                let remainder_pos_orientation = negate_if(negative_division_b, remainder_s);
+                let divisor_pos_orientation = negate_if(divisor_s < 0, divisor_s);
 
                 remainder_nonnegative.assign_instance(
                     instance,
