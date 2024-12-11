@@ -3,12 +3,8 @@ use std::{fmt::Display, mem::MaybeUninit};
 use ff_ext::ExtensionField;
 
 use crate::{
-    Value,
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::Expression,
-    instructions::riscv::constants::{BIT_WIDTH, UInt},
-    witness::LkMultiplicity,
+    Value, circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression,
+    instructions::riscv::constants::UInt, witness::LkMultiplicity,
 };
 
 use super::SignedExtendConfig;
@@ -29,7 +25,7 @@ impl<E: ExtensionField> Signed<E> {
     ) -> Result<Self, ZKVMError> {
         cb.namespace(name_fn, |cb| {
             let is_negative = unsigned_val.is_negative(cb)?;
-            let val = unsigned_val.value() - (is_negative.expr() << BIT_WIDTH);
+            let val = unsigned_val.to_field_expr(is_negative.expr());
 
             Ok(Self { is_negative, val })
         })

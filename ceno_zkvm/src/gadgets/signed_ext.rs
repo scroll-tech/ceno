@@ -2,7 +2,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::constants::{UInt, LIMB_BITS},
+    instructions::riscv::constants::{LIMB_BITS, UInt},
     set_val,
     witness::LkMultiplicity,
 };
