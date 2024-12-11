@@ -1,5 +1,5 @@
 {
-  "arch": "riscv32im",
+  "arch": "riscv32",
   "atomic-cas": false,
   "cpu": "generic-rv32",
   "crt-objects-fallback": "false",
@@ -7,16 +7,21 @@
   "eh-frame-header": false,
   "emit-debug-gdb-scripts": false,
   "executables": true,
-  "features": "+m",
-  "linker-flavor": "ld.lld",
+  "features": "+m,+forced-atomics",
   "linker": "rust-lld",
+  "linker-flavor": "gnu-lld",
+  "llvm-abiname": "ilp32",
   "llvm-target": "riscv32",
   "main-needs-argc-argv": false,
   "max-atomic-width": 32,
-  "os": "mozakvm",
+  "metadata": {
+    "description": null,
+    "host_tools": false,
+    "std": true,
+    "tier": 2
+  },
   "panic-strategy": "abort",
   "relocation-model": "static",
   "singlethread": true,
-  "target-pointer-width": "32",
-  "vendor": "mozak",
+  "target-pointer-width": "32"
 }
