@@ -18,7 +18,7 @@ build-std-features = []
 panic = "abort"
 
 [build]
-# rustflags = ["-C", "passes=loweratomic", "-Zlocation-detail=none"]
+rustflags = ["-C", "passes=lower-atomic", "-Zlocation-detail=none"]
 target = "my-target.json"
 
 # [alias]
