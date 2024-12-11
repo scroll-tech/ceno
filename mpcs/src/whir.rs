@@ -1,9 +1,10 @@
 use super::PolynomialCommitmentScheme;
 use ark_ff::{FftField, Field, PrimeField};
 use ff_ext::ExtensionField;
+use rand::{distributions::Standard, prelude::Distribution};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use whir::whir::{PolynomialCommitmentScheme as WhirPCS, pcs::Whir as WhirInner};
+use whir::ceno_binding::{PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner};
 
 mod ff;
 mod ff_base;
@@ -15,7 +16,10 @@ pub struct Whir<E: ExtensionField> {
     inner: WhirInner<E>,
 }
 
-impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E> {
+impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E>
+where
+    Standard: Distribution<E> + Distribution<E::BaseField>,
+{
     type Param = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
     type ProverParam = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
     type VerifierParam = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
@@ -27,14 +31,14 @@ impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E> {
         <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::CommitmentChunk;
 
     fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
-        Ok(WhirInner::default())
+        todo!()
     }
 
     fn trim(
         param: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        Ok((param.clone(), param))
+        todo!()
     }
 
     fn commit(
@@ -59,7 +63,7 @@ impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E> {
         eval: &E,
         transcript: &mut transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        Ok(pp.clone())
+        todo!()
     }
 
     fn verify(
