@@ -29,7 +29,7 @@ impl<E: ExtensionField> Signed<E> {
     ) -> Result<Self, ZKVMError> {
         cb.namespace(name_fn, |cb| {
             let is_negative = unsigned_val.is_negative(cb)?;
-            let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
+            let val = unsigned_val.value() - (is_negative.expr() << BIT_WIDTH);
 
             Ok(Self { is_negative, val })
         })
