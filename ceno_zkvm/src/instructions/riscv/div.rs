@@ -365,20 +365,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 dividend.checked_rem(divisor).unwrap_or(dividend),
             ),
             InternalDivRem::Signed { .. } => {
-                let dividend_s = dividend as i32;
-                let divisor_s = divisor as i32;
+                let dividend = dividend as i32;
+                let divisor = divisor as i32;
 
-                let (quotient_s, remainder_s) = if divisor_s == 0 {
-                    (-1i32, dividend_s)
+                let (quotient, remainder) = if divisor == 0 {
+                    (-1i32, dividend)
                 } else {
                     // these correctly handle signed division overflow
                     (
-                        dividend_s.wrapping_div(divisor_s),
-                        dividend_s.wrapping_rem(divisor_s),
+                        dividend.wrapping_div(divisor),
+                        dividend.wrapping_rem(divisor),
                     )
                 };
 
-                (quotient_s as u32, remainder_s as u32)
+                (quotient as u32, remainder as u32)
             }
         };
 
@@ -398,28 +398,28 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 remainder_signed,
                 remainder_nonnegative,
             } => {
-                let dividend_s = dividend as i32;
-                let divisor_s = divisor as i32;
-                let remainder_s = remainder as i32;
+                let dividend = dividend as i32;
+                let divisor = divisor as i32;
+                let remainder = remainder as i32;
 
                 dividend_signed.assign_instance(instance, lkm, &dividend_v)?;
                 divisor_signed.assign_instance(instance, lkm, &divisor_v)?;
 
-                let negative_division_b = (dividend_s < 0) ^ (divisor_s < 0);
+                let negative_division_b = (dividend < 0) ^ (divisor < 0);
                 set_val!(instance, negative_division, negative_division_b as u64);
 
                 is_dividend_max_negative.assign_instance(
                     instance,
-                    (dividend as u64).into(),
+                    (dividend as u32 as u64).into(),
                     (i32::MIN as u32 as u64).into(),
                 )?;
                 is_divisor_minus_one.assign_instance(
                     instance,
-                    (divisor as u64).into(),
+                    (divisor as u32 as u64).into(),
                     (-1i32 as u32 as u64).into(),
                 )?;
 
-                let signed_div_overflow_b = dividend_s == i32::MIN && divisor_s == -1i32;
+                let signed_div_overflow_b = dividend == i32::MIN && divisor == -1i32;
                 set_val!(instance, is_signed_overflow, signed_div_overflow_b as u64);
 
                 quotient_signed.assign_instance(instance, lkm, &quotient_v)?;
@@ -427,8 +427,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 let negate_if = |b: bool, x: i32| if b { -(x as i64) } else { x as i64 };
 
-                let remainder_pos_orientation = negate_if(negative_division_b, remainder_s);
-                let divisor_pos_orientation = negate_if(divisor_s < 0, divisor_s);
+                let remainder_pos_orientation = negate_if(negative_division_b, remainder);
+                let divisor_pos_orientation = negate_if(divisor < 0, divisor);
 
                 remainder_nonnegative.assign_instance(
                     instance,
