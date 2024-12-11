@@ -684,6 +684,11 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         self.as_u64() as u32
     }
 
+    /// Convert the limbs to a u32 value
+    pub fn as_i32(&self) -> i32 {
+        self.as_u32() as i32
+    }
+
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
         self.limbs.iter().map(|v| F::from(*v as u64)).collect_vec()
     }
