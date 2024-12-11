@@ -68,8 +68,9 @@
 //! we require just that the sum of these booleans is equal to 1.
 
 use ceno_emul::{InsnKind, StepRecord};
+use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use goldilocks::{Goldilocks, SmallField};
 
 use super::{
     RIVInstruction,
@@ -84,6 +85,7 @@ use crate::{
     instructions::Instruction,
     set_val,
     uint::Value,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
@@ -437,9 +439,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 remainder_nonnegative.assign_instance(
                     instance,
                     lkm,
-                    <E::BaseField as SmallField>::MODULUS_U64.wrapping_add_signed(-1),
-                    <E::BaseField as SmallField>::MODULUS_U64
-                        .wrapping_add_signed(remainder_pos_orientation),
+                    (-Goldilocks::ONE).to_canonical_u64(),
+                    i64_to_base::<Goldilocks>(remainder_pos_orientation).to_canonical_u64(),
                 )?;
 
                 (
