@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     instructions::{
         Instruction,
         riscv::{
@@ -21,7 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
-    lt_x10_cfg: AssertLTConfig,
+    lt_x10_cfg: AssertLtConfig,
 }
 
 pub struct HaltInstruction<E>(PhantomData<E>);
