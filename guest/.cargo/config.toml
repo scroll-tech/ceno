@@ -1,11 +1,25 @@
 # # Keeping this for legacy purposes - the commands below in `alias` are based off this configuration.
-# # [unstable]
-# # build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
-# # build-std-features = ["compiler-builtins-mem"]
+[unstable]
+# build-std = ["core"]
+# build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
+build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
+# build-std-features = ["compiler-builtins-mem"]
+build-std-features = []
 
-# # [build]
-# # rustflags = ["-C", "passes=loweratomic", "-Zlocation-detail=none"]
-# # target = "./.cargo/riscv32im-mozak-mozakvm-elf.json"
+# [alias]
+# my-check = """check \
+#  --target=target2.json
+#  """
+#  -Zbuild-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro \
+#  -Zbuild-std-features=compiler-builtins-mem
+#  """
+
+[profile.dev]
+panic = "abort"
+
+[build]
+# rustflags = ["-C", "passes=loweratomic", "-Zlocation-detail=none"]
+target = "target2.json"
 
 # [alias]
 # mozakvm-build = """

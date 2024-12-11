@@ -1,6 +1,7 @@
 [toolchain]
-channel = "nightly-2024-12-06"
+channel = "nightly"
 # targets = ["riscv32", "riscv32im-unknown-none-elf"]
-# targets = ["riscv32im-unknown-none-elf"]
-components = ["rustc"]
+# targets = ["riscv32im", "riscv32im-unknown-none-elf"]
+# riscv32im
+components = ["rustc", "rust-src"]
 profile = "minimal"
