@@ -73,7 +73,7 @@ use goldilocks::SmallField;
 
 use super::{
     RIVInstruction,
-    constants::{BIT_WIDTH, UINT_LIMBS, UInt},
+    constants::{UINT_LIMBS, UInt},
     r_insn::RInstructionConfig,
 };
 use crate::{
@@ -206,13 +206,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     cb,
                     || "is_dividend_max_negative",
                     dividend.value(),
-                    (1u64 << (BIT_WIDTH - 1)).into(),
+                    i32::MIN.into(),
                 )?;
                 let is_divisor_minus_one = IsEqualConfig::construct_circuit(
                     cb,
                     || "is_divisor_minus_one",
                     divisor.value(),
-                    ((1u64 << BIT_WIDTH) - 1).into(),
+                    (-1i32).into(),
                 )?;
                 let is_signed_overflow = cb.flatten_expr(
                     || "signed_division_overflow",
@@ -242,7 +242,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     is_signed_overflow.expr(),
                     div_rel_expr,
                     // overflow replacement dividend value, +2^31
-                    (1u64 << (BIT_WIDTH - 1)).into(),
+                    (1u64 << 31).into(),
                     dividend_signed.expr(),
                 )?;
 
@@ -454,18 +454,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             }
         };
 
-        config
-            .dividend
-            .assign_value(instance, dividend_v);
-        config
-            .divisor
-            .assign_value(instance, divisor_v);
-        config
-            .quotient
-            .assign_value(instance, quotient_v);
-        config
-            .remainder
-            .assign_value(instance, remainder_v);
+        config.dividend.assign_value(instance, dividend_v);
+        config.divisor.assign_value(instance, divisor_v);
+        config.quotient.assign_value(instance, quotient_v);
+        config.remainder.assign_value(instance, remainder_v);
 
         config
             .is_divisor_zero
