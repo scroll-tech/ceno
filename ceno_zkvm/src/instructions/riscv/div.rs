@@ -1,124 +1,348 @@
+//! Circuit implementations for DIVU, REMU, DIV, and REM RISC-V opcodes
+//!
+//! The signed and unsigned division and remainder opcodes are handled by
+//! simulating the division algorithm expression:
+//!
+//! `dividend = divisor * quotient + remainder` (1)
+//!
+//! where `remainder` is constrained to be between 0 and the divisor in a way
+//! that suitably respects signed values, except for the case of division by 0.
+//! Of particular note for this implememntation is the fact that in the
+//! Goldilocks field, the right hand side of (1) does not wrap around under
+//! modular arithmetic for either unsigned or signed 32-bit range-checked
+//! values of `divisor`, `quotient`, and `remainder`, taking values between `0`
+//! and `2^64 - 2^32` in the unsigned case, and between `-2^62` and `2^62 +
+//! 2^31 - 1` in the signed case.
+//!
+//! This means that in either the unsigned or the signed setting, equation
+//! (1) can be checked directly using native field expressions without
+//! ambiguity due to modular field arithmetic.
+//!
+//! The remainder of the complexity of this circuit comes about because of two
+//! edge cases in the opcodes: division by zero, and signed division overflow.
+//! For division by zero, equation (1) still holds, but an extra constraint is
+//! imposed on the value of `quotient` to be `u32::MAX` in the unsigned case,
+//! or `-1` in the unsigned case (the 32-bit vector with all 1s for both).
+//!
+//! Signed division overflow occurs when `dividend` is set to `i32::MIN
+//! = -2^31`, and `divisor` is set to `-1`.  In this case, the natural value of
+//! `quotient` is `2^31`, but this value cannot be properly represented as a
+//! signed 32-bit integer, so an error output must be enforced with `quotient =
+//! i32::MIN`, and `remainder = 0`.  In this one case, the proper RISC-V values
+//! for `dividend`, `divisor`, `quotient`, and `remainder` do not satisfy the
+//! division algorithm expression (1), so the proper values of `quotient` and
+//! `remainder` can be enforced by instead imposing the variant constraint
+//!
+//! `2^31 = divisor * quotient + remainder` (2)
+//!
+//! Once (1) or (2) is appropriately satisfied, an inequality condition is
+//! imposed on remainder, which varies depending on signs of the inputs.  In
+//! the case of unsigned inputs, this is just
+//!
+//! `0 <= remainder < divisor` (3)
+//!
+//! for signed inputs, the inequality is a little more complicated: for
+//! `dividend` and `divisor` with the same sign, quotient and remainder are
+//! non-negative, and we require
+//!
+//! `0 <= remainder < |divisor|` (4)
+//!
+//! When `dividend` and `divisor` have different signs, `quotient` and
+//! `remainder` are non-positive values, and we instead require
+//!
+//! `-|divisor| < remainder <= 0` (5)
+//!
+//! To handle these variations of the remainder inequalities in a uniform
+//! manner, we derive expressions representing the "positively oriented" values
+//! with signs set so that the inequalities are always of the form (3).  Note
+//! that it is not enough to just take absolute values, as this would allow
+//! values with an incorrect sign, e.g. for 10 divided by -6, one could witness
+//! `10 = -6 * 2 + 2` instead of the correct expression `10 = -6 * 1 - 4`.
+//!
+//! The inequality condition (5) is properly satisfied by `divisor` and the
+//! appropriate value of `remainder` in the case of signed division overflow,
+//! so no special treatment is needed in this case.  On the other hand, these
+//! inequalities cannot be satisfied when `divisor` is `0`, so we require that
+//! exactly one of `remainder < divisor` and `divisor = 0` holds.
+//! Specifically, since these conditions are expressed as 0/1-valued booleans,
+//! we require just that the sum of these booleans is equal to 1.
+
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
+use goldilocks::SmallField;
 
 use super::{
     RIVInstruction,
-    constants::{UINT_LIMBS, UInt},
-    dummy::DummyInstruction,
+    constants::{BIT_WIDTH, UINT_LIMBS, UInt},
     r_insn::RInstructionConfig,
 };
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
-    gadgets::{IsLtConfig, IsZeroConfig},
+    expression::{Expression, ToExpr, WitIn},
+    gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
+    set_val,
     uint::Value,
     witness::LkMultiplicity,
 };
 use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
-pub struct ArithConfig<E: ExtensionField> {
-    r_insn: RInstructionConfig<E>,
-
-    dividend: UInt<E>,
-    divisor: UInt<E>,
-    pub(crate) outcome: UInt<E>,
-
+pub struct DivRemConfig<E: ExtensionField> {
+    dividend: UInt<E>, // rs1_read
+    divisor: UInt<E>,  // rs2_read
+    quotient: UInt<E>,
     remainder: UInt<E>,
-    inter_mul_value: UInt<E>,
-    is_zero: IsZeroConfig,
-    pub remainder_lt: IsLtConfig,
+
+    internal_config: InternalDivRem<E>,
+
+    is_divisor_zero: IsZeroConfig,
+    is_remainder_lt_divisor: IsLtConfig,
+
+    r_insn: RInstructionConfig<E>,
+}
+
+enum InternalDivRem<E: ExtensionField> {
+    Unsigned,
+    Signed {
+        dividend_signed: Signed<E>,
+        divisor_signed: Signed<E>,
+        quotient_signed: Signed<E>,
+        remainder_signed: Signed<E>,
+        negative_division: WitIn,
+        is_dividend_max_negative: IsEqualConfig,
+        is_divisor_minus_one: IsEqualConfig,
+        is_signed_overflow: WitIn,
+        remainder_nonnegative: AssertLtConfig,
+    },
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
-pub struct DivOp;
-impl RIVInstruction for DivOp {
-    const INST_KIND: InsnKind = InsnKind::DIV;
-}
-pub type DivDummy<E> = DummyInstruction<E, DivOp>; // TODO: implement DivInstruction.
-
-pub struct DivUOp;
-impl RIVInstruction for DivUOp {
+pub struct DivuOp;
+impl RIVInstruction for DivuOp {
     const INST_KIND: InsnKind = InsnKind::DIVU;
 }
-pub type DivUInstruction<E> = ArithInstruction<E, DivUOp>;
-
-pub struct RemOp;
-impl RIVInstruction for RemOp {
-    const INST_KIND: InsnKind = InsnKind::REM;
-}
-pub type RemDummy<E> = DummyInstruction<E, RemOp>; // TODO: implement RemInstruction.
+pub type DivuInstruction<E> = ArithInstruction<E, DivuOp>;
 
 pub struct RemuOp;
 impl RIVInstruction for RemuOp {
     const INST_KIND: InsnKind = InsnKind::REMU;
 }
-pub type RemuDummy<E> = DummyInstruction<E, RemuOp>; // TODO: implement RemuInstruction.
+pub type RemuInstruction<E> = ArithInstruction<E, RemuOp>;
+
+pub struct RemOp;
+impl RIVInstruction for RemOp {
+    const INST_KIND: InsnKind = InsnKind::REM;
+}
+pub type RemInstruction<E> = ArithInstruction<E, RemOp>;
+
+pub struct DivOp;
+impl RIVInstruction for DivOp {
+    const INST_KIND: InsnKind = InsnKind::DIV;
+}
+pub type DivInstruction<E> = ArithInstruction<E, DivOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
-    type InstructionConfig = ArithConfig<E>;
+    type InstructionConfig = DivRemConfig<E>;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        // outcome = dividend / divisor + remainder => dividend = divisor * outcome + r
-        let mut divisor = UInt::new_unchecked(|| "divisor", cb)?;
-        let mut outcome = UInt::new(|| "outcome", cb)?;
-        let r = UInt::new(|| "remainder", cb)?;
-        let (dividend, inter_mul_value) =
-            divisor.mul_add(|| "divisor * outcome + r", cb, &mut outcome, &r, true)?;
+        // The soundness analysis for these constraints is only valid for
+        // 32-bit registers represented over the Goldilocks field, so verify
+        // these parameters
+        assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
+        assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
 
-        // div by zero check
-        let is_zero =
-            IsZeroConfig::construct_circuit(cb, || "divisor_zero_check", divisor.value())?;
-        let outcome_value = outcome.value();
+        let dividend = UInt::new_unchecked(|| "dividend", cb)?; // 32-bit value from rs1
+        let divisor = UInt::new_unchecked(|| "divisor", cb)?; // 32-bit value from rs2
+        let quotient = UInt::new(|| "quotient", cb)?;
+        let remainder = UInt::new(|| "remainder", cb)?;
+
+        // `rem_e` and `div_e` are expressions representing the remainder and
+        // divisor from the signed or unsigned division operation, with signs
+        // renormalized to be nonnegative, so that correct values must satisfy
+        // either `0 <= rem_e < div_e` or `div_e == 0`.  The `rem_e` value
+        // should be constrained to be nonnegative before being returned from
+        // this block, while the checks `rem_e < div_e` or `div_e == 0` are
+        // done later.
+        let (internal_config, rem_e, div_e) = match I::INST_KIND {
+            InsnKind::DIVU | InsnKind::REMU => {
+                cb.require_equal(
+                    || "unsigned_division_relation",
+                    dividend.value(),
+                    divisor.value() * quotient.value() + remainder.value(),
+                )?;
+
+                (InternalDivRem::Unsigned, remainder.value(), divisor.value())
+            }
+
+            InsnKind::DIV | InsnKind::REM => {
+                let dividend_signed: Signed<E> =
+                    Signed::construct_circuit(cb, || "dividend_signed", &dividend)?;
+                let divisor_signed: Signed<E> =
+                    Signed::construct_circuit(cb, || "divisor_signed", &divisor)?;
+                let quotient_signed: Signed<E> =
+                    Signed::construct_circuit(cb, || "quotient_signed", &quotient)?;
+                let remainder_signed: Signed<E> =
+                    Signed::construct_circuit(cb, || "remainder_signed", &quotient)?;
+
+                // The quotient and remainder can be interpreted as non-positive
+                // values when exactly one of dividend and divisor is negative
+                let neg_div_expr: Expression<E> = {
+                    let a_neg = dividend_signed.is_negative.expr();
+                    let b_neg = divisor_signed.is_negative.expr();
+                    // a_neg * (1 - b_neg) + (1 - a_neg) * b_neg
+                    (a_neg.clone() + b_neg.clone()) - (Expression::<E>::from(2) * a_neg * b_neg)
+                };
+                let negative_division = cb.flatten_expr(|| "neg_division", neg_div_expr)?;
+
+                // Check for signed division overflow: i32::MIN / -1
+                let is_dividend_max_negative = IsEqualConfig::construct_circuit(
+                    cb,
+                    || "is_dividend_max_negative",
+                    dividend.value(),
+                    (1u64 << (BIT_WIDTH - 1)).into(),
+                )?;
+                let is_divisor_minus_one = IsEqualConfig::construct_circuit(
+                    cb,
+                    || "is_divisor_minus_one",
+                    divisor.value(),
+                    ((1u64 << BIT_WIDTH) - 1).into(),
+                )?;
+                let is_signed_overflow = cb.flatten_expr(
+                    || "signed_division_overflow",
+                    is_dividend_max_negative.expr() * is_divisor_minus_one.expr(),
+                )?;
+
+                // For signed division overflow, dividend = -2^31 and divisor
+                // = -1, so that quotient = 2^31 would be required for proper
+                // arithmetic, which is too large for signed 32-bit values.  In
+                // this case, quotient and remainder are required to be set to
+                // -2^31 and 0 respectively.  These values are assured by the
+                // constraints
+                //
+                //   2^31 = divisor * quotient + remainder
+                //   0 <= |remainder| < |divisor|
+                //
+                // The second condition is the same inequality as required when
+                // there is no overflow, so no special handling is needed.  The
+                // first condition is only different from the proper value in
+                // the left side of the equality, which can be controlled by a
+                // conditional equality constraint using fixed dividend value
+                // +2^31 in the signed overflow case.
+                let div_rel_expr =
+                    quotient_signed.expr() * divisor_signed.expr() + remainder_signed.expr();
+                cb.condition_require_equal(
+                    || "signed_division_relation",
+                    is_signed_overflow.expr(),
+                    div_rel_expr,
+                    // overflow replacement dividend value, +2^31
+                    (1u64 << (BIT_WIDTH - 1)).into(),
+                    dividend_signed.expr(),
+                )?;
+
+                // Check required inequalities for remainder value; change sign
+                // for remainder and divisor so that checked inequality is the
+                // usual unsigned one, 0 <= remainder < divisor
+                let remainder_pos_orientation = (Expression::ONE
+                    - Expression::<E>::from(2) * negative_division.expr())
+                    * remainder_signed.expr();
+                let divisor_pos_orientation = (Expression::ONE
+                    - Expression::<E>::from(2) * divisor_signed.is_negative.expr())
+                    * divisor_signed.expr();
+
+                let remainder_nonnegative = AssertLtConfig::construct_circuit(
+                    cb,
+                    || "oriented_remainder_nonnegative",
+                    (-1).into(),
+                    remainder_pos_orientation.clone(),
+                    UINT_LIMBS,
+                )?;
+
+                (
+                    InternalDivRem::Signed {
+                        dividend_signed,
+                        divisor_signed,
+                        quotient_signed,
+                        remainder_signed,
+                        negative_division,
+                        is_dividend_max_negative,
+                        is_divisor_minus_one,
+                        is_signed_overflow,
+                        remainder_nonnegative,
+                    },
+                    remainder_pos_orientation,
+                    divisor_pos_orientation,
+                )
+            }
+
+            _ => unreachable!("Unsupported instruction kind"),
+        };
+
+        let is_divisor_zero =
+            IsZeroConfig::construct_circuit(cb, || "is_divisor_zero", divisor.value())?;
+
+        // For zero division, quotient must be the "all ones" register for both
+        // unsigned and signed cases, representing 2^32-1 and -1 respectively.
         cb.condition_require_equal(
-            || "outcome_is_zero",
-            is_zero.expr(),
-            outcome_value.clone(),
+            || "quotient_zero_division",
+            is_divisor_zero.expr(),
+            quotient.value(),
             ((1u64 << UInt::<E>::TOTAL_BITS) - 1).into(),
-            outcome_value,
+            quotient.value(),
         )?;
 
-        // remainder should be less than divisor if divisor != 0.
-        let lt = IsLtConfig::construct_circuit(
+        // Check whether the (suitably oriented) remainder is less than the
+        // (suitably oriented) divisor, where "suitably oriented" is subtle for
+        // the signed case, involving both signs and the constraints used for
+        // signed division overflow.
+        let is_remainder_lt_divisor = IsLtConfig::construct_circuit(
             cb,
-            || "remainder < divisor?",
-            r.value(),
-            divisor.value(),
+            || "is_remainder_lt_divisor",
+            rem_e,
+            div_e,
             UINT_LIMBS,
         )?;
 
-        // When divisor is zero, remainder is -1 implies "remainder > divisor" aka. lt.expr() == 0
-        // otherwise lt.expr() == 1
+        // When divisor is nonzero, (nonnegative) remainder must be less than
+        // divisor, but when divisor is zero, remainder can't be less than
+        // divisor; so require that exactly one of these is true, i.e. sum of
+        // bit expressions is equal to 1.
         cb.require_equal(
-            || "remainder < divisor when non-zero divisor",
-            is_zero.expr() + lt.expr(),
-            Expression::ONE,
+            || "remainder < divisor iff divisor nonzero",
+            is_divisor_zero.expr() + is_remainder_lt_divisor.expr(),
+            1.into(),
         )?;
 
+        // TODO determine whether any optimizations are possible for getting
+        // just one of quotient or remainder
+        let rd_written_e = match I::INST_KIND {
+            InsnKind::DIVU | InsnKind::DIV => quotient.register_expr(),
+            InsnKind::REMU | InsnKind::REM => remainder.register_expr(),
+            _ => unreachable!("Unsupported instruction kind"),
+        };
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
             I::INST_KIND,
             dividend.register_expr(),
             divisor.register_expr(),
-            outcome.register_expr(),
+            rd_written_e,
         )?;
 
-        Ok(ArithConfig {
-            r_insn,
+        Ok(DivRemConfig {
             dividend,
             divisor,
-            outcome,
-            remainder: r,
-            inter_mul_value,
-            is_zero,
-            remainder_lt: lt,
+            quotient,
+            remainder,
+            internal_config,
+            is_divisor_zero,
+            is_remainder_lt_divisor,
+            r_insn,
         })
     }
 
@@ -128,42 +352,140 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let rs1 = step.rs1().unwrap().value;
-        let rs2 = step.rs2().unwrap().value;
-        let rd = step.rd().unwrap().value.after;
+        // dividend = quotient * divisor + remainder
+        let dividend = step.rs1().unwrap().value;
+        let divisor = step.rs2().unwrap().value;
 
-        // dividend = divisor * outcome + r
-        let divisor = Value::new_unchecked(rs2);
-        let outcome = Value::new(rd, lkm);
+        let dividend_v = Value::new_unchecked(dividend);
+        let divisor_v = Value::new_unchecked(divisor);
 
-        let r = Value::new(if rs2 == 0 { 0 } else { rs1 % rs2 }, lkm);
-
-        // assignment
-        config.r_insn.assign_instance(instance, lkm, step)?;
+        config
+            .dividend
+            .assign_limbs(instance, dividend_v.as_u16_limbs());
         config
             .divisor
-            .assign_limbs(instance, divisor.as_u16_limbs());
-        config
-            .outcome
-            .assign_limbs(instance, outcome.as_u16_limbs());
+            .assign_limbs(instance, divisor_v.as_u16_limbs());
 
-        let (dividend, inter_mul_value) = divisor.mul_add(&outcome, &r, lkm, true);
-        config
-            .inter_mul_value
-            .assign_mul_outcome(instance, lkm, &inter_mul_value)?;
+        let (quotient, remainder) = match &config.internal_config {
+            InternalDivRem::Unsigned => {
+                if divisor == 0 {
+                    (u32::MAX, dividend)
+                } else {
+                    (dividend / divisor, dividend % divisor)
+                }
+            }
+            InternalDivRem::Signed { .. } => {
+                let dividend_s = dividend as i32;
+                let divisor_s = divisor as i32;
 
-        config.dividend.assign_add_outcome(instance, &dividend);
-        config.remainder.assign_limbs(instance, r.as_u16_limbs());
+                let (quotient_s, remainder_s) = if divisor_s == 0 {
+                    (-1i32, dividend_s)
+                } else {
+                    // these correctly handle signed division overflow
+                    (
+                        dividend_s.wrapping_div(divisor_s),
+                        dividend_s.wrapping_rem(divisor_s),
+                    )
+                };
+
+                (quotient_s as u32, remainder_s as u32)
+            }
+        };
+
+        let quotient_v = Value::new(quotient, lkm);
+        let remainder_v = Value::new(remainder, lkm);
+
         config
-            .is_zero
-            .assign_instance(instance, divisor.as_u64().into())?;
+            .quotient
+            .assign_limbs(instance, quotient_v.as_u16_limbs());
         config
-            .remainder_lt
-            .assign_instance(instance, lkm, r.as_u64(), divisor.as_u64())?;
+            .remainder
+            .assign_limbs(instance, remainder_v.as_u16_limbs());
+
+        let (rem_pos, div_pos) = match &config.internal_config {
+            InternalDivRem::Unsigned => (remainder, divisor),
+            InternalDivRem::Signed {
+                dividend_signed,
+                divisor_signed,
+                negative_division,
+                is_dividend_max_negative,
+                is_divisor_minus_one,
+                is_signed_overflow,
+                quotient_signed,
+                remainder_signed,
+                remainder_nonnegative,
+            } => {
+                let dividend_s = dividend as i32;
+                let divisor_s = divisor as i32;
+                let remainder_s = remainder as i32;
+
+                dividend_signed.assign_instance(instance, lkm, &dividend_v)?;
+                divisor_signed.assign_instance(instance, lkm, &divisor_v)?;
+
+                let negative_division_b = (dividend_s < 0) ^ (divisor_s < 0);
+                set_val!(instance, negative_division, negative_division_b as u64);
+
+                is_dividend_max_negative.assign_instance(
+                    instance,
+                    (dividend as u64).into(),
+                    ((i32::MIN as u32) as u64).into(),
+                )?;
+                is_divisor_minus_one.assign_instance(
+                    instance,
+                    (divisor as u64).into(),
+                    ((-1i32 as u32) as u64).into(),
+                )?;
+
+                let signed_div_overflow_b = dividend_s == i32::MIN && divisor_s == -1i32;
+                set_val!(instance, is_signed_overflow, signed_div_overflow_b as u64);
+
+                quotient_signed.assign_instance(instance, lkm, &quotient_v)?;
+                remainder_signed.assign_instance(instance, lkm, &remainder_v)?;
+
+                let remainder_pos_orientation = if negative_division_b {
+                    -(remainder_s as i64)
+                } else {
+                    remainder_s as i64
+                };
+                let divisor_pos_orientation = if divisor_s < 0 {
+                    -(divisor_s as i64)
+                } else {
+                    divisor_s as i64
+                };
+
+                remainder_nonnegative.assign_instance(
+                    instance,
+                    lkm,
+                    <E::BaseField as SmallField>::MODULUS_U64.wrapping_add_signed(-1),
+                    <E::BaseField as SmallField>::MODULUS_U64
+                        .wrapping_add_signed(remainder_pos_orientation),
+                )?;
+
+                (
+                    remainder_pos_orientation as u32,
+                    divisor_pos_orientation as u32,
+                )
+            }
+        };
+
+        config
+            .is_divisor_zero
+            .assign_instance(instance, (divisor as u64).into())?;
+
+        config.is_remainder_lt_divisor.assign_instance(
+            instance,
+            lkm,
+            rem_pos as u64,
+            div_pos as u64,
+        )?;
+
+        config.r_insn.assign_instance(instance, lkm, step)?;
 
         Ok(())
     }
 }
+
+// TODO Tests
 
 #[cfg(test)]
 mod test {
@@ -181,7 +503,7 @@ mod test {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             instructions::{
                 Instruction,
-                riscv::{constants::UInt, div::DivUInstruction},
+                riscv::{constants::UInt, div::DivuInstruction},
             },
             scheme::mock_prover::{MOCK_PC_START, MockProver},
         };
@@ -198,7 +520,7 @@ mod test {
             let config = cb
                 .namespace(
                     || format!("divu_({name})"),
-                    |cb| Ok(DivUInstruction::construct_circuit(cb)),
+                    |cb| Ok(DivuInstruction::construct_circuit(cb)),
                 )
                 .unwrap()
                 .unwrap();
@@ -212,7 +534,7 @@ mod test {
             let insn_code = encode_rv32(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, lkm) =
-                DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                DivuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                     StepRecord::new_r_instruction(
                         3,
                         MOCK_PC_START,
@@ -230,7 +552,7 @@ mod test {
             );
 
             config
-                .outcome
+                .quotient
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
 
@@ -262,7 +584,7 @@ mod test {
         }
 
         #[test]
-        fn test_opcode_divu_unstatisfied() {
+        fn test_opcode_divu_unsatisfied() {
             verify("assert_outcome", 10, 2, 3, false);
         }
 
