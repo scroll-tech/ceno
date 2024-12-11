@@ -186,18 +186,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             }
 
             InsnKind::DIV | InsnKind::REM => {
-                let dividend_signed: Signed<E> =
+                let dividend_signed =
                     Signed::construct_circuit(cb, || "dividend_signed", &dividend)?;
-                let divisor_signed: Signed<E> =
-                    Signed::construct_circuit(cb, || "divisor_signed", &divisor)?;
-                let quotient_signed: Signed<E> =
+                let divisor_signed = Signed::construct_circuit(cb, || "divisor_signed", &divisor)?;
+                let quotient_signed =
                     Signed::construct_circuit(cb, || "quotient_signed", &quotient)?;
-                let remainder_signed: Signed<E> =
+                let remainder_signed =
                     Signed::construct_circuit(cb, || "remainder_signed", &remainder)?;
 
                 // The quotient and remainder can be interpreted as non-positive
                 // values when exactly one of dividend and divisor is negative
-                let neg_div_expr: Expression<E> = {
+                let neg_div_expr = {
                     let a_neg = dividend_signed.is_negative.expr();
                     let b_neg = divisor_signed.is_negative.expr();
                     &a_neg * (1 - &b_neg) + (1 - &a_neg) * &b_neg
