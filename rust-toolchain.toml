@@ -1,5 +1,6 @@
 [toolchain]
-channel = "nightly"
+# channel = "nightly"
+channel = "nightly-2024-12-06"
 # targets = ["riscv32", "riscv32im-unknown-none-elf"]
 # targets = ["riscv32im", "riscv32im-unknown-none-elf"]
 # riscv32im

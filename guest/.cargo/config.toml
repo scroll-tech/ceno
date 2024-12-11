@@ -3,8 +3,9 @@
 # build-std = ["core"]
 # build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
 build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
-# build-std-features = ["compiler-builtins-mem"]
-build-std-features = []
+# build-std = ["core","alloc","compiler_builtins", "panic_abort", "std"]
+build-std-features = ["compiler-builtins-mem","panic_immediate_abort"]
+# build-std-features = []
 
 # [alias]
 # my-check = """check \

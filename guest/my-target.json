@@ -1,6 +1,6 @@
 {
   "arch": "riscv32",
-  "atomic-cas": false,
+  "atomic-cas": true,
   "cpu": "generic-rv32",
   "crt-objects-fallback": "false",
   "data-layout": "e-m:e-p:32:32-i64:64-n32-S128",
@@ -13,15 +13,17 @@
   "llvm-abiname": "ilp32",
   "llvm-target": "riscv32",
   "main-needs-argc-argv": false,
-  "max-atomic-width": 32,
+  "max-atomic-width": 64,
   "metadata": {
     "description": null,
     "host_tools": false,
     "std": true,
     "tier": 2
   },
+  "os": "zkvm",
   "panic-strategy": "abort",
   "relocation-model": "static",
   "singlethread": true,
-  "target-pointer-width": "32"
+  "target-pointer-width": "32",
+  "vendor": "scroll"
 }
