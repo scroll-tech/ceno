@@ -182,36 +182,34 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             }
 
             InsnKind::DIV | InsnKind::REM => {
-                let dividend_signed: Signed<E> =
+                let dividend_signed =
                     Signed::construct_circuit(cb, || "dividend_signed", &dividend)?;
-                let divisor_signed: Signed<E> =
-                    Signed::construct_circuit(cb, || "divisor_signed", &divisor)?;
-                let quotient_signed: Signed<E> =
+                let divisor_signed = Signed::construct_circuit(cb, || "divisor_signed", &divisor)?;
+                let quotient_signed =
                     Signed::construct_circuit(cb, || "quotient_signed", &quotient)?;
-                let remainder_signed: Signed<E> =
-                    Signed::construct_circuit(cb, || "remainder_signed", &quotient)?;
+                let remainder_signed =
+                    Signed::construct_circuit(cb, || "remainder_signed", &remainder)?;
 
                 // The quotient and remainder can be interpreted as non-positive
                 // values when exactly one of dividend and divisor is negative
-                let neg_div_expr: Expression<E> = {
+                let negative_division = cb.flatten_expr(|| "neg_division", {
                     let a_neg = dividend_signed.is_negative.expr();
                     let b_neg = divisor_signed.is_negative.expr();
                     &a_neg * (1 - &b_neg) + (1 - &a_neg) * &b_neg
-                };
-                let negative_division = cb.flatten_expr(|| "neg_division", neg_div_expr)?;
+                })?;
 
                 // Check for signed division overflow: i32::MIN / -1
                 let is_dividend_max_negative = IsEqualConfig::construct_circuit(
                     cb,
                     || "is_dividend_max_negative",
                     dividend.value(),
-                    (1u64 << (BIT_WIDTH - 1)).into(),
+                    (i32::MIN as u32).into(),
                 )?;
                 let is_divisor_minus_one = IsEqualConfig::construct_circuit(
                     cb,
                     || "is_divisor_minus_one",
                     divisor.value(),
-                    ((1u64 << BIT_WIDTH) - 1).into(),
+                    (i32::MIN as u32).into(),
                 )?;
                 let is_signed_overflow = cb.flatten_expr(
                     || "signed_division_overflow",
