@@ -69,14 +69,9 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         ))?;
 
         // Branch program counter
-        let pc_offset =
-            branch_taken_bit.clone() * imm.expr() - branch_taken_bit * PC_STEP_SIZE + PC_STEP_SIZE;
+        let pc_offset = &branch_taken_bit * imm - branch_taken_bit * PC_STEP_SIZE + PC_STEP_SIZE;
         let next_pc = vm_state.next_pc.unwrap();
-        circuit_builder.require_equal(
-            || "pc_branch",
-            next_pc.expr(),
-            vm_state.pc.expr() + pc_offset,
-        )?;
+        circuit_builder.require_equal(|| "pc_branch", next_pc, vm_state.pc + pc_offset)?;
 
         Ok(BInstructionConfig {
             vm_state,

@@ -19,6 +19,22 @@ pub struct SignedExtendConfig<E> {
     _marker: PhantomData<E>,
 }
 
+impl<E: ExtensionField> ToExpr<E> for SignedExtendConfig<E> {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
+        self.msb.expr()
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &SignedExtendConfig<E> {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
+        self.msb.expr()
+    }
+}
+
 impl<E: ExtensionField> SignedExtendConfig<E> {
     pub fn construct_limb(
         cb: &mut CircuitBuilder<E>,
@@ -34,10 +50,6 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         Self::construct_circuit(cb, 8, val)
     }
 
-    pub fn expr(&self) -> Expression<E> {
-        self.msb.expr()
-    }
-
     fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         n_bits: usize,
@@ -47,7 +59,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
 
         let msb = cb.create_witin(|| "msb");
         // require msb is boolean
-        cb.assert_bit(|| "msb is boolean", msb.expr())?;
+        cb.assert_bit(|| "msb is boolean", msb)?;
 
         // assert 2*val - msb*2^N_BITS is within range [0, 2^N_BITS)
         // - if val < 2^(N_BITS-1), then 2*val < 2^N_BITS, msb can only be zero.

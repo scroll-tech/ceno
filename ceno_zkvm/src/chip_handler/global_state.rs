@@ -1,17 +1,24 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression, structs::RAMType,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    expression::{Expression, ToExpr},
+    structs::RAMType,
 };
 
 use super::GlobalStateRegisterMachineChipOperations;
 
 impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'_, E> {
-    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {
+    fn state_in(
+        &mut self,
+        pc: impl ToExpr<E, Output = Expression<E>>,
+        ts: impl ToExpr<E, Output = Expression<E>>,
+    ) -> Result<(), ZKVMError> {
         let record: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(RAMType::GlobalState as u64)),
-            pc,
-            ts,
+            pc.expr(),
+            ts.expr(),
         ];
 
         self.read_record(|| "state_in", RAMType::GlobalState, record)

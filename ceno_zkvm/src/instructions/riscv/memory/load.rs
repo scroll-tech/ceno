@@ -97,7 +97,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         circuit_builder.require_equal(
             || "memory_addr = rs1_read + imm",
             memory_addr.expr_unaligned(),
-            rs1_read.value() + imm.expr(),
+            rs1_read.value() + imm,
         )?;
 
         let addr_low_bits = memory_addr.low_bit_exprs();
@@ -110,7 +110,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 circuit_builder.condition_require_equal(
                     || "target_limb = memory_value[low_bits[1]]",
                     addr_low_bits[1].clone(),
-                    target_limb.expr(),
+                    target_limb,
                     memory_value[1].clone(),
                     memory_value[0].clone(),
                 )?;
@@ -178,7 +178,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let im_insn = IMInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.expr(),
+            imm,
             rs1_read.register_expr(),
             memory_read.memory_expr(),
             memory_addr.expr_align4(),

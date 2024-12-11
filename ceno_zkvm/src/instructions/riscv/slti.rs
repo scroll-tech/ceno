@@ -66,19 +66,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             InsnKind::SLTIU => (rs1_read.value(), None),
             InsnKind::SLTI => {
                 let is_rs1_neg = rs1_read.is_negative(cb)?;
-                (rs1_read.to_field_expr(is_rs1_neg.expr()), Some(is_rs1_neg))
+                (
+                    rs1_read.to_field_expr((&is_rs1_neg).expr()),
+                    Some(is_rs1_neg),
+                )
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
-        let lt =
-            IsLtConfig::construct_circuit(cb, || "rs1 < imm", value_expr, imm.expr(), UINT_LIMBS)?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
+        let lt = IsLtConfig::construct_circuit(cb, || "rs1 < imm", value_expr, imm, UINT_LIMBS)?;
+        let rd_written = UInt::from_exprs_unchecked(vec![(&lt).expr()]);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
             I::INST_KIND,
-            &imm.expr(),
+            imm,
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,

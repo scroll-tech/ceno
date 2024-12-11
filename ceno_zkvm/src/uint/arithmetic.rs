@@ -34,31 +34,30 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             return Err(ZKVMError::CircuitError);
         };
         carries.iter().enumerate().try_for_each(|(i, carry)| {
-            circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
+            circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry)
         })?;
 
         // perform add operation
         // c[i] = a[i] + b[i] + carry[i-1] - carry[i] * 2 ^ C
         c.limbs = UintLimb::Expression(
-            (self.expr())
+            self.expr()
                 .iter()
                 .zip((*addend).iter())
                 .enumerate()
                 .map(|(i, (a, b))| {
                     let carries = c.carries.as_ref().unwrap();
-                    let carry = if i > 0 { carries.get(i - 1) } else { None };
+                    let carry = carries.get(i - 1);
                     let next_carry = carries.get(i);
 
-                    let mut limb_expr = a.clone() + b.clone();
-                    if carry.is_some() {
-                        limb_expr = limb_expr.clone() + carry.unwrap().expr();
+                    let mut limb_expr = a + b;
+                    if let Some(carry) = carry {
+                        limb_expr += carry;
                     }
-                    if next_carry.is_some() {
-                        limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                    if let Some(next_carry) = next_carry {
+                        limb_expr -= next_carry.expr() * Self::POW_OF_C;
                     }
-
                     circuit_builder
-                        .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb_expr.clone())?;
+                        .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), &limb_expr)?;
                     Ok(limb_expr)
                 })
                 .collect::<Result<Vec<Expression<E>>, ZKVMError>>()?,
@@ -120,7 +119,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         // with high limb, overall cell will be double
         let c_limbs: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_limbs, i| {
             let limb = circuit_builder.create_witin(|| format!("limb_{i}"));
-            circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
+            circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb)?;
             c_limbs.push(limb);
             Result::<Vec<WitIn>, ZKVMError>::Ok(c_limbs)
         })?;
@@ -140,8 +139,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 AssertLTConfig::construct_circuit(
                     circuit_builder,
                     || format!("carry_{i}_in_less_than"),
-                    carry.expr(),
-                    (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
+                    carry,
+                    Self::MAX_DEGREE_2_MUL_CARRY_VALUE,
                     Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
                 )
             })
@@ -190,16 +189,16 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         // constrain each limb with carry
         c_limbs.iter().enumerate().try_for_each(|(i, c_limb)| {
-            let carry = if i > 0 { c_carries.get(i - 1) } else { None };
+            let carry = c_carries.get(i - 1);
             let next_carry = c_carries.get(i);
-            result_c[i] = result_c[i].clone() - c_limb.expr();
-            if carry.is_some() {
-                result_c[i] = result_c[i].clone() + carry.unwrap().expr();
+            result_c[i] -= c_limb;
+            if let Some(carry) = carry {
+                result_c[i] += carry;
             }
-            if next_carry.is_some() {
-                result_c[i] = result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+            if let Some(next_carry) = next_carry {
+                result_c[i] -= next_carry.expr() * Self::POW_OF_C;
             }
-            circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
+            circuit_builder.require_zero(|| format!("mul_zero_{i}"), &result_c[i])?;
             Ok::<(), ZKVMError>(())
         })?;
 
@@ -667,8 +666,8 @@ mod tests {
 
             // overflow
             if overflow {
-                let overflow = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &overflow), E::ONE);
+                let &overflow = uint_c.carries.unwrap().last().unwrap();
+                assert_eq!(eval_by_expr(&wit, &challenges, overflow), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)

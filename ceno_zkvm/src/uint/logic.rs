@@ -3,8 +3,8 @@ use itertools::izip;
 
 use super::UIntLimbs;
 use crate::{
-    ROMType, circuit_builder::CircuitBuilder, error::ZKVMError, expression::ToExpr,
-    tables::OpsTable, witness::LkMultiplicity,
+    ROMType, circuit_builder::CircuitBuilder, error::ZKVMError, tables::OpsTable,
+    witness::LkMultiplicity,
 };
 
 // Only implemented for u8 limbs.
@@ -19,7 +19,7 @@ impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {
         c: &Self,
     ) -> Result<(), ZKVMError> {
         for (a_byte, b_byte, c_byte) in izip!(&a.limbs, &b.limbs, &c.limbs) {
-            cb.logic_u8(rom_type, a_byte.expr(), b_byte.expr(), c_byte.expr())?;
+            cb.logic_u8(rom_type, a_byte, b_byte, c_byte)?;
         }
         Ok(())
     }

@@ -6,7 +6,7 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
+    expression::ToExpr,
     gadgets::IsLtConfig,
     instructions::{
         Instruction,
@@ -51,8 +51,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<E, I> 
         )?;
 
         let branch_taken_bit = match I::INST_KIND {
-            InsnKind::BLTU => is_lt.expr(),
-            InsnKind::BGEU => Expression::ONE - is_lt.expr(),
+            InsnKind::BLTU => (&is_lt).expr(),
+            InsnKind::BGEU => 1 - (&is_lt).expr(),
 
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };

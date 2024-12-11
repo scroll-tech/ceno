@@ -2,7 +2,7 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
+    expression::WitIn,
     instructions::{
         Instruction,
         riscv::{
@@ -87,7 +87,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         circuit_builder.require_equal(
             || "memory_addr = rs1_read + imm",
             memory_addr.expr_unaligned(),
-            rs1_read.value() + imm.expr(),
+            rs1_read.value() + imm,
         )?;
 
         let (new_memory_value, word_change) = match I::INST_KIND {
@@ -107,7 +107,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.expr(),
+            imm,
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.expr_align4(),

@@ -588,20 +588,29 @@ macro_rules! mixed_binop_instances {
     };
 }
 
-mixed_binop_instances!(
-    Add,
-    add,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
-);
-mixed_binop_instances!(
-    Sub,
-    sub,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
-);
-mixed_binop_instances!(
-    Mul,
-    mul,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+macro_rules! mixed_binop_instances_all {
+    ($($t:ty),*) => {
+        mixed_binop_instances!(
+            Add,
+            add,
+            ($($t),*)
+        );
+        mixed_binop_instances!(
+            Sub,
+            sub,
+            ($($t),*)
+        );
+        mixed_binop_instances!(
+            Mul,
+            mul,
+            ($($t),*)
+        );
+    };
+}
+
+mixed_binop_instances_all!(
+    u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, WitIn, Fixed, Instance, &WitIn, &Fixed,
+    &Instance
 );
 
 impl<E: ExtensionField> Mul for Expression<E> {
@@ -767,48 +776,55 @@ impl WitIn {
 
 pub trait ToExpr<E: ExtensionField> {
     type Output;
-    fn expr(&self) -> Self::Output;
+    fn expr(self) -> Self::Output;
+}
+
+impl<E: ExtensionField> ToExpr<E> for Expression<E> {
+    type Output = Expression<E>;
+    fn expr(self) -> Expression<E> {
+        self
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &Expression<E> {
+    type Output = Expression<E>;
+    fn expr(self) -> Expression<E> {
+        self.clone()
+    }
 }
 
 impl<E: ExtensionField> ToExpr<E> for WitIn {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr(self) -> Expression<E> {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &WitIn {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr(self) -> Expression<E> {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Fixed {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Fixed(*self)
+    fn expr(self) -> Expression<E> {
+        Expression::Fixed(self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &Fixed {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Fixed(**self)
+    fn expr(self) -> Expression<E> {
+        Expression::Fixed(*self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Instance(*self)
-    }
-}
-
-impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
-    type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Constant(*self)
+    fn expr(self) -> Expression<E> {
+        Expression::Instance(self)
     }
 }
 
@@ -823,45 +839,41 @@ macro_rules! impl_from_via_ToExpr {
         )*
     };
 }
-impl_from_via_ToExpr!(WitIn, Fixed, Instance);
+impl_from_via_ToExpr!(
+    WitIn, Fixed, Instance, u8, u16, u32, u64, usize, RAMType, InsnKind, i8, i16, i32, i64, isize
+);
 impl_from_via_ToExpr!(&WitIn, &Fixed, &Instance);
 
-// Implement From trait for unsigned types of at most 64 bits
-macro_rules! impl_from_unsigned {
+// Implement ToExpr trait for unsigned types of at most 64 bits
+macro_rules! impl_ToExpr_unsigned {
     ($($t:ty),*) => {
         $(
-            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
-                fn from(value: $t) -> Self {
-                    Expression::Constant(F::from(value as u64))
+            impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for $t {
+                type Output = Expression<E>;
+                fn expr(self) -> Self::Output {
+                    Expression::Constant(F::from(self as u64))
                 }
             }
         )*
     };
 }
-impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
+impl_ToExpr_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
 
-// Implement From trait for u128 separately since it requires explicit reduction
-impl<F: SmallField, E: ExtensionField<BaseField = F>> From<u128> for Expression<E> {
-    fn from(value: u128) -> Self {
-        let reduced = value.rem_euclid(F::MODULUS_U64 as u128) as u64;
-        Expression::Constant(F::from(reduced))
-    }
-}
-
-// Implement From trait for signed types
-macro_rules! impl_from_signed {
+// Implement ToExpr trait for signed types
+macro_rules! impl_ToExpr_signed {
     ($($t:ty),*) => {
         $(
-            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
-                fn from(value: $t) -> Self {
-                    let reduced = (value as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
+            impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for $t {
+                type Output = Expression<E>;
+                fn expr(self) -> Self::Output {
+                    let reduced = (self as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
                     Expression::Constant(F::from(reduced))
                 }
             }
         )*
     };
 }
-impl_from_signed!(i8, i16, i32, i64, i128, isize);
+impl_ToExpr_signed!(i8, i16, i32, i64, isize);
 
 impl<E: ExtensionField> Display for Expression<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

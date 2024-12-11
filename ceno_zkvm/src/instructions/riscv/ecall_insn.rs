@@ -31,10 +31,10 @@ impl EcallInstructionConfig {
         let pc = cb.create_witin(|| "pc");
         let ts = cb.create_witin(|| "cur_ts");
 
-        cb.state_in(pc.expr(), ts.expr())?;
+        cb.state_in(pc, ts)?;
         cb.state_out(
             next_pc.map_or(pc.expr() + PC_STEP_SIZE, |next_pc| next_pc),
-            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize),
+            ts.expr() + Tracer::SUBCYCLES_PER_INSN,
         )?;
 
         cb.lk_fetch(&InsnRecord::new(
@@ -51,8 +51,8 @@ impl EcallInstructionConfig {
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(
             || "write x5",
-            E::BaseField::from(Platform::reg_ecall() as u64),
-            prev_x5_ts.expr(),
+            Platform::reg_ecall(),
+            prev_x5_ts,
             ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),
             syscall_ret_value.map_or(syscall_id, |v| v),

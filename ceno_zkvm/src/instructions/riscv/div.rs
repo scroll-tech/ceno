@@ -10,7 +10,7 @@ use super::{
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
+    expression::{Expression, ToExpr},
     gadgets::{IsLtConfig, IsZeroConfig},
     instructions::Instruction,
     uint::Value,
@@ -79,10 +79,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let outcome_value = outcome.value();
         cb.condition_require_equal(
             || "outcome_is_zero",
-            is_zero.expr(),
-            outcome_value.clone(),
-            ((1u64 << UInt::<E>::TOTAL_BITS) - 1).into(),
-            outcome_value,
+            &is_zero,
+            &outcome_value,
+            Expression::from((1u64 << UInt::<E>::TOTAL_BITS) - 1),
+            &outcome_value,
         )?;
 
         // remainder should be less than divisor if divisor != 0.
@@ -98,8 +98,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // otherwise lt.expr() == 1
         cb.require_equal(
             || "remainder < divisor when non-zero divisor",
-            is_zero.expr() + lt.expr(),
-            Expression::ONE,
+            (&is_zero).expr() + (&lt).expr(),
+            1,
         )?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(

@@ -55,7 +55,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     .iter()
                     .enumerate()
                     .map(|(idx, byte)| byte.expr() << (idx * 8))
-                    .sum(),
+                    .sum::<Expression<E>>(),
             )?;
 
             Ok(bytes)
@@ -80,27 +80,27 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                 let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
                 cb.assert_ux::<_, _, 8>(
                     || "rs2_limb[0].le_bytes[1]",
-                    u8_base_inv.expr() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
+                    Expression::Constant(u8_base_inv) * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
                 let expected_limb_change = cb.create_witin(|| "expected_limb_change");
                 cb.condition_require_equal(
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
-                    low_bits[0].clone(),
-                    expected_limb_change.expr(),
-                    (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()) << 8,
-                    rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr(),
+                    &low_bits[0],
+                    expected_limb_change,
+                    (rs2_limb_bytes[0].expr() - prev_limb_bytes[1]) << 8,
+                    rs2_limb_bytes[0].expr() - prev_limb_bytes[0],
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
                 let expected_change = cb.create_witin(|| "expected_change");
                 cb.condition_require_equal(
                     || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
-                    low_bits[1].clone(),
-                    expected_change.expr(),
+                    &low_bits[1],
+                    expected_change,
                     expected_limb_change.expr() << 16,
-                    expected_limb_change.expr(),
+                    expected_limb_change,
                 )?;
 
                 Ok(MemWordChange {

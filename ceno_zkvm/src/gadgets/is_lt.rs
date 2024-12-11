@@ -29,22 +29,16 @@ impl AssertLTConfig {
     >(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
+        lhs: impl ToExpr<E, Output = Expression<E>>,
+        rhs: impl ToExpr<E, Output = Expression<E>>,
         max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
         cb.namespace(
             || "assert_lt",
             |cb| {
                 let name = name_fn();
-                let config = InnerLtConfig::construct_circuit(
-                    cb,
-                    name,
-                    lhs,
-                    rhs,
-                    Expression::ONE,
-                    max_num_u16_limbs,
-                )?;
+                let config =
+                    InnerLtConfig::construct_circuit(cb, name, lhs, rhs, 1, max_num_u16_limbs)?;
                 Ok(Self(config))
             },
         )
@@ -68,11 +62,23 @@ pub struct IsLtConfig {
     config: InnerLtConfig,
 }
 
-impl IsLtConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> ToExpr<E> for IsLtConfig {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
         self.is_lt.expr()
     }
+}
 
+impl<E: ExtensionField> ToExpr<E> for &IsLtConfig {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
+        (&self.is_lt).expr()
+    }
+}
+
+impl IsLtConfig {
     pub fn construct_circuit<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,
@@ -80,8 +86,8 @@ impl IsLtConfig {
     >(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
+        lhs: impl ToExpr<E, Output = Expression<E>>,
+        rhs: impl ToExpr<E, Output = Expression<E>>,
         max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
         cb.namespace(
@@ -89,16 +95,10 @@ impl IsLtConfig {
             |cb| {
                 let name = name_fn();
                 let is_lt = cb.create_witin(|| format!("{name} is_lt witin"));
-                cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
+                cb.assert_bit(|| "is_lt_bit", is_lt)?;
 
-                let config = InnerLtConfig::construct_circuit(
-                    cb,
-                    name,
-                    lhs,
-                    rhs,
-                    is_lt.expr(),
-                    max_num_u16_limbs,
-                )?;
+                let config =
+                    InnerLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt, max_num_u16_limbs)?;
                 Ok(Self { is_lt, config })
             },
         )
@@ -144,11 +144,14 @@ impl InnerLtConfig {
     pub fn construct_circuit<E: ExtensionField, NR: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: NR,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
-        is_lt_expr: Expression<E>,
+        lhs: impl ToExpr<E, Output = Expression<E>>,
+        rhs: impl ToExpr<E, Output = Expression<E>>,
+        is_lt_expr: impl ToExpr<E, Output = Expression<E>>,
         max_num_u16_limbs: usize,
     ) -> Result<Self, ZKVMError> {
+        let lhs = lhs.expr();
+        let rhs = rhs.expr();
+        let is_lt_expr = is_lt_expr.expr();
         assert!(max_num_u16_limbs >= 1);
 
         let mut witin_u16 = |var_name: String| -> Result<WitIn, ZKVMError> {
@@ -156,7 +159,7 @@ impl InnerLtConfig {
                 || format!("var {var_name}"),
                 |cb| {
                     let witin = cb.create_witin(|| var_name.to_string());
-                    cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
+                    cb.assert_ux::<_, _, 16>(|| name.clone(), witin)?;
                     Ok(witin)
                 },
             )
@@ -169,7 +172,7 @@ impl InnerLtConfig {
         let pows = power_sequence((1 << u16::BITS).into());
 
         let diff_expr = izip!(&diff, pows)
-            .map(|(record, beta)| beta * record.expr())
+            .map(|(record, beta)| beta * record)
             .sum::<Expression<E>>();
 
         let range = Self::range(max_num_u16_limbs);
@@ -247,8 +250,7 @@ impl<E: ExtensionField> AssertSignedLtConfig<E> {
             || "assert_signed_lt",
             |cb| {
                 let name = name_fn();
-                let config =
-                    InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, Expression::ONE)?;
+                let config = InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, 1)?;
                 Ok(Self { config })
             },
         )
@@ -272,11 +274,23 @@ pub struct SignedLtConfig<E> {
     config: InnerSignedLtConfig<E>,
 }
 
-impl<E: ExtensionField> SignedLtConfig<E> {
-    pub fn expr(&self) -> Expression<E> {
+impl<E: ExtensionField> ToExpr<E> for SignedLtConfig<E> {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
         self.is_lt.expr()
     }
+}
 
+impl<E: ExtensionField> ToExpr<E> for &SignedLtConfig<E> {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
+        (&self.is_lt).expr()
+    }
+}
+
+impl<E: ExtensionField> SignedLtConfig<E> {
     pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
@@ -288,9 +302,8 @@ impl<E: ExtensionField> SignedLtConfig<E> {
             |cb| {
                 let name = name_fn();
                 let is_lt = cb.create_witin(|| format!("{name} is_signed_lt witin"));
-                cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
-                let config =
-                    InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr())?;
+                cb.assert_bit(|| "is_lt_bit", is_lt)?;
+                let config = InnerSignedLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt)?;
 
                 Ok(SignedLtConfig { is_lt, config })
             },
@@ -324,15 +337,15 @@ impl<E: ExtensionField> InnerSignedLtConfig<E> {
         name: NR,
         lhs: &UInt<E>,
         rhs: &UInt<E>,
-        is_lt_expr: Expression<E>,
+        is_lt_expr: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<Self, ZKVMError> {
         // Extract the sign bit.
         let is_lhs_neg = lhs.is_negative(cb)?;
         let is_rhs_neg = rhs.is_negative(cb)?;
 
         // Convert to field arithmetic.
-        let lhs_value = lhs.to_field_expr(is_lhs_neg.expr());
-        let rhs_value = rhs.to_field_expr(is_rhs_neg.expr());
+        let lhs_value = lhs.to_field_expr(&is_lhs_neg);
+        let rhs_value = rhs.to_field_expr(&is_rhs_neg);
         let config = InnerLtConfig::construct_circuit(
             cb,
             format!("{name} (lhs < rhs)"),

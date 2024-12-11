@@ -26,7 +26,7 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        imm: &Expression<E>,
+        imm: impl ToExpr<E, Output = Expression<E>>,
         rs1_read: RegisterExpr<E>,
         memory_read: MemoryExpr<E>,
         memory_addr: AddressExpr<E>,
@@ -49,7 +49,7 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
             Some(rd.id.expr()),
             rs1.id.expr(),
             0.into(),
-            imm.clone(),
+            imm.expr(),
         ))?;
 
         Ok(IMInstructionConfig {

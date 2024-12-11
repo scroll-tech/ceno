@@ -7,7 +7,7 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
+    expression::ToExpr,
     gadgets::IsEqualConfig,
     instructions::{
         Instruction,
@@ -49,8 +49,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BeqCircuit<E, I> {
         )?;
 
         let branch_taken_bit = match I::INST_KIND {
-            InsnKind::BEQ => equal.expr(),
-            InsnKind::BNE => Expression::ONE - equal.expr(),
+            InsnKind::BEQ => (&equal).expr(),
+            InsnKind::BNE => 1 - (&equal).expr(),
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
