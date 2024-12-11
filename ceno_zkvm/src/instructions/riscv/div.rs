@@ -252,12 +252,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 // Check required inequalities for remainder value; change sign
                 // for remainder and divisor so that checked inequality is the
                 // usual unsigned one, 0 <= remainder < divisor
-                let remainder_pos_orientation = (Expression::ONE
-                    - Expression::<E>::from(2) * negative_division.expr())
-                    * remainder_signed.expr();
-                let divisor_pos_orientation = (Expression::ONE
-                    - Expression::<E>::from(2) * divisor_signed.is_negative.expr())
-                    * divisor_signed.expr();
+                let remainder_pos_orientation: Expression<E> =
+                    (1 - 2 * negative_division.expr()) * remainder_signed.expr();
+                let divisor_pos_orientation =
+                    (1 - 2 * divisor_signed.is_negative.expr()) * divisor_signed.expr();
 
                 let remainder_nonnegative = AssertLTConfig::construct_circuit(
                     cb,
