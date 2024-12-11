@@ -189,7 +189,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let quotient_signed: Signed<E> =
                     Signed::construct_circuit(cb, || "quotient_signed", &quotient)?;
                 let remainder_signed: Signed<E> =
-                    Signed::construct_circuit(cb, || "remainder_signed", &quotient)?;
+                    Signed::construct_circuit(cb, || "remainder_signed", &remainder)?;
 
                 // The quotient and remainder can be interpreted as non-positive
                 // values when exactly one of dividend and divisor is negative
