@@ -26,6 +26,13 @@ pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) 
     }
 }
 
+pub const fn load_immediate(rd: u32, imm: u32) -> [u32; 2] {
+    [
+        encode_rv32(InsnKind::LUI, 0, 0, rd, imm),
+        encode_rv32(InsnKind::ORI, rd, 0, rd, imm),
+    ]
+}
+
 // R-Type
 //        25    20    15       12   7       0
 // +------+-----+-----+--------+----+-------+

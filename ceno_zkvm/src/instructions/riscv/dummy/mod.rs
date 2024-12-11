@@ -13,7 +13,7 @@ mod dummy_circuit;
 pub use dummy_circuit::DummyInstruction;
 
 mod dummy_ecall;
-pub use dummy_ecall::DummyEcall;
+pub use dummy_ecall::LargeEcallDummy;
 
 #[cfg(test)]
 mod test;

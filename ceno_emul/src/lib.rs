@@ -21,3 +21,6 @@ mod rv32im_encode;
 pub use rv32im_encode::encode_rv32;
 
 mod syscalls;
+pub use syscalls::{KECCAK_PERMUTE, keccak_permute::KECCAK_WORDS};
+
+pub mod test_utils;

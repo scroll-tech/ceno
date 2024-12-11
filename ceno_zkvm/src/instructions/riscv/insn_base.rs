@@ -223,6 +223,16 @@ impl<E: ExtensionField> WriteRD<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.rd().expect("rd op");
+        self.assign_op(instance, lk_multiplicity, step.cycle(), &op)
+    }
+
+    pub fn assign_op(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        lk_multiplicity: &mut LkMultiplicity,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) -> Result<(), ZKVMError> {
         set_val!(instance, self.id, op.register_index() as u64);
         set_val!(instance, self.prev_ts, op.previous_cycle);
 
@@ -237,7 +247,7 @@ impl<E: ExtensionField> WriteRD<E> {
             instance,
             lk_multiplicity,
             op.previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_RD,
+            cycle + Tracer::SUBCYCLE_RD,
         )?;
 
         Ok(())

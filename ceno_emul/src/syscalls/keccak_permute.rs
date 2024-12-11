@@ -6,7 +6,7 @@ use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, WordAddr, WriteOp}
 use super::{SyscallEffects, SyscallWitness};
 
 const KECCAK_CELLS: usize = 25; // u64 cells
-const KECCAK_WORDS: usize = KECCAK_CELLS * 2; // u32 words
+pub const KECCAK_WORDS: usize = KECCAK_CELLS * 2; // u32 words
 
 /// Trace the execution of a Keccak permutation.
 ///
@@ -18,7 +18,7 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument `state_ptr`.
-    let reg_accesses = vec![WriteOp::new_register_op(
+    let reg_ops = vec![WriteOp::new_register_op(
         Platform::reg_arg0(),
         Change::new(state_ptr, state_ptr),
         0, // Cycle set later in finalize().
@@ -49,7 +49,7 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
     };
 
     // Write permuted state.
-    let mem_writes = izip!(addrs, input, output)
+    let mem_ops = izip!(addrs, input, output)
         .map(|(addr, before, after)| WriteOp {
             addr,
             value: Change { before, after },
@@ -57,12 +57,9 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
         })
         .collect_vec();
 
-    assert_eq!(mem_writes.len(), KECCAK_WORDS);
+    assert_eq!(mem_ops.len(), KECCAK_WORDS);
     SyscallEffects {
-        witness: SyscallWitness {
-            mem_writes,
-            reg_accesses,
-        },
+        witness: SyscallWitness { mem_ops, reg_ops },
         next_pc: None,
     }
 }

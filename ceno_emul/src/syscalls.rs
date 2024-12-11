@@ -1,8 +1,7 @@
 use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
-use itertools::chain;
 
-mod keccak_permute;
+pub mod keccak_permute;
 
 pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
 
@@ -17,8 +16,8 @@ pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects
 /// A syscall event, available to the circuit witness generators.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyscallWitness {
-    pub mem_writes: Vec<WriteOp>,
-    pub reg_accesses: Vec<WriteOp>,
+    pub mem_ops: Vec<WriteOp>,
+    pub reg_ops: Vec<WriteOp>,
 }
 
 /// The effects of a syscall to apply on the VM.
@@ -35,7 +34,7 @@ impl SyscallEffects {
     /// Iterate over the register values after the syscall.
     pub fn iter_reg_values(&self) -> impl Iterator<Item = (RegIdx, Word)> + '_ {
         self.witness
-            .reg_accesses
+            .reg_ops
             .iter()
             .map(|op| (op.register_index(), op.value.after))
     }
@@ -43,15 +42,18 @@ impl SyscallEffects {
     /// Iterate over the memory values after the syscall.
     pub fn iter_mem_values(&self) -> impl Iterator<Item = (WordAddr, Word)> + '_ {
         self.witness
-            .mem_writes
+            .mem_ops
             .iter()
             .map(|op| (op.addr, op.value.after))
     }
 
     /// Keep track of the cycles of registers and memory accesses.
     pub fn finalize(mut self, tracer: &mut Tracer) -> SyscallWitness {
-        for op in chain(&mut self.witness.reg_accesses, &mut self.witness.mem_writes) {
-            op.previous_cycle = tracer.track_access(op.addr, 0);
+        for op in &mut self.witness.reg_ops {
+            op.previous_cycle = tracer.track_access(op.addr, Tracer::SUBCYCLE_RD);
+        }
+        for op in &mut self.witness.mem_ops {
+            op.previous_cycle = tracer.track_access(op.addr, Tracer::SUBCYCLE_MEM);
         }
         self.witness
     }
