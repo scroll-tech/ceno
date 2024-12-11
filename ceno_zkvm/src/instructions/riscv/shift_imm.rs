@@ -188,7 +188,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
     use goldilocks::GoldilocksExt2;
 
     use super::{ShiftImmInstruction, SlliOp, SraiOp, SrliOp};
@@ -255,17 +255,17 @@ mod test {
         let (prefix, insn_code, rd_written) = match I::INST_KIND {
             InsnKind::SLLI => (
                 "SLLI",
-                encode_rv32(InsnKind::SLLI, 2, 0, 4, imm),
+                encode_rv32u(InsnKind::SLLI, 2, 0, 4, imm),
                 rs1_read << imm,
             ),
             InsnKind::SRAI => (
                 "SRAI",
-                encode_rv32(InsnKind::SRAI, 2, 0, 4, imm),
+                encode_rv32u(InsnKind::SRAI, 2, 0, 4, imm),
                 (rs1_read as i32 >> imm as i32) as u32,
             ),
             InsnKind::SRLI => (
                 "SRLI",
-                encode_rv32(InsnKind::SRLI, 2, 0, 4, imm),
+                encode_rv32u(InsnKind::SRLI, 2, 0, 4, imm),
                 rs1_read >> imm,
             ),
             _ => unreachable!(),

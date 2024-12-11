@@ -89,7 +89,7 @@ mod test {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::test_utils::imm_i},
+        instructions::Instruction,
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
@@ -110,7 +110,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, 3);
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -143,7 +143,8 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(-3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, -3);
+
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,

@@ -74,7 +74,7 @@ fn load(mem_value: Word, insn: InsnKind, shift: u32) -> Word {
     }
 }
 
-fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: u32) {
+fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: i32) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
@@ -92,7 +92,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     let prev_mem_value = 0x40302010;
     let rs2_word = Word::from(0x12345678_u32);
     let rs1_word = Word::from(0x4000000_u32);
-    let unaligned_addr = ByteAddr::from(rs1_word.wrapping_add(imm));
+    let unaligned_addr = ByteAddr::from(rs1_word.wrapping_add_signed(imm));
     let new_mem_value = match I::INST_KIND {
         InsnKind::SB => sb(prev_mem_value, rs2_word, unaligned_addr.shift()),
         InsnKind::SH => sh(prev_mem_value, rs2_word, unaligned_addr.shift()),
@@ -122,7 +122,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
-fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: u32) {
+fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: i32) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
@@ -140,7 +140,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
     let mem_value = 0x40302010;
     let rs1_word = Word::from(0x4000000_u32);
     let prev_rd_word = Word::from(0x12345678_u32);
-    let unaligned_addr = ByteAddr::from(rs1_word.wrapping_add(imm));
+    let unaligned_addr = ByteAddr::from(rs1_word.wrapping_add_signed(imm));
     let new_rd_word = load(mem_value, I::INST_KIND, unaligned_addr.shift());
     let rd_change = Change {
         before: prev_rd_word,
@@ -166,16 +166,16 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
-fn impl_opcode_sb(imm: u32) {
+fn impl_opcode_sb(imm: i32) {
     impl_opcode_store::<GoldilocksExt2, SBOp, SbInstruction<GoldilocksExt2>>(imm)
 }
 
-fn impl_opcode_sh(imm: u32) {
+fn impl_opcode_sh(imm: i32) {
     assert_eq!(imm & 0x01, 0);
     impl_opcode_store::<GoldilocksExt2, SHOp, ShInstruction<GoldilocksExt2>>(imm)
 }
 
-fn impl_opcode_sw(imm: u32) {
+fn impl_opcode_sw(imm: i32) {
     assert_eq!(imm & 0x03, 0);
     impl_opcode_store::<GoldilocksExt2, SWOp, SwInstruction<GoldilocksExt2>>(imm)
 }
@@ -187,9 +187,8 @@ fn test_sb() {
     impl_opcode_sb(10);
     impl_opcode_sb(15);
 
-    let neg_one = u32::MAX;
-    for i in 0..4 {
-        impl_opcode_sb(neg_one - i);
+    for i in -4..0 {
+        impl_opcode_sb(i);
     }
 }
 
@@ -198,9 +197,8 @@ fn test_sh() {
     impl_opcode_sh(0);
     impl_opcode_sh(2);
 
-    let neg_two = u32::MAX - 1;
-    for i in [0, 2] {
-        impl_opcode_sh(neg_two - i)
+    for i in [-4, -2] {
+        impl_opcode_sh(i)
     }
 }
 
@@ -209,8 +207,7 @@ fn test_sw() {
     impl_opcode_sw(0);
     impl_opcode_sw(4);
 
-    let neg_four = u32::MAX - 3;
-    impl_opcode_sw(neg_four);
+    impl_opcode_sw(-4);
 }
 
 #[test]
@@ -220,10 +217,8 @@ fn test_lb() {
     impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(2);
     impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(3);
 
-    let neg_one = u32::MAX;
-    // imm = -1, -2, -3
-    for i in 0..3 {
-        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(neg_one - i);
+    for i in -3..0 {
+        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(i);
     }
 }
 
@@ -234,10 +229,8 @@ fn test_lbu() {
     impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(2);
     impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(3);
 
-    let neg_one = u32::MAX;
-    // imm = -1, -2, -3
-    for i in 0..3 {
-        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(neg_one - i);
+    for i in -3..0 {
+        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(i);
     }
 }
 
@@ -247,10 +240,8 @@ fn test_lh() {
     impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(2);
     impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(4);
 
-    let neg_two = u32::MAX - 1;
-    // imm = -2, -4
-    for i in [0, 2] {
-        impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(neg_two - i);
+    for i in [-4, -2] {
+        impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(i);
     }
 }
 
@@ -260,10 +251,8 @@ fn test_lhu() {
     impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(2);
     impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(4);
 
-    let neg_two = u32::MAX - 1;
-    // imm = -2, -4
-    for i in [0, 2] {
-        impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(neg_two - i);
+    for i in [-4, -2] {
+        impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(i);
     }
 }
 
@@ -271,5 +260,5 @@ fn test_lhu() {
 fn test_lw() {
     impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(0);
     impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(4);
-    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(u32::MAX - 3); // imm = -4
+    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(-4);
 }

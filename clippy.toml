@@ -2,9 +2,10 @@
 # Eg removing syn is blocked by ark-ff-asm cutting a new release
 # (https://github.com/arkworks-rs/algebra/issues/813) amongst other things.
 allowed-duplicate-crates = [
-  "syn",
-  "windows-sys",
+  "hashbrown",
+  "itertools",
   "regex-automata",
   "regex-syntax",
-  "itertools",
+  "syn",
+  "windows-sys",
 ]
