@@ -392,7 +392,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Vec<LkMultiplicity>>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         Self::run_maybe_challenge(cb, wits_in, &[], &[], Some(challenge), lkm)
     }
@@ -401,7 +401,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Vec<LkMultiplicity>>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         Self::run_maybe_challenge(cb, wits_in, programs, &[], None, lkm)
     }
@@ -412,7 +412,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         input_programs: &[u32],
         pi: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Vec<LkMultiplicity>>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         // fix the program table
         let instructions = input_programs
@@ -543,94 +543,67 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         // LK Multiplicity check
         if let Some(lkm_from_assignment) = lkm {
             // Infer LK Multiplicity from constraint system.
-            let lkm_from_cs = cb
-                .cs
-                .lk_expressions_items_map
-                .iter()
-                .map(|(rom_type, items)| {
-                    (
-                        rom_type,
-                        items
-                            .iter()
-                            .map(|expr| {
-                                // TODO generalized to all inst_id
-                                let inst_id = 0;
-                                wit_infer_by_expr(&[], wits_in, pi, &challenge, expr)
-                                    .get_base_field_vec()[inst_id]
-                                    .to_canonical_u64()
-                            })
-                            .collect::<Vec<u64>>(),
-                    )
-                })
-                .fold(LkMultiplicity::default(), |mut lkm, (rom_type, args)| {
-                    match rom_type {
-                        ROMType::U5 => lkm.assert_ux::<5>(args[0]),
-                        ROMType::U8 => lkm.assert_ux::<8>(args[0]),
-                        ROMType::U14 => lkm.assert_ux::<14>(args[0]),
-                        ROMType::U16 => lkm.assert_ux::<16>(args[0]),
-                        ROMType::And => lkm.lookup_and_byte(args[0], args[1]),
-                        ROMType::Or => lkm.lookup_or_byte(args[0], args[1]),
-                        ROMType::Xor => lkm.lookup_xor_byte(args[0], args[1]),
-                        ROMType::Ltu => lkm.lookup_ltu_byte(args[0], args[1]),
-                        ROMType::Pow => {
-                            assert_eq!(args[0], 2);
-                            lkm.lookup_pow2(args[1])
-                        }
-                        ROMType::Instruction => lkm.fetch(args[0] as u32),
-                    };
+            let lkm_from_cs = {
+                let result = transpose(
+                    cb.cs
+                        .lk_expressions_items_map
+                        .iter()
+                        .map(|(rom_type, items)| {
+                            (
+                                *rom_type,
+                                items
+                                    .iter()
+                                    .map(|expr| {
+                                        let insts =
+                                            wit_infer_by_expr(&[], wits_in, pi, &challenge, expr)
+                                                .get_base_field_vec()
+                                                .iter()
+                                                .map(|f| f.to_canonical_u64())
+                                                .collect::<Vec<u64>>();
+                                        (expr.clone(), insts)
+                                    })
+                                    .collect::<Vec<(Expression<E>, Vec<u64>)>>(),
+                            )
+                        })
+                        .collect::<Vec<(ROMType, Vec<(Expression<E>, Vec<u64>)>)>>(),
+                );
+                // Remove the last instance, which is the padding instance.
+                let instances = result.len();
+                result.into_iter().take(instances - 1)
+            }
+            .map(|records| {
+                records
+                    .iter()
+                    .fold(LkMultiplicity::default(), |mut lkm, (rom_type, args)| {
+                        match rom_type {
+                            ROMType::U5 => lkm.assert_ux::<5>(args[0]),
+                            ROMType::U8 => lkm.assert_ux::<8>(args[0]),
+                            ROMType::U14 => lkm.assert_ux::<14>(args[0]),
+                            ROMType::U16 => lkm.assert_ux::<16>(args[0]),
+                            ROMType::And => lkm.lookup_and_byte(args[0], args[1]),
+                            ROMType::Or => lkm.lookup_or_byte(args[0], args[1]),
+                            ROMType::Xor => lkm.lookup_xor_byte(args[0], args[1]),
+                            ROMType::Ltu => lkm.lookup_ltu_byte(args[0], args[1]),
+                            ROMType::Pow => {
+                                assert_eq!(args[0], 2);
+                                assert_eq!(args.len(), 3);
+                                lkm.lookup_pow2(args[1])
+                            }
+                            ROMType::Instruction => lkm.fetch(args[0] as u32),
+                        };
 
-                    lkm
-                });
+                        lkm
+                    })
+            })
+            .collect::<Vec<LkMultiplicity>>();
 
-            let lkm_from_cs = lkm_from_cs.into_finalize_result();
-            let lkm_from_assignment = lkm_from_assignment.into_finalize_result();
-
-            // Compare each LK Multiplicity.
-
-            for (rom_type, cs_map, ass_map) in
-                izip!(ROMType::iter(), &lkm_from_cs, &lkm_from_assignment)
+            // Compare LK Multiplicity from constraint system and assignment for every instance, record the errors if any.
+            for (inst_id, (lkm_from_cs, lkm_from_assignment)) in lkm_from_cs
+                .into_iter()
+                .zip_eq(lkm_from_assignment.into_iter())
+                .enumerate()
             {
-                if *cs_map != *ass_map {
-                    let cs_keys: HashSet<_> = cs_map.keys().collect();
-                    let ass_keys: HashSet<_> = ass_map.keys().collect();
-
-                    // lookup missing in lkm Constraint System.
-                    ass_keys.difference(&cs_keys).for_each(|k| {
-                        let count_ass = ass_map.get(k).unwrap();
-                        errors.push(MockProverError::LkMultiplicityError {
-                            rom_type,
-                            key: **k,
-                            count: *count_ass as isize,
-                            inst_id: 0,
-                        })
-                    });
-
-                    // lookup missing in lkm Assignments.
-                    cs_keys.difference(&ass_keys).for_each(|k| {
-                        let count_cs = cs_map.get(k).unwrap();
-                        errors.push(MockProverError::LkMultiplicityError {
-                            rom_type,
-                            key: **k,
-                            count: -(*count_cs as isize),
-                            inst_id: 0,
-                        })
-                    });
-
-                    // count of specific lookup differ lkm assignments and lkm cs
-                    cs_keys.intersection(&ass_keys).for_each(|k| {
-                        let count_cs = cs_map.get(k).unwrap();
-                        let count_ass = ass_map.get(k).unwrap();
-
-                        if count_cs != count_ass {
-                            errors.push(MockProverError::LkMultiplicityError {
-                                rom_type,
-                                key: **k,
-                                count: (*count_ass as isize) - (*count_cs as isize),
-                                inst_id: 0,
-                            })
-                        }
-                    });
-                }
+                compare_lkm(inst_id, lkm_from_cs, lkm_from_assignment, &mut errors);
             }
         }
 
@@ -673,7 +646,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         programs: &[u32],
         constraint_names: &[&str],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Vec<LkMultiplicity>>,
     ) {
         let error_groups = if let Some(challenge) = challenge {
             Self::run_with_challenge(cb, wits_in, challenge, lkm)
@@ -724,7 +697,7 @@ Hints:
         raw_witin: RowMajorMatrix<E::BaseField>,
         programs: &[u32],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Vec<LkMultiplicity>>,
     ) {
         let wits_in = raw_witin
             .de_interleaving()
@@ -740,7 +713,7 @@ Hints:
         wits_in: &[ArcMultilinearExtension<'a, E>],
         programs: &[u32],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Vec<LkMultiplicity>>,
     ) {
         Self::assert_with_expected_errors(cb, wits_in, programs, &[], challenge, lkm);
     }
@@ -1200,6 +1173,89 @@ Hints:
 
         if num_rw_mismatch_errors > 0 {
             panic!("found {} r/w mismatch errors", num_rw_mismatch_errors);
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+// Transpose the data from Vec of LK Records(ROMType, Vec of (Combined Expr, Vec of Instance Values))
+// The goal of this transpose is to bring the instance dimension to the top.
+fn transpose<E: ExtensionField>(
+    data: Vec<(ROMType, Vec<(Expression<E>, Vec<u64>)>)>,
+) -> Vec<Vec<(ROMType, Vec<u64>)>> {
+    // Vec of Instances(Vec of LK Records(ROMType, Vec of Values))
+    let mut result: Vec<Vec<(ROMType, Vec<u64>)>> = vec![];
+
+    for (record_id, (record_rom, record_args)) in data.iter().enumerate() {
+        for (arg_id, (_expr, instance_vec)) in record_args.iter().enumerate() {
+            for (inst_id, value) in instance_vec.iter().enumerate() {
+                if result.len() <= inst_id {
+                    result.push(vec![]);
+                }
+                if result[inst_id].len() <= record_id {
+                    result[inst_id].push((*record_rom, vec![]));
+                }
+                if result[inst_id][record_id].1.len() <= arg_id {
+                    result[inst_id][record_id].1.push(*value);
+                }
+            }
+        }
+    }
+
+    result
+}
+
+// Compare two lkm and append the errors if any.
+fn compare_lkm<E: ExtensionField>(
+    inst_id: usize,
+    lkm_from_cs: LkMultiplicity,
+    lkm_from_assignment: LkMultiplicity,
+    errors: &mut Vec<MockProverError<E>>,
+) {
+    let lkm_from_cs = lkm_from_cs.into_finalize_result();
+    let lkm_from_assignment = lkm_from_assignment.into_finalize_result();
+
+    for (rom_type, cs_map, ass_map) in izip!(ROMType::iter(), &lkm_from_cs, &lkm_from_assignment) {
+        if *cs_map != *ass_map {
+            let cs_keys: HashSet<_> = cs_map.keys().collect();
+            let ass_keys: HashSet<_> = ass_map.keys().collect();
+
+            // Lookup missing in lkm cs.
+            ass_keys.difference(&cs_keys).for_each(|k| {
+                let count_ass = ass_map.get(k).unwrap();
+                errors.push(MockProverError::LkMultiplicityError {
+                    rom_type,
+                    key: **k,
+                    count: *count_ass as isize,
+                    inst_id,
+                })
+            });
+
+            // Lookup missing in lkm assignments.
+            cs_keys.difference(&ass_keys).for_each(|k| {
+                let count_cs = cs_map.get(k).unwrap();
+                errors.push(MockProverError::LkMultiplicityError {
+                    rom_type,
+                    key: **k,
+                    count: -(*count_cs as isize),
+                    inst_id,
+                })
+            });
+
+            // Count of specific lookup differ lkm assignments and lkm cs.
+            cs_keys.intersection(&ass_keys).for_each(|k| {
+                let count_cs = cs_map.get(k).unwrap();
+                let count_ass = ass_map.get(k).unwrap();
+
+                if count_cs != count_ass {
+                    errors.push(MockProverError::LkMultiplicityError {
+                        rom_type,
+                        key: **k,
+                        count: (*count_ass as isize) - (*count_cs as isize),
+                        inst_id,
+                    })
+                }
+            });
         }
     }
 }
