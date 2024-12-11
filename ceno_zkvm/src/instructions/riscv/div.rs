@@ -359,13 +359,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let dividend_v = Value::new_unchecked(dividend);
         let divisor_v = Value::new_unchecked(divisor);
 
-        config
-            .dividend
-            .assign_limbs(instance, dividend_v.as_u16_limbs());
-        config
-            .divisor
-            .assign_limbs(instance, divisor_v.as_u16_limbs());
-
         let (quotient, remainder) = match &config.internal_config {
             InternalDivRem::Unsigned => {
                 if divisor == 0 {
@@ -394,13 +387,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         let quotient_v = Value::new(quotient, lkm);
         let remainder_v = Value::new(remainder, lkm);
-
-        config
-            .quotient
-            .assign_limbs(instance, quotient_v.as_u16_limbs());
-        config
-            .remainder
-            .assign_limbs(instance, remainder_v.as_u16_limbs());
 
         let (rem_pos, div_pos) = match &config.internal_config {
             InternalDivRem::Unsigned => (remainder, divisor),
@@ -467,6 +453,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 )
             }
         };
+
+        config
+            .dividend
+            .assign_value(instance, dividend_v);
+        config
+            .divisor
+            .assign_value(instance, divisor_v);
+        config
+            .quotient
+            .assign_value(instance, quotient_v);
+        config
+            .remainder
+            .assign_value(instance, remainder_v);
 
         config
             .is_divisor_zero
