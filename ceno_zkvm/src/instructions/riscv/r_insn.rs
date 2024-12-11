@@ -10,7 +10,6 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 /// This config handles the common part of R-type instructions:
 /// - PC, cycle, fetch.
@@ -61,7 +60,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

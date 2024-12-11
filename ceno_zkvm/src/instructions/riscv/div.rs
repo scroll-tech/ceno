@@ -16,7 +16,6 @@ use crate::{
     uint::Value,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
 pub struct ArithConfig<E: ExtensionField> {
@@ -124,7 +123,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -173,7 +172,6 @@ mod test {
         use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
-        use multilinear_extensions::mle::IntoMLEs;
         use rand::Rng;
 
         use crate::{
@@ -238,7 +236,6 @@ mod test {
             MockProver::assert_with_expected_errors(
                 &cb,
                 &raw_witin
-                    .de_interleaving()
                     .into_mles()
                     .into_iter()
                     .map(|v| v.into())
