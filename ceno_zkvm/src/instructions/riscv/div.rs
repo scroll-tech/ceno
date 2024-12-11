@@ -181,7 +181,7 @@ mod test {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             instructions::{
                 Instruction,
-                riscv::{constants::UInt, divu::DivUInstruction},
+                riscv::{constants::UInt, div::DivUInstruction},
             },
             scheme::mock_prover::{MOCK_PC_START, MockProver},
         };
