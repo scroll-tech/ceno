@@ -10,7 +10,7 @@ use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 /// Extract the most significant bit from an expression previously constrained
-/// to an 8- or 16-bit length.
+/// to an 8 or 16-bit length.
 ///
 /// Uses 1 `WitIn` value to store the bit, one `assert_bit` constraint, and one
 /// `u8` or `u16` table lookup.

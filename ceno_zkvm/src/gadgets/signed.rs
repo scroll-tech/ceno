@@ -15,7 +15,7 @@ use super::SignedExtendConfig;
 
 /// Interprets a `UInt` value as a 2s-complement signed value.
 ///
-/// Uses 1 `WitIn` to represent the MSB of the value.
+/// Uses 1 `WitIn` to represent the most sigificant bit of the value.
 pub struct Signed<E: ExtensionField> {
     pub is_negative: SignedExtendConfig<E>,
     val: Expression<E>,
