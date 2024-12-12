@@ -178,7 +178,6 @@ pub fn setup_platform(
         Preset::Sp1 => Platform {
             // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
             stack: 0x0020_0400..0x0020_0400,
-            ram: 0x0010_0000..0xFFFF_0000,
             unsafe_ecall_nop: true,
             ..CENO_PLATFORM
         },

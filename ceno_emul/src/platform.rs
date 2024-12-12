@@ -10,7 +10,6 @@ use crate::addr::{Addr, RegIdx};
 #[derive(Clone, Debug)]
 pub struct Platform {
     pub prog_code: Range<Addr>,
-    pub ram: Range<Addr>, // TODO: remove.
     pub prog_data: Option<HashSet<Addr>>,
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
@@ -22,7 +21,6 @@ pub struct Platform {
 
 pub const CENO_PLATFORM: Platform = Platform {
     prog_code: 0x2000_0000..0x3000_0000,
-    ram: 0x8000_0000..0xFFFF_0000,
     prog_data: None, // This is an `Option` to allow `const` here.
     stack: 0xB0000000..0xC0000000,
     heap: 0x8000_0000..0xFFFF_0000,
@@ -39,10 +37,7 @@ impl Platform {
     }
 
     pub fn is_ram(&self, addr: Addr) -> bool {
-        self.ram.contains(&addr)
-            || self.stack.contains(&addr)
-            || self.heap.contains(&addr)
-            || self.is_prog_data(addr)
+        self.stack.contains(&addr) || self.heap.contains(&addr) || self.is_prog_data(addr)
     }
 
     pub fn is_prog_data(&self, addr: Addr) -> bool {
