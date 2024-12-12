@@ -39,9 +39,7 @@ pub fn halt(exit_code: u32) -> ! {
         unreachable!();
     }
     #[cfg(not(target_arch = "riscv32"))]
-    panic!("Halt is not implemented for this target: {}", exit_code);
-    // #[allow(clippy::empty_loop)]
-    // loop {}
+    unimplemented!("Halt is not implemented for this target: {}", exit_code);
 }
 
 global_asm!(
