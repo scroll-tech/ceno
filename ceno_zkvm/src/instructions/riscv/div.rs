@@ -98,7 +98,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // otherwise lt.expr() == 1
         cb.require_equal(
             || "remainder < divisor when non-zero divisor",
-            (&is_zero).expr() + (&lt).expr(),
+            is_zero.expr() + (&lt).expr(),
             1,
         )?;
 
