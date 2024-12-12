@@ -6,7 +6,7 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
+    expression::ToExpr,
     gadgets::SignedLtConfig,
     instructions::{
         Instruction,
@@ -42,8 +42,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<E, I> {
             SignedLtConfig::construct_circuit(circuit_builder, || "rs1<rs2", &read_rs1, &read_rs2)?;
 
         let branch_taken_bit = match I::INST_KIND {
-            InsnKind::BLT => is_lt.expr(),
-            InsnKind::BGE => Expression::ONE - is_lt.expr(),
+            InsnKind::BLT => (&is_lt).expr(),
+            InsnKind::BGE => 1 - (&is_lt).expr(),
 
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };

@@ -10,16 +10,29 @@ use crate::{
     set_val,
 };
 
+#[derive(Clone, Copy, Debug)]
 pub struct IsZeroConfig {
     is_zero: Option<WitIn>,
     inverse: WitIn,
 }
 
-impl IsZeroConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
-        self.is_zero.map(|wit| wit.expr()).unwrap_or(0.into())
-    }
+impl<E: ExtensionField> ToExpr<E> for IsZeroConfig {
+    type Output = Expression<E>;
 
+    fn expr(self) -> Self::Output {
+        self.is_zero.map(ToExpr::expr).unwrap_or(0.into())
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &IsZeroConfig {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
+        self.is_zero.map(ToExpr::expr).unwrap_or(0.into())
+    }
+}
+
+impl IsZeroConfig {
     pub fn construct_circuit<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
@@ -49,14 +62,14 @@ impl IsZeroConfig {
                 let is_zero = cb.create_witin(|| "is_zero");
 
                 // x!=0 => is_zero=0
-                cb.require_zero(|| "is_zero_0", is_zero.expr() * x.clone())?;
+                cb.require_zero(|| "is_zero_0", is_zero * &x)?;
 
                 (Some(is_zero), is_zero.expr())
             };
             let inverse = cb.create_witin(|| "inv");
 
             // x==0 => is_zero=1
-            cb.require_one(|| "is_zero_1", is_zero_expr + x.clone() * inverse.expr())?;
+            cb.require_one(|| "is_zero_1", is_zero_expr + x * inverse)?;
 
             Ok(IsZeroConfig { is_zero, inverse })
         })
@@ -82,13 +95,26 @@ impl IsZeroConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct IsEqualConfig(IsZeroConfig);
 
-impl IsEqualConfig {
-    pub fn expr<E: ExtensionField>(&self) -> Expression<E> {
+impl<E: ExtensionField> ToExpr<E> for IsEqualConfig {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
         self.0.expr()
     }
+}
 
+impl<E: ExtensionField> ToExpr<E> for &IsEqualConfig {
+    type Output = Expression<E>;
+
+    fn expr(self) -> Self::Output {
+        (&self.0).expr()
+    }
+}
+
+impl IsEqualConfig {
     pub fn construct_circuit<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
@@ -105,9 +131,11 @@ impl IsEqualConfig {
     pub fn construct_non_equal<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
-        a: Expression<E>,
-        b: Expression<E>,
+        a: impl ToExpr<E, Output = Expression<E>>,
+        b: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<Self, ZKVMError> {
+        let a = a.expr();
+        let b = b.expr();
         Ok(IsEqualConfig(IsZeroConfig::construct_non_zero(
             cb,
             name_fn,

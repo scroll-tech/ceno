@@ -113,7 +113,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         .map(|i| {
                             let w = cb.create_witin(|| format!("limb_{i}"));
                             if is_check {
-                                cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
+                                cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w)?;
                             }
                             // skip range check
                             Ok(w)
@@ -185,10 +185,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .map(|i| {
                 let w = circuit_builder.create_witin(|| "wit for limb");
                 circuit_builder
-                    .assert_ux::<_, _, C>(|| "range check", w.expr())
+                    .assert_ux::<_, _, C>(|| "range check", w)
                     .unwrap();
                 circuit_builder
-                    .require_zero(|| "create_witin_from_expr", w.expr() - &expr_limbs[i])
+                    .require_zero(|| "create_witin_from_expr", w - &expr_limbs[i])
                     .unwrap();
                 w
             })
@@ -315,9 +315,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 chunk
                     .iter()
                     .zip(shift_pows.iter())
-                    .map(|(limb, shift)| shift * limb.expr())
-                    .reduce(|a, b| a + b)
-                    .unwrap()
+                    .map(|(&limb, shift)| shift * limb)
+                    .sum::<Expression<_>>()
             })
             .collect_vec();
         Ok(UIntLimbs::<M, C, E>::from_exprs_unchecked(combined_limbs))
@@ -343,8 +342,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 let limbs = (0..k)
                     .map(|_| {
                         let w = circuit_builder.create_witin(|| "");
-                        circuit_builder.assert_byte(|| "", w.expr()).unwrap();
-                        w.expr()
+                        circuit_builder.assert_byte(|| "", w).unwrap();
+                        w
                     })
                     .collect_vec();
                 let combined_limb = limbs
@@ -355,19 +354,21 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .unwrap();
 
                 circuit_builder
-                    .require_zero(|| "zero check", large_limb.expr() - combined_limb)
+                    .require_zero(|| "zero check", large_limb - combined_limb)
                     .unwrap();
                 limbs
             })
+            .map(ToExpr::expr)
             .collect_vec();
         UIntLimbs::<M, 8, E>::create_witin_from_exprs(circuit_builder, split_limbs)
     }
 
-    pub fn from_exprs_unchecked(expr_limbs: Vec<Expression<E>>) -> Self {
+    pub fn from_exprs_unchecked(expr_limbs: Vec<impl ToExpr<E, Output = Expression<E>>>) -> Self {
         Self {
             limbs: UintLimb::Expression(
                 expr_limbs
                     .into_iter()
+                    .map(ToExpr::expr)
                     .chain(std::iter::repeat(Expression::ZERO))
                     .take(Self::NUM_LIMBS)
                     .collect_vec(),
@@ -479,10 +480,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         ))
     }
 
-    pub fn to_field_expr(&self, is_neg: Expression<E>) -> Expression<E> {
+    pub fn to_field_expr(&self, is_neg: impl ToExpr<E, Output = Expression<E>>) -> Expression<E> {
         // Convert two's complement representation into field arithmetic.
         // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
-        self.value() - is_neg * (1_u64 << 32)
+        self.value() - (is_neg.expr() << 32)
     }
 }
 
@@ -531,9 +532,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UI
     }
 }
 
-impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for UIntLimbs<M, C, E> {
+impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for &UIntLimbs<M, C, E> {
     type Output = Vec<Expression<E>>;
-    fn expr(&self) -> Vec<Expression<E>> {
+    fn expr(self) -> Self::Output {
         match &self.limbs {
             UintLimb::WitIn(limbs) => limbs
                 .iter()

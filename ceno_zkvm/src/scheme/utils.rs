@@ -19,7 +19,9 @@ use rayon::{
 };
 
 use crate::{
-    expression::Expression, scheme::constants::MIN_PAR_SIZE, utils::next_pow2_instance_padding,
+    expression::{Expression, ToExpr},
+    scheme::constants::MIN_PAR_SIZE,
+    utils::next_pow2_instance_padding,
 };
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
@@ -350,7 +352,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
 pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     challenges: &[E],
-    expr: &Expression<E>,
+    expr: impl ToExpr<E, Output = Expression<E>>,
 ) -> E {
     eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
 }
@@ -359,9 +361,9 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
     challenges: &[E],
-    expr: &Expression<E>,
+    expr: impl ToExpr<E, Output = Expression<E>>,
 ) -> E {
-    expr.evaluate::<E>(
+    expr.expr().evaluate::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
         &|scalar| scalar.into(),

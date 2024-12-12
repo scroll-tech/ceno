@@ -164,7 +164,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR + Clone,
     {
         let byte = self.cs.create_witin(name_fn.clone());
-        self.assert_ux::<_, _, 8>(name_fn, byte.expr())?;
+        self.assert_ux::<_, _, 8>(name_fn, byte)?;
 
         Ok(byte)
     }
@@ -175,7 +175,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR + Clone,
     {
         let limb = self.cs.create_witin(name_fn.clone());
-        self.assert_ux::<_, _, 16>(name_fn, limb.expr())?;
+        self.assert_ux::<_, _, 16>(name_fn, limb)?;
 
         Ok(limb)
     }
@@ -191,7 +191,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR + Clone,
     {
         let wit = self.cs.create_witin(name_fn.clone());
-        self.require_equal(name_fn, wit.expr(), expr)?;
+        self.require_equal(name_fn, wit, expr)?;
 
         Ok(wit)
     }
@@ -199,7 +199,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn require_zero<NR, N>(
         &mut self,
         name_fn: N,
-        assert_zero_expr: Expression<E>,
+        assert_zero_expr: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
@@ -214,8 +214,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn require_equal<NR, N>(
         &mut self,
         name_fn: N,
-        a: Expression<E>,
-        b: Expression<E>,
+        a: impl ToExpr<E, Output = Expression<E>>,
+        b: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
@@ -224,8 +224,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.namespace(
             || "require_equal",
             |cb| {
-                cb.cs
-                    .require_zero(name_fn, a.to_monomial_form() - b.to_monomial_form())
+                cb.cs.require_zero(
+                    name_fn,
+                    a.expr().to_monomial_form() - b.expr().to_monomial_form(),
+                )
             },
         )
     }
@@ -241,21 +243,25 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn condition_require_equal<NR, N>(
         &mut self,
         name_fn: N,
-        cond: Expression<E>,
-        target: Expression<E>,
-        true_expr: Expression<E>,
-        false_expr: Expression<E>,
+        cond: impl ToExpr<E, Output = Expression<E>>,
+        target: impl ToExpr<E, Output = Expression<E>>,
+        true_expr: impl ToExpr<E, Output = Expression<E>>,
+        false_expr: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let cond = cond.expr();
+        let target = target.expr();
+        let true_expr = true_expr.expr();
+        let false_expr = false_expr.expr();
         // cond * (true_expr) + (1 - cond) * false_expr
         // => false_expr + cond * true_expr - cond * false_expr
         self.namespace(
             || "cond_require_equal",
             |cb| {
-                let cond_target = false_expr.clone() + cond.clone() * true_expr - cond * false_expr;
+                let cond_target = &false_expr + &cond * true_expr - cond * false_expr;
                 cb.cs.require_zero(name_fn, target - cond_target)
             },
         )
@@ -263,22 +269,24 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn select(
         &mut self,
-        cond: &Expression<E>,
-        when_true: &Expression<E>,
-        when_false: &Expression<E>,
+        cond: impl ToExpr<E, Output = Expression<E>>,
+        when_true: impl ToExpr<E, Output = Expression<E>>,
+        when_false: impl ToExpr<E, Output = Expression<E>>,
     ) -> Expression<E> {
-        cond * when_true + (1 - cond) * when_false
+        let cond = cond.expr();
+        &cond * when_true.expr() + (1 - &cond) * when_false.expr()
     }
 
     pub(crate) fn assert_ux<NR, N, const C: usize>(
         &mut self,
         name_fn: N,
-        expr: Expression<E>,
+        expr: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let expr = expr.expr();
         match C {
             16 => self.assert_u16(name_fn, expr),
             14 => self.assert_u14(name_fn, expr),
@@ -333,25 +341,26 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub(crate) fn assert_byte<NR, N>(
         &mut self,
         name_fn: N,
-        expr: Expression<E>,
+        expr: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.lk_record(name_fn, ROMType::U8, vec![expr])?;
+        self.lk_record(name_fn, ROMType::U8, vec![expr.expr()])?;
         Ok(())
     }
 
     pub(crate) fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,
-        expr: Expression<E>,
+        expr: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let expr = expr.expr();
         self.namespace(
             || "assert_bit",
             |cb| cb.cs.require_zero(name_fn, &expr * (1 - &expr)),
@@ -362,10 +371,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn logic_u8(
         &mut self,
         rom_type: ROMType,
-        a: Expression<E>,
-        b: Expression<E>,
-        c: Expression<E>,
+        a: impl ToExpr<E, Output = Expression<E>>,
+        b: impl ToExpr<E, Output = Expression<E>>,
+        c: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let a = a.expr();
+        let b = b.expr();
+        let c = c.expr();
         self.lk_record(|| format!("lookup_{:?}", rom_type), rom_type, vec![a, b, c])
     }
 
@@ -402,31 +414,30 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     /// Assert that `(a < b) == c as bool`, that `a, b` are unsigned bytes, and that `c` is 0 or 1.
     pub fn lookup_ltu_byte(
         &mut self,
-        a: Expression<E>,
-        b: Expression<E>,
-        c: Expression<E>,
+        a: impl ToExpr<E, Output = Expression<E>>,
+        b: impl ToExpr<E, Output = Expression<E>>,
+        c: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError> {
         self.logic_u8(ROMType::Ltu, a, b, c)
     }
 
     // Assert that `2^b = c` and that `b` is a 5-bit unsigned integer.
     pub fn lookup_pow2(&mut self, b: Expression<E>, c: Expression<E>) -> Result<(), ZKVMError> {
-        self.logic_u8(ROMType::Pow, 2.into(), b, c)
+        self.logic_u8(ROMType::Pow, 2, b, c)
     }
 
     pub(crate) fn is_equal(
         &mut self,
-        lhs: Expression<E>,
-        rhs: Expression<E>,
+        lhs: impl ToExpr<E, Output = Expression<E>>,
+        rhs: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(WitIn, WitIn), ZKVMError> {
+        let lhs = lhs.expr();
+        let rhs = rhs.expr();
         let is_eq = self.create_witin(|| "is_eq");
         let diff_inverse = self.create_witin(|| "diff_inverse");
 
-        self.require_zero(|| "is equal", is_eq.expr() * &lhs - is_eq.expr() * &rhs)?;
-        self.require_zero(
-            || "is equal",
-            1 - is_eq.expr() - diff_inverse.expr() * lhs + diff_inverse.expr() * rhs,
-        )?;
+        self.require_zero(|| "is equal", is_eq * &lhs - is_eq * &rhs)?;
+        self.require_zero(|| "is equal", 1 + diff_inverse * (rhs + lhs) - is_eq)?;
 
         Ok((is_eq, diff_inverse))
     }

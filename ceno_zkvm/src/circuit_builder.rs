@@ -9,7 +9,7 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, WitIn},
+    expression::{Expression, Fixed, Instance, ToExpr, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -440,8 +440,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn require_zero<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        assert_zero_expr: Expression<E>,
+        assert_zero_expr: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let assert_zero_expr = assert_zero_expr.expr();
         assert!(
             assert_zero_expr.degree() > 0,
             "constant expression assert to zero ?"

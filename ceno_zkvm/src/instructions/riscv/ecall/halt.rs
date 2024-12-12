@@ -47,11 +47,12 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             Some(EXIT_PC.into()),
         )?;
 
+        // let reg_: usize = ceno_emul::Platform::reg_arg0();
         // read exit_code from arg0 (X10 register)
         let (_, lt_x10_cfg) = cb.register_read(
             || "read x10",
-            E::BaseField::from(ceno_emul::Platform::reg_arg0() as u64),
-            prev_x10_ts.expr(),
+            ceno_emul::Platform::reg_arg0(),
+            prev_x10_ts,
             ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
         )?;

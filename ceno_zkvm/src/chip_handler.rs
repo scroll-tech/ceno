@@ -17,7 +17,11 @@ pub mod utils;
 pub mod test;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
-    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
+    fn state_in(
+        &mut self,
+        pc: impl ToExpr<E, Output = Expression<E>>,
+        ts: impl ToExpr<E, Output = Expression<E>>,
+    ) -> Result<(), ZKVMError>;
 
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
 }
@@ -30,8 +34,8 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
     fn register_read(
         &mut self,
         name_fn: N,
-        register_id: impl ToExpr<E, Output = Expression<E>>,
-        prev_ts: Expression<E>,
+        register_id: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
+        prev_ts: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
         ts: Expression<E>,
         value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
@@ -40,8 +44,8 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
     fn register_write(
         &mut self,
         name_fn: N,
-        register_id: impl ToExpr<E, Output = Expression<E>>,
-        prev_ts: Expression<E>,
+        register_id: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
+        prev_ts: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,

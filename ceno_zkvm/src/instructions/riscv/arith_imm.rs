@@ -41,7 +41,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             Self::INST_KIND,
-            &imm.value(),
+            imm.value(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,

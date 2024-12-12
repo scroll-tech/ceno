@@ -5,7 +5,10 @@ use std::{
     fmt::Display,
     iter::{Product, Sum},
     mem::MaybeUninit,
-    ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
+    ops::{
+        Add, AddAssign, Deref, Div, Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub,
+        SubAssign,
+    },
 };
 
 use ceno_emul::InsnKind;
@@ -361,6 +364,35 @@ impl<E: ExtensionField> ShlAssign<usize> for Expression<E> {
     }
 }
 
+//
+
+impl<E: ExtensionField> Shr<usize> for Expression<E> {
+    type Output = Expression<E>;
+    fn shr(self, rhs: usize) -> Expression<E> {
+        self / (1_usize << rhs)
+    }
+}
+
+impl<E: ExtensionField> Shr<usize> for &Expression<E> {
+    type Output = Expression<E>;
+    fn shr(self, rhs: usize) -> Expression<E> {
+        self.clone() >> rhs
+    }
+}
+
+impl<E: ExtensionField> Shr<usize> for &mut Expression<E> {
+    type Output = Expression<E>;
+    fn shr(self, rhs: usize) -> Expression<E> {
+        self.clone() >> rhs
+    }
+}
+
+impl<E: ExtensionField> ShrAssign<usize> for Expression<E> {
+    fn shr_assign(&mut self, rhs: usize) {
+        *self = self.clone() >> rhs;
+    }
+}
+
 impl<E: ExtensionField> Sum for Expression<E> {
     fn sum<I: Iterator<Item = Expression<E>>>(iter: I) -> Expression<E> {
         iter.fold(Expression::ZERO, |acc, x| acc + x)
@@ -588,20 +620,29 @@ macro_rules! mixed_binop_instances {
     };
 }
 
-mixed_binop_instances!(
-    Add,
-    add,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, isize)
-);
-mixed_binop_instances!(
-    Sub,
-    sub,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, isize)
-);
-mixed_binop_instances!(
-    Mul,
-    mul,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, isize)
+macro_rules! mixed_binop_instances_all {
+    ($($t:ty),*) => {
+        mixed_binop_instances!(
+            Add,
+            add,
+            ($($t),*)
+        );
+        mixed_binop_instances!(
+            Sub,
+            sub,
+            ($($t),*)
+        );
+        mixed_binop_instances!(
+            Mul,
+            mul,
+            ($($t),*)
+        );
+    };
+}
+
+mixed_binop_instances_all!(
+    u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, WitIn, Fixed, Instance, &WitIn, &Fixed,
+    &Instance
 );
 
 impl<E: ExtensionField> Mul for Expression<E> {
@@ -721,6 +762,32 @@ impl<E: ExtensionField> Mul for Expression<E> {
     }
 }
 
+macro_rules! div_instances {
+    (($($t:ty),*)) => {
+        $(
+
+        impl<E: ExtensionField> Div<$t> for Expression<E> {
+            type Output = Expression<E>;
+            #[allow(clippy::suspicious_arithmetic_impl)]
+            fn div(self, rhs: $t) -> Expression<E> {
+                let reduced = (rhs as i128).rem_euclid(E::BaseField::MODULUS_U64 as i128) as u64;
+                self * E::BaseField::from(reduced).invert().unwrap().to_canonical_u64()
+            }
+        }
+
+        impl<E: ExtensionField> Div<$t> for &Expression<E> {
+            type Output = Expression<E>;
+            #[allow(clippy::suspicious_arithmetic_impl)]
+            fn div(self, rhs: $t) -> Expression<E> {
+                let reduced = (rhs as i128).rem_euclid(E::BaseField::MODULUS_U64 as i128) as u64;
+                self * E::BaseField::from(reduced).invert().unwrap().to_canonical_u64()
+            }
+        }
+    )*
+    };
+}
+div_instances!((u8, u16, u32, u64, usize, i8, i16, i32, i64, isize));
+
 #[derive(Clone, Debug, Copy)]
 pub struct WitIn {
     pub id: WitnessId,
@@ -767,48 +834,55 @@ impl WitIn {
 
 pub trait ToExpr<E: ExtensionField> {
     type Output;
-    fn expr(&self) -> Self::Output;
+    fn expr(self) -> Self::Output;
+}
+
+impl<E: ExtensionField> ToExpr<E> for Expression<E> {
+    type Output = Expression<E>;
+    fn expr(self) -> Self::Output {
+        self
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &Expression<E> {
+    type Output = Expression<E>;
+    fn expr(self) -> Self::Output {
+        self.clone()
+    }
 }
 
 impl<E: ExtensionField> ToExpr<E> for WitIn {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &WitIn {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Fixed {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Fixed(*self)
+    fn expr(self) -> Self::Output {
+        Expression::Fixed(self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &Fixed {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Fixed(**self)
+    fn expr(self) -> Self::Output {
+        Expression::Fixed(*self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Instance(*self)
-    }
-}
-
-impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
-    type Output = Expression<E>;
-    fn expr(&self) -> Expression<E> {
-        Expression::Constant(*self)
+    fn expr(self) -> Self::Output {
+        Expression::Instance(self)
     }
 }
 
@@ -823,37 +897,41 @@ macro_rules! impl_from_via_ToExpr {
         )*
     };
 }
-impl_from_via_ToExpr!(WitIn, Fixed, Instance);
+impl_from_via_ToExpr!(
+    WitIn, Fixed, Instance, u8, u16, u32, u64, usize, RAMType, InsnKind, i8, i16, i32, i64, isize
+);
 impl_from_via_ToExpr!(&WitIn, &Fixed, &Instance);
 
-// Implement From trait for unsigned types of at most 64 bits
-macro_rules! impl_from_unsigned {
+// Implement ToExpr trait for unsigned types of at most 64 bits
+macro_rules! impl_ToExpr_unsigned {
     ($($t:ty),*) => {
         $(
-            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
-                fn from(value: $t) -> Self {
-                    Expression::Constant(F::from(value as u64))
+            impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for $t {
+                type Output = Expression<E>;
+                fn expr(self) -> Self::Output {
+                    Expression::Constant(F::from(self as u64))
                 }
             }
         )*
     };
 }
-impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
+impl_ToExpr_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
 
-// Implement From trait for signed types
-macro_rules! impl_from_signed {
+// Implement ToExpr trait for signed types
+macro_rules! impl_ToExpr_signed {
     ($($t:ty),*) => {
         $(
-            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
-                fn from(value: $t) -> Self {
-                    let reduced = (value as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
+            impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for $t {
+                type Output = Expression<E>;
+                fn expr(self) -> Self::Output {
+                    let reduced = (self as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
                     Expression::Constant(F::from(reduced))
                 }
             }
         )*
     };
 }
-impl_from_signed!(i8, i16, i32, i64, isize);
+impl_ToExpr_signed!(i8, i16, i32, i64, isize);
 
 impl<E: ExtensionField> Display for Expression<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

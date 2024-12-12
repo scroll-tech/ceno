@@ -65,7 +65,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
             InsnKind::SLT => {
                 let signed_lt =
                     SignedLtConfig::construct_circuit(cb, || "rs1 < rs2", &rs1_read, &rs2_read)?;
-                let rd_written = UInt::from_exprs_unchecked(vec![signed_lt.expr()]);
+                let rd_written = UInt::from_exprs_unchecked(vec![&signed_lt]);
                 (SetLessThanDependencies::Slt { signed_lt }, rd_written)
             }
             InsnKind::SLTU => {
@@ -76,7 +76,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
                     rs2_read.value(),
                     UINT_LIMBS,
                 )?;
-                let rd_written = UInt::from_exprs_unchecked(vec![is_lt.expr()]);
+                let rd_written = UInt::from_exprs_unchecked(vec![&is_lt]);
                 (SetLessThanDependencies::Sltu { is_lt }, rd_written)
             }
             _ => unreachable!(),

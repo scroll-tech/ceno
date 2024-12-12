@@ -1,5 +1,4 @@
 use ceno_emul::{StepRecord, Word};
-use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
@@ -92,7 +91,7 @@ impl<E: ExtensionField> ReadRS1<E> {
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs1",
             id,
-            prev_ts.expr(),
+            prev_ts,
             cur_ts.expr() + Tracer::SUBCYCLE_RS1,
             rs1_read,
         )?;
@@ -146,7 +145,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         let (_, lt_cfg) = circuit_builder.register_read(
             || "read_rs2",
             id,
-            prev_ts.expr(),
+            prev_ts,
             cur_ts.expr() + Tracer::SUBCYCLE_RS2,
             rs2_read,
         )?;
@@ -201,7 +200,7 @@ impl<E: ExtensionField> WriteRD<E> {
         let (_, lt_cfg) = circuit_builder.register_write(
             || "write_rd",
             id,
-            prev_ts.expr(),
+            prev_ts,
             cur_ts.expr() + Tracer::SUBCYCLE_RD,
             prev_value.register_expr(),
             rd_written,
@@ -420,11 +419,7 @@ impl<E: ExtensionField> MemAddr<E> {
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
-        let shift_right = E::BaseField::from(1 << Self::N_LOW_BITS)
-            .invert()
-            .unwrap()
-            .expr();
-        let mid_u14 = (&limbs[0] - low_sum) * shift_right;
+        let mid_u14 = (&limbs[0] - low_sum) >> Self::N_LOW_BITS;
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 
         // Range check the high limb.
@@ -477,6 +472,7 @@ mod test {
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
+        expression::Expression,
         scheme::mock_prover::MockProver,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -535,9 +531,9 @@ mod test {
         assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
 
         if is_ok {
-            cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;
-            cb.require_equal(|| "", mem_addr.expr_align2(), (addr & !1).into())?;
-            cb.require_equal(|| "", mem_addr.expr_align4(), (addr & !3).into())?;
+            cb.require_equal(|| "", mem_addr.expr_unaligned(), Expression::from(addr))?;
+            cb.require_equal(|| "", mem_addr.expr_align2(), Expression::from(addr & !1))?;
+            cb.require_equal(|| "", mem_addr.expr_align4(), Expression::from(addr & !3))?;
         }
         MockProver::assert_with_expected_errors(
             &cb,

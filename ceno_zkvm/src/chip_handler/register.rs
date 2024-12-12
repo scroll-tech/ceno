@@ -17,8 +17,8 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
     fn register_read(
         &mut self,
         name_fn: N,
-        register_id: impl ToExpr<E, Output = Expression<E>>,
-        prev_ts: Expression<E>,
+        register_id: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
+        prev_ts: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
         ts: Expression<E>,
         value: RegisterExpr<E>,
     ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError> {
@@ -28,7 +28,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
                 vec![RAMType::Register.into()],
                 vec![register_id.expr()],
                 value.to_vec(),
-                vec![prev_ts.clone()],
+                vec![prev_ts.expr()],
             ]
             .concat();
             // Write (a, v, t)
@@ -60,8 +60,8 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
     fn register_write(
         &mut self,
         name_fn: N,
-        register_id: impl ToExpr<E, Output = Expression<E>>,
-        prev_ts: Expression<E>,
+        register_id: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
+        prev_ts: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
@@ -73,7 +73,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
                 vec![RAMType::Register.into()],
                 vec![register_id.expr()],
                 prev_values.to_vec(),
-                vec![prev_ts.clone()],
+                vec![prev_ts.expr()],
             ]
             .concat();
             // Write (a, v, t)

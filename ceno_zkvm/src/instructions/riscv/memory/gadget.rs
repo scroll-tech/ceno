@@ -8,7 +8,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
-use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::izip;
 use std::mem::MaybeUninit;
@@ -55,7 +54,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     .iter()
                     .enumerate()
                     .map(|(idx, byte)| byte.expr() << (idx * 8))
-                    .sum(),
+                    .sum::<Expression<E>>(),
             )?;
 
             Ok(bytes)
@@ -77,30 +76,29 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
 
                 // extract the least significant byte from u16 limb
                 let rs2_limb_bytes = alloc_bytes(cb, "rs2_limb[0]", 1)?;
-                let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
                 cb.assert_ux::<_, _, 8>(
                     || "rs2_limb[0].le_bytes[1]",
-                    u8_base_inv.expr() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
+                    (&rs2_limbs[0] - rs2_limb_bytes[0].expr()) >> 8,
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
                 let expected_limb_change = cb.create_witin(|| "expected_limb_change");
                 cb.condition_require_equal(
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
-                    low_bits[0].clone(),
-                    expected_limb_change.expr(),
-                    (rs2_limb_bytes[0].expr() - prev_limb_bytes[1].expr()) << 8,
-                    rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr(),
+                    &low_bits[0],
+                    expected_limb_change,
+                    (rs2_limb_bytes[0].expr() - prev_limb_bytes[1]) << 8,
+                    rs2_limb_bytes[0].expr() - prev_limb_bytes[0],
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
                 let expected_change = cb.create_witin(|| "expected_change");
                 cb.condition_require_equal(
                     || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
-                    low_bits[1].clone(),
-                    expected_change.expr(),
+                    &low_bits[1],
+                    expected_change,
                     expected_limb_change.expr() << 16,
-                    expected_limb_change.expr(),
+                    expected_limb_change,
                 )?;
 
                 Ok(MemWordChange {

@@ -106,7 +106,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
                 let (inflow, is_lt_config) = match I::INST_KIND {
                     InsnKind::SRAI => {
                         let is_rs1_neg = rs1_read.is_negative(circuit_builder)?;
-                        let ones = imm.expr() - 1;
+                        let ones: Expression<E> = imm.expr() - 1;
                         (is_rs1_neg.expr() * ones, Some(is_rs1_neg))
                     }
                     InsnKind::SRLI => (Expression::ZERO, None),
@@ -125,7 +125,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.expr(),
+            imm,
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,

@@ -113,8 +113,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
                 let (inflow, signed_extend_config) = match I::INST_KIND {
                     InsnKind::SRA => {
                         let signed_extend_config = rs1_read.is_negative(circuit_builder)?;
-                        let msb_expr = signed_extend_config.expr();
-                        let ones = pow2_rs2_low5.expr() - Expression::ONE;
+                        let msb_expr = (&signed_extend_config).expr();
+                        let ones = (&pow2_rs2_low5).expr() - 1;
                         (msb_expr * ones, Some(signed_extend_config))
                     }
                     InsnKind::SRL => (Expression::ZERO, None),
