@@ -177,7 +177,7 @@ pub fn setup_platform(
         Preset::Ceno => CENO_PLATFORM,
         Preset::Sp1 => Platform {
             // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
-            stack_top: 0x0020_0400,
+            stack: 0x0020_0400..0x0020_0400,
             ram: 0x0010_0000..0xFFFF_0000,
             unsafe_ecall_nop: true,
             ..CENO_PLATFORM
@@ -185,7 +185,7 @@ pub fn setup_platform(
     };
 
     let prog_data = program.image.keys().copied().collect::<HashSet<Addr>>();
-    let stack = preset.stack_top - stack_size..preset.stack_top;
+    let stack = preset.stack.end - stack_size..preset.stack.end;
     let heap = {
         // Detect heap as starting after program data.
         let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
