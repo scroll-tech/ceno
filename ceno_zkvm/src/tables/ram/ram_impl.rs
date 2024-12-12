@@ -390,8 +390,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
 
         let params = self.params.clone();
-        // TODO: make this more robust
-        let addr_column = 0;
+        let addr_column = self.addr.id as u64;
         let padding_fn = move |row: u64, col: u64| {
             if col == addr_column {
                 DVRAM::addr(&params, row as usize) as u64
