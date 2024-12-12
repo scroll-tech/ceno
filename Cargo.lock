@@ -40,7 +40,6 @@ dependencies = [
 [[package]]
 name = "ceno_emul"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?branch=matthias%2Fceno_host#39280bf5cb5df3f1e821c9072e8f149b08a912e9"
 dependencies = [
  "anyhow",
  "elf 0.7.4",
@@ -55,7 +54,6 @@ dependencies = [
 [[package]]
 name = "ceno_host"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?branch=matthias%2Fceno_host#39280bf5cb5df3f1e821c9072e8f149b08a912e9"
 dependencies = [
  "anyhow",
  "ceno_emul",
