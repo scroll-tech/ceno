@@ -363,16 +363,12 @@ impl InstructionProcessor for InstructionTranspiler {
 }
 
 /// Transpile the [`Instruction`]s from the 32-bit encoded instructions.
-///
-/// # Panics
-///
-/// This function will return an error if the [`Instruction`] cannot be processed.
 #[must_use]
 pub fn transpile(base: u32, instructions_u32: &[u32]) -> Vec<Instruction> {
     let mut instructions = Vec::new();
     for (pc, &word) in izip!(enumerate(base, 4), instructions_u32) {
-        let instruction =
-            process_instruction(&mut InstructionTranspiler { pc, word }, word).unwrap();
+        let instruction = process_instruction(&mut InstructionTranspiler { pc, word }, word)
+            .unwrap_or_else(|| Instruction::unimp(word));
         instructions.push(instruction);
     }
     instructions
