@@ -11,7 +11,7 @@ pub mod arith_imm;
 pub mod branch;
 pub mod config;
 pub mod constants;
-pub mod divu;
+pub mod div;
 pub mod dummy;
 pub mod ecall;
 pub mod jump;
