@@ -198,9 +198,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
 
                 (
-                    rs1_signed.expr(),
-                    rs2_signed.expr(),
-                    rd_signed.expr(),
+                    (&rs1_signed).expr(),
+                    (&rs2_signed).expr(),
+                    (&rd_signed).expr(),
                     MulhSignDependencies::SS {
                         rs1_signed,
                         rs2_signed,
@@ -213,12 +213,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             InsnKind::MULHU => {
                 let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
                 // constrain that rd does not represent 2^32 - 1
-                let rd_avoid = Expression::<E>::from(u32::MAX);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
                     || "constrain_rd",
                     rd_written.value(),
-                    rd_avoid,
+                    u32::MAX,
                 )?;
 
                 (
@@ -231,13 +230,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
             InsnKind::MUL => {
                 // constrain that prod_hi does not represent 2^32 - 1
-                let prod_hi_avoid = Expression::<E>::from(u32::MAX);
                 let prod_hi = UInt::new(|| "prod_hi", circuit_builder)?;
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
                     || "constrain_prod_hi",
                     prod_hi.value(),
-                    prod_hi_avoid,
+                    u32::MAX,
                 )?;
 
                 (
@@ -255,18 +253,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 let prod_low = UInt::new(|| "prod_low", circuit_builder)?;
 
                 // constrain that (signed) rd does not represent 2^31 - 1
-                let rd_avoid = Expression::<E>::from(i32::MAX);
                 let constrain_rd = IsEqualConfig::construct_non_equal(
                     circuit_builder,
                     || "constrain_rd",
-                    rd_signed.expr(),
-                    rd_avoid,
+                    &rd_signed,
+                    i32::MAX,
                 )?;
 
                 (
-                    rs1_signed.expr(),
+                    (&rs1_signed).expr(),
                     rs2_read.value(),
-                    rd_signed.expr(),
+                    (&rd_signed).expr(),
                     MulhSignDependencies::SU {
                         rs1_signed,
                         rd_signed,
@@ -407,6 +404,20 @@ struct Signed<E: ExtensionField> {
     val: Expression<E>,
 }
 
+impl<E: ExtensionField> ToExpr<E> for &Signed<E> {
+    type Output = Expression<E>;
+    fn expr(self) -> Expression<E> {
+        self.val.clone()
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for Signed<E> {
+    type Output = Expression<E>;
+    fn expr(self) -> Expression<E> {
+        self.val
+    }
+}
+
 impl<E: ExtensionField> Signed<E> {
     pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
@@ -435,10 +446,6 @@ impl<E: ExtensionField> Signed<E> {
         let signed_val = val.as_u32() as i32;
 
         Ok(signed_val)
-    }
-
-    pub fn expr(&self) -> Expression<E> {
-        self.val.clone()
     }
 }
 

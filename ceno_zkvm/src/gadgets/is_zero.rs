@@ -129,9 +129,11 @@ impl IsEqualConfig {
     pub fn construct_non_equal<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR>(
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
-        a: Expression<E>,
-        b: Expression<E>,
+        a: impl ToExpr<E, Output = Expression<E>>,
+        b: impl ToExpr<E, Output = Expression<E>>,
     ) -> Result<Self, ZKVMError> {
+        let a = a.expr();
+        let b = b.expr();
         Ok(IsEqualConfig(IsZeroConfig::construct_non_zero(
             cb,
             name_fn,
