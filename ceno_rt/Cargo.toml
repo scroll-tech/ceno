@@ -10,7 +10,6 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-riscv = "0.12"
 rkyv = { version = "0.8", default-features = false, features = [
   "alloc",
   "bytecheck",
