@@ -705,10 +705,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .unwrap_or_default();
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
+        assert_eq!(structural_witnesses.len(), cs.num_structural_witin as usize);
         assert_eq!(fixed.len(), cs.num_fixed);
         // check all witness size are power of 2
         assert!(
             witnesses
+                .iter()
+                .all(|v| { v.evaluations().len().is_power_of_two() })
+        );
+        assert!(
+            structural_witnesses
                 .iter()
                 .all(|v| { v.evaluations().len().is_power_of_two() })
         );
