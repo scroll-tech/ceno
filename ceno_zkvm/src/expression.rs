@@ -591,17 +591,17 @@ macro_rules! mixed_binop_instances {
 mixed_binop_instances!(
     Add,
     add,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, isize)
 );
 mixed_binop_instances!(
     Sub,
     sub,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, isize)
 );
 mixed_binop_instances!(
     Mul,
     mul,
-    (u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize)
+    (u8, u16, u32, u64, usize, i8, i16, i32, i64, isize)
 );
 
 impl<E: ExtensionField> Mul for Expression<E> {
@@ -840,14 +840,6 @@ macro_rules! impl_from_unsigned {
 }
 impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
 
-// Implement From trait for u128 separately since it requires explicit reduction
-impl<F: SmallField, E: ExtensionField<BaseField = F>> From<u128> for Expression<E> {
-    fn from(value: u128) -> Self {
-        let reduced = value.rem_euclid(F::MODULUS_U64 as u128) as u64;
-        Expression::Constant(F::from(reduced))
-    }
-}
-
 // Implement From trait for signed types
 macro_rules! impl_from_signed {
     ($($t:ty),*) => {
@@ -861,7 +853,7 @@ macro_rules! impl_from_signed {
         )*
     };
 }
-impl_from_signed!(i8, i16, i32, i64, i128, isize);
+impl_from_signed!(i8, i16, i32, i64, isize);
 
 impl<E: ExtensionField> Display for Expression<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
