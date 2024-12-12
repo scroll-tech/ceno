@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashSet, ops::Range};
 
 use crate::addr::{Addr, RegIdx};
 
@@ -9,11 +9,14 @@ use crate::addr::{Addr, RegIdx};
 /// - codes of environment calls.
 #[derive(Clone, Debug)]
 pub struct Platform {
-    pub rom: Range<Addr>,
-    pub ram: Range<Addr>,
+    pub rom: Range<Addr>, // TODO: rename.
+    pub ram: Range<Addr>, // TODO: remove.
+    pub prog_data: Option<HashSet<Addr>>,
+    pub stack: Range<Addr>,
+    pub heap: Range<Addr>,
     pub public_io: Range<Addr>,
     pub hints: Range<Addr>,
-    pub stack_top: Addr,
+    pub stack_top: Addr, // TODO: remove.
     /// If true, ecall instructions are no-op instead of trap. Testing only.
     pub unsafe_ecall_nop: bool,
 }
@@ -21,6 +24,9 @@ pub struct Platform {
 pub const CENO_PLATFORM: Platform = Platform {
     rom: 0x2000_0000..0x3000_0000,
     ram: 0x8000_0000..0xFFFF_0000,
+    prog_data: None, // This is an `Option` to allow `const` here.
+    stack: 0xB0000000..0xC0000000,
+    heap: 0x8000_0000..0xFFFF_0000,
     public_io: 0x3000_1000..0x3000_2000,
     hints: 0x4000_0000..0x5000_0000,
     stack_top: 0xC0000000,
@@ -36,6 +42,16 @@ impl Platform {
 
     pub fn is_ram(&self, addr: Addr) -> bool {
         self.ram.contains(&addr)
+            || self.stack.contains(&addr)
+            || self.heap.contains(&addr)
+            || self.is_prog_data(addr)
+    }
+
+    pub fn is_prog_data(&self, addr: Addr) -> bool {
+        self.prog_data
+            .as_ref()
+            .map(|set| set.contains(&addr))
+            .unwrap_or(false)
     }
 
     pub fn is_pub_io(&self, addr: Addr) -> bool {
