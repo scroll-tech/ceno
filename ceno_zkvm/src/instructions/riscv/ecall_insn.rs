@@ -5,20 +5,19 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind::EANY, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
-use std::mem::MaybeUninit;
 
 pub struct EcallInstructionConfig {
     pub pc: WitIn,
     pub ts: WitIn,
     prev_x5_ts: WitIn,
-    lt_x5_cfg: AssertLTConfig,
+    lt_x5_cfg: AssertLtConfig,
 }
 
 impl EcallInstructionConfig {
@@ -68,7 +67,7 @@ impl EcallInstructionConfig {
 
     pub fn assign_instance<E: ExtensionField>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

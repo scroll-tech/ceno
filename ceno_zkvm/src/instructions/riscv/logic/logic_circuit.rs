@@ -1,6 +1,5 @@
 //! The circuit implementation of logic instructions.
 
-use core::mem::MaybeUninit;
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
 
@@ -50,7 +49,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -102,7 +101,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
     fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
