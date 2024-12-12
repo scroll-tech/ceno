@@ -1,14 +1,6 @@
 [env]
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 CORE = { script = ["nproc"] }
-CUR_TARGET = { script = ['''
-        if [ -z "${TARGET}" ]; then
-            TARGET=$(rustc -vV | grep "host" | awk '{print $2}')
-            echo "${TARGET}"
-        else
-            echo "${TARGET}"
-        fi
-        '''] }
 RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.tests]
@@ -20,8 +12,6 @@ args = [
   "--tests",
   "--examples",
   "--release",
-  "--target",
-  "${CUR_TARGET}",
   "--workspace",
   "--exclude",
   "ceno_rt",
@@ -46,8 +36,6 @@ args = [
   "--all-targets",
   "--exclude",
   "ceno_rt",
-  "--target",
-  "${CUR_TARGET}",
   "--",
   "-D",
   "warnings",
