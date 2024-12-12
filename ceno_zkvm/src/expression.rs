@@ -5,7 +5,7 @@ use std::{
     fmt::Display,
     iter::{Product, Sum},
     mem::MaybeUninit,
-    ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Deref, Div, Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign},
 };
 
 use ceno_emul::InsnKind;
@@ -358,6 +358,35 @@ impl<E: ExtensionField> Shl<usize> for &mut Expression<E> {
 impl<E: ExtensionField> ShlAssign<usize> for Expression<E> {
     fn shl_assign(&mut self, rhs: usize) {
         *self = self.clone() << rhs;
+    }
+}
+
+//
+
+impl<E: ExtensionField> Shr<usize> for Expression<E> {
+    type Output = Expression<E>;
+    fn shr(self, rhs: usize) -> Expression<E> {
+        self / (1_usize << rhs)
+    }
+}
+
+impl<E: ExtensionField> Shr<usize> for &Expression<E> {
+    type Output = Expression<E>;
+    fn shr(self, rhs: usize) -> Expression<E> {
+        self.clone() >> rhs
+    }
+}
+
+impl<E: ExtensionField> Shr<usize> for &mut Expression<E> {
+    type Output = Expression<E>;
+    fn shr(self, rhs: usize) -> Expression<E> {
+        self.clone() >> rhs
+    }
+}
+
+impl<E: ExtensionField> ShrAssign<usize> for Expression<E> {
+    fn shr_assign(&mut self, rhs: usize) {
+        *self = self.clone() >> rhs;
     }
 }
 
@@ -729,6 +758,33 @@ impl<E: ExtensionField> Mul for Expression<E> {
         }
     }
 }
+
+
+macro_rules! div_instances {
+    (($($t:ty),*)) => {
+        $(
+
+        impl<E: ExtensionField> Div<$t> for Expression<E> {
+            type Output = Expression<E>;
+            #[allow(clippy::suspicious_arithmetic_impl)]
+            fn div(self, rhs: $t) -> Expression<E> {
+                let reduced = (rhs as i128).rem_euclid(E::BaseField::MODULUS_U64 as i128) as u64;
+                self * E::BaseField::from(reduced).invert().unwrap().to_canonical_u64()
+            }
+        }
+
+        impl<E: ExtensionField> Div<$t> for &Expression<E> {
+            type Output = Expression<E>;
+            #[allow(clippy::suspicious_arithmetic_impl)]
+            fn div(self, rhs: $t) -> Expression<E> {
+                let reduced = (rhs as i128).rem_euclid(E::BaseField::MODULUS_U64 as i128) as u64;
+                self * E::BaseField::from(reduced).invert().unwrap().to_canonical_u64()
+            }
+        }
+    )*
+    };
+}
+div_instances!((u8, u16, u32, u64, usize, i8, i16, i32, i64, isize));
 
 #[derive(Clone, Debug, Copy)]
 pub struct WitIn {

@@ -8,7 +8,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
-use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::izip;
 use std::mem::MaybeUninit;
@@ -77,10 +76,9 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
 
                 // extract the least significant byte from u16 limb
                 let rs2_limb_bytes = alloc_bytes(cb, "rs2_limb[0]", 1)?;
-                let u8_base_inv = E::BaseField::from(1 << 8).invert().unwrap();
                 cb.assert_ux::<_, _, 8>(
                     || "rs2_limb[0].le_bytes[1]",
-                    Expression::Constant(u8_base_inv) * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
+                    (&rs2_limbs[0] - rs2_limb_bytes[0].expr()) >> 8,
                 )?;
 
                 // alloc a new witIn to cache degree 2 expression
