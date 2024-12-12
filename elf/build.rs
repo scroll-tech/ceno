@@ -31,10 +31,10 @@ fn build_elfs() {
     writeln!(
         dest,
         r#"pub const ELF: &[u8] =
-            include_bytes!(r"{CARGO_MANIFEST_DIR}/../guest/target/riscv32im-unknown-none-elf/release/guest");"#
+            include_bytes!(r"{CARGO_MANIFEST_DIR}/../guest/target/my-target/release/guest");"#
     ).expect("failed to write vars.rs");
     let input_path = "../guest/";
-    let elfs_path = "../guest/target/riscv32im-unknown-none-elf/release/";
+    let elfs_path = "../guest/target/my-target/release/";
 
     println!("cargo:rerun-if-changed={input_path}");
     println!("cargo:rerun-if-changed={elfs_path}");
