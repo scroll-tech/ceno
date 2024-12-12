@@ -10,6 +10,7 @@ use crate::{
     set_val,
 };
 
+#[derive(Clone, Copy, Debug)]
 pub struct IsZeroConfig {
     is_zero: Option<WitIn>,
     inverse: WitIn,
@@ -94,6 +95,7 @@ impl IsZeroConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct IsEqualConfig(IsZeroConfig);
 
 impl<E: ExtensionField> ToExpr<E> for IsEqualConfig {
