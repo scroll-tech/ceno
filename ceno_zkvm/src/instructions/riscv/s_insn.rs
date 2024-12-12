@@ -44,9 +44,8 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
-            (insn_kind.codes().opcode as usize).into(),
-            0.into(),
-            (insn_kind.codes().func3 as usize).into(),
+            insn_kind.into(),
+            None,
             rs1.id.expr(),
             rs2.id.expr(),
             imm.clone(),
@@ -71,7 +70,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

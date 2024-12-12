@@ -29,7 +29,7 @@ use super::{
 };
 
 pub fn prover_query_phase<E: ExtensionField>(
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
     trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
@@ -65,7 +65,7 @@ where
 }
 
 pub fn batch_prover_query_phase<E: ExtensionField>(
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     codeword_size: usize,
     comms: &[BasefoldCommitmentWithData<E>],
     trees: &[MerkleTree<E>],
@@ -102,7 +102,7 @@ where
 }
 
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
-    transcript: &mut Transcript<E>,
+    transcript: &mut impl Transcript<E>,
     comm: &BasefoldCommitmentWithData<E>,
     trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
@@ -1065,7 +1065,7 @@ where
                 curr_right += query.right_ext() * coeffs[*index];
             });
 
-            let (x0, x1, w) = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
+            let (x0, x1, w) = Spec::EncodingScheme::verifier_folding_coeffs(
                 vp,
                 num_vars + Spec::get_rate_log() - i - 1,
                 left_index >> 1,

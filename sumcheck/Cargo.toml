@@ -1,7 +1,12 @@
 [package]
+categories.workspace = true
+description = "Sumcheck protocol implementation"
 edition.workspace = true
+keywords.workspace = true
 license.workspace = true
 name = "sumcheck"
+readme.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]
@@ -24,6 +29,3 @@ criterion.workspace = true
 [[bench]]
 harness = false
 name = "devirgo_sumcheck"
-
-[features]
-non_pow2_rayon_thread = []

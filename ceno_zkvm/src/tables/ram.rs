@@ -1,57 +1,113 @@
-use ceno_emul::{Addr, CENO_PLATFORM, WORD_SIZE, Word};
-use ram_circuit::RamTableCircuit;
+use ceno_emul::{Addr, VMState};
+use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamCircuit};
 
-use crate::{instructions::riscv::constants::UINT_LIMBS, structs::RAMType};
+use crate::{
+    instructions::riscv::constants::UINT_LIMBS,
+    structs::{ProgramParams, RAMType},
+};
 
 mod ram_circuit;
 mod ram_impl;
-use ram_circuit::RamTable;
-pub use ram_circuit::{MemFinalRecord, MemInitRecord};
+pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
 #[derive(Clone)]
-pub struct MemTable;
+pub struct DynMemTable;
 
-impl RamTable for MemTable {
+impl DynVolatileRamTable for DynMemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const ZERO_INIT: bool = true;
 
-    fn len() -> usize {
-        // TODO figure out better way to define memory entry count
-        1 << 10
+    fn offset_addr(params: &ProgramParams) -> Addr {
+        params.platform.ram.start
     }
 
-    fn addr(entry_index: usize) -> Addr {
-        CENO_PLATFORM.ram_start() + (entry_index * WORD_SIZE) as Addr
+    fn end_addr(params: &ProgramParams) -> Addr {
+        params.platform.ram.end
+    }
+
+    fn name() -> &'static str {
+        "DynMemTable"
     }
 }
-pub type MemTableCircuit<E> = RamTableCircuit<E, MemTable>;
 
+pub type DynMemCircuit<E> = DynVolatileRamCircuit<E, DynMemTable>;
+
+#[derive(Clone)]
+pub struct HintsTable;
+impl DynVolatileRamTable for HintsTable {
+    const RAM_TYPE: RAMType = RAMType::Memory;
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const ZERO_INIT: bool = false;
+
+    fn offset_addr(params: &ProgramParams) -> Addr {
+        params.platform.hints.start
+    }
+
+    fn end_addr(params: &ProgramParams) -> Addr {
+        params.platform.hints.end
+    }
+
+    fn name() -> &'static str {
+        "HintsTable"
+    }
+}
+pub type HintsCircuit<E> = DynVolatileRamCircuit<E, HintsTable>;
+
+/// RegTable, fix size without offset
 #[derive(Clone)]
 pub struct RegTable;
 
-impl RamTable for RegTable {
+impl NonVolatileTable for RegTable {
     const RAM_TYPE: RAMType = RAMType::Register;
     const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
+    const WRITABLE: bool = true;
 
-    fn len() -> usize {
-        32 // register size 32
+    fn name() -> &'static str {
+        "RegTable"
     }
 
-    fn addr(entry_index: usize) -> Addr {
-        entry_index as Addr
+    fn len(_params: &ProgramParams) -> usize {
+        VMState::REG_COUNT.next_power_of_two()
     }
 }
 
-pub type RegTableCircuit<E> = RamTableCircuit<E, RegTable>;
+pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
 
-pub fn initial_registers() -> Vec<MemInitRecord> {
-    RegTable::init_state()
-}
+#[derive(Clone)]
+pub struct StaticMemTable;
 
-pub fn initial_memory(ram_content: &[Word]) -> Vec<MemInitRecord> {
-    let mut mem_init = MemTable::init_state();
-    for (i, value) in ram_content.iter().enumerate() {
-        mem_init[i].value = *value;
+impl NonVolatileTable for StaticMemTable {
+    const RAM_TYPE: RAMType = RAMType::Memory;
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const WRITABLE: bool = true;
+
+    fn len(params: &ProgramParams) -> usize {
+        params.static_memory_len
     }
-    mem_init
+
+    fn name() -> &'static str {
+        "StaticMemTable"
+    }
 }
+
+pub type StaticMemCircuit<E> = NonVolatileRamCircuit<E, StaticMemTable>;
+
+#[derive(Clone)]
+pub struct PubIOTable;
+
+impl NonVolatileTable for PubIOTable {
+    const RAM_TYPE: RAMType = RAMType::Memory;
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const WRITABLE: bool = false;
+
+    fn len(params: &ProgramParams) -> usize {
+        params.pub_io_len
+    }
+
+    fn name() -> &'static str {
+        "PubIOTable"
+    }
+}
+
+pub type PubIOCircuit<E> = PubIORamCircuit<E, PubIOTable>;

@@ -1,20 +1,17 @@
-#[macro_export]
-macro_rules! entered_span {
-    ($first:expr $(,)*) => {
-        $crate::tracing_span!($first).entered()
-    };
+use tracing::span;
+
+pub macro entered_span {
+    ($first:expr $(, $($fields:tt)*)?) => {
+        tracing_span!($first, $($($fields)*)?).entered()
+    }
 }
 
-#[macro_export]
-macro_rules! tracing_span {
-    ($first:expr $(,)*) => {
-        tracing::span!(tracing::Level::DEBUG, $first)
-    };
+pub macro tracing_span {
+    ($first:expr $(, $($fields:tt)*)?) => {
+        span!(tracing::Level::TRACE, $first, $($($fields)*)?)
+    },
 }
 
-#[macro_export]
-macro_rules! exit_span {
-    ($first:expr $(,)*) => {
-        $first.exit();
-    };
+pub macro exit_span($first:expr $(,)*) {
+    $first.exit();
 }

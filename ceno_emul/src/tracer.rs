@@ -1,8 +1,9 @@
 use std::{collections::HashMap, fmt, mem};
 
 use crate::{
-    CENO_PLATFORM, PC_STEP_SIZE,
+    CENO_PLATFORM, InsnKind, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
+    encode_rv32,
     rv32im::DecodedInstruction,
 };
 
@@ -34,7 +35,7 @@ pub struct StepRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MemOp<T> {
     /// Virtual Memory Address.
-    /// For registers, get it from `CENO_PLATFORM.register_vma(idx)`.
+    /// For registers, get it from `Platform::register_vma(idx)`.
     pub addr: WordAddr,
     /// The Word read, or the Change<Word> to be written.
     pub value: T,
@@ -45,7 +46,7 @@ pub struct MemOp<T> {
 impl<T> MemOp<T> {
     /// Get the register index of this operation.
     pub fn register_index(&self) -> RegIdx {
-        CENO_PLATFORM.register_index(self.addr.into())
+        Platform::register_index(self.addr.into())
     }
 }
 
@@ -187,6 +188,28 @@ impl StepRecord {
         )
     }
 
+    /// Create a test record for an ECALL instruction that can do anything.
+    pub fn new_ecall_any(cycle: Cycle, pc: ByteAddr) -> StepRecord {
+        let value = 1234;
+        Self::new_insn(
+            cycle,
+            Change::new(pc, pc + PC_STEP_SIZE),
+            encode_rv32(InsnKind::EANY, 0, 0, 0, 0),
+            Some(value),
+            Some(value),
+            Some(Change::new(value, value)),
+            Some(WriteOp {
+                addr: CENO_PLATFORM.ram.start.into(),
+                value: Change {
+                    before: value,
+                    after: value,
+                },
+                previous_cycle: 0,
+            }),
+            0,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn new_insn(
         cycle: Cycle,
@@ -204,17 +227,17 @@ impl StepRecord {
             pc,
             insn_code,
             rs1: rs1_read.map(|rs1| ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs1() as RegIdx).into(),
+                addr: Platform::register_vma(insn.rs1() as RegIdx).into(),
                 value: rs1,
                 previous_cycle,
             }),
             rs2: rs2_read.map(|rs2| ReadOp {
-                addr: CENO_PLATFORM.register_vma(insn.rs2() as RegIdx).into(),
+                addr: Platform::register_vma(insn.rs2() as RegIdx).into(),
                 value: rs2,
                 previous_cycle,
             }),
             rd: rd.map(|rd| WriteOp {
-                addr: CENO_PLATFORM.register_vma(insn.rd() as RegIdx).into(),
+                addr: Platform::register_vma(insn.rd_internal() as RegIdx).into(),
                 value: rd,
                 previous_cycle,
             }),
@@ -304,13 +327,16 @@ impl Tracer {
         self.record.pc.after = pc;
     }
 
+    // TODO(Matthias): this should perhaps record `DecodedInstruction`s instead
+    // of raw codes, or perhaps only the pc, because we can always look up the
+    // instruction in the program.
     pub fn fetch(&mut self, pc: WordAddr, value: Word) {
         self.record.pc.before = pc.baddr();
         self.record.insn_code = value;
     }
 
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
-        let addr = CENO_PLATFORM.register_vma(idx).into();
+        let addr = Platform::register_vma(idx).into();
 
         match (&self.record.rs1, &self.record.rs2) {
             (None, None) => {
@@ -336,7 +362,7 @@ impl Tracer {
             unimplemented!("Only one register write is supported");
         }
 
-        let addr = CENO_PLATFORM.register_vma(idx).into();
+        let addr = Platform::register_vma(idx).into();
         self.record.rd = Some(WriteOp {
             addr,
             value,

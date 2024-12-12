@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    witness::LkMultiplicity,
+    tables::InsnRecord, witness::LkMultiplicity,
 };
 
 use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
@@ -57,12 +57,15 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        let imm = Value::new(step.insn().imm_or_funct7(), lk_multiplicity);
+        let imm = Value::new(
+            InsnRecord::imm_internal(&step.insn()) as u32,
+            lk_multiplicity,
+        );
 
         let result = rs1_read.add(&imm, lk_multiplicity, true);
 

@@ -16,7 +16,7 @@ use multilinear_extensions::{
     util::max_usable_threads,
     virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2 as VirtualPolynomial},
 };
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 
 criterion_group!(benches, sumcheck_fn, devirgo_sumcheck_fn,);
 criterion_main!(benches);
@@ -103,7 +103,7 @@ fn prepare_input<'a, E: ExtensionField>(
 fn sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
-    for nv in NV.into_iter() {
+    for nv in NV {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("sumcheck_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);
@@ -148,7 +148,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
 
     let threads = max_usable_threads();
-    for nv in NV.into_iter() {
+    for nv in NV {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("devirgo_nv_{}", nv));
         group.sample_size(NUM_SAMPLES);

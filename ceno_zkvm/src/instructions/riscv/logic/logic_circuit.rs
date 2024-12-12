@@ -50,7 +50,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -102,7 +102,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
     fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

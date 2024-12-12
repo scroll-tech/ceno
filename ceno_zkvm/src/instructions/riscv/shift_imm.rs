@@ -4,12 +4,13 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, IsLtConfig},
+    gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
     set_val,
+    tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
@@ -23,10 +24,10 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
     rd_written: UInt<E>,
     outflow: WitIn,
-    assert_lt_config: AssertLTConfig,
+    assert_lt_config: AssertLtConfig,
 
     // SRAI
-    is_lt_config: Option<IsLtConfig>,
+    is_lt_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -35,16 +36,19 @@ pub struct SlliOp;
 impl RIVInstruction for SlliOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLLI;
 }
+pub type SlliInstruction<E> = ShiftImmInstruction<E, SlliOp>;
 
 pub struct SraiOp;
 impl RIVInstruction for SraiOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SRAI;
 }
+pub type SraiInstruction<E> = ShiftImmInstruction<E, SraiOp>;
 
 pub struct SrliOp;
 impl RIVInstruction for SrliOp {
     const INST_KIND: ceno_emul::InsnKind = InsnKind::SRLI;
 }
+pub type SrliInstruction<E> = ShiftImmInstruction<E, SrliOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
@@ -56,13 +60,30 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
+        // treat bit shifting as a bit "inflow" and "outflow" process, flowing from left to right or vice versa
+        // this approach simplifies constraint and witness allocation compared to using multiplication/division gadget,
+        // as the divisor/multiplier is a power of 2.
+        //
+        // example: right shift (bit flow from left to right)
+        //    inflow || rs1_read == rd_written || outflow
+        // in this case, inflow consists of either all 0s or all 1s for sign extension (if the value is signed).
+        //
+        // for left shifts, the inflow is always 0:
+        //    rs1_read || inflow == outflow || rd_written
+        //
+        // additional constraint: outflow < (1 << shift), which lead to unique solution
+
+        // soundness: take Goldilocks as example, both sides of the equation are 63 bits numbers (<2**63)
+        // rd * imm + outflow == inflow * 2**32 + rs1
+        // 32 + 31.   31.        31 + 32.         32.     (Bit widths)
+
         // Note: `imm` wtns is set to 2**imm (upto 32 bit) just for efficient verification.
-        let imm = circuit_builder.create_witin(|| "imm")?;
+        let imm = circuit_builder.create_witin(|| "imm");
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
-        let outflow = circuit_builder.create_witin(|| "outflow")?;
-        let assert_lt_config = AssertLTConfig::construct_circuit(
+        let outflow = circuit_builder.create_witin(|| "outflow");
+        let assert_lt_config = AssertLtConfig::construct_circuit(
             circuit_builder,
             || "outflow < imm",
             outflow.expr(),
@@ -84,18 +105,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             InsnKind::SRAI | InsnKind::SRLI => {
                 let (inflow, is_lt_config) = match I::INST_KIND {
                     InsnKind::SRAI => {
-                        let max_signed_limb_expr: Expression<_> =
-                            ((1 << (UInt::<E>::LIMB_BITS - 1)) - 1).into();
-                        let is_rs1_neg = IsLtConfig::construct_circuit(
-                            circuit_builder,
-                            || "lhs_msb",
-                            max_signed_limb_expr,
-                            rs1_read.limbs.iter().last().unwrap().expr(), // msb limb
-                            1,
-                        )?;
-                        let msb_expr: Expression<E> = is_rs1_neg.is_lt.expr();
-                        let ones = imm.expr() - Expression::ONE;
-                        (msb_expr * ones, Some(is_rs1_neg))
+                        let is_rs1_neg = rs1_read.is_negative(circuit_builder)?;
+                        let ones = imm.expr() - 1;
+                        (is_rs1_neg.expr() * ones, Some(is_rs1_neg))
                     }
                     InsnKind::SRLI => (Expression::ZERO, None),
                     _ => unreachable!(),
@@ -132,32 +144,31 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<<E as ExtensionField>::BaseField>],
+        instance: &mut [MaybeUninit<E::BaseField>],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let imm = step.insn().imm_or_funct7();
+        // imm_internal is a precomputed 2**shift.
+        let imm = InsnRecord::imm_internal(&step.insn()) as u64;
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
 
-        set_val!(instance, config.imm, imm as u64);
+        set_val!(instance, config.imm, imm);
         config.rs1_read.assign_value(instance, rs1_read.clone());
         config.rd_written.assign_value(instance, rd_written);
 
         let outflow = match I::INST_KIND {
-            InsnKind::SLLI => (rs1_read.as_u64() * imm as u64) >> UInt::<E>::TOTAL_BITS,
+            InsnKind::SLLI => (rs1_read.as_u64() * imm) >> UInt::<E>::TOTAL_BITS,
             InsnKind::SRAI | InsnKind::SRLI => {
                 if I::INST_KIND == InsnKind::SRAI {
-                    let max_signed_limb_expr = (1 << (UInt::<E>::LIMB_BITS - 1)) - 1;
                     config.is_lt_config.as_ref().unwrap().assign_instance(
                         instance,
                         lk_multiplicity,
-                        max_signed_limb_expr,
-                        rs1_read.as_u64() >> UInt::<E>::LIMB_BITS,
+                        *rs1_read.as_u16_limbs().last().unwrap() as u64,
                     )?;
                 }
 
-                rs1_read.as_u64() & (imm as u64 - 1)
+                rs1_read.as_u64() & (imm - 1)
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
@@ -165,7 +176,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         set_val!(instance, config.outflow, outflow);
         config
             .assert_lt_config
-            .assign_instance(instance, lk_multiplicity, outflow, imm as u64)?;
+            .assign_instance(instance, lk_multiplicity, outflow, imm)?;
 
         config
             .i_insn

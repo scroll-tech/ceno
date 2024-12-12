@@ -1,3 +1,5 @@
+use ceno_emul::Addr;
+use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
@@ -9,12 +11,12 @@ use crate::{
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, WitIn},
-    structs::{ProvingKey, VerifyingKey, WitnessId},
+    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
 
 /// namespace used for annotation, preserve meta info during circuit construction
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct NameSpace {
     namespace: Vec<String>,
 }
@@ -58,16 +60,40 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub table_len: usize,
 }
 
+// TODO encapsulate few information of table spec to SetTableAddrType value
+// once confirm syntax is friendly and parsed by recursive verifier
+#[derive(Clone, Debug)]
+pub enum SetTableAddrType {
+    FixedAddr,
+    DynamicAddr(DynamicAddr),
+}
+
+#[derive(Clone, Debug)]
+pub struct DynamicAddr {
+    pub addr_witin_id: usize,
+    pub offset: Addr,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTableSpec {
+    pub addr_type: SetTableAddrType,
+    pub len: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
-    pub values: Expression<E>,
-    pub table_len: usize,
+    pub expr: Expression<E>,
+
+    // TODO make decision to have enum/struct
+    // for which option is more friendly to be processed by ConstrainSystem + recursive verifier
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
+    // pub platform: Platform,
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
 
@@ -78,9 +104,15 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
+    // for each read expression we store its ram type and original value before doing RLC
+    // the original value will be used for debugging
+    pub r_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
 
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
+    // for each write expression we store its ram type and original value before doing RLC
+    // the original value will be used for debugging
+    pub w_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
 
     /// init/final ram expression
     pub r_table_expressions: Vec<SetTableExpression<E>>,
@@ -109,9 +141,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
-    #[cfg(test)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
-    #[cfg(test)]
     pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
@@ -121,6 +151,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(root_name_fn: N) -> Self {
         Self {
             num_witin: 0,
+            // platform,
             witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
@@ -128,8 +159,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             instance_name_map: HashMap::new(),
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
+            r_ram_types: vec![],
             w_expressions: vec![],
             w_expressions_namespace_map: vec![],
+            w_ram_types: vec![],
             r_table_expressions: vec![],
             r_table_expressions_namespace_map: vec![],
             w_table_expressions: vec![],
@@ -146,9 +179,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
-            #[cfg(test)]
             debug_map: HashMap::new(),
-            #[cfg(test)]
             lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
@@ -178,14 +209,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(
-        &mut self,
-        n: N,
-    ) -> Result<WitIn, ZKVMError> {
+    pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> WitIn {
         let wit_in = WitIn {
             id: {
                 let id = self.num_witin;
-                self.num_witin += 1;
+                self.num_witin = self.num_witin.strict_add(1);
                 id
             },
         };
@@ -193,7 +221,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);
 
-        Ok(wit_in)
+        wit_in
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(
@@ -234,16 +262,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         rom_type: ROMType,
-        items: Vec<Expression<E>>,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
             std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
-                .chain(
-                    #[cfg(test)]
-                    items.clone(),
-                    #[cfg(not(test))]
-                    items,
-                )
+                .chain(record.clone())
                 .collect(),
         );
         assert_eq!(
@@ -255,8 +278,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
-        #[cfg(test)]
-        self.lk_expressions_items_map.push((rom_type, items));
+        // Since lk_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.lk_expressions_items_map.push((rom_type, record));
         Ok(())
     }
 
@@ -264,13 +288,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         table_len: usize,
-        rlc_record: Expression<E>,
+        rom_type: ROMType,
+        record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let rlc_record = self.rlc_chip_record(
+            vec![(rom_type as usize).into()]
+                .into_iter()
+                .chain(record.clone())
+                .collect_vec(),
+        );
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -284,6 +315,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         });
         let path = self.ns.compute_path(name_fn().into());
         self.lk_table_expressions_namespace_map.push(path);
+        // Since lk_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.lk_expressions_items_map.push((rom_type, record));
 
         Ok(())
     }
@@ -291,13 +325,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn r_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -305,11 +341,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             rlc_record.degree()
         );
         self.r_table_expressions.push(SetTableExpression {
-            values: rlc_record,
-            table_len,
+            expr: rlc_record,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.r_table_expressions_namespace_map.push(path);
+        self.r_ram_types.push((ram_type, record));
 
         Ok(())
     }
@@ -317,13 +354,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -331,11 +370,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             rlc_record.degree()
         );
         self.w_table_expressions.push(SetTableExpression {
-            values: rlc_record,
-            table_len,
+            expr: rlc_record,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.w_table_expressions_namespace_map.push(path);
+        self.w_ram_types.push((ram_type, record));
 
         Ok(())
     }
@@ -343,8 +383,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn read_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -354,14 +396,19 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
+        // Since r_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.r_ram_types.push((ram_type, record));
         Ok(())
     }
 
     pub fn write_record<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
-        rlc_record: Expression<E>,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
+        let rlc_record = self.rlc_chip_record(record.clone());
         assert_eq!(
             rlc_record.degree(),
             1,
@@ -371,6 +418,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
+        self.w_ram_types.push((ram_type, record));
         Ok(())
     }
 
@@ -407,8 +455,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn namespace<NR: Into<String>, N: FnOnce() -> NR, T>(
         &mut self,
         name_fn: N,
-        cb: impl FnOnce(&mut ConstraintSystem<E>) -> Result<T, ZKVMError>,
-    ) -> Result<T, ZKVMError> {
+        cb: impl FnOnce(&mut ConstraintSystem<E>) -> T,
+    ) -> T {
         self.ns.push_namespace(name_fn().into());
         let t = cb(self);
         self.ns.pop_namespace();
@@ -435,4 +483,5 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 #[derive(Debug)]
 pub struct CircuitBuilder<'a, E: ExtensionField> {
     pub(crate) cs: &'a mut ConstraintSystem<E>,
+    pub params: ProgramParams,
 }

@@ -1,0 +1,8 @@
+name: ceno
+services:
+  runner:
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env

@@ -29,23 +29,13 @@ args = [
 command = "cargo"
 workspace = false
 
-[tasks.fmt-all-check]
-args = ["fmt", "--all", "--", "--check"]
-command = "cargo"
-workspace = false
-
-[tasks.fmt-all]
-args = ["fmt", "--all"]
-command = "cargo"
-workspace = false
-
 [tasks.clippy-all]
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
 command = "cargo"
 workspace = false
 
-[tasks.fmt]
-args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
+[tasks.riscv_stats]
+args = ["run", "--bin", "riscv_stats"]
 command = "cargo"
 workspace = false
 

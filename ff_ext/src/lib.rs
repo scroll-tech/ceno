@@ -1,3 +1,4 @@
+#![deny(clippy::cargo)]
 pub use ff;
 use ff::FromUniformBytes;
 use goldilocks::SmallField;
@@ -21,10 +22,12 @@ pub trait ExtensionField:
     + for<'a> AddAssign<&'a Self::BaseField>
     + for<'a> SubAssign<&'a Self::BaseField>
     + for<'a> MulAssign<&'a Self::BaseField>
+    + Ord
+    + std::hash::Hash
 {
     const DEGREE: usize;
 
-    type BaseField: SmallField + FromUniformBytes<64> + Poseidon;
+    type BaseField: SmallField + FromUniformBytes<64> + Poseidon + Ord;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 

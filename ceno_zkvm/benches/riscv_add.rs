@@ -15,13 +15,13 @@ use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
     criterion_group! {
       name = op_add;
-      config = Criterion::default().warm_up_time(Duration::from_millis(3000)).with_profiler(pprof::criterion::PProfProfiler::new(100, pprof::criterion::Output::Flamegraph(None)));
+      config = Criterion::default().warm_up_time(Duration::from_millis(3000)).with_profiler(pprof2::criterion::PProfProfiler::new(100, pprof2::criterion::Output::Flamegraph(None)));
       targets = bench_add
     }
   } else {
@@ -45,7 +45,7 @@ fn bench_add(c: &mut Criterion) {
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
 
     let param = Pcs::setup(1 << MAX_NUM_VARIABLES).unwrap();
-    let (pp, vp) = Pcs::trim(&param, 1 << MAX_NUM_VARIABLES).unwrap();
+    let (pp, vp) = Pcs::trim(param, 1 << MAX_NUM_VARIABLES).unwrap();
 
     let pk = zkvm_cs
         .clone()
@@ -87,7 +87,7 @@ fn bench_add(c: &mut Criterion) {
                     |wits_in| {
                         let timer = Instant::now();
                         let num_instances = 1 << instance_num_vars;
-                        let mut transcript = Transcript::new(b"riscv");
+                        let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
                             Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
                                 .unwrap();

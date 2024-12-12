@@ -5,12 +5,12 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     set_val,
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, InsnKind::EANY, PC_STEP_SIZE, StepRecord, Tracer};
+use ceno_emul::{InsnKind::EANY, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use std::mem::MaybeUninit;
 
@@ -18,7 +18,7 @@ pub struct EcallInstructionConfig {
     pub pc: WitIn,
     pub ts: WitIn,
     prev_x5_ts: WitIn,
-    lt_x5_cfg: AssertLTConfig,
+    lt_x5_cfg: AssertLtConfig,
 }
 
 impl EcallInstructionConfig {
@@ -28,8 +28,8 @@ impl EcallInstructionConfig {
         syscall_ret_value: Option<RegisterExpr<E>>,
         next_pc: Option<Expression<E>>,
     ) -> Result<Self, ZKVMError> {
-        let pc = cb.create_witin(|| "pc")?;
-        let ts = cb.create_witin(|| "cur_ts")?;
+        let pc = cb.create_witin(|| "pc");
+        let ts = cb.create_witin(|| "cur_ts");
 
         cb.state_in(pc.expr(), ts.expr())?;
         cb.state_out(
@@ -39,20 +39,19 @@ impl EcallInstructionConfig {
 
         cb.lk_fetch(&InsnRecord::new(
             pc.expr(),
-            (EANY.codes().opcode as usize).into(),
-            0.into(),
-            (EANY.codes().func3 as usize).into(),
+            EANY.into(),
+            None,
             0.into(),
             0.into(),
             0.into(), // imm = 0
         ))?;
 
-        let prev_x5_ts = cb.create_witin(|| "prev_x5_ts")?;
+        let prev_x5_ts = cb.create_witin(|| "prev_x5_ts");
 
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(
             || "write x5",
-            E::BaseField::from(CENO_PLATFORM.reg_ecall() as u64),
+            E::BaseField::from(Platform::reg_ecall() as u64),
             prev_x5_ts.expr(),
             ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),

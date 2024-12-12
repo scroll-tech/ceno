@@ -16,16 +16,16 @@ use crate::{
 };
 use ceno_emul::{InsnKind, SWord};
 
-pub struct BltCircuit<I>(PhantomData<I>);
+pub struct BltCircuit<E, I>(PhantomData<(E, I)>);
 
 pub struct InstructionConfig<E: ExtensionField> {
     pub b_insn: BInstructionConfig<E>,
     pub read_rs1: UInt<E>,
     pub read_rs2: UInt<E>,
-    pub signed_lt: SignedLtConfig,
+    pub signed_lt: SignedLtConfig<E>,
 }
 
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<E, I> {
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
@@ -74,7 +74,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltCircuit<I> {
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         config.read_rs1.assign_limbs(instance, rs1.as_u16_limbs());
         config.read_rs2.assign_limbs(instance, rs2.as_u16_limbs());
-        config.signed_lt.assign_instance::<E>(
+        config.signed_lt.assign_instance(
             instance,
             lk_multiplicity,
             step.rs1().unwrap().value as SWord,

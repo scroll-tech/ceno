@@ -1,7 +1,7 @@
 use ark_std::test_rng;
 use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
+use goldilocks::{Goldilocks, GoldilocksExt2};
 
 type E = GoldilocksExt2;
 
@@ -41,7 +41,7 @@ fn test_virtual_polynomial_mul_by_mle() {
             let (a, _a_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
             let (b, _b_sum) = DenseMultilinearExtension::<E>::random_mle_list(nv, 1, &mut rng);
             let b_mle = b[0].clone();
-            let coeff = <E as ExtensionField>::BaseField::random(&mut rng);
+            let coeff = Goldilocks::random(&mut rng);
             let b_vp = VirtualPolynomial::new_from_mle(b_mle.clone(), coeff);
 
             let mut c = a.clone();
@@ -71,14 +71,14 @@ fn test_eq_xr() {
 fn test_fix_high_variables() {
     let poly: DenseMultilinearExtension<E> =
         DenseMultilinearExtension::from_evaluations_vec(3, vec![
-            <E as ExtensionField>::BaseField::from(13),
-            <E as ExtensionField>::BaseField::from(97),
-            <E as ExtensionField>::BaseField::from(11),
-            <E as ExtensionField>::BaseField::from(101),
-            <E as ExtensionField>::BaseField::from(7),
-            <E as ExtensionField>::BaseField::from(103),
-            <E as ExtensionField>::BaseField::from(5),
-            <E as ExtensionField>::BaseField::from(107),
+            Goldilocks::from(13),
+            Goldilocks::from(97),
+            Goldilocks::from(11),
+            Goldilocks::from(101),
+            Goldilocks::from(7),
+            Goldilocks::from(103),
+            Goldilocks::from(5),
+            Goldilocks::from(107),
         ]);
 
     let partial_point = vec![E::from(3), E::from(5)];

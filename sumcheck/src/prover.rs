@@ -12,11 +12,8 @@ use rayon::{
 };
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
-#[cfg(feature = "non_pow2_rayon_thread")]
-use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
-
 use crate::{
-    entered_span, exit_span,
+    macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverState},
     util::{
         AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
@@ -33,7 +30,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     pub fn prove_batch_polys(
         max_thread_id: usize,
         mut polys: Vec<VirtualPolynomial<E>>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverState<E>) {
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
@@ -119,25 +116,11 @@ impl<E: ExtensionField> IOPProverState<E> {
             if rayon::current_num_threads() >= max_thread_id {
                 rayon::spawn(spawn_task);
             } else {
-                #[cfg(not(feature = "non_pow2_rayon_thread"))]
-                {
-                    panic!(
-                        "rayon global thread pool size {} mismatch with desired poly size {}, add --features non_pow2_rayon_thread",
-                        rayon::current_num_threads(),
-                        polys.len()
-                    );
-                }
-
-                #[cfg(feature = "non_pow2_rayon_thread")]
-                unsafe {
-                    create_local_pool_once(max_thread_id, true);
-
-                    if let Some(pool) = LOCAL_THREAD_POOL.as_ref() {
-                        pool.spawn(spawn_task)
-                    } else {
-                        panic!("empty local pool")
-                    }
-                }
+                panic!(
+                    "rayon global thread pool size {} mismatch with desired poly size {}.",
+                    rayon::current_num_threads(),
+                    polys.len()
+                );
             }
         }
 
@@ -476,7 +459,7 @@ impl<E: ExtensionField> IOPProverState<E> {
     #[tracing::instrument(skip_all, name = "sumcheck::prove_parallel")]
     pub fn prove_parallel(
         poly: VirtualPolynomial<E>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverState<E>) {
         let (num_variables, max_degree) = (poly.aux_info.num_variables, poly.aux_info.max_degree);
 

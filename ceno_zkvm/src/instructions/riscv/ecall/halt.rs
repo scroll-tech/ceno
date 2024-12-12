@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     instructions::{
         Instruction,
         riscv::{
@@ -21,7 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit};
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
-    lt_x10_cfg: AssertLTConfig,
+    lt_x10_cfg: AssertLtConfig,
 }
 
 pub struct HaltInstruction<E>(PhantomData<E>);
@@ -34,7 +34,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
-        let prev_x10_ts = cb.create_witin(|| "prev_x10_ts")?;
+        let prev_x10_ts = cb.create_witin(|| "prev_x10_ts");
         let exit_code = {
             let exit_code = cb.query_exit_code()?;
             [exit_code[0].expr(), exit_code[1].expr()]
@@ -50,7 +50,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         // read exit_code from arg0 (X10 register)
         let (_, lt_x10_cfg) = cb.register_read(
             || "read x10",
-            E::BaseField::from(ceno_emul::CENO_PLATFORM.reg_arg0() as u64),
+            E::BaseField::from(ceno_emul::Platform::reg_arg0() as u64),
             prev_x10_ts.expr(),
             ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,

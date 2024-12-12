@@ -1,47 +1,47 @@
-# Ceno: Non-uniform, Segment and Parallel Zero-knowledge Virtual Machine
+# Ceno: Non-uniform, Segment and Parallel Risc-V Zero-knowledge Virtual Machine
 
-Please see [the paper](https://eprint.iacr.org/2024/387) for an introduction to Ceno.
+Please see [the slightly outdated paper](https://eprint.iacr.org/2024/387) for an introduction to Ceno.
 
-# MVP
-step 1
-- non-uniform prover end to end
-  - no recursion
-  - no PCS
-  - with IOP
-  - with lookup
-  - with Frontend + VM
+🚧 This project is currently under construction and not suitable for use in production. 🚧
 
-step 2
-- introduce PCS
+If you are unfamiliar with the RISC-V instruction set, please have a look at the [RISC-V instruction set reference](https://github.com/jameslzhu/riscv-card/releases/download/latest/riscv-card.pdf).
 
-step 3
-- recursion and achieve uniformality
+## Local build requirements
 
-# Building blocks
-- hash function
-<!---  - [ ] merkle tree hash: 2-1 or 3-1 with padding
-  - [ ] transcript: 3-1
-  - [ ] (optional) breakdown: 16-1
-  - [ ] plonky2 12-4 --->
-  - [ ] decision: start with 8-4 first
+Ceno is built in Rust, so [installing the Rust toolchain](https://www.rust-lang.org/tools/install) is a pre-requisite if you want to develop on your local machine.  We also use [cargo-make](https://sagiegurari.github.io/cargo-make/) to build Ceno. You can install cargo-make with the following command:
 
-- IOP
-  - lookup
-    - [ ] logup: spec @wenqing
-    - [ ] implement as an IOP module along with high degree gate
-  - high degree gates
-    - [ ] paper/spec @tianyi
-    - one on one tianyi/zhenfei
+```sh
+cargo install cargo-make
+```
 
-- PCS
+You will also need to install the Risc-V target for Rust. You can do this with the following command:
 
-- gates/subcircuits
-  - spec
-  - example by tianyi
+```sh
+rustup target add riscv32im-unknown-none-elf
+```
 
+## Building Ceno and running tests
 
-option 1
-- repeat sumcheck twice/three times
-option 2
-- use F_q^2/3 extension field, do not repeat
-- rule of thumb: n rounds, soundness ~ (64-n) bits
+To run the tests, you can use the following command:
+
+```sh
+cargo make tests
+```
+
+Clippy and check work as usual:
+
+```sh
+cargo check
+cargo clippy
+```
+
+Alas, `cargo build` doesn't work. That's a known problem and we're working on it.  Please use `cargo make build` instead for now.
+
+### Setting up self-hosted CI docker container
+
+To set up docker container for CI, you can run the following command:
+
+```sh
+docker build -t ceno-runner scripts/ci/
+docker run -d ceno-runner
+```
