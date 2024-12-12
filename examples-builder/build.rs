@@ -9,11 +9,11 @@ use std::{
 ///
 /// Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
 const EXAMPLES: &[&str] = &[
-    "ceno_rt_alloc",
-    "ceno_rt_io",
-    "ceno_rt_mem",
-    "ceno_rt_mini",
-    "ceno_rt_panic",
+    // "ceno_rt_alloc",
+    // "ceno_rt_io",
+    // "ceno_rt_mem",
+    // "ceno_rt_mini",
+    // "ceno_rt_panic",
 ];
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 

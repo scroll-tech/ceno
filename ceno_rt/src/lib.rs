@@ -1,6 +1,10 @@
 #![deny(clippy::cargo)]
 #![feature(strict_overflow_ops)]
-#![no_std]
+#![feature(linkage)]
+
+#![cfg_attr(feature = "std", feature(panic_always_abort))]
+// #![cfg_attr(not(feature = "std"), no_std)]
+// #![cfg_attr(feature = "std", feature(restricted_std))]
 
 use core::arch::global_asm;
 
@@ -15,6 +19,12 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
+    unimplemented!();
+}
+
 #[cfg(not(any(test, feature = "std")))]
 mod panic_handler {
     use core::panic::PanicInfo;
@@ -26,8 +36,6 @@ mod panic_handler {
     }
 }
 
-// #[allow(asm_sub_register)]
-// #[cfg(target_os = "mozakvm")]
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]
     unsafe {
@@ -60,34 +68,18 @@ _start:
     mv fp, sp
 
     // Call the Rust start function.
-    jal zero, _start_rust
+    // jal zero, _start_rust
+    call main
+
+    // If we return from main, we halt with success:
+
+    // Set the ecall code HALT.
+    addi t0, x0, 0
+    // Set successful exit code, ie 0:
+    addi a0, x0, 0
+    ecall
     ",
 );
-
-#[macro_export]
-macro_rules! entry {
-    ($path:path) => {
-        // Type check the given path
-        const CENO_ENTRY: fn() = $path;
-
-        mod ceno_generated_main {
-            #[no_mangle]
-            extern "C" fn bespoke_entrypoint() {
-                super::CENO_ENTRY();
-            }
-        }
-    };
-}
-
-/// _start_rust is called by the assembly entry point and it calls the Rust main().
-#[no_mangle]
-unsafe extern "C" fn _start_rust() -> ! {
-    extern "C" {
-        fn bespoke_entrypoint();
-    }
-    bespoke_entrypoint();
-    halt(0)
-}
 
 extern "C" {
     // The address of this variable is the start of the stack (growing downwards).

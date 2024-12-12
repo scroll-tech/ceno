@@ -271,11 +271,14 @@ pub fn step<C: EmuContext>(ctx: &mut C) -> Result<()> {
     let pc = ctx.get_pc();
 
     let Some(insn) = ctx.fetch(pc.waddr()) else {
+        eprintln!("pc: {:x}", pc.0);
+
         ctx.trap(TrapCause::InstructionAccessFault)?;
         return Err(anyhow!(
             "Fatal: could not fetch instruction at pc={pc:?}, ELF does not have instructions there."
         ));
     };
+    eprintln!("{:x}\t{insn:?}", pc.0);
 
     tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
@@ -332,7 +335,10 @@ fn step_compute<M: EmuContext>(ctx: &mut M, kind: InsnKind, insn: &Instruction) 
                     }
                 }
                 JALR => {
-                    new_pc = ByteAddr(rs1.wrapping_add(imm_i) & !1);
+                    let target_raw = rs1.wrapping_add(imm_i);
+                    let target = rs1.wrapping_add(imm_i) & !1;
+                    eprintln!("JALR rs1: {rs1:x}\timm_i: {imm_i:x}\ttarget_raw: {target_raw:x}\ttarget: {target:x}");
+                    new_pc = ByteAddr(target);
                     (pc + WORD_SIZE).0
                 }
 
