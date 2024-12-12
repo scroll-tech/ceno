@@ -9,7 +9,7 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, WitIn},
+    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -106,9 +106,11 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
-    // pub platform: Platform,
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
+
+    pub num_structural_witin: WitnessId,
+    pub structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
@@ -166,6 +168,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_witin: 0,
             // platform,
             witin_namespace_map: vec![],
+            num_structural_witin: 0,
+            structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
@@ -225,13 +229,23 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     }
 
     pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> WitIn {
-        let wit_in = WitIn {
-            id: {
-                let id = self.num_witin;
-                self.num_witin = self.num_witin.strict_add(1);
-                id
-            },
+        let wit_in = WitIn { id: self.num_witin };
+        self.num_witin = self.num_witin.strict_add(1);
+
+        let path = self.ns.compute_path(n().into());
+        self.witin_namespace_map.push(path);
+
+        wit_in
+    }
+
+    pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+    ) -> StructuralWitIn {
+        let wit_in = StructuralWitIn {
+            id: self.num_structural_witin,
         };
+        self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);

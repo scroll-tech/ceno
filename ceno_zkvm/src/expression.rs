@@ -25,6 +25,9 @@ use crate::{
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
+    /// StructuralWitIn(WitnessId)
+    /// same as witin, but it's structual witness and be evaluated by verifier succinctly.
+    StructuralWitIn(WitnessId),
     /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values
@@ -57,6 +60,7 @@ impl<E: ExtensionField> Expression<E> {
         match self {
             Expression::Fixed(_) => 1,
             Expression::WitIn(_) => 1,
+            Expression::StructuralWitIn(_) => 1,
             Expression::Instance(_) => 0,
             Expression::Constant(_) => 0,
             Expression::Sum(a_expr, b_expr) => max(a_expr.degree(), b_expr.degree()),
@@ -71,6 +75,7 @@ impl<E: ExtensionField> Expression<E> {
         &self,
         fixed_in: &impl Fn(&Fixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
+        structural_wit_in: &impl Fn(WitnessId) -> T,
         constant: &impl Fn(E::BaseField) -> T,
         challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
         sum: &impl Fn(T, T) -> T,
@@ -80,6 +85,7 @@ impl<E: ExtensionField> Expression<E> {
         self.evaluate_with_instance(
             fixed_in,
             wit_in,
+            structural_wit_in,
             &|_| unreachable!(),
             constant,
             challenge,
@@ -94,6 +100,7 @@ impl<E: ExtensionField> Expression<E> {
         &self,
         fixed_in: &impl Fn(&Fixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
+        structural_wit_in: &impl Fn(WitnessId) -> T,
         instance: &impl Fn(Instance) -> T,
         constant: &impl Fn(E::BaseField) -> T,
         challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
@@ -104,35 +111,92 @@ impl<E: ExtensionField> Expression<E> {
         match self {
             Expression::Fixed(f) => fixed_in(f),
             Expression::WitIn(witness_id) => wit_in(*witness_id),
+            Expression::StructuralWitIn(witness_id) => structural_wit_in(*witness_id),
             Expression::Instance(i) => instance(*i),
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Sum(a, b) => {
                 let a = a.evaluate_with_instance(
-                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let b = b.evaluate_with_instance(
-                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 sum(a, b)
             }
             Expression::Product(a, b) => {
                 let a = a.evaluate_with_instance(
-                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let b = b.evaluate_with_instance(
-                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 product(a, b)
             }
             Expression::ScaledSum(x, a, b) => {
                 let x = x.evaluate_with_instance(
-                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let a = a.evaluate_with_instance(
-                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let b = b.evaluate_with_instance(
-                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 scaled(x, a, b)
             }
@@ -161,6 +225,7 @@ impl<E: ExtensionField> Expression<E> {
         match expr {
             Expression::Fixed(_) => false,
             Expression::WitIn(_) => false,
+            Expression::StructuralWitIn(_) => false,
             Expression::Instance(_) => false,
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
@@ -177,6 +242,7 @@ impl<E: ExtensionField> Expression<E> {
             (
                 Expression::Fixed(_)
                 | Expression::WitIn(_)
+                | Expression::StructuralWitIn(_)
                 | Expression::Challenge(..)
                 | Expression::Constant(_)
                 | Expression::Instance(_),
@@ -207,13 +273,14 @@ impl<E: ExtensionField> Neg for Expression<E> {
     type Output = Expression<E>;
     fn neg(self) -> Self::Output {
         match self {
-            Expression::Fixed(_) | Expression::WitIn(_) | Expression::Instance(_) => {
-                Expression::ScaledSum(
-                    Box::new(self),
-                    Box::new(Expression::Constant(E::BaseField::ONE.neg())),
-                    Box::new(Expression::Constant(E::BaseField::ZERO)),
-                )
-            }
+            Expression::Fixed(_)
+            | Expression::WitIn(_)
+            | Expression::StructuralWitIn(_)
+            | Expression::Instance(_) => Expression::ScaledSum(
+                Box::new(self),
+                Box::new(Expression::Constant(E::BaseField::ONE.neg())),
+                Box::new(Expression::Constant(E::BaseField::ZERO)),
+            ),
             Expression::Constant(c1) => Expression::Constant(c1.neg()),
             Expression::Sum(a, b) => {
                 Expression::Sum(Box::new(-a.deref().clone()), Box::new(-b.deref().clone()))
@@ -726,6 +793,10 @@ pub struct WitIn {
     pub id: WitnessId,
 }
 
+#[derive(Clone, Debug, Copy)]
+pub struct StructuralWitIn {
+    pub id: WitnessId,
+}
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Fixed(pub usize);
 
@@ -765,6 +836,39 @@ impl WitIn {
     }
 }
 
+impl StructuralWitIn {
+    pub fn from_expr<E: ExtensionField, N, NR>(
+        name: N,
+        circuit_builder: &mut CircuitBuilder<E>,
+        input: Expression<E>,
+        debug: bool,
+    ) -> Result<Self, ZKVMError>
+    where
+        NR: Into<String> + Clone,
+        N: FnOnce() -> NR,
+    {
+        circuit_builder.namespace(
+            || "from_expr",
+            |cb| {
+                let name = name().into();
+                let wit = cb.create_structural_witin(|| name.clone());
+                if !debug {
+                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
+                }
+                Ok(wit)
+            },
+        )
+    }
+
+    pub fn assign<E: ExtensionField>(
+        &self,
+        instance: &mut [MaybeUninit<E::BaseField>],
+        value: E::BaseField,
+    ) {
+        instance[self.id as usize] = MaybeUninit::new(value);
+    }
+}
+
 pub trait ToExpr<E: ExtensionField> {
     type Output;
     fn expr(&self) -> Self::Output;
@@ -781,6 +885,20 @@ impl<E: ExtensionField> ToExpr<E> for &WitIn {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
         Expression::WitIn(self.id)
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for StructuralWitIn {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::StructuralWitIn(self.id)
+    }
+}
+
+impl<E: ExtensionField> ToExpr<E> for &StructuralWitIn {
+    type Output = Expression<E>;
+    fn expr(&self) -> Expression<E> {
+        Expression::StructuralWitIn(self.id)
     }
 }
 
@@ -823,8 +941,8 @@ macro_rules! impl_from_via_ToExpr {
         )*
     };
 }
-impl_from_via_ToExpr!(WitIn, Fixed, Instance);
-impl_from_via_ToExpr!(&WitIn, &Fixed, &Instance);
+impl_from_via_ToExpr!(WitIn, Fixed, StructuralWitIn, Instance);
+impl_from_via_ToExpr!(&WitIn, &Fixed, &StructuralWitIn, &Instance);
 
 // Implement From trait for unsigned types of at most 64 bits
 macro_rules! impl_from_unsigned {
@@ -877,6 +995,9 @@ pub mod fmt {
                     wtns.push(*wit_in);
                 }
                 format!("WitIn({})", wit_in)
+            }
+            Expression::StructuralWitIn(wit_in) => {
+                format!("StructuralWitIn({})", wit_in)
             }
             Expression::Challenge(id, pow, scaler, offset) => {
                 if *pow == 1 && *scaler == 1.into() && *offset == 0.into() {

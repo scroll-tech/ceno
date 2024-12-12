@@ -59,7 +59,11 @@ impl<T: Sized + Sync + Clone + Send + Copy> RowMajorMatrix<T> {
     }
 
     pub fn num_instances(&self) -> usize {
-        self.values.len() / self.num_col - self.num_padding_rows
+        let mut num = 0;
+        if self.num_col != 0 {
+            num = self.values.len() / self.num_col - self.num_padding_rows
+        }
+        num
     }
 
     pub fn num_padding_instances(&self) -> usize {

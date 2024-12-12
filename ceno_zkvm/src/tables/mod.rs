@@ -43,6 +43,13 @@ pub trait TableCircuit<E: ExtensionField> {
         input: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
 
+    fn assign_structural_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        multiplicity: &[HashMap<u64, usize>],
+        final_v: &Self::WitnessInput,
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
+
     fn padding_zero(
         table: &mut RowMajorMatrix<E::BaseField>,
         num_witin: usize,
