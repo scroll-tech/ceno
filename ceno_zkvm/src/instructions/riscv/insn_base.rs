@@ -518,7 +518,7 @@ mod test {
         let mut raw_witin = RowMajorMatrix::<F>::new(
             num_rows,
             cb.cs.num_witin as usize,
-            InstancePaddingStrategy::Zero,
+            InstancePaddingStrategy::Default,
         );
         for instance in raw_witin.iter_mut() {
             mem_addr.assign_instance(instance, &mut lkm, addr)?;

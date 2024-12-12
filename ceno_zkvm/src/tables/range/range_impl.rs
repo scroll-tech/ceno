@@ -44,7 +44,7 @@ impl RangeTableConfig {
         content: Vec<u64>,
     ) -> RowMajorMatrix<F> {
         let mut fixed =
-            RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Zero);
+            RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Default);
 
         fixed
             .par_iter_mut()
@@ -64,7 +64,7 @@ impl RangeTableConfig {
         length: usize,
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         let mut witness =
-            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Zero);
+            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {

@@ -162,7 +162,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
             num_fixed,
-            InstancePaddingStrategy::Zero,
+            InstancePaddingStrategy::Default,
         );
 
         fixed
@@ -200,7 +200,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let mut witness = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
             num_witin,
-            InstancePaddingStrategy::Zero,
+            InstancePaddingStrategy::Default,
         );
         witness
             .par_iter_mut()

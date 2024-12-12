@@ -1392,7 +1392,7 @@ mod tests {
             let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
                 instances.len(),
                 num_witin,
-                InstancePaddingStrategy::Zero,
+                InstancePaddingStrategy::Default,
             );
             let raw_witin_iter = raw_witin.iter_mut();
 
@@ -1510,7 +1510,7 @@ mod tests {
             let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
                 instances.len(),
                 num_witin,
-                InstancePaddingStrategy::Zero,
+                InstancePaddingStrategy::Default,
             );
             let raw_witin_iter = raw_witin.iter_mut();
 

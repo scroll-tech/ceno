@@ -65,10 +65,6 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix
         self.values.len() / self.num_col
     }
 
-    pub fn row(&self, row: usize) -> &[T] {
-        &self.values[row * self.num_col..(row + 1) * self.num_col]
-    }
-
     pub fn iter_rows(&self) -> Chunks<T> {
         self.values.chunks(self.num_col)
     }
@@ -84,20 +80,19 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix
     pub fn par_batch_iter_mut(&mut self, num_rows: usize) -> rayon::slice::ChunksMut<T> {
         self.values.par_chunks_mut(num_rows * self.num_col)
     }
-}
 
-impl<F: Field + From<u64>> RowMajorMatrix<F> {
     // Returns column number `column`, padded appropriately according to the stored strategy
-    pub fn column_padded(&self, column: usize) -> Vec<F> {
+    pub fn column_padded(&self, column: usize) -> Vec<T> {
         let num_instances = self.num_instances();
         let num_padding_instances = self.num_padding_instances();
-        let last_element = self.row(num_instances - 1)[column];
 
         let padding_iter = (num_instances..num_instances + num_padding_instances).map(|i| {
             match &self.padding_strategy {
-                InstancePaddingStrategy::Custom(fun) => F::from(fun(i as u64, column as u64)),
-                InstancePaddingStrategy::RepeatLast => last_element,
-                _ => F::ZERO,
+                InstancePaddingStrategy::Custom(fun) => T::from(fun(i as u64, column as u64)),
+                InstancePaddingStrategy::RepeatLast if num_instances > 0 => {
+                    self[num_instances - 1][column]
+                }
+                _ => T::default(),
             }
         });
 
@@ -109,7 +104,9 @@ impl<F: Field + From<u64>> RowMajorMatrix<F> {
             .chain(padding_iter)
             .collect::<Vec<_>>()
     }
+}
 
+impl<F: Field + From<u64>> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
@@ -120,7 +117,7 @@ impl<F: Field + From<u64>> RowMajorMatrix<F> {
     }
 }
 
-impl<F: Field> Index<usize> for RowMajorMatrix<F> {
+impl<F: Sync + Send + Copy> Index<usize> for RowMajorMatrix<F> {
     type Output = [F];
 
     fn index(&self, idx: usize) -> &Self::Output {

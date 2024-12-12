@@ -122,7 +122,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         let mut init_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
             num_fixed,
-            InstancePaddingStrategy::Zero,
+            InstancePaddingStrategy::Default,
         );
         assert_eq!(init_table.num_padding_instances(), 0);
 
@@ -156,7 +156,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
             num_witness,
-            InstancePaddingStrategy::Zero,
+            InstancePaddingStrategy::Default,
         );
 
         final_table
@@ -260,7 +260,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         let mut init_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
             num_fixed,
-            InstancePaddingStrategy::Zero,
+            InstancePaddingStrategy::Default,
         );
         assert_eq!(init_table.num_padding_instances(), 0);
 
@@ -283,7 +283,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
             num_witness,
-            InstancePaddingStrategy::Zero,
+            InstancePaddingStrategy::Default,
         );
 
         final_table

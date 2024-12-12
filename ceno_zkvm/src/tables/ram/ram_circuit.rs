@@ -205,7 +205,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         _num_fixed: usize,
         _init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
-        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Zero)
+        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
     }
 
     fn assign_instances(

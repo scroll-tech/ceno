@@ -17,7 +17,10 @@ pub mod riscv;
 
 #[derive(Clone)]
 pub enum InstancePaddingStrategy {
-    Zero,
+    // Pads with default values of underlying type
+    // Usually zero, but check carefully
+    Default,
+    // Pads by repeating last row
     RepeatLast,
     // Custom strategy consists of a closure
     // `pad(i, j) = padding value for cell at row i, column j`
