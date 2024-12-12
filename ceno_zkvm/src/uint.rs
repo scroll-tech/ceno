@@ -624,6 +624,12 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> From<&Value<'a, T>> for u32 
     }
 }
 
+impl<'a, T: Into<u64> + From<u32> + Copy + Default> From<&Value<'a, T>> for i32 {
+    fn from(v: &Value<'a, T>) -> Self {
+        v.as_i32()
+    }
+}
+
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
 impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
