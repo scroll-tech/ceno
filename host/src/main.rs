@@ -6,6 +6,8 @@ fn main() {
     hints.write(&"This is my hint string.".to_string()).unwrap();
     hints.write(&1997_u32).unwrap();
     hints.write(&1999_u32).unwrap();
+    // hints.write(&true).unwrap();
+    hints.write(&false).unwrap();
 
     let all_messages = run(CENO_PLATFORM, elf::ELF, &hints);
 

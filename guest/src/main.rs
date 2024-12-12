@@ -21,4 +21,7 @@ fn main() {
     println!("🚀🚀🚀");
     println!("This message is a hint: {msg}");
     println!("I know the factors for {product}.");
+    if *ceno_rt::read() {
+        panic!();
+    }
 }

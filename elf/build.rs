@@ -32,7 +32,8 @@ fn build_elfs() {
         dest,
         r#"pub const ELF: &[u8] =
             include_bytes!(r"{CARGO_MANIFEST_DIR}/../guest/target/my-target/release/guest");"#
-    ).expect("failed to write vars.rs");
+    )
+    .expect("failed to write vars.rs");
     let input_path = "../guest/";
     let elfs_path = "../guest/target/my-target/release/";
 
