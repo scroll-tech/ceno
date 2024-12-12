@@ -9,7 +9,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct SignedExtendConfig<E> {
     /// most significant bit
     msb: WitIn,
