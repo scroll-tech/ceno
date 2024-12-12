@@ -2,7 +2,7 @@ use crate::{
     chip_handler::RegisterChipOperations,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
+    expression::{ToExpr, WitIn},
     gadgets::AssertLTConfig,
     instructions::{
         Instruction,
@@ -51,8 +51,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         // read exit_code from arg0 (X10 register)
         let (_, lt_x10_cfg) = cb.register_read(
             || "read x10",
-            // TODO(Matthias): clean up.
-            &Expression::Constant(E::BaseField::from(ceno_emul::Platform::reg_arg0() as u64)),
+            ceno_emul::Platform::reg_arg0(),
             prev_x10_ts,
             ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
