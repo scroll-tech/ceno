@@ -79,9 +79,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let outcome_value = outcome.value();
         cb.condition_require_equal(
             || "outcome_is_zero",
-            &is_zero,
+            is_zero,
             &outcome_value,
-            Expression::from((1u64 << UInt::<E>::TOTAL_BITS) - 1),
+            (1u64 << UInt::<E>::TOTAL_BITS) - 1,
             &outcome_value,
         )?;
 
