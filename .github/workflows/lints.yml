@@ -63,7 +63,7 @@ jobs:
         run: |
           cargo make --version || cargo install cargo-make
       - name: Check code format
-        run: cargo make fmt-all-check
+        run: cargo fmt --all --check
 
       - name: Run clippy
         env:
