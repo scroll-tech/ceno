@@ -23,58 +23,48 @@ use ark_std::{end_timer, start_timer};
 use super::hash::write_digest_to_transcript;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
-pub struct MerkleTree<E: ExtensionField>
+#[serde(bound(deserialize = "E: DeserializeOwned"))]
+pub struct MerkleTreeDigests<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    // This structure contains all the digests in the Merkle tree without
+    // the leaves. Each vector represents a layer in the Merkle tree.
+    // The first vector consists of the parents of the leaves, so the
+    // size of the first vector is `merkle_tree_size / 2`.
+    // The last vector consists of only the root.
+    // The length of the outer vector is exactly the Merkle tree height.
     inner: Vec<Vec<Digest<E::BaseField>>>,
-    leaves: Vec<FieldType<E>>,
 }
 
-impl<E: ExtensionField> MerkleTree<E>
+impl<E: ExtensionField> MerkleTreeDigests<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn compute_inner(leaves: &FieldType<E>) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize::<E>(&[leaves])
-    }
-
-    pub fn compute_inner_base(leaves: &[E::BaseField]) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize_base::<E>(&[leaves])
-    }
-
-    pub fn compute_inner_ext(leaves: &[E]) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize_ext::<E>(&[leaves])
-    }
-
-    pub fn root_from_inner(inner: &[Vec<Digest<E::BaseField>>]) -> Digest<E::BaseField> {
-        inner.last().unwrap()[0].clone()
-    }
-
-    pub fn from_inner_leaves(inner: Vec<Vec<Digest<E::BaseField>>>, leaves: FieldType<E>) -> Self {
+    pub fn from_leaves(leaves: &FieldType<E>) -> Self {
         Self {
-            inner,
-            leaves: vec![leaves],
+            inner: merkelize::<E>(&[leaves]),
+        }
+    }
+    pub fn from_leaves_base(leaves: &[E::BaseField]) -> Self {
+        Self {
+            inner: merkelize_base::<E>(&[leaves]),
+        }
+    }
+    pub fn from_leaves_ext(leaves: &[E]) -> Self {
+        Self {
+            inner: merkelize_ext::<E>(&[leaves]),
         }
     }
 
-    pub fn from_leaves(leaves: FieldType<E>) -> Self {
+    pub fn from_batch_leaves(leaves: &[&FieldType<E>]) -> Self {
         Self {
-            inner: Self::compute_inner(&leaves),
-            leaves: vec![leaves],
-        }
-    }
-
-    pub fn from_batch_leaves(leaves: Vec<FieldType<E>>) -> Self {
-        Self {
-            inner: merkelize::<E>(&leaves.iter().collect_vec()),
-            leaves,
+            inner: merkelize::<E>(leaves),
         }
     }
 
     pub fn root(&self) -> Digest<E::BaseField> {
-        Self::root_from_inner(&self.inner)
+        self.inner.last().unwrap()[0].clone()
     }
 
     pub fn root_ref(&self) -> &Digest<E::BaseField> {
@@ -85,6 +75,93 @@ where
         self.inner.len()
     }
 
+    pub fn bottom_size(&self) -> usize {
+        self.inner.first().unwrap().len()
+    }
+
+    // Given the leaf group index, returns the Merkle path for this
+    // leaf group. Here a leaf group represents two leaves that
+    // are hashed together in the tree. The leaf group index is
+    // the index of this leaf group in all the leaf groups.
+    pub fn merkle_path_without_leaf_sibling_or_root(
+        &self,
+        leaf_group_index: usize,
+    ) -> MerklePathWithoutLeafOrRoot<E> {
+        assert!(leaf_group_index < self.bottom_size());
+        MerklePathWithoutLeafOrRoot::new(
+            self.inner
+                .iter()
+                .take(self.height() - 1)
+                .enumerate()
+                .map(|(layer_index, layer)| {
+                    // For each leaf group (i.e., 2 leaves that are hashed
+                    // together into their parent node), their ancestors
+                    // consist of their parent node, and all the way
+                    // up to the root.
+                    // Their parent is in `layer[0]`, and the index of their
+                    // parent in `layer[0]` is exactly `leaf_group_index`.
+                    // Similarly, the grandparent is in `layer[1]`, then the
+                    // index of their grandparent in `layer[1]` is exactly
+                    // `leaf_group_index >> 1`. In general, their ancestors
+                    // are
+                    // `layers[layer_index][(leaf_group_index >> layer_index)]`.
+                    // Note that the Merkle path are not the ancestors, but
+                    // siblings of all the ancestors, that's why we need the
+                    // `^1`.
+                    Digest::<E::BaseField>(layer[(leaf_group_index >> layer_index) ^ 1].clone().0)
+                })
+                .collect(),
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(bound(deserialize = "E: DeserializeOwned"))]
+pub struct MerkleTree<E: ExtensionField>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    inner: MerkleTreeDigests<E>,
+    leaves: Vec<FieldType<E>>,
+}
+
+impl<E: ExtensionField> MerkleTree<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    pub fn new(inner: MerkleTreeDigests<E>, leaves: FieldType<E>) -> Self {
+        Self {
+            inner,
+            leaves: vec![leaves],
+        }
+    }
+
+    pub fn from_leaves(leaves: FieldType<E>) -> Self {
+        Self {
+            inner: MerkleTreeDigests::<E>::from_leaves(&leaves),
+            leaves: vec![leaves],
+        }
+    }
+
+    pub fn from_batch_leaves(leaves: Vec<FieldType<E>>) -> Self {
+        Self {
+            inner: MerkleTreeDigests::<E>::from_batch_leaves(&leaves.iter().collect_vec()),
+            leaves,
+        }
+    }
+
+    pub fn root(&self) -> Digest<E::BaseField> {
+        self.inner.root()
+    }
+
+    pub fn root_ref(&self) -> &Digest<E::BaseField> {
+        self.inner.root_ref()
+    }
+
+    pub fn height(&self) -> usize {
+        self.inner.height()
+    }
+
     pub fn leaves(&self) -> &Vec<FieldType<E>> {
         &self.leaves
     }
@@ -92,17 +169,19 @@ where
     pub fn batch_leaves(&self, coeffs: &[E]) -> Vec<E> {
         (0..self.leaves[0].len())
             .into_par_iter()
-            .map(|i| {
-                self.leaves
-                    .iter()
-                    .zip(coeffs.iter())
-                    .map(|(leaf, coeff)| field_type_index_ext(leaf, i) * *coeff)
-                    .sum()
-            })
+            .map(|i| self.batch_leaf(coeffs, i))
             .collect()
     }
 
-    pub fn size(&self) -> (usize, usize) {
+    pub fn batch_leaf(&self, coeffs: &[E], index: usize) -> E {
+        self.leaves
+            .iter()
+            .zip(coeffs.iter())
+            .map(|(leaf, coeff)| field_type_index_ext(leaf, index) * *coeff)
+            .sum()
+    }
+
+    pub fn leaves_size(&self) -> (usize, usize) {
         (self.leaves.len(), self.leaves[0].len())
     }
 
@@ -140,17 +219,13 @@ where
         &self,
         leaf_index: usize,
     ) -> MerklePathWithoutLeafOrRoot<E> {
-        assert!(leaf_index < self.size().1);
-        MerklePathWithoutLeafOrRoot::<E>::new(
-            self.inner
-                .iter()
-                .take(self.height() - 1)
-                .enumerate()
-                .map(|(index, layer)| {
-                    Digest::<E::BaseField>(layer[(leaf_index >> (index + 1)) ^ 1].clone().0)
-                })
-                .collect(),
-        )
+        assert!(leaf_index < self.leaves_size().1);
+        // The inner (i.e., the digests without leaves) have half
+        // number of bottom-layer nodes than the Merkle tree leaves.
+        // So leaves of index 2i and 2i+1 in Merkle tree corresponds
+        // to the index i in the inner.
+        self.inner
+            .merkle_path_without_leaf_sibling_or_root(leaf_index >> 1)
     }
 }
 
