@@ -534,7 +534,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<&[WitIn]> for UI
 
 impl<E: ExtensionField, const M: usize, const C: usize> ToExpr<E> for &UIntLimbs<M, C, E> {
     type Output = Vec<Expression<E>>;
-    fn expr(self) -> Vec<Expression<E>> {
+    fn expr(self) -> Self::Output {
         match &self.limbs {
             UintLimb::WitIn(limbs) => limbs
                 .iter()
