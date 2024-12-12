@@ -1,12 +1,10 @@
-use crate::rv32im::Instruction;
+use crate::rv32im::{InsnKind, Instruction};
 use itertools::izip;
 use rrs_lib::{
     InstructionProcessor,
     instruction_formats::{BType, IType, ITypeCSR, ITypeShamt, JType, RType, SType, UType},
     process_instruction,
 };
-
-type InsnKind = crate::rv32im::InsnKind;
 
 /// A transpiler that converts the 32-bit encoded instructions into instructions.
 pub(crate) struct InstructionTranspiler {
