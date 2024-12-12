@@ -781,49 +781,49 @@ pub trait ToExpr<E: ExtensionField> {
 
 impl<E: ExtensionField> ToExpr<E> for Expression<E> {
     type Output = Expression<E>;
-    fn expr(self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         self
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &Expression<E> {
     type Output = Expression<E>;
-    fn expr(self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         self.clone()
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for WitIn {
     type Output = Expression<E>;
-    fn expr(self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &WitIn {
     type Output = Expression<E>;
-    fn expr(self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         Expression::WitIn(self.id)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Fixed {
     type Output = Expression<E>;
-    fn expr(self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         Expression::Fixed(self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &Fixed {
     type Output = Expression<E>;
-    fn expr(self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         Expression::Fixed(*self)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
-    fn expr(self) -> Expression<E> {
+    fn expr(self) -> Self::Output {
         Expression::Instance(self)
     }
 }
