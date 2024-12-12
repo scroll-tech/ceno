@@ -3,7 +3,6 @@ use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
