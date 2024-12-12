@@ -10,7 +10,7 @@ use super::{
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
+    expression::ToExpr,
     gadgets::{IsLtConfig, IsZeroConfig},
     instructions::Instruction,
     uint::Value,

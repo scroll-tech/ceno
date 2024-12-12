@@ -344,8 +344,8 @@ impl<E: ExtensionField> InnerSignedLtConfig<E> {
         let is_rhs_neg = rhs.is_negative(cb)?;
 
         // Convert to field arithmetic.
-        let lhs_value = lhs.to_field_expr(&is_lhs_neg);
-        let rhs_value = rhs.to_field_expr(&is_rhs_neg);
+        let lhs_value = lhs.to_field_expr(is_lhs_neg);
+        let rhs_value = rhs.to_field_expr(is_rhs_neg);
         let config = InnerLtConfig::construct_circuit(
             cb,
             format!("{name} (lhs < rhs)"),
