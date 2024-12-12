@@ -294,6 +294,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 mod tests {
 
     mod add {
+        use std::iter::once;
+
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             expression::{Expression, ToExpr},
@@ -302,7 +304,7 @@ mod tests {
         };
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
-        use itertools::Itertools;
+        use itertools::{Itertools, chain, izip};
 
         type E = GoldilocksExt2;
         #[test]
@@ -469,26 +471,17 @@ mod tests {
             let carries = &witness_values[(num_witness - 1) * single_wit_size..wit_end_idx];
 
             // limbs cal.
-            let mut result = vec![0u64; single_wit_size];
-            a.iter()
-                .zip(b)
-                .enumerate()
-                .for_each(|(i, (&limb_a, &limb_b))| {
-                    let carry = carries.get(i);
-                    result[i] = limb_a + limb_b;
-                    if i != 0 {
-                        result[i] += carries[i - 1];
-                    }
-                    if !overflow && carry.is_some() {
-                        result[i] -= carry.unwrap() * pow_of_c;
-                    }
-                });
+            let result: Vec<u64> = izip!(a, b, carries, chain!(once(&0_u64), carries))
+                .map(|(limb_a, limb_b, carry, prev_carry)| {
+                    limb_a + limb_b + prev_carry - carry * pow_of_c * u64::from(!overflow)
+                })
+                .collect();
 
             // verify
-            let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
-            uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
-            });
+            let wit: Vec<E> = witness_values.into_iter().map(E::from).collect();
+            for (c, ret) in izip!(uint_c.expr(), result) {
+                assert_eq!(eval_by_expr(&wit, &challenges, &c), E::from(ret));
+            }
 
             // overflow
             if overflow {
