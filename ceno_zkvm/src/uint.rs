@@ -684,7 +684,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
         self.as_u64() as u32
     }
 
-    /// Convert the limbs to a u32 value
+    /// Convert the limbs to an i32 value
     pub fn as_i32(&self) -> i32 {
         self.as_u32() as i32
     }
