@@ -1208,7 +1208,7 @@ mod tests {
         ROMType::U5,
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        gadgets::{AssertLTConfig, IsLtConfig},
+        gadgets::{AssertLtConfig, IsLtConfig},
         instructions::InstancePaddingStrategy,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
@@ -1353,7 +1353,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: AssertLTConfig,
+        pub lt_wtns: AssertLtConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -1365,7 +1365,7 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a");
             let b = cb.create_witin(|| "b");
-            let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
+            let lt_wtns = AssertLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
