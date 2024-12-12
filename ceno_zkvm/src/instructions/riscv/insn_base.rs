@@ -420,11 +420,9 @@ impl<E: ExtensionField> MemAddr<E> {
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
-        // TODO(Matthias): division here seems very, very suspicious from a soundness perspective.
-        // TODO(Matthias): clean up.
-        let shift_right = Expression::Constant(
-            E::BaseField::from(1 << Self::N_LOW_BITS).invert().unwrap(), /* TODO: do something about this. */
-        );
+        // TODO(Matthias): division here seems suspicious from a soundness perspective.
+        let shift_right =
+            Expression::Constant(E::BaseField::from(1 << Self::N_LOW_BITS).invert().unwrap());
         let mid_u14 = (&limbs[0] - low_sum) * shift_right;
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 
