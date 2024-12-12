@@ -46,18 +46,15 @@ thread_local = "1.1"
 [dev-dependencies]
 cfg-if.workspace = true
 criterion.workspace = true
-pprof.workspace = true
+pprof2.workspace = true
 
 [build-dependencies]
 glob = "0.3"
 
 [features]
-default = ["riv32", "forbid_overflow"]
-flamegraph = ["pprof/flamegraph", "pprof/criterion"]
+default = ["forbid_overflow"]
+flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
-non_pow2_rayon_thread = []
-riv32 = []
-riv64 = []
 
 [[bench]]
 harness = false
@@ -67,3 +64,7 @@ name = "riscv_add"
 [[bench]]
 harness = false
 name = "fibonacci"
+
+[[bench]]
+harness = false
+name = "fibonacci_witness"

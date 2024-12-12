@@ -18,7 +18,7 @@ use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverStateV2},
 };
-use transcript::Transcript;
+use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
     circuit_builder::SetTableAddrType,
@@ -62,7 +62,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         &self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues<u32>,
-        mut transcript: Transcript<E>,
+        mut transcript: impl ForkableTranscript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
         let mut vm_proof = ZKVMProof::empty(pi);
@@ -244,7 +244,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         wits_commit: PCS::CommitmentWithData,
         pi: &[ArcMultilinearExtension<'_, E>],
         num_instances: usize,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
@@ -689,7 +689,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         wits_commit: PCS::CommitmentWithData,
         structural_witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         pi: &[ArcMultilinearExtension<'_, E>],
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<ResultCreateTableProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
@@ -1186,7 +1186,7 @@ impl TowerProver {
         prod_specs: Vec<TowerProverSpec<'a, E>>,
         logup_specs: Vec<TowerProverSpec<'a, E>>,
         num_fanin: usize,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?

@@ -6,7 +6,7 @@ pub enum DebugIndex {
     RdWrite = 0,
 }
 
-impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
+impl<E: ExtensionField> CircuitBuilder<'_, E> {
     pub fn register_debug_expr<T: Into<usize>>(&mut self, debug_index: T, expr: Expression<E>) {
         self.cs.register_debug_expr(debug_index, expr)
     }

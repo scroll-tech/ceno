@@ -6,7 +6,7 @@ use crate::{
 
 use super::GlobalStateRegisterMachineChipOperations;
 
-impl<'a, E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'a, E> {
+impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'_, E> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {
         let record: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from(RAMType::GlobalState as u64)),

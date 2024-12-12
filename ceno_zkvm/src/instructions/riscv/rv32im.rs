@@ -7,7 +7,7 @@ use crate::{
             branch::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
-            divu::DivUInstruction,
+            div::DivUInstruction,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -27,7 +27,7 @@ use ceno_emul::{
     InsnKind::{self, *},
     Platform, StepRecord,
 };
-use divu::{DivDummy, RemDummy, RemuDummy};
+use div::{DivDummy, RemDummy, RemuDummy};
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
