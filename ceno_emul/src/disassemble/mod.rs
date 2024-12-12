@@ -365,13 +365,12 @@ impl InstructionProcessor for InstructionTranspiler {
 /// Transpile the [`Instruction`]s from the 32-bit encoded instructions.
 #[must_use]
 pub fn transpile(base: u32, instructions_u32: &[u32]) -> Vec<Instruction> {
-    let mut instructions = Vec::new();
-    for (pc, &word) in izip!(enumerate(base, 4), instructions_u32) {
-        let instruction = process_instruction(&mut InstructionTranspiler { pc, word }, word)
-            .unwrap_or_else(|| Instruction::unimp(word));
-        instructions.push(instruction);
-    }
-    instructions
+    izip!(enumerate(base, 4), instructions_u32)
+        .map(|(pc, &word)| {
+            process_instruction(&mut InstructionTranspiler { pc, word }, word)
+                .unwrap_or(Instruction::unimp(word))
+        })
+        .collect()
 }
 
 fn enumerate(start: u32, step: u32) -> impl Iterator<Item = u32> {
