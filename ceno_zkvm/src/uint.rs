@@ -606,6 +606,30 @@ pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
     pub limbs: Cow<'a, [u16]>,
 }
 
+impl<'a, T: Into<u64> + From<u32> + Copy + Default> From<&'a Value<'a, T>> for &'a [u16] {
+    fn from(v: &'a Value<'a, T>) -> Self {
+        v.as_u16_limbs()
+    }
+}
+
+impl<'a, T: Into<u64> + From<u32> + Copy + Default> From<&Value<'a, T>> for u64 {
+    fn from(v: &Value<'a, T>) -> Self {
+        v.as_u64()
+    }
+}
+
+impl<'a, T: Into<u64> + From<u32> + Copy + Default> From<&Value<'a, T>> for u32 {
+    fn from(v: &Value<'a, T>) -> Self {
+        v.as_u32()
+    }
+}
+
+impl<'a, T: Into<u64> + From<u32> + Copy + Default> From<&Value<'a, T>> for i32 {
+    fn from(v: &Value<'a, T>) -> Self {
+        v.as_i32()
+    }
+}
+
 // TODO generalize to support non 16 bit limbs
 // TODO optimize api with fixed size array
 impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
@@ -616,10 +640,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
     const LIMBS: usize = (Self::M + 15) / 16;
 
     pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
-        let uint = Value::<T> {
-            val,
-            limbs: Cow::Owned(Self::split_to_u16(val)),
-        };
+        let uint = Self::new_unchecked(val);
         Self::assert_u16(&uint.limbs, lkm);
         uint
     }
@@ -682,6 +703,11 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
     /// Convert the limbs to a u32 value
     pub fn as_u32(&self) -> u32 {
         self.as_u64() as u32
+    }
+
+    /// Convert the limbs to an i32 value
+    pub fn as_i32(&self) -> i32 {
+        self.as_u32() as i32
     }
 
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
