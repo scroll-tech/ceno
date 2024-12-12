@@ -75,7 +75,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BltuCircuit<E, I> 
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [std::mem::MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
