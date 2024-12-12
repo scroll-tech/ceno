@@ -264,22 +264,22 @@ impl Emulator {
         &self,
         ctx: &mut M,
         kind: InsnKind,
-        decoded: &Instruction,
+        insn: &Instruction,
     ) -> Result<bool> {
         use InsnKind::*;
 
         let pc = ctx.get_pc();
         let mut new_pc = pc + WORD_SIZE;
-        let imm_i = decoded.imm as u32;
+        let imm_i = insn.imm as u32;
         let out = match kind {
             // Instructions that do not read rs1 nor rs2.
             JAL => {
-                new_pc = pc.wrapping_add(decoded.imm as u32);
+                new_pc = pc.wrapping_add(insn.imm as u32);
                 (pc + WORD_SIZE).0
             }
             _ => {
                 // Instructions that read rs1 but not rs2.
-                let rs1 = ctx.load_register(decoded.rs1)?;
+                let rs1 = ctx.load_register(insn.rs1)?;
 
                 match kind {
                     ADDI => rs1.wrapping_add(imm_i),
@@ -310,7 +310,7 @@ impl Emulator {
 
                     _ => {
                         // Instructions that use rs1 and rs2.
-                        let rs2 = ctx.load_register(decoded.rs2)?;
+                        let rs2 = ctx.load_register(insn.rs2)?;
 
                         match kind {
                             ADD => rs1.wrapping_add(rs2),
@@ -380,7 +380,7 @@ impl Emulator {
         if !new_pc.is_aligned() {
             return ctx.trap(TrapCause::InstructionAddressMisaligned);
         }
-        ctx.store_register(decoded.rd_internal() as usize, out)?;
+        ctx.store_register(insn.rd_internal() as usize, out)?;
         ctx.set_pc(new_pc);
         Ok(true)
     }
