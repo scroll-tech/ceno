@@ -15,9 +15,10 @@
 // limitations under the License.
 
 use anyhow::{Result, anyhow};
+use core::fmt;
 use itertools::enumerate;
 use num_derive::ToPrimitive;
-use std::sync::OnceLock;
+use std::{fmt::Debug, sync::OnceLock};
 use strum_macros::{Display, EnumIter};
 
 use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
@@ -85,11 +86,19 @@ pub struct Emulator {
     table: &'static FastDecodeTable,
 }
 
+pub struct Hex(u32);
+
+impl Debug for Hex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "0x{:08x}", self.0)
+    }
+}
+
 #[derive(Debug)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
-    IllegalInstruction(u32),
+    IllegalInstruction(Hex),
     Breakpoint,
     LoadAddressMisaligned,
     LoadAccessFault(ByteAddr),
@@ -489,7 +498,7 @@ impl Emulator {
         // ELF.
         if word & 0x03 != 0x03 {
             // Opcode must end in 0b11 in RV32IM.
-            ctx.trap(TrapCause::IllegalInstruction(word))?;
+            ctx.trap(TrapCause::IllegalInstruction(Hex(word)))?;
             return Err(anyhow!(
                 "Fatal: illegal instruction at pc={:?}: 0x{:08x}",
                 pc,
@@ -508,7 +517,7 @@ impl Emulator {
             InsnCategory::Load => self.step_load(ctx, insn.kind, &decoded)?,
             InsnCategory::Store => self.step_store(ctx, insn.kind, &decoded)?,
             InsnCategory::System => self.step_system(ctx, insn.kind, &decoded)?,
-            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(word))?,
+            InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(Hex(word)))?,
         } {
             ctx.on_normal_end(&decoded);
         };
@@ -783,7 +792,7 @@ impl Emulator {
             InsnKind::EANY => match decoded.rs2 {
                 0 => ctx.ecall(),
                 1 => ctx.trap(TrapCause::Breakpoint),
-                _ => ctx.trap(TrapCause::IllegalInstruction(decoded.insn)),
+                _ => ctx.trap(TrapCause::IllegalInstruction(Hex(decoded.insn))),
             },
             _ => unreachable!(),
         }

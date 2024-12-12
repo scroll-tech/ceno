@@ -2,7 +2,7 @@
 #![feature(strict_overflow_ops)]
 #![no_std]
 
-use core::arch::{asm, global_asm};
+use core::arch::global_asm;
 
 mod allocator;
 
@@ -15,7 +15,7 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "std")))]
 mod panic_handler {
     use core::panic::PanicInfo;
 
@@ -26,20 +26,30 @@ mod panic_handler {
     }
 }
 
-#[allow(asm_sub_register)]
+// #[allow(asm_sub_register)]
+// #[cfg(target_os = "mozakvm")]
 pub fn halt(exit_code: u32) -> ! {
+    #[cfg(target_arch = "riscv32")]
     unsafe {
-        asm!(
-            // Set the first argument.
-            "mv a0, {}",
-            // Set the ecall code HALT.
-            "li t0, 0x0",
-            in(reg) exit_code,
+        core::arch::asm!(
+            "ecall",
+            in ("a0") exit_code,
+            in ("t0") 0,
         );
-        riscv::asm::ecall();
+        unreachable!();
+        // asm!(
+        //     // Set the first argument.
+        //     "add a0, x0, {}",
+        //     // Set the ecall code HALT.
+        //     "addi t0, x0, 0x0",
+        //     in(reg) exit_code,
+        // );
+        // riscv::asm::ecall();
     }
-    #[allow(clippy::empty_loop)]
-    loop {}
+    #[cfg(not(target_arch = "riscv32"))]
+    panic!("Halt is not implemented for this target: {}", exit_code);
+    // #[allow(clippy::empty_loop)]
+    // loop {}
 }
 
 global_asm!(
