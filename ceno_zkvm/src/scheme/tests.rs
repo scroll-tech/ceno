@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 use ark_std::test_rng;
 use ceno_emul::{
@@ -77,7 +77,7 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
     ) -> Result<(), ZKVMError> {

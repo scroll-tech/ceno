@@ -12,7 +12,6 @@ use crate::{
 };
 use ceno_emul::{InsnKind::EANY, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
-use std::mem::MaybeUninit;
 
 pub struct EcallInstructionConfig {
     pub pc: WitIn,
@@ -68,7 +67,7 @@ impl EcallInstructionConfig {
 
     pub fn assign_instance<E: ExtensionField>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

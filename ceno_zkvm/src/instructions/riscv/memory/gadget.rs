@@ -11,7 +11,6 @@ use ceno_emul::StepRecord;
 use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::izip;
-use std::mem::MaybeUninit;
 
 pub struct MemWordChange<const N_ZEROS: usize> {
     prev_limb_bytes: Vec<WitIn>,
@@ -147,7 +146,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
 
     pub fn assign_instance<E: ExtensionField>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
         shift: u32,

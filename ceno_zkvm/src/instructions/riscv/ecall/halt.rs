@@ -16,7 +16,7 @@ use crate::{
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
@@ -65,7 +65,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

@@ -653,10 +653,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
-                let row = row
-                    .iter()
-                    .map(|v| unsafe { (*v).assume_init() }.into())
-                    .collect::<Vec<_>>();
+                let row = row.iter().map(|v| (*v).into()).collect::<Vec<E>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
@@ -727,7 +724,6 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         let wits_in = raw_witin
-            .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
@@ -1206,7 +1202,6 @@ Hints:
 
 #[cfg(test)]
 mod tests {
-    use std::mem::MaybeUninit;
 
     use super::*;
     use crate::{
@@ -1214,6 +1209,7 @@ mod tests {
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLtConfig, IsLtConfig},
+        instructions::InstancePaddingStrategy,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -1375,7 +1371,7 @@ mod tests {
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: AssertLtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
@@ -1393,7 +1389,11 @@ mod tests {
             instances: Vec<AssertLtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
@@ -1489,7 +1489,7 @@ mod tests {
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: LtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
@@ -1507,7 +1507,11 @@ mod tests {
             instances: Vec<LtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
