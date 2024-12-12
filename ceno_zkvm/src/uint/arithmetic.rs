@@ -268,18 +268,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let n_limbs = Self::NUM_LIMBS;
         let (is_equal_per_limb, diff_inv_per_limb): (Vec<WitIn>, Vec<WitIn>) =
             izip!(&self.limbs, &rhs.limbs)
-                .map(|(a, b)| circuit_builder.is_equal(a.expr(), b.expr()))
+                .map(|(a, b)| circuit_builder.is_equal(a, b))
                 .collect::<Result<Vec<(WitIn, WitIn)>, ZKVMError>>()?
                 .into_iter()
                 .unzip();
 
-        let sum_expr = is_equal_per_limb
-            .iter()
-            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
+        let sum_expr = is_equal_per_limb.iter().map(ToExpr::expr).sum();
 
         let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
-        let (is_equal, diff_inv) =
-            circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
+        let (is_equal, diff_inv) = circuit_builder.is_equal(sum_flag, n_limbs)?;
         Ok(IsEqualConfig {
             is_equal_per_limb,
             diff_inv_per_limb,
