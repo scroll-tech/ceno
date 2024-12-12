@@ -1,12 +1,10 @@
+use crate::rv32im::{InsnKind, Instruction};
 use itertools::izip;
 use rrs_lib::{
     InstructionProcessor,
     instruction_formats::{BType, IType, ITypeCSR, ITypeShamt, JType, RType, SType, UType},
     process_instruction,
 };
-
-use crate::rv32im::Instruction;
-type InsnKind = crate::rv32im::InsnKind;
 
 /// A transpiler that converts the 32-bit encoded instructions into instructions.
 pub(crate) struct InstructionTranspiler {
@@ -366,19 +364,14 @@ impl InstructionProcessor for InstructionTranspiler {
 }
 
 /// Transpile the [`Instruction`]s from the 32-bit encoded instructions.
-///
-/// # Panics
-///
-/// This function will return an error if the [`Instruction`] cannot be processed.
 #[must_use]
 pub fn transpile(base: u32, instructions_u32: &[u32]) -> Vec<Instruction> {
-    let mut instructions = Vec::new();
-    for (pc, &word) in izip!(enumerate(base, 4), instructions_u32) {
-        let instruction =
-            process_instruction(&mut InstructionTranspiler { pc, word }, word).unwrap();
-        instructions.push(instruction);
-    }
-    instructions
+    izip!(enumerate(base, 4), instructions_u32)
+        .map(|(pc, &word)| {
+            process_instruction(&mut InstructionTranspiler { pc, word }, word)
+                .unwrap_or(Instruction::unimp(word))
+        })
+        .collect()
 }
 
 fn enumerate(start: u32, step: u32) -> impl Iterator<Item = u32> {

@@ -5,7 +5,7 @@ use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
-    rv32im::{Emulator, Instruction, TrapCause},
+    rv32im::{Instruction, TrapCause},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -77,18 +77,17 @@ impl VMState {
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
-        let emu = Emulator::default();
         from_fn(move || {
             if self.halted() {
                 None
             } else {
-                Some(self.step(&emu))
+                Some(self.step())
             }
         })
     }
 
-    fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
-        emu.step(self)?;
+    fn step(&mut self) -> Result<StepRecord> {
+        crate::rv32im::step(self)?;
         let step = self.tracer.advance();
         if step.is_busy_loop() && !self.halted() {
             Err(anyhow!("Stuck in loop {}", "{}"))
