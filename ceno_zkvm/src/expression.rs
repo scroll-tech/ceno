@@ -5,7 +5,10 @@ use std::{
     fmt::Display,
     iter::{Product, Sum},
     mem::MaybeUninit,
-    ops::{Add, AddAssign, Deref, Div, Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign},
+    ops::{
+        Add, AddAssign, Deref, Div, Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub,
+        SubAssign,
+    },
 };
 
 use ceno_emul::InsnKind;
@@ -758,7 +761,6 @@ impl<E: ExtensionField> Mul for Expression<E> {
         }
     }
 }
-
 
 macro_rules! div_instances {
     (($($t:ty),*)) => {
