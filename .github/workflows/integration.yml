@@ -32,13 +32,6 @@ jobs:
     timeout-minutes: 30
     runs-on: [self-hosted, Linux, X64]
 
-    strategy:
-      matrix:
-        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
-        # Exclude the riscv32im-unknown-none-elf target
-        exclude:
-          - target: riscv32im-unknown-none-elf
-
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
@@ -57,11 +50,11 @@ jobs:
         env:
           RAYON_NUM_THREADS: 2
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --package ceno_zkvm --example riscv_opcodes --target ${{ matrix.target }} -- --start 10 --end 11
+        run: cargo run --package ceno_zkvm --example riscv_opcodes -- --start 10 --end 11
 
       - name: Run fibonacci
         env:
           RAYON_NUM_THREADS: 8
           RUST_LOG: debug
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --package ceno_zkvm --bin e2e --target ${{ matrix.target }} -- --platform=sp1 ceno_zkvm/examples/fibonacci.elf
+        run: cargo run --package ceno_zkvm --bin e2e -- --platform=sp1 ceno_zkvm/examples/fibonacci.elf
