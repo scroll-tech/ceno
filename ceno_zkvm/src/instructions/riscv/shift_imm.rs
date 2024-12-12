@@ -4,7 +4,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, SignedExtendConfig},
+    gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig},
@@ -24,7 +24,7 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
     rd_written: UInt<E>,
     outflow: WitIn,
-    assert_lt_config: AssertLTConfig,
+    assert_lt_config: AssertLtConfig,
 
     // SRAI
     is_lt_config: Option<SignedExtendConfig<E>>,
@@ -83,7 +83,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let outflow = circuit_builder.create_witin(|| "outflow");
-        let assert_lt_config = AssertLTConfig::construct_circuit(
+        let assert_lt_config = AssertLtConfig::construct_circuit(
             circuit_builder,
             || "outflow < imm",
             outflow.expr(),
