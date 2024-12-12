@@ -32,12 +32,8 @@ pub const CENO_PLATFORM: Platform = Platform {
 impl Platform {
     // Virtual memory layout.
 
-    pub fn is_rom(&self, addr: Addr) -> bool {
+    pub fn is_prog_code(&self, addr: Addr) -> bool {
         self.prog_code.contains(&addr)
-    }
-
-    pub fn is_ram(&self, addr: Addr) -> bool {
-        self.stack.contains(&addr) || self.heap.contains(&addr) || self.is_prog_data(addr)
     }
 
     pub fn is_prog_data(&self, addr: Addr) -> bool {
@@ -45,6 +41,10 @@ impl Platform {
             .as_ref()
             .map(|set| set.contains(&(addr & !0x3)))
             .unwrap_or(false)
+    }
+
+    pub fn is_ram(&self, addr: Addr) -> bool {
+        self.stack.contains(&addr) || self.heap.contains(&addr) || self.is_prog_data(addr)
     }
 
     pub fn is_pub_io(&self, addr: Addr) -> bool {
@@ -83,7 +83,7 @@ impl Platform {
     }
 
     pub fn can_execute(&self, addr: Addr) -> bool {
-        self.is_rom(addr)
+        self.is_prog_code(addr)
     }
 
     // Environment calls.
@@ -124,8 +124,8 @@ mod tests {
         let p = CENO_PLATFORM;
         assert!(p.can_execute(p.pc_base()));
         // ROM and RAM do not overlap.
-        assert!(!p.is_rom(p.heap.start));
-        assert!(!p.is_rom(p.heap.end - WORD_SIZE as Addr));
+        assert!(!p.is_prog_code(p.heap.start));
+        assert!(!p.is_prog_code(p.heap.end - WORD_SIZE as Addr));
         assert!(!p.is_ram(p.prog_code.start));
         assert!(!p.is_ram(p.prog_code.end - WORD_SIZE as Addr));
         // Registers do not overlap with ROM or RAM.
@@ -133,7 +133,7 @@ mod tests {
             Platform::register_vma(0),
             Platform::register_vma(VMState::REG_COUNT - 1),
         ] {
-            assert!(!p.is_rom(reg));
+            assert!(!p.is_prog_code(reg));
             assert!(!p.is_ram(reg));
         }
     }
