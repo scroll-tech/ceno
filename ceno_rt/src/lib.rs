@@ -37,14 +37,6 @@ pub fn halt(exit_code: u32) -> ! {
             in ("t0") 0,
         );
         unreachable!();
-        // asm!(
-        //     // Set the first argument.
-        //     "add a0, x0, {}",
-        //     // Set the ecall code HALT.
-        //     "addi t0, x0, 0x0",
-        //     in(reg) exit_code,
-        // );
-        // riscv::asm::ecall();
     }
     #[cfg(not(target_arch = "riscv32"))]
     panic!("Halt is not implemented for this target: {}", exit_code);
