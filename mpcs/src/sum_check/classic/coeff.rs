@@ -49,7 +49,7 @@ impl<E: ExtensionField> ClassicSumCheckRoundMessage<E> for Coefficients<E> {
     }
 
     fn sum(&self) -> E {
-        self[..].iter().sum()
+        self[0] + self[..].iter().sum::<E>()
     }
 
     fn evaluate(&self, _: &Self::Auxiliary, challenge: &E) -> E {
