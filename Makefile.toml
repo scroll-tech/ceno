@@ -11,10 +11,6 @@ CUR_TARGET = { script = ['''
         '''] }
 RAYON_NUM_THREADS = "${CORE}"
 
-[tasks.build]
-# Override the default `--all-features`, that's broken, because some of our features are mutually exclusive.
-args = ["build"]
-
 [tasks.tests]
 args = [
   "test",

@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use crate::{
     error::ZKVMError,
     expression::{Expression, ToExpr},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
 };
 
@@ -38,7 +38,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: impl ToExpr<E, Output = Expression<E>> + std::marker::Copy,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     fn register_write(
@@ -49,7 +49,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
 }
 
 /// The common representation of a memory address.
@@ -66,7 +66,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
 
     #[allow(clippy::too_many_arguments)]
     fn memory_write(
@@ -77,5 +77,5 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
 }
