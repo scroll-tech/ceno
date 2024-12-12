@@ -432,7 +432,7 @@ impl<E: ExtensionField> Signed<E> {
             lkm,
             *val.as_u16_limbs().last().unwrap() as u64,
         )?;
-        Ok(val.as_i32())
+        Ok(i32::from(val))
     }
 
     pub fn expr(&self) -> Expression<E> {
