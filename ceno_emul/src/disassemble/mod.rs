@@ -1,3 +1,4 @@
+use crate::rv32im::Instruction;
 use itertools::izip;
 use rrs_lib::{
     InstructionProcessor,
@@ -5,7 +6,6 @@ use rrs_lib::{
     process_instruction,
 };
 
-use crate::rv32im::Instruction;
 type InsnKind = crate::rv32im::InsnKind;
 
 /// A transpiler that converts the 32-bit encoded instructions into instructions.
