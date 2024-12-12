@@ -11,10 +11,6 @@ CUR_TARGET = { script = ['''
         '''] }
 RAYON_NUM_THREADS = "${CORE}"
 
-[tasks.build]
-# Override the default `--all-features`, that's broken, because some of our features are mutually exclusive.
-args = ["build"]
-
 [tasks.tests]
 args = [
   "test",
@@ -33,23 +29,8 @@ args = [
 command = "cargo"
 workspace = false
 
-[tasks.fmt-all-check]
-args = ["fmt", "--all", "--", "--check"]
-command = "cargo"
-workspace = false
-
-[tasks.fmt-all]
-args = ["fmt", "--all"]
-command = "cargo"
-workspace = false
-
 [tasks.clippy-all]
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
-command = "cargo"
-workspace = false
-
-[tasks.fmt]
-args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 command = "cargo"
 workspace = false
 
