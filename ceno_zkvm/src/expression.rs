@@ -116,31 +116,87 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Sum(a, b) => {
                 let a = a.evaluate_with_instance(
-                    fixed_in, wit_in, structural_wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let b = b.evaluate_with_instance(
-                    fixed_in, wit_in, structural_wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 sum(a, b)
             }
             Expression::Product(a, b) => {
                 let a = a.evaluate_with_instance(
-                    fixed_in, wit_in, structural_wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let b = b.evaluate_with_instance(
-                    fixed_in, wit_in, structural_wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 product(a, b)
             }
             Expression::ScaledSum(x, a, b) => {
                 let x = x.evaluate_with_instance(
-                    fixed_in, wit_in, structural_wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let a = a.evaluate_with_instance(
-                    fixed_in, wit_in, structural_wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 let b = b.evaluate_with_instance(
-                    fixed_in, wit_in, structural_wit_in, instance, constant, challenge, sum, product, scaled,
+                    fixed_in,
+                    wit_in,
+                    structural_wit_in,
+                    instance,
+                    constant,
+                    challenge,
+                    sum,
+                    product,
+                    scaled,
                 );
                 scaled(x, a, b)
             }
@@ -217,13 +273,14 @@ impl<E: ExtensionField> Neg for Expression<E> {
     type Output = Expression<E>;
     fn neg(self) -> Self::Output {
         match self {
-            Expression::Fixed(_) | Expression::WitIn(_) | Expression::StructuralWitIn(_) | Expression::Instance(_) => {
-                Expression::ScaledSum(
-                    Box::new(self),
-                    Box::new(Expression::Constant(E::BaseField::ONE.neg())),
-                    Box::new(Expression::Constant(E::BaseField::ZERO)),
-                )
-            }
+            Expression::Fixed(_)
+            | Expression::WitIn(_)
+            | Expression::StructuralWitIn(_)
+            | Expression::Instance(_) => Expression::ScaledSum(
+                Box::new(self),
+                Box::new(Expression::Constant(E::BaseField::ONE.neg())),
+                Box::new(Expression::Constant(E::BaseField::ZERO)),
+            ),
             Expression::Constant(c1) => Expression::Constant(c1.neg()),
             Expression::Sum(a, b) => {
                 Expression::Sum(Box::new(-a.deref().clone()), Box::new(-b.deref().clone()))

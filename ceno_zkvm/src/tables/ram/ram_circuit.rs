@@ -104,7 +104,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>{
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         config.assign_structural_instances(num_witin, final_v)
     }
 }
@@ -160,7 +160,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_cycles: &[Cycle],
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>{
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         config.assign_structural_instances(num_witin, final_cycles)
     }
 }
@@ -241,7 +241,6 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-
         config.assign_structural_instances(num_witin, final_v)
     }
 }

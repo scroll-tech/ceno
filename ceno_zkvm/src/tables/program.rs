@@ -228,7 +228,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         _num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         _final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>{
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         Ok(RowMajorMatrix::new(0, 0))
     }
 }

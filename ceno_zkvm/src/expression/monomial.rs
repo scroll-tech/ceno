@@ -146,6 +146,8 @@ mod tests {
             E::random(&mut rng),
             E::random(&mut rng),
         ];
-        move |expr: &Expression<E>| eval_by_expr_with_fixed(&fixed, &witnesses, &[], &challenges, expr)
+        move |expr: &Expression<E>| {
+            eval_by_expr_with_fixed(&fixed, &witnesses, &[], &challenges, expr)
+        }
     }
 }

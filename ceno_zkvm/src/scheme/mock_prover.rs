@@ -315,7 +315,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
                 (b as usize).into(),
                 (c as usize).into(),
             ]);
-            let rlc_record = eval_by_expr(&[], &[],&challenge, &rlc_record);
+            let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
         }
     }
@@ -657,7 +657,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     .iter()
                     .map(|v| unsafe { (*v).assume_init() }.into())
                     .collect::<Vec<_>>();
-                let rlc_record = eval_by_expr_with_fixed(&row, &[], &[], &challenge, &table_expr.values);
+                let rlc_record =
+                    eval_by_expr_with_fixed(&row, &[], &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
         }
@@ -847,15 +848,21 @@ Hints:
                     .iter()
                     .zip(cs.lk_expressions_items_map.clone().into_iter())
                 {
-                    let lk_table =
-                        wit_infer_by_expr(&fixed, &witness, &[], &pi_mles, &challenges, &expr.values)
-                            .get_ext_field_vec()
-                            .to_vec();
+                    let lk_table = wit_infer_by_expr(
+                        &fixed,
+                        &witness,
+                        &[],
+                        &pi_mles,
+                        &challenges,
+                        &expr.values,
+                    )
+                    .get_ext_field_vec()
+                    .to_vec();
 
                     let multiplicity = wit_infer_by_expr(
                         &fixed,
                         &witness,
-                        &[], 
+                        &[],
                         &pi_mles,
                         &challenges,
                         &expr.multiplicity,
@@ -920,7 +927,7 @@ Hints:
                             eval_by_expr_with_instance(
                                 &[],
                                 &witness,
-                                &[], 
+                                &[],
                                 &instance,
                                 challenges.as_slice(),
                                 expr,
@@ -979,10 +986,16 @@ Hints:
                     .zip_eq(cs.w_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
-                        let write_rlc_records =
-                            (wit_infer_by_expr(fixed, witness, &[], &pi_mles, &challenges, w_rlc_expr)
-                                .get_ext_field_vec())[..*num_rows]
-                                .to_vec();
+                        let write_rlc_records = (wit_infer_by_expr(
+                            fixed,
+                            witness,
+                            &[],
+                            &pi_mles,
+                            &challenges,
+                            w_rlc_expr,
+                        )
+                        .get_ext_field_vec())[..*num_rows]
+                            .to_vec();
 
                         if $ram_type == RAMType::GlobalState {
                             // w_exprs = [GlobalState, pc, timestamp]
@@ -994,7 +1007,7 @@ Hints:
                                     let v = wit_infer_by_expr(
                                         fixed,
                                         witness,
-                                        &[], 
+                                        &[],
                                         &pi_mles,
                                         &challenges,
                                         expr,
@@ -1154,7 +1167,7 @@ Hints:
         gs_rs.insert(eval_by_expr_with_instance(
             &[],
             &[],
-            &[], 
+            &[],
             &instance,
             &challenges,
             &gs_final,
@@ -1162,7 +1175,7 @@ Hints:
         gs_ws.insert(eval_by_expr_with_instance(
             &[],
             &[],
-            &[], 
+            &[],
             &instance,
             &challenges,
             &gs_init,

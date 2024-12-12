@@ -255,7 +255,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses_tables.get(name).cloned()
     }
 
-    pub fn get_table_structural_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
+    pub fn get_table_structural_witness(
+        &self,
+        name: &String,
+    ) -> Option<RowMajorMatrix<E::BaseField>> {
         self.structural_witnesses_tables.get(name).cloned()
     }
 
@@ -330,7 +333,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        assert!(self.structural_witnesses_tables.insert(TC::name(), structural_witness).is_none());
+        assert!(
+            self.structural_witnesses_tables
+                .insert(TC::name(), structural_witness)
+                .is_none()
+        );
 
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 

@@ -66,7 +66,7 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         _num_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>{
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         Ok(RowMajorMatrix::new(0, 0))
     }
 }

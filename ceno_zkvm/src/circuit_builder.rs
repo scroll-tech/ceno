@@ -9,7 +9,7 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, WitIn, StructuralWitIn},
+    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -243,7 +243,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         wit_in
     }
 
-    pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> StructuralWitIn{
+    pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+    ) -> StructuralWitIn {
         let wit_in = StructuralWitIn {
             id: {
                 let id = self.num_structural_witin;

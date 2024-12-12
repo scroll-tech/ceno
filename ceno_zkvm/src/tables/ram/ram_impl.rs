@@ -9,7 +9,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use crate::{
     circuit_builder::{CircuitBuilder, DynamicAddr, SetTableAddrType, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, ToExpr, WitIn, StructuralWitIn},
+    expression::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
@@ -452,7 +452,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .with_min_len(MIN_PAR_SIZE)
             .for_each(|(i, row)| {
                 set_val!(row, self.addr, DVRAM::addr(&self.params, i) as u64);
-               
             });
 
         Ok(final_table)
