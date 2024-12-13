@@ -78,17 +78,19 @@ fn test_ceno_rt_io() -> Result<()> {
 }
 
 #[test]
-fn test_hints() {
+fn test_hints() -> Result<()> {
     let mut hints = CenoStdin::default();
-    hints.write(&"This is my hint string.".to_string()).unwrap();
-    hints.write(&1997_u32).unwrap();
-    hints.write(&1999_u32).unwrap();
+    hints.write(&true)?;
+    hints.write(&"This is my hint string.".to_string())?;
+    hints.write(&1997_u32)?;
+    hints.write(&1999_u32)?;
 
     let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::hints, &hints);
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
     }
     assert_eq!(all_messages[0], "3992003");
+    Ok(())
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {

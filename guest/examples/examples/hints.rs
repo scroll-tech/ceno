@@ -8,6 +8,8 @@ use rkyv::{Archived, string::ArchivedString};
 
 ceno_rt::entry!(main);
 fn main() {
+    let condition: &bool = ceno_rt::read();
+    assert!(*condition);
     let msg: &ArchivedString = ceno_rt::read();
 
     let a: &Archived<u32> = ceno_rt::read();
