@@ -198,7 +198,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let neg_div_expr = {
                     let a_neg = dividend_signed.is_negative.expr();
                     let b_neg = divisor_signed.is_negative.expr();
-                    &a_neg * (1 - &b_neg) + (1 - &a_neg) * &b_neg
+                    // a_neg xor b_neg
+                    &a_neg + &b_neg - 2 * a_neg * b_neg
                 };
                 let negative_division = cb.flatten_expr(|| "neg_division", neg_div_expr)?;
 
