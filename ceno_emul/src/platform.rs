@@ -9,7 +9,8 @@ use crate::addr::{Addr, RegIdx};
 /// - codes of environment calls.
 #[derive(Clone, Debug)]
 pub struct Platform {
-    pub prog_code: Range<Addr>,
+    pub rom: Range<Addr>,
+    // This is an `Option` to allow `const` here.
     pub prog_data: Option<HashSet<Addr>>,
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
@@ -20,8 +21,8 @@ pub struct Platform {
 }
 
 pub const CENO_PLATFORM: Platform = Platform {
-    prog_code: 0x2000_0000..0x3000_0000,
-    prog_data: None, // This is an `Option` to allow `const` here.
+    rom: 0x2000_0000..0x3000_0000,
+    prog_data: None,
     stack: 0xB0000000..0xC0000000,
     heap: 0x8000_0000..0xFFFF_0000,
     public_io: 0x3000_1000..0x3000_2000,
@@ -32,8 +33,8 @@ pub const CENO_PLATFORM: Platform = Platform {
 impl Platform {
     // Virtual memory layout.
 
-    pub fn is_prog_code(&self, addr: Addr) -> bool {
-        self.prog_code.contains(&addr)
+    pub fn is_rom(&self, addr: Addr) -> bool {
+        self.rom.contains(&addr)
     }
 
     pub fn is_prog_data(&self, addr: Addr) -> bool {
@@ -69,7 +70,7 @@ impl Platform {
     // Startup.
 
     pub const fn pc_base(&self) -> Addr {
-        self.prog_code.start
+        self.rom.start
     }
 
     // Permissions.
@@ -83,7 +84,7 @@ impl Platform {
     }
 
     pub fn can_execute(&self, addr: Addr) -> bool {
-        self.is_prog_code(addr)
+        self.is_rom(addr)
     }
 
     // Environment calls.
@@ -124,16 +125,16 @@ mod tests {
         let p = CENO_PLATFORM;
         assert!(p.can_execute(p.pc_base()));
         // ROM and RAM do not overlap.
-        assert!(!p.is_prog_code(p.heap.start));
-        assert!(!p.is_prog_code(p.heap.end - WORD_SIZE as Addr));
-        assert!(!p.is_ram(p.prog_code.start));
-        assert!(!p.is_ram(p.prog_code.end - WORD_SIZE as Addr));
+        assert!(!p.is_rom(p.heap.start));
+        assert!(!p.is_rom(p.heap.end - WORD_SIZE as Addr));
+        assert!(!p.is_ram(p.rom.start));
+        assert!(!p.is_ram(p.rom.end - WORD_SIZE as Addr));
         // Registers do not overlap with ROM or RAM.
         for reg in [
             Platform::register_vma(0),
             Platform::register_vma(VMState::REG_COUNT - 1),
         ] {
-            assert!(!p.is_prog_code(reg));
+            assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));
         }
     }

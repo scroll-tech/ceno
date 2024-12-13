@@ -201,7 +201,7 @@ pub fn setup_platform(
     };
 
     Platform {
-        prog_code: program.base_address
+        rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data: Some(prog_data),
         stack,
