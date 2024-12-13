@@ -1,5 +1,9 @@
+use std::{collections::HashSet, sync::Arc};
+
 use anyhow::Result;
-use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, Platform, StepRecord, VMState};
+use ceno_emul::{
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, Platform, Program, StepRecord, VMState,
+};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -27,7 +31,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
-    let value = state.peek_memory(CENO_PLATFORM.ram.start.into());
+    let value = state.peek_memory(CENO_PLATFORM.heap.start.into());
     assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
     Ok(())
 }
@@ -60,7 +64,12 @@ fn test_ceno_rt_alloc() -> Result<()> {
 #[test]
 fn test_ceno_rt_io() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_io;
-    let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
+    let program = Program::load_elf(program_elf, u32::MAX)?;
+    let platform = Platform {
+        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        ..CENO_PLATFORM
+    };
+    let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
 
     let all_messages = read_all_messages(&state);
