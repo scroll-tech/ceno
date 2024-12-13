@@ -3,12 +3,13 @@
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use std::{collections::HashMap, mem::MaybeUninit};
+use std::collections::HashMap;
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
+    instructions::InstancePaddingStrategy,
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
@@ -42,7 +43,8 @@ impl RangeTableConfig {
         num_fixed: usize,
         content: Vec<u64>,
     ) -> RowMajorMatrix<F> {
-        let mut fixed = RowMajorMatrix::<F>::new(content.len(), num_fixed);
+        let mut fixed =
+            RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Default);
 
         fixed
             .par_iter_mut()
@@ -61,7 +63,8 @@ impl RangeTableConfig {
         multiplicity: &HashMap<u64, usize>,
         length: usize,
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut witness = RowMajorMatrix::<F>::new(length, num_witin);
+        let mut witness =
+            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {

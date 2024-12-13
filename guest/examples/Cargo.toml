@@ -1,0 +1,13 @@
+[package]
+categories.workspace = true
+description = "Ceno RiscV guest examples"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "examples"
+readme = "README.md"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+ceno_rt = { path = "../ceno_rt" }

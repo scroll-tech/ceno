@@ -16,7 +16,6 @@ use crate::{
     uint::Value,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 pub struct SetLessThanInstruction<E, I>(PhantomData<(E, I)>);
 
@@ -84,7 +83,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
-            InsnKind::SLT,
+            I::INST_KIND,
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             rd_written.register_expr(),
@@ -101,7 +100,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -160,7 +159,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::SLT, 2, 3, 4, 0);
+        let insn_code = encode_rv32(I::INST_KIND, 2, 3, 4, 0);
         let (raw_witin, lkm) = SetLessThanInstruction::<_, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,

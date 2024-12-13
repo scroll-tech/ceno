@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem::MaybeUninit};
+use std::fmt::Display;
 
 use ff_ext::ExtensionField;
 
@@ -33,7 +33,7 @@ impl<E: ExtensionField> Signed<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
     ) -> Result<i32, ZKVMError> {

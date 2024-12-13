@@ -4,7 +4,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
 };
@@ -21,7 +21,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = [
@@ -43,7 +43,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
             cb.write_record(|| "write_record", RAMType::Register, write_record)?;
 
             // assert prev_ts < current_ts
-            let lt_cfg = AssertLTConfig::construct_circuit(
+            let lt_cfg = AssertLtConfig::construct_circuit(
                 cb,
                 || "prev_ts < ts",
                 prev_ts,
@@ -65,7 +65,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLTConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError> {
         assert!(register_id.expr().degree() <= 1);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
@@ -87,7 +87,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
             cb.read_record(|| "read_record", RAMType::Register, read_record)?;
             cb.write_record(|| "write_record", RAMType::Register, write_record)?;
 
-            let lt_cfg = AssertLTConfig::construct_circuit(
+            let lt_cfg = AssertLtConfig::construct_circuit(
                 cb,
                 || "prev_ts < ts",
                 prev_ts,

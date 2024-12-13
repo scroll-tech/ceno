@@ -4,10 +4,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ceno_emul::{CENO_PLATFORM, Platform, Program, WORD_SIZE};
+use ceno_emul::{Platform, Program};
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, run_e2e_with_checkpoint},
+    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 use criterion::*;
 
@@ -28,29 +28,20 @@ type Pcs = BasefoldDefault<E>;
 type E = GoldilocksExt2;
 
 // Relevant init data for fibonacci run
-fn setup() -> (Program, Platform, u32, u32) {
+fn setup() -> (Program, Platform) {
     let mut file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     file_path.push("examples/fibonacci.elf");
     let stack_size = 32768;
     let heap_size = 2097152;
+    let pub_io_size = 16;
     let elf_bytes = fs::read(&file_path).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
-
-    let platform = Platform {
-        // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
-        stack_top: 0x0020_0400,
-        rom: program.base_address
-            ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
-        ram: 0x0010_0000..0xFFFF_0000,
-        unsafe_ecall_nop: true,
-        ..CENO_PLATFORM
-    };
-
-    (program, platform, stack_size, heap_size)
+    let platform = setup_platform(Preset::Sp1, &program, stack_size, heap_size, pub_io_size);
+    (program, platform)
 }
 
 fn fibonacci_prove(c: &mut Criterion) {
-    let (program, platform, stack_size, heap_size) = setup();
+    let (program, platform) = setup();
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("fibonacci_max_steps_{}", max_steps));
@@ -68,8 +59,6 @@ fn fibonacci_prove(c: &mut Criterion) {
                         run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
-                            stack_size,
-                            heap_size,
                             vec![],
                             max_steps,
                             Checkpoint::PrepE2EProving,
