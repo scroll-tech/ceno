@@ -93,6 +93,22 @@ fn test_hints() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_sorting() -> Result<()> {
+    use rand::Rng;
+    let mut hints = CenoStdin::default();
+    let mut rng = rand::thread_rng();
+
+    // Provide some random numbers to sort:
+    hints.write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
+
+    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::sorting, &hints);
+    for (i, msg) in enumerate(&all_messages) {
+        println!("{i}: {msg}");
+    }
+    Ok(())
+}
+
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
     let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
     eprintln!("Emulator ran for {} steps.", steps.len());
