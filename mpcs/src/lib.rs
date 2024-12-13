@@ -12,7 +12,8 @@ pub mod util;
 
 pub type Commitment<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Commitment;
 pub type CommitmentChunk<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::CommitmentChunk;
-pub type CommitmentWithData<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::CommitmentWithData;
+pub type CommitmentWithWitness<E, Pcs> =
+    <Pcs as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
 pub type Param<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Param;
 pub type ProverParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::ProverParam;
@@ -34,7 +35,7 @@ pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 pub fn pcs_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     poly: &DenseMultilinearExtension<E>,
-) -> Result<Pcs::CommitmentWithData, Error> {
+) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::commit(pp, poly)
 }
 
@@ -42,14 +43,14 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
     pp: &Pcs::ProverParam,
     poly: &DenseMultilinearExtension<E>,
     transcript: &mut impl Transcript<E>,
-) -> Result<Pcs::CommitmentWithData, Error> {
+) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::commit_and_write(pp, poly, transcript)
 }
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     polys: &[DenseMultilinearExtension<E>],
-) -> Result<Pcs::CommitmentWithData, Error> {
+) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::batch_commit(pp, polys)
 }
 
@@ -57,14 +58,14 @@ pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentSc
     pp: &Pcs::ProverParam,
     polys: &[DenseMultilinearExtension<E>],
     transcript: &mut impl Transcript<E>,
-) -> Result<Pcs::CommitmentWithData, Error> {
+) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::batch_commit_and_write(pp, polys, transcript)
 }
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     poly: &DenseMultilinearExtension<E>,
-    comm: &Pcs::CommitmentWithData,
+    comm: &Pcs::CommitmentWithWitness,
     point: &[E],
     eval: &E,
     transcript: &mut impl Transcript<E>,
@@ -75,7 +76,7 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     polys: &[DenseMultilinearExtension<E>],
-    comms: &[Pcs::CommitmentWithData],
+    comms: &[Pcs::CommitmentWithWitness],
     points: &[Vec<E>],
     evals: &[Evaluation<E>],
     transcript: &mut impl Transcript<E>,
@@ -112,7 +113,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
-    type CommitmentWithData: Clone + Debug + Default + Serialize + DeserializeOwned;
+    type CommitmentWithWitness: Clone + Debug;
     type Commitment: Clone + Debug + Default + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
     type Proof: Clone + Debug + Serialize + DeserializeOwned;
@@ -127,13 +128,13 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     fn commit(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
-    ) -> Result<Self::CommitmentWithData, Error>;
+    ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn commit_and_write(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
         transcript: &mut impl Transcript<E>,
-    ) -> Result<Self::CommitmentWithData, Error> {
+    ) -> Result<Self::CommitmentWithWitness, Error> {
         let comm = Self::commit(pp, poly)?;
         Self::write_commitment(&Self::get_pure_commitment(&comm), transcript)?;
         Ok(comm)
@@ -144,18 +145,18 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 
-    fn get_pure_commitment(comm: &Self::CommitmentWithData) -> Self::Commitment;
+    fn get_pure_commitment(comm: &Self::CommitmentWithWitness) -> Self::Commitment;
 
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
-    ) -> Result<Self::CommitmentWithData, Error>;
+    ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<Self::CommitmentWithData, Error> {
+    ) -> Result<Self::CommitmentWithWitness, Error> {
         let comm = Self::batch_commit(pp, polys)?;
         Self::write_commitment(&Self::get_pure_commitment(&comm), transcript)?;
         Ok(comm)
@@ -164,7 +165,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     fn open(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
-        comm: &Self::CommitmentWithData,
+        comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
         transcript: &mut impl Transcript<E>,
@@ -173,7 +174,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     fn batch_open(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithData],
+        comms: &[Self::CommitmentWithWitness],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
         transcript: &mut impl Transcript<E>,
@@ -186,7 +187,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     fn simple_batch_open(
         pp: &Self::ProverParam,
         polys: &[ArcMultilinearExtension<E>],
-        comm: &Self::CommitmentWithData,
+        comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],
         transcript: &mut impl Transcript<E>,
@@ -228,7 +229,7 @@ where
     fn ni_open(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
-        comm: &Self::CommitmentWithData,
+        comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
     ) -> Result<Self::Proof, Error> {
@@ -239,7 +240,7 @@ where
     fn ni_batch_open(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithData],
+        comms: &[Self::CommitmentWithWitness],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
     ) -> Result<Self::Proof, Error> {
@@ -315,7 +316,7 @@ pub enum Error {
 mod basefold;
 pub use basefold::{
     Basecode, BasecodeDefaultSpec, Basefold, BasefoldBasecodeParams, BasefoldCommitment,
-    BasefoldCommitmentWithData, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
+    BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams, BasefoldRSParams, BasefoldSpec,
     EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
     one_level_interp_hc,
 };
@@ -436,7 +437,7 @@ pub mod test_util {
         pp: &Pcs::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
         transcript: &mut impl Transcript<E>,
-    ) -> Vec<Pcs::CommitmentWithData> {
+    ) -> Vec<Pcs::CommitmentWithWitness> {
         polys
             .iter()
             .map(|poly| Pcs::commit_and_write(pp, poly, transcript).unwrap())
