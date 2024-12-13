@@ -14,7 +14,7 @@ fn main() {
     let numbers: &ArchivedVec<u32> = ceno_rt::read();
     let median_candidate: &Archived<u32> = ceno_rt::read();
     let median_candidate = &&median_candidate.to_native();
-    let smaller = numbers.into_iter().filter(move |x| x < median_candidate).count();
+    let smaller = numbers.iter().filter(move |x| x < median_candidate).count();
     assert_eq!(smaller, numbers.len() / 2);
     println!("{}", median_candidate);
 }
