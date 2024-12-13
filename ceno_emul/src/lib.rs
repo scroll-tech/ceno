@@ -1,4 +1,3 @@
-//! Ceno Emulator
 #![deny(clippy::cargo)]
 mod addr;
 pub use addr::*;
