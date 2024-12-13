@@ -11,3 +11,7 @@ version.workspace = true
 
 [dependencies]
 ceno_rt = { path = "../ceno_rt" }
+rkyv = { version = "0.8", default-features = false, features = [
+  "alloc",
+  "bytecheck",
+] }

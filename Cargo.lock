@@ -256,7 +256,6 @@ name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ceno-examples",
  "elf",
  "itertools 0.13.0",
  "num-derive",
@@ -272,6 +271,7 @@ name = "ceno_host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ceno-examples",
  "ceno_emul",
  "itertools 0.13.0",
  "rand",
