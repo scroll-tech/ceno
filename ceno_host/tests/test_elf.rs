@@ -3,6 +3,8 @@ use ceno_emul::{
     CENO_PLATFORM, EmuContext, InsnKind, Platform, StepRecord, VMState,
     host_utils::read_all_messages,
 };
+use ceno_host::CenoStdin;
+use itertools::enumerate;
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -73,6 +75,20 @@ fn test_ceno_rt_io() -> Result<()> {
     assert_eq!(&all_messages[0], "📜📜📜 Hello, World!\n");
     assert_eq!(&all_messages[1], "🌏🌍🌎\n");
     Ok(())
+}
+
+#[test]
+fn test_hints() {
+    let mut hints = CenoStdin::default();
+    hints.write(&"This is my hint string.".to_string()).unwrap();
+    hints.write(&1997_u32).unwrap();
+    hints.write(&1999_u32).unwrap();
+
+    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::hints, &hints);
+    for (i, msg) in enumerate(&all_messages) {
+        println!("{i}: {msg}");
+    }
+    assert_eq!(all_messages[0], "3992003");
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
