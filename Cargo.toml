@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["guest"]
+exclude = ["ceno_rt", "examples"]
 members = [
   "ceno_emul",
   "examples-builder",

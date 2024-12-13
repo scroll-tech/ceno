@@ -1,0 +1,13 @@
+[package]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+description = "Ceno runtime library"
+edition = "2021"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
+license = "MIT OR Apache-2.0"
+name = "ceno_rt"
+readme = "README.md"
+repository = "https://github.com/scroll-tech/ceno"
+version = "0.1.0"
+
+[dependencies]
+riscv = "0.12"
