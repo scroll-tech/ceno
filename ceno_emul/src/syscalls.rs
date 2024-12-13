@@ -4,6 +4,9 @@ use itertools::chain;
 
 mod keccak_permute;
 
+// Using the same function codes as sp1:
+// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/code.rs
+
 pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
 
 /// Trace the inputs and effects of a syscall.
