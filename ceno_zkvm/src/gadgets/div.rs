@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem::MaybeUninit};
+use std::fmt::Display;
 
 use ff_ext::ExtensionField;
 
@@ -53,7 +53,7 @@ impl<E: ExtensionField> DivConfig<E> {
 
     pub fn assign_instance<'a>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         divisor: &Value<'a, u32>,
         quotient: &Value<'a, u32>,

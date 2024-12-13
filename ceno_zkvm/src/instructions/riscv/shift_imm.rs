@@ -15,7 +15,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct ShiftImmConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
@@ -144,7 +144,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
