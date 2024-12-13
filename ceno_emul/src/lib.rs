@@ -1,4 +1,5 @@
 #![deny(clippy::cargo)]
+// #![deny(clippy::pedantic)]
 #![feature(step_trait)]
 mod addr;
 pub use addr::*;
@@ -13,12 +14,12 @@ mod vm_state;
 pub use vm_state::VMState;
 
 mod rv32im;
-pub use rv32im::{DecodedInstruction, EmuContext, InsnCategory, InsnCodes, InsnFormat, InsnKind};
+pub use rv32im::{
+    EmuContext, InsnCategory, InsnFormat, InsnKind, Instruction, encode_rv32, encode_rv32u,
+};
 
 mod elf;
 pub use elf::Program;
 
-mod rv32im_encode;
-pub use rv32im_encode::encode_rv32;
-
+pub mod disassemble;
 pub mod host_utils;
