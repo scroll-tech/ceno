@@ -1,9 +1,10 @@
-use std::{collections::HashMap, marker::PhantomData, mem::MaybeUninit};
+use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
+    instructions::InstancePaddingStrategy,
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
@@ -12,26 +13,12 @@ use crate::{
     witness::RowMajorMatrix,
 };
 use ceno_emul::{
-    DecodedInstruction, InsnCodes, InsnFormat::*, InsnKind::*, PC_STEP_SIZE, Program, WORD_SIZE,
+    InsnFormat, InsnFormat::*, InsnKind::*, Instruction, PC_STEP_SIZE, Program, WORD_SIZE,
 };
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-
-#[macro_export]
-macro_rules! declare_program {
-    ($program:ident, $($instr:expr),* $(,)?) => {
-
-        {
-            let mut _i = 0;
-            $(
-                $program[_i] = $instr;
-                _i += 1;
-            )*
-        }
-    };
-}
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
@@ -42,7 +29,7 @@ impl<T> InsnRecord<T> {
     where
         T: From<u32>,
     {
-        let rd = rd.unwrap_or_else(|| T::from(DecodedInstruction::RD_NULL));
+        let rd = rd.unwrap_or_else(|| T::from(Instruction::RD_NULL));
         InsnRecord([pc, kind, rd, rs1, rs2, imm_internal])
     }
 
@@ -52,10 +39,10 @@ impl<T> InsnRecord<T> {
 }
 
 impl<F: SmallField> InsnRecord<F> {
-    fn from_decoded(pc: u32, insn: &DecodedInstruction) -> Self {
+    fn from_decoded(pc: u32, insn: &Instruction) -> Self {
         InsnRecord([
             (pc as u64).into(),
-            (insn.codes().kind as u64).into(),
+            (insn.kind as u64).into(),
             (insn.rd_internal() as u64).into(),
             (insn.rs1_or_zero() as u64).into(),
             (insn.rs2_or_zero() as u64).into(),
@@ -72,25 +59,17 @@ impl InsnRecord<()> {
     /// - `as u32` and `as i32` as usual.
     /// - `i64_to_base(imm)` gives the field element going into the program table.
     /// - `as u64` in unsigned cases.
-    pub fn imm_internal(insn: &DecodedInstruction) -> i64 {
-        let imm: u32 = insn.immediate();
-        match insn.codes() {
+    pub fn imm_internal(insn: &Instruction) -> i64 {
+        match (insn.kind, InsnFormat::from(insn.kind)) {
             // Prepare the immediate for ShiftImmInstruction.
             // The shift is implemented as a multiplication/division by 1 << immediate.
-            InsnCodes {
-                kind: SLLI | SRLI | SRAI,
-                ..
-            } => 1 << (imm & 0x1F),
+            (SLLI | SRLI | SRAI, _) => 1 << insn.imm,
             // Unsigned view.
             // For example, u32::MAX is `u32::MAX mod p` in the finite field.
-            InsnCodes { format: R | U, .. }
-            | InsnCodes {
-                kind: ADDI | SLTIU | ANDI | XORI | ORI,
-                ..
-            } => imm as u64 as i64,
+            (_, R | U) | (ADDI | SLTIU | ANDI | XORI | ORI, _) => insn.imm as u32 as i64,
             // Signed view.
             // For example, u32::MAX is `-1 mod p` in the finite field.
-            _ => imm as i32 as i64,
+            _ => insn.imm as i64,
         }
     }
 }
@@ -158,7 +137,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         let pc_base = program.base_address;
         assert!(num_instructions <= config.program_size);
 
-        let mut fixed = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_fixed);
+        let mut fixed = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            num_fixed,
+            InstancePaddingStrategy::Default,
+        );
 
         fixed
             .par_iter_mut()
@@ -166,23 +149,12 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .zip((0..num_instructions).into_par_iter())
             .for_each(|(row, i)| {
                 let pc = pc_base + (i * PC_STEP_SIZE) as u32;
-                let insn = DecodedInstruction::new(program.instructions[i]);
-                let values = InsnRecord::from_decoded(pc, &insn);
+                let insn = program.instructions[i];
+                let values: InsnRecord<_> = InsnRecord::from_decoded(pc, &insn);
 
                 // Copy all the fields.
                 for (col, val) in config.record.as_slice().iter().zip_eq(values.as_slice()) {
                     set_fixed_val!(row, *col, *val);
-                }
-            });
-
-        assert_eq!(INVALID as u64, 0, "0 padding must be invalid instructions");
-        fixed
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .skip(num_instructions)
-            .for_each(|row| {
-                for col in config.record.as_slice() {
-                    set_fixed_val!(row, *col, 0_u64.into());
                 }
             });
 
@@ -203,21 +175,17 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             prog_mlt[i] = *mlt;
         }
 
-        let mut witness = RowMajorMatrix::<E::BaseField>::new(config.program_size, num_witin);
+        let mut witness = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
         witness
             .par_iter_mut()
             .with_min_len(MIN_PAR_SIZE)
             .zip(prog_mlt.into_par_iter())
             .for_each(|(row, mlt)| {
                 set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
-            });
-
-        witness
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .skip(program.instructions.len())
-            .for_each(|row| {
-                set_val!(row, config.mlt, 0_u64);
             });
 
         Ok(witness)
@@ -231,29 +199,6 @@ mod tests {
     use ceno_emul::encode_rv32;
     use ff::Field;
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
-
-    #[test]
-    #[allow(clippy::identity_op)]
-    fn test_decode_imm() {
-        for (i, expected) in [
-            // Example of I-type: ADDI.
-            // imm    | rs1     | funct3      | rd     | opcode
-            (89 << 20 | 1 << 15 | 0b000 << 12 | 1 << 7 | 0x13, 89),
-            // Shifts get a precomputed power of 2: SLLI, SRLI, SRAI.
-            (31 << 20 | 1 << 15 | 0b001 << 12 | 1 << 7 | 0x13, 1 << 31),
-            (31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13, 1 << 31),
-            (
-                1 << 30 | 31 << 20 | 1 << 15 | 0b101 << 12 | 1 << 7 | 0x13,
-                1 << 31,
-            ),
-            // Example of R-type with funct7: SUB.
-            // funct7     | rs2    | rs1     | funct3      | rd     | opcode
-            (0x20 << 25 | 1 << 20 | 1 << 15 | 0 << 12 | 1 << 7 | 0x33, 0),
-        ] {
-            let imm = InsnRecord::imm_internal(&DecodedInstruction::new(i));
-            assert_eq!(imm, expected);
-        }
-    }
 
     #[test]
     fn test_program_padding() {
@@ -273,7 +218,7 @@ mod tests {
             );
             for row in matrix.iter_rows().skip(actual_len) {
                 for col in row.iter() {
-                    assert_eq!(unsafe { col.assume_init() }, F::ZERO);
+                    assert_eq!(*col, F::ZERO);
                 }
             }
         };

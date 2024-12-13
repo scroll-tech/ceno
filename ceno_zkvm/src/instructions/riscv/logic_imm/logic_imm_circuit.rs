@@ -1,6 +1,5 @@
 //! The circuit implementation of logic instructions.
 
-use core::mem::MaybeUninit;
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
 
@@ -50,7 +49,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -103,7 +102,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
     fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -124,7 +123,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
     use goldilocks::GoldilocksExt2;
 
     use crate::{
@@ -191,7 +190,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
+        let insn_code = encode_rv32u(I::INST_KIND, 2, 0, 4, imm);
         let (raw_witin, lkm) = LogicInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,

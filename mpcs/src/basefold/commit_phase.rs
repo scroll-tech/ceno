@@ -27,13 +27,13 @@ use rayon::prelude::{
     ParallelSlice,
 };
 
-use super::structure::BasefoldCommitmentWithData;
+use super::structure::BasefoldCommitmentWithWitness;
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
-    comm: &BasefoldCommitmentWithData<E>,
+    comm: &BasefoldCommitmentWithWitness<E>,
     transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
@@ -179,7 +179,7 @@ where
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
-    comms: &[BasefoldCommitmentWithData<E>],
+    comms: &[BasefoldCommitmentWithWitness<E>],
     transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
@@ -350,7 +350,7 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     batch_coeffs: &[E],
-    comm: &BasefoldCommitmentWithData<E>,
+    comm: &BasefoldCommitmentWithWitness<E>,
     transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,

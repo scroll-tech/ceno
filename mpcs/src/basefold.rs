@@ -58,7 +58,7 @@ type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 
 mod structure;
 pub use structure::{
-    Basefold, BasefoldBasecodeParams, BasefoldCommitment, BasefoldCommitmentWithData,
+    Basefold, BasefoldBasecodeParams, BasefoldCommitment, BasefoldCommitmentWithWitness,
     BasefoldDefault, BasefoldParams, BasefoldProverParams, BasefoldRSParams,
     BasefoldVerifierParams,
 };
@@ -273,7 +273,7 @@ where
     type Param = BasefoldParams<E, Spec>;
     type ProverParam = BasefoldProverParams<E, Spec>;
     type VerifierParam = BasefoldVerifierParams<E, Spec>;
-    type CommitmentWithData = BasefoldCommitmentWithData<E>;
+    type CommitmentWithWitness = BasefoldCommitmentWithWitness<E>;
     type Commitment = BasefoldCommitment<E>;
     type CommitmentChunk = Digest<E::BaseField>;
     type Proof = BasefoldProof<E>;
@@ -307,7 +307,7 @@ where
     fn commit(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
-    ) -> Result<Self::CommitmentWithData, Error> {
+    ) -> Result<Self::CommitmentWithWitness, Error> {
         let timer = start_timer!(|| "Basefold::commit");
 
         let is_base = match poly.evaluations {
@@ -325,9 +325,9 @@ where
             PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
                 let codeword_tree = MerkleTree::<E>::from_leaves(codeword);
 
-                // All these values are stored in the `CommitmentWithData` because
+                // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
-                Ok(Self::CommitmentWithData {
+                Ok(Self::CommitmentWithWitness {
                     codeword_tree,
                     polynomials_bh_evals: vec![bh_evals],
                     num_vars: poly.num_vars,
@@ -338,9 +338,9 @@ where
             PolyEvalsCodeword::TooSmall(evals) => {
                 let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone());
 
-                // All these values are stored in the `CommitmentWithData` because
+                // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
-                Ok(Self::CommitmentWithData {
+                Ok(Self::CommitmentWithWitness {
                     codeword_tree,
                     polynomials_bh_evals: vec![evals],
                     num_vars: poly.num_vars,
@@ -359,7 +359,7 @@ where
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
-    ) -> Result<Self::CommitmentWithData, Error> {
+    ) -> Result<Self::CommitmentWithWitness, Error> {
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
@@ -413,7 +413,7 @@ where
                     })
                     .collect::<(Vec<_>, Vec<_>)>();
                 let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
-                Self::CommitmentWithData {
+                Self::CommitmentWithWitness {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
                     num_vars: polys[0].num_vars,
@@ -433,7 +433,7 @@ where
                     })
                     .collect::<Vec<_>>();
                 let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
-                Self::CommitmentWithData {
+                Self::CommitmentWithWitness {
                     codeword_tree,
                     polynomials_bh_evals: bh_evals,
                     num_vars: polys[0].num_vars,
@@ -457,7 +457,7 @@ where
         Ok(())
     }
 
-    fn get_pure_commitment(comm: &Self::CommitmentWithData) -> Self::Commitment {
+    fn get_pure_commitment(comm: &Self::CommitmentWithWitness) -> Self::Commitment {
         comm.to_commitment()
     }
 
@@ -467,7 +467,7 @@ where
     fn open(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
-        comm: &Self::CommitmentWithData,
+        comm: &Self::CommitmentWithWitness,
         point: &[E],
         _eval: &E, // Opening does not need eval, except for sanity check
         transcript: &mut impl Transcript<E>,
@@ -547,7 +547,7 @@ where
     fn batch_open(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithData],
+        comms: &[Self::CommitmentWithWitness],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
         transcript: &mut impl Transcript<E>,
@@ -769,7 +769,7 @@ where
     fn simple_batch_open(
         pp: &Self::ProverParam,
         polys: &[ArcMultilinearExtension<E>],
-        comm: &Self::CommitmentWithData,
+        comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],
         transcript: &mut impl Transcript<E>,
