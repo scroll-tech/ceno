@@ -53,10 +53,7 @@ impl CenoStdin {
         ]);
         for (offset, item) in izip!(offsets, &self.items) {
             buf.extend_from_slice(item);
-            buf.extend_from_slice(&vec![
-                0;
-                buf.len().next_multiple_of(RKYV_ALIGNMENT) - buf.len()
-            ]);
+            buf.resize(buf.len().next_multiple_of(RKYV_ALIGNMENT), 0);
             assert_eq!(
                 buf.len(),
                 (offset as usize).next_multiple_of(RKYV_ALIGNMENT)
