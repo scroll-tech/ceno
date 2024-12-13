@@ -2,9 +2,20 @@
 [unstable]
 # build-std = ["core"]
 # build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
-build-std = ["alloc", "core", "compiler_builtins", "std", "panic_abort", "proc_macro"]
+build-std = [
+  "alloc",
+  "core",
+  "compiler_builtins",
+  "std",
+  "panic_abort",
+  "proc_macro",
+]
 # build-std = ["core","alloc","compiler_builtins", "panic_abort"]
-build-std-features = ["compiler-builtins-mem","panic_immediate_abort"]
+build-std-features = [
+  "compiler-builtins-mem",
+  "panic_immediate_abort",
+  "default",
+]
 # build-std-features = []
 
 # [alias]
@@ -20,7 +31,15 @@ panic = "abort"
 
 [build]
 # rustflags = ["-C", "passes=lower-atomic", "-Zlocation-detail=none"]
-rustflags = ["-C", "link-arg=-Tmemory.x", "-C", "link-arg=-Tceno_link.x", "-Zlocation-detail=none"]
+rustflags = [
+  "-C",
+  "link-arg=-Tmemory.x",
+  "-C",
+  "link-arg=-Tceno_link.x",
+  "-Zlocation-detail=none",
+  "-C",
+  "passes=lower-atomic",
+]
 # #   "-C", "link-arg=-Tmemory.x",
 # #   "-C", "link-arg=-Tceno_link.x",
 # #   "-Zlocation-detail=none",

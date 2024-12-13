@@ -8,7 +8,7 @@ version = "0.1.0"
 [dependencies]
 # NOTE: you can use path dependencies for local development.
 # ceno_rt = { git = "https://github.com/scroll-tech/ceno", branch = "matthias/ceno_host" }
-ceno_rt = { path = "../../ceno/ceno_rt", features = ["std"]}
+ceno_rt = { path = "../../ceno/ceno_rt", features = ["std"] }
 rkyv = { version = "0.8", default-features = false, features = [
   "alloc",
   "bytecheck",
@@ -21,3 +21,6 @@ lto = "thin"
 [profile.release]
 panic = "abort"
 lto = "fat"
+
+# [patch.crates-io]
+# alloc = { path = "../alloc" }

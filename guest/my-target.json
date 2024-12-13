@@ -6,6 +6,7 @@
   "data-layout": "e-m:e-p:32:32-i64:64-n32-S128",
   "eh-frame-header": false,
   "emit-debug-gdb-scripts": false,
+  "env": "",
   "executables": true,
   "features": "+m,+forced-atomics",
   "linker": "rust-lld",
@@ -25,5 +26,7 @@
   "relocation-model": "static",
   "singlethread": true,
   "target-pointer-width": "32",
-  "vendor": "scroll"
+  "target-c-int-width": "32",
+  "target-endian": "little",
+  "disable-redzone": true
 }
