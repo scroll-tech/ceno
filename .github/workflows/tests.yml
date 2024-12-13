@@ -39,7 +39,7 @@ jobs:
           # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
           toolchain: nightly-2024-12-06
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -49,6 +49,7 @@ jobs:
             target/
             examples/target/
           key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: tests-${{ runner.os }}-cargo-
 
       - name: Install cargo make
         run: |
