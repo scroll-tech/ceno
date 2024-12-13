@@ -1,9 +1,0 @@
-[package]
-edition = "2021"
-name = "examples"
-readme = "README.md"
-resolver = "2"
-version = "0.1.0"
-
-[dependencies]
-ceno_rt = { path = "../ceno_rt" }

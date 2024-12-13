@@ -49,7 +49,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-            examples/target/
+            guest/target/
           key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cargo make
@@ -62,13 +62,13 @@ jobs:
         env:
           RUSTFLAGS: "-Dwarnings"
         run: |
-          cargo check --workspace --all-targets --exclude ceno_rt
+          cargo check --workspace --all-targets
           # We have a lot of code under #[cfg(not(debug_assertions))] and similar,
           # so we need to run cargo check in release mode, too:
-          cargo check --workspace --all-targets --exclude ceno_rt --release
+          cargo check --workspace --all-targets --release
           cargo make clippy
           # Same for clippy:
-          cargo clippy --workspace --all-targets --exclude ceno_rt --release
+          cargo clippy --workspace --all-targets --release
 
       - name: Install taplo
         run: taplo --version || cargo install taplo-cli
