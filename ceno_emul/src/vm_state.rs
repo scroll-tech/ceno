@@ -122,7 +122,7 @@ impl EmuContext for VMState {
             tracing::warn!("ecall ignored: syscall_id={}", function);
             self.store_register(Instruction::RD_NULL as RegIdx, 0)?;
             // Example ecall effect - any writable address will do.
-            let addr = (self.platform.stack_top - WORD_SIZE as u32).into();
+            let addr = (self.platform.stack.end - WORD_SIZE as u32).into();
             self.store_memory(addr, self.peek_memory(addr))?;
             self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
