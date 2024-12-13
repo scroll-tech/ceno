@@ -1,5 +1,4 @@
 #![deny(clippy::cargo)]
-// #![deny(clippy::pedantic)]
 #![feature(step_trait)]
 mod addr;
 pub use addr::*;
