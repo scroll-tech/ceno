@@ -228,7 +228,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm as u32);
+        let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
 
         let config = cb
             .namespace(
