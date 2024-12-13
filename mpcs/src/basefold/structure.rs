@@ -60,7 +60,7 @@ pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
 /// used to generate this commitment and for assistant in opening
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
-pub struct BasefoldCommitmentWithData<E: ExtensionField>
+pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -71,7 +71,7 @@ where
     pub(crate) num_polys: usize,
 }
 
-impl<E: ExtensionField> BasefoldCommitmentWithData<E>
+impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -133,20 +133,20 @@ where
     }
 }
 
-impl<E: ExtensionField> From<BasefoldCommitmentWithData<E>> for Digest<E::BaseField>
+impl<E: ExtensionField> From<BasefoldCommitmentWithWitness<E>> for Digest<E::BaseField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn from(val: BasefoldCommitmentWithData<E>) -> Self {
+    fn from(val: BasefoldCommitmentWithWitness<E>) -> Self {
         val.get_root_as()
     }
 }
 
-impl<E: ExtensionField> From<&BasefoldCommitmentWithData<E>> for BasefoldCommitment<E>
+impl<E: ExtensionField> From<&BasefoldCommitmentWithWitness<E>> for BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    fn from(val: &BasefoldCommitmentWithData<E>) -> Self {
+    fn from(val: &BasefoldCommitmentWithWitness<E>) -> Self {
         val.to_commitment()
     }
 }
@@ -194,7 +194,7 @@ where
     }
 }
 
-impl<E: ExtensionField> PartialEq for BasefoldCommitmentWithData<E>
+impl<E: ExtensionField> PartialEq for BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -204,7 +204,7 @@ where
     }
 }
 
-impl<E: ExtensionField> Eq for BasefoldCommitmentWithData<E> where
+impl<E: ExtensionField> Eq for BasefoldCommitmentWithWitness<E> where
     E::BaseField: Serialize + DeserializeOwned
 {
 }
@@ -266,7 +266,7 @@ where
     }
 }
 
-impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithData<E>
+impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {

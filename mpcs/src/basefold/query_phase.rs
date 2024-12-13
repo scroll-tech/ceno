@@ -25,12 +25,12 @@ use rayon::{
 
 use super::{
     encoding::EncodingScheme,
-    structure::{BasefoldCommitment, BasefoldCommitmentWithData, BasefoldSpec},
+    structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
 };
 
 pub fn prover_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
-    comm: &BasefoldCommitmentWithData<E>,
+    comm: &BasefoldCommitmentWithWitness<E>,
     trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> QueriesResult<E>
@@ -67,7 +67,7 @@ where
 pub fn batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
     codeword_size: usize,
-    comms: &[BasefoldCommitmentWithData<E>],
+    comms: &[BasefoldCommitmentWithWitness<E>],
     trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<E>
@@ -103,7 +103,7 @@ where
 
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
-    comm: &BasefoldCommitmentWithData<E>,
+    comm: &BasefoldCommitmentWithWitness<E>,
     trees: &[MerkleTree<E>],
     num_verifier_queries: usize,
 ) -> SimpleBatchQueriesResult<E>
@@ -411,7 +411,7 @@ where
 }
 
 fn batch_basefold_get_query<E: ExtensionField>(
-    comms: &[BasefoldCommitmentWithData<E>],
+    comms: &[BasefoldCommitmentWithWitness<E>],
     trees: &[MerkleTree<E>],
     codeword_size: usize,
     x_index: usize,
@@ -828,7 +828,7 @@ where
     pub fn from_single_query_result(
         single_query_result: SingleQueryResult<E>,
         oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithData<E>,
+        commitment: &BasefoldCommitmentWithWitness<E>,
     ) -> Self {
         assert!(commitment.codeword_tree.height() > 0);
         Self {
@@ -927,7 +927,7 @@ where
     pub fn from_query_result(
         query_result: QueriesResult<E>,
         oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithData<E>,
+        commitment: &BasefoldCommitmentWithWitness<E>,
     ) -> Self {
         Self {
             inner: query_result
@@ -1002,7 +1002,7 @@ where
     pub fn from_batched_single_query_result(
         batched_single_query_result: BatchedSingleQueryResult<E>,
         oracle_trees: &[MerkleTree<E>],
-        commitments: &[BasefoldCommitmentWithData<E>],
+        commitments: &[BasefoldCommitmentWithWitness<E>],
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -1147,7 +1147,7 @@ where
     pub fn from_batched_query_result(
         batched_query_result: BatchedQueriesResult<E>,
         oracle_trees: &[MerkleTree<E>],
-        commitments: &[BasefoldCommitmentWithData<E>],
+        commitments: &[BasefoldCommitmentWithWitness<E>],
     ) -> Self {
         Self {
             inner: batched_query_result
@@ -1307,7 +1307,7 @@ where
     pub fn from_single_query_result(
         single_query_result: SimpleBatchSingleQueryResult<E>,
         oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithData<E>,
+        commitment: &BasefoldCommitmentWithWitness<E>,
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -1403,7 +1403,7 @@ where
     pub fn from_query_result(
         query_result: SimpleBatchQueriesResult<E>,
         oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithData<E>,
+        commitment: &BasefoldCommitmentWithWitness<E>,
     ) -> Self {
         Self {
             inner: query_result
