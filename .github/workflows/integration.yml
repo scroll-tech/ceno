@@ -41,7 +41,6 @@ jobs:
             target/
             examples/target/
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: integration-${{ runner.os }}-cargo-
       - uses: dtolnay/rust-toolchain@nightly
 
       - name: Run example

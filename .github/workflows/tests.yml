@@ -42,14 +42,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
             target/
             examples/target/
           key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: tests-${{ runner.os }}-cargo-
 
       - name: Install cargo make
         run: |
