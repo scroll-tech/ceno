@@ -32,14 +32,14 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           targets: riscv32im-unknown-none-elf
           # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
           toolchain: nightly-2024-12-06
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
