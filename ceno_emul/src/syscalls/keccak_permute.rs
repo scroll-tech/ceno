@@ -39,12 +39,12 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
     // Compute Keccak permutation.
     let output = {
         let mut state = [0_u64; KECCAK_CELLS];
-        izip!(state.iter_mut(), input.chunks_exact(2)).for_each(|(cell, chunk)| {
-            let lo = chunk[0] as u64;
-            let hi = chunk[1] as u64;
-            *cell = lo | hi << 32;
-        });
+        for (cell, (&lo, &hi)) in izip!(&mut state, input.iter().tuples()) {
+            *cell = lo as u64 | (hi as u64) << 32;
+        }
+
         keccakf(&mut state);
+
         state.into_iter().flat_map(|c| [c as u32, (c >> 32) as u32])
     };
 

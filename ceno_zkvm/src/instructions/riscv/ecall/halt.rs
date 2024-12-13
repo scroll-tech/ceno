@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     instructions::{
         Instruction,
         riscv::{
@@ -16,12 +16,12 @@ use crate::{
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
     prev_x10_ts: WitIn,
-    lt_x10_cfg: AssertLTConfig,
+    lt_x10_cfg: AssertLtConfig,
 }
 
 pub struct HaltInstruction<E>(PhantomData<E>);
@@ -65,7 +65,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

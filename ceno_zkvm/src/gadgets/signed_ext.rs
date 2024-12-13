@@ -7,7 +7,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub struct SignedExtendConfig<E> {
@@ -84,7 +84,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         val: u64,
     ) -> Result<(), ZKVMError> {
