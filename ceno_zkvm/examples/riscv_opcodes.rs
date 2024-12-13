@@ -1,4 +1,4 @@
-use std::{panic, time::Instant};
+use std::{panic, sync::Arc, time::Instant};
 
 use ceno_zkvm::{
     declare_program,
@@ -7,6 +7,7 @@ use ceno_zkvm::{
     state::GlobalState,
     structs::ProgramParams,
     tables::{MemFinalRecord, ProgramTableCircuit},
+    with_panic_hook,
 };
 use clap::Parser;
 
@@ -26,7 +27,7 @@ use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use sumcheck::macros::{entered_span, exit_span};
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
-use transcript::Transcript;
+use transcript::BasicTranscript as Transcript;
 const PROGRAM_SIZE: usize = 16;
 // For now, we assume registers
 //  - x0 is not touched,
@@ -176,7 +177,7 @@ fn main() {
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         let public_io_init = init_public_io(&[1, u32::MAX, step_loop]);
 
-        let mut vm = VMState::new(CENO_PLATFORM, program.clone());
+        let mut vm = VMState::new(CENO_PLATFORM, Arc::new(program.clone()));
 
         // init memory mapped IO
         for record in &public_io_init {
@@ -289,12 +290,7 @@ fn main() {
         trace_report.save_json("report.json");
         trace_report.save_table("report.txt");
 
-        MockProver::assert_satisfied_full(
-            zkvm_cs.clone(),
-            zkvm_fixed_traces.clone(),
-            &zkvm_witness,
-            &pi,
-        );
+        MockProver::assert_satisfied_full(&zkvm_cs, zkvm_fixed_traces.clone(), &zkvm_witness, &pi);
 
         let timer = Instant::now();
 
@@ -323,13 +319,9 @@ fn main() {
         zkvm_proof.raw_pi[1] = vec![Goldilocks::ONE];
 
         // capture panic message, if have
-        let default_hook = panic::take_hook();
-        panic::set_hook(Box::new(|_info| {
-            // by default it will print msg to stdout/stderr
-            // we override it to avoid print msg since we will capture the msg by our own
-        }));
-        let result = panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript));
-        panic::set_hook(default_hook);
+        let result = with_panic_hook(Box::new(|_info| ()), || {
+            panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+        });
         match result {
             Ok(res) => {
                 res.expect_err("verify proof should return with error");

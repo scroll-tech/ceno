@@ -59,11 +59,10 @@ pub trait EmuContext {
     // Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> Word;
 
-    // Load from memory, in the context of instruction fetching.
-    // Only called after check_insn_load returns true.
-    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        self.load_memory(pc)
-    }
+    /// Load from instruction cache
+    // TODO(Matthias): this should really return `Result<DecodedInstruction>`
+    // because the instruction cache should contain instructions, not just words.
+    fn fetch(&mut self, pc: WordAddr) -> Option<Word>;
 
     // Check access for instruction load
     fn check_insn_load(&self, _addr: ByteAddr) -> bool {
@@ -465,12 +464,29 @@ impl Emulator {
     pub fn step<C: EmuContext>(&self, ctx: &mut C) -> Result<()> {
         let pc = ctx.get_pc();
 
+        // TODO(Matthias): `check_insn_load` should be unnecessary: we can statically
+        // check in `fn new_from_elf` that the program only has instructions where
+        // our platform accepts them.
         if !ctx.check_insn_load(pc) {
             ctx.trap(TrapCause::InstructionAccessFault)?;
             return Err(anyhow!("Fatal: could not fetch instruction at pc={:?}", pc));
         }
+        let Some(word) = ctx.fetch(pc.waddr()) else {
+            ctx.trap(TrapCause::InstructionAccessFault)?;
+            return Err(anyhow!("Fatal: could not fetch instruction at pc={:?}", pc));
+        };
 
-        let word = ctx.fetch(pc.waddr())?;
+        // TODO(Matthias): our `Program` that we are fetching from should really store
+        // already decoded instructions, instead of doing this weird, partial checking
+        // for `0x03` here.
+        //
+        // Note how we can fail here with an IllegalInstruction, and again further down
+        // when we match against the decoded instruction. We should centralise that. And
+        // our `step` function here shouldn't need to know anything about how instruction
+        // are encoded as numbers.
+        //
+        // One way to centralise is to do the check once when loading the program from the
+        // ELF.
         if word & 0x03 != 0x03 {
             // Opcode must end in 0b11 in RV32IM.
             ctx.trap(TrapCause::IllegalInstruction(word))?;

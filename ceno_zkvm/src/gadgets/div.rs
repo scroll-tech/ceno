@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem::MaybeUninit};
+use std::fmt::Display;
 
 use ff_ext::ExtensionField;
 
@@ -10,13 +10,13 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-use super::AssertLTConfig;
+use super::AssertLtConfig;
 
 /// divide gadget
 #[derive(Debug, Clone)]
 pub struct DivConfig<E: ExtensionField> {
     pub dividend: UInt<E>,
-    pub r_lt: AssertLTConfig,
+    pub r_lt: AssertLtConfig,
     pub intermediate_mul: UInt<E>,
 }
 
@@ -35,7 +35,7 @@ impl<E: ExtensionField> DivConfig<E> {
             let (dividend, intermediate_mul) =
                 divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true)?;
 
-            let r_lt = AssertLTConfig::construct_circuit(
+            let r_lt = AssertLtConfig::construct_circuit(
                 cb,
                 || "remainder < divisor",
                 remainder.value(),
@@ -53,7 +53,7 @@ impl<E: ExtensionField> DivConfig<E> {
 
     pub fn assign_instance<'a>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         divisor: &Value<'a, u32>,
         quotient: &Value<'a, u32>,

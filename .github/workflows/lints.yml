@@ -32,13 +32,6 @@ jobs:
     timeout-minutes: 30
     runs-on: [self-hosted, Linux, X64]
 
-    strategy:
-      matrix:
-        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
-        # Exclude the riscv32im-unknown-none-elf target
-        exclude:
-          - target: riscv32im-unknown-none-elf
-
     steps:
       - uses: actions/checkout@v2
       - uses: dtolnay/rust-toolchain@master
@@ -46,7 +39,7 @@ jobs:
           components: rustfmt, clippy
           targets: riscv32im-unknown-none-elf
           # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
-          toolchain: nightly-2024-10-03
+          toolchain: nightly-2024-12-06
       - name: Cargo cache
         uses: actions/cache@v3
         with:
@@ -63,11 +56,10 @@ jobs:
         run: |
           cargo make --version || cargo install cargo-make
       - name: Check code format
-        run: cargo make fmt-all-check
+        run: cargo fmt --all --check
 
       - name: Run clippy
         env:
-          TARGET: ${{ matrix.target }}
           RUSTFLAGS: "-Dwarnings"
         run: |
           cargo check --workspace --all-targets --exclude ceno_rt

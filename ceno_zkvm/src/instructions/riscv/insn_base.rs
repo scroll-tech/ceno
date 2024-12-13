@@ -12,13 +12,12 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     set_val,
     uint::Value,
     witness::LkMultiplicity,
 };
 use ceno_emul::Tracer;
-use core::mem::MaybeUninit;
 use std::{iter, marker::PhantomData};
 
 #[derive(Debug)]
@@ -59,7 +58,7 @@ impl<E: ExtensionField> StateInOut<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         // lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -77,7 +76,7 @@ impl<E: ExtensionField> StateInOut<E> {
 pub struct ReadRS1<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
-    pub lt_cfg: AssertLTConfig,
+    pub lt_cfg: AssertLtConfig,
     _field_type: PhantomData<E>,
 }
 
@@ -107,7 +106,7 @@ impl<E: ExtensionField> ReadRS1<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -131,7 +130,7 @@ impl<E: ExtensionField> ReadRS1<E> {
 pub struct ReadRS2<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
-    pub lt_cfg: AssertLTConfig,
+    pub lt_cfg: AssertLtConfig,
     _field_type: PhantomData<E>,
 }
 
@@ -161,7 +160,7 @@ impl<E: ExtensionField> ReadRS2<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -186,7 +185,7 @@ pub struct WriteRD<E: ExtensionField> {
     pub id: WitIn,
     pub prev_ts: WitIn,
     pub prev_value: UInt<E>,
-    pub lt_cfg: AssertLTConfig,
+    pub lt_cfg: AssertLtConfig,
 }
 
 impl<E: ExtensionField> WriteRD<E> {
@@ -217,7 +216,7 @@ impl<E: ExtensionField> WriteRD<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -246,7 +245,7 @@ impl<E: ExtensionField> WriteRD<E> {
 #[derive(Debug)]
 pub struct ReadMEM<E: ExtensionField> {
     pub prev_ts: WitIn,
-    pub lt_cfg: AssertLTConfig,
+    pub lt_cfg: AssertLtConfig,
     _field_type: PhantomData<E>,
 }
 
@@ -275,7 +274,7 @@ impl<E: ExtensionField> ReadMEM<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -301,7 +300,7 @@ impl<E: ExtensionField> ReadMEM<E> {
 #[derive(Debug)]
 pub struct WriteMEM {
     pub prev_ts: WitIn,
-    pub lt_cfg: AssertLTConfig,
+    pub lt_cfg: AssertLtConfig,
 }
 
 impl WriteMEM {
@@ -328,7 +327,7 @@ impl WriteMEM {
 
     pub fn assign_instance<E: ExtensionField>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -437,7 +436,7 @@ impl<E: ExtensionField> MemAddr<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         addr: Word,
     ) -> Result<(), ZKVMError> {
@@ -471,12 +470,12 @@ impl<E: ExtensionField> MemAddr<E> {
 mod test {
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
     use itertools::Itertools;
-    use multilinear_extensions::mle::IntoMLEs;
 
     use crate::{
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
+        instructions::InstancePaddingStrategy,
         scheme::mock_prover::MockProver,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -516,7 +515,11 @@ mod test {
 
         let mut lkm = LkMultiplicity::default();
         let num_rows = 2;
-        let mut raw_witin = RowMajorMatrix::<F>::new(num_rows, cb.cs.num_witin as usize);
+        let mut raw_witin = RowMajorMatrix::<F>::new(
+            num_rows,
+            cb.cs.num_witin as usize,
+            InstancePaddingStrategy::Default,
+        );
         for instance in raw_witin.iter_mut() {
             mem_addr.assign_instance(instance, &mut lkm, addr)?;
         }
@@ -542,7 +545,6 @@ mod test {
         MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
-                .de_interleaving()
                 .into_mles()
                 .into_iter()
                 .map(|v| v.into())

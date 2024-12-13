@@ -18,9 +18,6 @@ use rayon::{
 };
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
-#[cfg(feature = "non_pow2_rayon_thread")]
-use crate::local_thread_pool::{LOCAL_THREAD_POOL, create_local_pool_once};
-
 use crate::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverStateV2},
@@ -39,7 +36,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     pub fn prove_batch_polys(
         max_thread_id: usize,
         mut polys: Vec<VirtualPolynomialV2<'a, E>>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
@@ -99,19 +96,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
                     // Nesting is possible, but then `tracing-forest` does the wrong thing when measuring duration.
                     // TODO: investigate possibility of nesting with correct duration of parent span
                     let span = entered_span!("prove_rounds", profiling_5 = true);
-                    for i in 0..num_variables {
+                    for _ in 0..num_variables {
                         let prover_msg = IOPProverStateV2::prove_round_and_update_state(
                             &mut prover_state,
                             &challenge,
                         );
-                        if thread_id < 2 {
-                            tracing::debug!(
-                                "thread {}: sumcheck round {}/{}",
-                                thread_id,
-                                i + 1,
-                                num_variables
-                            );
-                        }
                         thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
                         challenge = Some(
@@ -243,26 +232,11 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
         {
             rayon::in_place_scope(scoped_fn)
         } else {
-            #[cfg(not(feature = "non_pow2_rayon_thread"))]
-            {
-                panic!(
-                    "rayon global thread pool size {} mismatch with desired poly size {}, add
-            --features non_pow2_rayon_thread",
-                    rayon::current_num_threads(),
-                    polys.len()
-                );
-            }
-
-            #[cfg(feature = "non_pow2_rayon_thread")]
-            unsafe {
-                create_local_pool_once(max_thread_id, true);
-
-                if let Some(pool) = LOCAL_THREAD_POOL.as_ref() {
-                    pool.scope(scoped_fn)
-                } else {
-                    panic!("empty local pool")
-                }
-            }
+            panic!(
+                "rayon global thread pool size {} mismatch with desired poly size {}.",
+                rayon::current_num_threads(),
+                polys.len()
+            );
         };
 
         if log2_max_thread_id == 0 {
@@ -612,7 +586,7 @@ impl<'a, E: ExtensionField> IOPProverStateV2<'a, E> {
     #[tracing::instrument(skip_all, name = "sumcheck::prove_parallel")]
     pub fn prove_parallel(
         poly: VirtualPolynomialV2<'a, E>,
-        transcript: &mut Transcript<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverStateV2<'a, E>) {
         let (num_variables, max_degree) =
             (poly.aux_info.max_num_variables, poly.aux_info.max_degree);

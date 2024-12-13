@@ -1,13 +1,20 @@
 use ceno_emul::{CENO_PLATFORM, IterAddresses, Platform, Program, WORD_SIZE, Word};
-use ceno_zkvm::e2e::run_e2e;
+use ceno_zkvm::{
+    e2e::{Checkpoint, run_e2e_with_checkpoint},
+    with_panic_hook,
+};
 use clap::{Parser, ValueEnum};
+use ff_ext::ff::Field;
+use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
-use std::fs;
+use mpcs::{Basefold, BasefoldRSParams};
+use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
+use transcript::BasicTranscript as Transcript;
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
@@ -80,7 +87,7 @@ fn main() {
         .without_time();
 
     Registry::default()
-        .with(ForestLayer::default())
+        .with(args.profiling.is_some().then_some(ForestLayer::default()))
         .with(fmt_layer)
         // if some profiling granularity is specified, use the profiling filter,
         // otherwise use the default
@@ -131,16 +138,55 @@ fn main() {
     );
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
-    run_e2e(
+
+    type E = GoldilocksExt2;
+    type B = Goldilocks;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+
+    let (state, _) = run_e2e_with_checkpoint::<E, Pcs>(
         program,
         platform,
         args.stack_size,
         args.heap_size,
         hints,
         max_steps,
+        Checkpoint::PrepSanityCheck,
     );
-}
 
+    let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
+
+    // do sanity check
+    let transcript = Transcript::new(b"riscv");
+    // change public input maliciously should cause verifier to reject proof
+    zkvm_proof.raw_pi[0] = vec![B::ONE];
+    zkvm_proof.raw_pi[1] = vec![B::ONE];
+
+    // capture panic message, if have
+    let result = with_panic_hook(Box::new(|_info| ()), || {
+        panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+    });
+    match result {
+        Ok(res) => {
+            res.expect_err("verify proof should return with error");
+        }
+        Err(err) => {
+            let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
+                message.to_string()
+            } else if let Some(message) = err.downcast_ref::<String>() {
+                message.to_string()
+            } else if let Some(message) = err.downcast_ref::<&String>() {
+                message.to_string()
+            } else {
+                unreachable!()
+            };
+
+            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+                println!("unknown panic {msg:?}");
+                panic::resume_unwind(err);
+            };
+        }
+    };
+}
 fn memory_from_file(path: &Option<String>) -> Vec<u32> {
     path.as_ref()
         .map(|path| {

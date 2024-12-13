@@ -27,14 +27,14 @@ use rayon::prelude::{
     ParallelSlice,
 };
 
-use super::structure::BasefoldCommitmentWithData;
+use super::structure::BasefoldCommitmentWithWitness;
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
-    comm: &BasefoldCommitmentWithData<E>,
-    transcript: &mut Transcript<E>,
+    comm: &BasefoldCommitmentWithWitness<E>,
+    transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
@@ -179,8 +179,8 @@ where
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
-    comms: &[BasefoldCommitmentWithData<E>],
-    transcript: &mut Transcript<E>,
+    comms: &[BasefoldCommitmentWithWitness<E>],
+    transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
     coeffs: &[E],
@@ -350,8 +350,8 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     batch_coeffs: &[E],
-    comm: &BasefoldCommitmentWithData<E>,
-    transcript: &mut Transcript<E>,
+    comm: &BasefoldCommitmentWithWitness<E>,
+    transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)

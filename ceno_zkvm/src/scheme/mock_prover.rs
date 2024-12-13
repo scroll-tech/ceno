@@ -653,10 +653,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
-                let row = row
-                    .iter()
-                    .map(|v| unsafe { (*v).assume_init() }.into())
-                    .collect::<Vec<_>>();
+                let row = row.iter().map(|v| (*v).into()).collect::<Vec<E>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
@@ -727,7 +724,6 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         let wits_in = raw_witin
-            .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
@@ -746,7 +742,7 @@ Hints:
     }
 
     pub fn assert_satisfied_full(
-        cs: ZKVMConstraintSystem<E>,
+        cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
         pi: &PublicValues<u32>,
@@ -1206,14 +1202,14 @@ Hints:
 
 #[cfg(test)]
 mod tests {
-    use std::mem::MaybeUninit;
 
     use super::*;
     use crate::{
         ROMType::U5,
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        gadgets::{AssertLTConfig, IsLtConfig},
+        gadgets::{AssertLtConfig, IsLtConfig},
+        instructions::InstancePaddingStrategy,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -1357,7 +1353,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: AssertLTConfig,
+        pub lt_wtns: AssertLtConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -1369,13 +1365,13 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a");
             let b = cb.create_witin(|| "b");
-            let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
+            let lt_wtns = AssertLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: AssertLtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
@@ -1393,7 +1389,11 @@ mod tests {
             instances: Vec<AssertLtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
@@ -1489,7 +1489,7 @@ mod tests {
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: LtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
@@ -1507,7 +1507,11 @@ mod tests {
             instances: Vec<LtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
