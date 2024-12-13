@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::Range};
+use std::{collections::BTreeSet, ops::Range};
 
 use crate::addr::{Addr, RegIdx};
 
@@ -10,8 +10,7 @@ use crate::addr::{Addr, RegIdx};
 #[derive(Clone, Debug)]
 pub struct Platform {
     pub rom: Range<Addr>,
-    // This is an `Option` to allow `const` here.
-    pub prog_data: Option<HashSet<Addr>>,
+    pub prog_data: BTreeSet<Addr>,
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
     pub public_io: Range<Addr>,
@@ -22,7 +21,7 @@ pub struct Platform {
 
 pub const CENO_PLATFORM: Platform = Platform {
     rom: 0x2000_0000..0x3000_0000,
-    prog_data: None,
+    prog_data: BTreeSet::new(),
     stack: 0xB0000000..0xC0000000,
     heap: 0x8000_0000..0xFFFF_0000,
     public_io: 0x3000_1000..0x3000_2000,
@@ -38,10 +37,7 @@ impl Platform {
     }
 
     pub fn is_prog_data(&self, addr: Addr) -> bool {
-        self.prog_data
-            .as_ref()
-            .map(|set| set.contains(&(addr & !0x3)))
-            .unwrap_or(false)
+        self.prog_data.contains(&(addr & !0x3))
     }
 
     pub fn is_ram(&self, addr: Addr) -> bool {

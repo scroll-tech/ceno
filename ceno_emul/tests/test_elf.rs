@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
 use ceno_emul::{
@@ -66,7 +66,7 @@ fn test_ceno_rt_io() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_io;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
     let mut state = VMState::new(platform, Arc::new(program));

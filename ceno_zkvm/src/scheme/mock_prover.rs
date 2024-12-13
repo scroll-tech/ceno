@@ -17,7 +17,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
-use ceno_emul::{ByteAddr, CENO_PLATFORM, Program};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
@@ -38,7 +38,10 @@ use strum::IntoEnumIterator;
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
-pub const MOCK_PC_START: ByteAddr = ByteAddr(CENO_PLATFORM.pc_base());
+pub static MOCK_PC_START: ByteAddr = ByteAddr({
+    static CENO_PLATFORM: Platform = ceno_emul::CENO_PLATFORM;
+    CENO_PLATFORM.pc_base()
+});
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
