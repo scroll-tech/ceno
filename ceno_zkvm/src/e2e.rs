@@ -11,7 +11,7 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program,
+    Addr, ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program,
     StepRecord, Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
@@ -74,7 +74,7 @@ fn emulate_program(
         .iter()
         .rev()
         .find(|record| {
-            record.insn().codes().kind == EANY
+            record.insn().kind == InsnKind::ECALL
                 && record.rs1().unwrap().value == Platform::ecall_halt()
         })
         .and_then(|halt_record| halt_record.rs2())
@@ -579,9 +579,8 @@ fn format_segments(
 
 fn format_segment(platform: &Platform, addr: u32) -> String {
     format!(
-        "{}{}{}",
+        "{}{}",
         if platform.can_read(addr) { "R" } else { "-" },
         if platform.can_write(addr) { "W" } else { "-" },
-        if platform.can_execute(addr) { "X" } else { "-" },
     )
 }

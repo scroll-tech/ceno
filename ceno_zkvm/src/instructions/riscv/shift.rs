@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
@@ -7,7 +7,7 @@ use crate::{
     Value,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, SignedExtendConfig},
+    gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::Instruction,
     set_val,
 };
@@ -26,7 +26,7 @@ pub struct ShiftConfig<E: ExtensionField> {
     pow2_rs2_low5: WitIn,
 
     outflow: WitIn,
-    assert_lt_config: AssertLTConfig,
+    assert_lt_config: AssertLtConfig,
 
     // SRA
     signed_extend_config: Option<SignedExtendConfig<E>>,
@@ -90,7 +90,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
         let outflow = circuit_builder.create_witin(|| "outflow");
-        let assert_lt_config = AssertLTConfig::construct_circuit(
+        let assert_lt_config = AssertLtConfig::construct_circuit(
             circuit_builder,
             || "outflow < pow2_rs2_low5",
             outflow.expr(),
@@ -163,7 +163,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {

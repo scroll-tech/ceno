@@ -33,9 +33,8 @@ Clippy and check work as usual:
 ```sh
 cargo check
 cargo clippy
+cargo build
 ```
-
-Alas, `cargo build` doesn't work. That's a known problem and we're working on it.  Please use `cargo make build` instead for now.
 
 ### Setting up self-hosted CI docker container
 
