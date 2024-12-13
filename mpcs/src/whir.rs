@@ -2,7 +2,7 @@ use super::PolynomialCommitmentScheme;
 use ark_ff::{FftField, Field, PrimeField};
 use ff_ext::ExtensionField;
 use rand::{distributions::Standard, prelude::Distribution};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::marker::PhantomData;
 use whir::ceno_binding::{PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner};
 
@@ -18,6 +18,8 @@ pub struct Whir<E: ExtensionField> {
 
 impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E>
 where
+    E: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned,
     Standard: Distribution<E> + Distribution<E::BaseField>,
 {
     type Param = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
