@@ -39,7 +39,7 @@ mod panic_handler {
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]
     unsafe {
-        core::arch::asm!(
+        asm!(
             "ecall",
             in ("a0") exit_code,
             in ("t0") 0,
