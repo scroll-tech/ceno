@@ -14,8 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt::{self, Debug};
-
 use anyhow::{Result, anyhow};
 use num_derive::ToPrimitive;
 use strum_macros::{Display, EnumIter};
@@ -98,19 +96,11 @@ pub trait EmuContext {
     }
 }
 
-pub struct Hex(u32);
-
-impl Debug for Hex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0x{:08x}", self.0)
-    }
-}
-
 #[derive(Debug)]
 pub enum TrapCause {
     InstructionAddressMisaligned,
     InstructionAccessFault,
-    IllegalInstruction(Hex),
+    IllegalInstruction(u32),
     Breakpoint,
     LoadAddressMisaligned,
     LoadAccessFault(ByteAddr),
@@ -285,7 +275,7 @@ pub fn step<C: EmuContext>(ctx: &mut C) -> Result<()> {
         InsnCategory::Load => step_load(ctx, insn.kind, &insn)?,
         InsnCategory::Store => step_store(ctx, insn.kind, &insn)?,
         InsnCategory::System => step_system(ctx, insn.kind, &insn)?,
-        InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(Hex(insn.raw)))?,
+        InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.raw))?,
     } {
         ctx.on_normal_end(&insn);
     };
@@ -529,7 +519,7 @@ fn step_store<M: EmuContext>(ctx: &mut M, kind: InsnKind, decoded: &Instruction)
 fn step_system<M: EmuContext>(ctx: &mut M, kind: InsnKind, decoded: &Instruction) -> Result<bool> {
     match kind {
         InsnKind::ECALL => ctx.ecall(),
-        _ => ctx.trap(TrapCause::IllegalInstruction(Hex(decoded.raw))),
+        _ => ctx.trap(TrapCause::IllegalInstruction(decoded.raw)),
     }
 }
 

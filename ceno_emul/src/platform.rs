@@ -76,11 +76,11 @@ impl Platform {
     // Permissions.
 
     pub fn can_read(&self, addr: Addr) -> bool {
-        self.is_ram(addr) || self.is_pub_io(addr) || self.is_hints(addr)
+        self.can_write(addr)
     }
 
     pub fn can_write(&self, addr: Addr) -> bool {
-        self.is_ram(addr)
+        self.is_ram(addr) || self.is_pub_io(addr) || self.is_hints(addr)
     }
 
     // Environment calls.
