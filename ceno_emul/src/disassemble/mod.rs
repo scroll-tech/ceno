@@ -257,7 +257,6 @@ impl InstructionProcessor for InstructionTranspiler {
     ///
     /// Our internal ADDI does not have this limitation, so we can convert LUI to ADDI.
     /// See [`InstructionTranspiler::process_auipc`] for more background on the conversion.
-    ///
     fn process_lui(&mut self, dec_insn: UType) -> Self::InstructionResult {
         // Verify assumption that the immediate is already shifted left by 12 bits.
         assert_eq!(dec_insn.imm & 0xfff, 0);
