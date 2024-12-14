@@ -61,9 +61,9 @@ _start:
     // If we return from main, we halt with success:
 
     // Set the ecall code HALT.
-    addi t0, x0, 0
+    li t0, 0
     // Set successful exit code, ie 0:
-    addi a0, x0, 0
+    li a0, 0
     ecall
     ",
 );
