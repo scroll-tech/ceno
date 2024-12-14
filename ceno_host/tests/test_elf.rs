@@ -26,7 +26,7 @@ fn test_ceno_rt_mini() -> Result<()> {
 // as you can tell, because this tests panics.)  However, we should adapt this test
 // to properly check for the conventional Rust panic.
 #[test]
-#[should_panic]
+#[should_panic(expected = "Trap IllegalInstruction")]
 fn test_ceno_rt_panic() {
     let program_elf = ceno_examples::ceno_rt_panic;
     let program = Program::load_elf(program_elf, u32::MAX).unwrap();
