@@ -1,15 +1,29 @@
-[target.riscv32im-unknown-none-elf]
+[unstable]
+build-std = [
+  "alloc",
+  "core",
+  "compiler_builtins",
+  "std",
+  "panic_abort",
+  "proc_macro",
+]
+build-std-features = [
+  "compiler-builtins-mem",
+  "panic_immediate_abort",
+  "default",
+]
+
+[profile.dev]
+panic = "abort"
+
+[build]
 rustflags = [
   "-C",
   "link-arg=-Tmemory.x",
-  #"-C", "link-arg=-Tlink.x", // Script from riscv_rt.
   "-C",
   "link-arg=-Tceno_link.x",
+  "-Zlocation-detail=none",
+  "-C",
+  "passes=lower-atomic",
 ]
-
-[build]
-target = "riscv32im-unknown-none-elf"
-
-[profile.release]
-lto = true
-panic = "abort"
+target = ".cargo/riscv32im-ceno-zkvm-elf.json"

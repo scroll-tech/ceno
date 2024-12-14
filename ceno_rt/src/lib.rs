@@ -2,11 +2,8 @@
 #![feature(strict_overflow_ops)]
 #![feature(linkage)]
 
-#![cfg_attr(feature = "std", feature(panic_always_abort))]
-// #![cfg_attr(not(feature = "std"), no_std)]
-// #![cfg_attr(feature = "std", feature(restricted_std))]
-
-use core::arch::global_asm;
+#[cfg(target_arch = "riscv32")]
+use core::arch::{asm, global_asm};
 
 mod allocator;
 
@@ -25,17 +22,6 @@ pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
     unimplemented!();
 }
 
-#[cfg(not(any(test, feature = "std")))]
-mod panic_handler {
-    use core::panic::PanicInfo;
-
-    #[panic_handler]
-    #[inline(never)]
-    fn panic_handler(_panic: &PanicInfo<'_>) -> ! {
-        super::halt(1)
-    }
-}
-
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]
     unsafe {
@@ -50,6 +36,7 @@ pub fn halt(exit_code: u32) -> ! {
     unimplemented!("Halt is not implemented for this target: {}", exit_code);
 }
 
+#[cfg(target_arch = "riscv32")]
 global_asm!(
     "
 // The entry point for the program.

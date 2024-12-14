@@ -248,6 +248,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ceno-examples"
+version = "0.1.0"
+
+[[package]]
 name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
@@ -267,6 +271,7 @@ name = "ceno_host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ceno-examples",
  "ceno_emul",
  "itertools 0.13.0",
  "rand",
