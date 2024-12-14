@@ -150,7 +150,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .for_each(|(row, i)| {
                 let pc = pc_base + (i * PC_STEP_SIZE) as u32;
                 let insn = program.instructions[i];
-                let values = InsnRecord::from_decoded(pc, &insn);
+                let values: InsnRecord<_> = InsnRecord::from_decoded(pc, &insn);
 
                 // Copy all the fields.
                 for (col, val) in config.record.as_slice().iter().zip_eq(values.as_slice()) {
