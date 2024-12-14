@@ -1,5 +1,3 @@
-use std::mem::MaybeUninit;
-
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
@@ -64,7 +62,7 @@ impl IsZeroConfig {
 
     pub fn assign_instance<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         x: F,
     ) -> Result<(), ZKVMError> {
         let (is_zero, inverse) = if x.is_zero_vartime() {
@@ -117,7 +115,7 @@ impl IsEqualConfig {
 
     pub fn assign_instance<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         a: F,
         b: F,
     ) -> Result<(), ZKVMError> {

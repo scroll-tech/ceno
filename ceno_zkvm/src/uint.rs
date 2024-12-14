@@ -20,7 +20,7 @@ use goldilocks::SmallField;
 use itertools::{Itertools, enumerate};
 use std::{
     borrow::Cow,
-    mem::{self, MaybeUninit},
+    mem::{self},
     ops::Index,
 };
 pub use strum::IntoEnumIterator;
@@ -202,20 +202,20 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     pub fn assign_value<T: Into<u64> + Default + From<u32> + Copy>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         value: Value<T>,
     ) {
         self.assign_limbs(instance, value.as_u16_limbs())
     }
 
-    pub fn assign_add_outcome(&self, instance: &mut [MaybeUninit<E::BaseField>], value: &ValueAdd) {
+    pub fn assign_add_outcome(&self, instance: &mut [E::BaseField], value: &ValueAdd) {
         self.assign_limbs(instance, &value.limbs);
         self.assign_carries(instance, &value.carries);
     }
 
     pub fn assign_mul_outcome(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         value: &ValueMul,
     ) -> Result<(), ZKVMError> {
@@ -224,7 +224,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         self.assign_carries_auxiliary(instance, lkm, &value.carries, value.max_carry_value)
     }
 
-    pub fn assign_limbs(&self, instance: &mut [MaybeUninit<E::BaseField>], limbs_values: &[u16]) {
+    pub fn assign_limbs(&self, instance: &mut [E::BaseField], limbs_values: &[u16]) {
         assert!(
             limbs_values.len() <= Self::NUM_LIMBS,
             "assign input length mismatch. input_len={}, NUM_CELLS={}",
@@ -238,14 +238,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .map(|v| E::BaseField::from(*v as u64))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
-                instance[wire.id as usize] = MaybeUninit::new(limb);
+                instance[wire.id as usize] = limb;
             }
         }
     }
 
     pub fn assign_carries<T: Into<u64> + Copy>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         carry_values: &[T],
     ) {
         assert!(
@@ -264,14 +264,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     .map(|v| E::BaseField::from(Into::<u64>::into(*v)))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
-                instance[wire.id as usize] = MaybeUninit::new(carry);
+                instance[wire.id as usize] = carry;
             }
         }
     }
 
     pub fn assign_carries_auxiliary<T: Into<u64> + Copy>(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         carry_values: &[T],
         max_carry: u64,
