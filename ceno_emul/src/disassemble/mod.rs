@@ -284,7 +284,8 @@ impl InstructionProcessor for InstructionTranspiler {
     ///
     /// ADDI is slightly more general than LUI or AUIPC, because you can also specify an
     /// input register rs1.  That generality might cost us sligthtly in the non-recursive proof,
-    /// but we suspect dropping the number of instructions will speed up the recursive proof.
+    /// but we suspect decreasing the total number of different instruction kinds will speed up
+    /// the recursive proof.
     ///
     /// In any case, AUIPC and LUI together make up ~0.1% of instructions executed in typical
     /// real world scenarios like a `reth` run.
