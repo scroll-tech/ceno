@@ -16,4 +16,5 @@ itertools.workspace = true
 rkyv = { version = "0.8.9", default-features = false, features = ["alloc", "bytecheck"] }
 
 [dev-dependencies]
+# ceno-examples = { path = "../examples-builder" }
 rand.workspace = true

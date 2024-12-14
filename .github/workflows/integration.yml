@@ -8,6 +8,10 @@ on:
     branches:
       - master
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   skip_check:
     runs-on: [self-hosted, Linux, X64]
@@ -33,9 +37,9 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -43,18 +47,17 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
+            guest/target/
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
       - name: Run example
         env:
-          RAYON_NUM_THREADS: 2
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --package ceno_zkvm --example riscv_opcodes -- --start 10 --end 11
 
       - name: Run fibonacci
         env:
-          RAYON_NUM_THREADS: 8
           RUST_LOG: debug
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --package ceno_zkvm --bin e2e -- --platform=sp1 ceno_zkvm/examples/fibonacci.elf

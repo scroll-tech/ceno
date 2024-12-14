@@ -1,7 +1,5 @@
 [env]
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
-CORE = { script = ["nproc"] }
-RAYON_NUM_THREADS = "${CORE}"
 
 [tasks.tests]
 args = [
@@ -11,10 +9,7 @@ args = [
   "--bins",
   "--tests",
   "--examples",
-  "--release",
   "--workspace",
-  "--exclude",
-  "ceno_rt",
 ]
 command = "cargo"
 workspace = false
@@ -34,8 +29,6 @@ args = [
   "clippy",
   "--workspace",
   "--all-targets",
-  "--exclude",
-  "ceno_rt",
   "--",
   "-D",
   "warnings",
