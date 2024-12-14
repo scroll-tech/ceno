@@ -9,7 +9,6 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use std::mem::MaybeUninit;
 
 /// This config handles the common part of S-type instructions:
 /// - PC, cycle, fetch.
@@ -70,7 +69,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

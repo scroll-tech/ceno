@@ -1,7 +1,7 @@
-use std::iter::zip;
+use std::{collections::HashSet, iter::zip, sync::Arc};
 
 use anyhow::Result;
-use ceno_emul::{IterAddresses, Platform, VMState, host_utils::read_all_messages};
+use ceno_emul::{IterAddresses, Platform, Program, VMState, host_utils::read_all_messages};
 use itertools::izip;
 use rkyv::{
     Serialize, api::high::HighSerializer, rancor::Error, ser::allocator::ArenaHandle, to_bytes,
@@ -53,10 +53,7 @@ impl CenoStdin {
         ]);
         for (offset, item) in izip!(offsets, &self.items) {
             buf.extend_from_slice(item);
-            buf.extend_from_slice(&vec![
-                0;
-                buf.len().next_multiple_of(RKYV_ALIGNMENT) - buf.len()
-            ]);
+            buf.resize(buf.len().next_multiple_of(RKYV_ALIGNMENT), 0);
             assert_eq!(
                 buf.len(),
                 (offset as usize).next_multiple_of(RKYV_ALIGNMENT)
@@ -70,11 +67,18 @@ impl CenoStdin {
 }
 
 pub fn run(platform: Platform, elf: &[u8], hints: &CenoStdin) -> Vec<String> {
+    let program = Program::load_elf(elf, u32::MAX).unwrap();
+    let platform = Platform {
+        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        ..platform
+    };
+
     let hints: Vec<u32> = hints.finalise();
+    let hints_range = platform.hints.clone();
 
-    let mut state = VMState::new_from_elf(platform.clone(), elf).expect("Failed to load ELF");
+    let mut state = VMState::new(platform, Arc::new(program));
 
-    for (addr, value) in zip(platform.hints.iter_addresses(), hints) {
+    for (addr, value) in zip(hints_range.iter_addresses(), hints) {
         state.init_memory(addr.into(), value);
     }
 

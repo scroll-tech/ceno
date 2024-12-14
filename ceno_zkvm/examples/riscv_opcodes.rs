@@ -76,7 +76,7 @@ fn main() {
         program_code,
         Default::default(),
     );
-    let mem_addresses = CENO_PLATFORM.ram.clone();
+    let mem_addresses = CENO_PLATFORM.heap.clone();
     let io_addresses = CENO_PLATFORM.public_io.clone();
 
     let mut fmt_layer = fmt::layer()
