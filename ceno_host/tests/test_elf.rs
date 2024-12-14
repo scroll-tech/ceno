@@ -11,7 +11,12 @@ use itertools::enumerate;
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_mini;
-    let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
+    let program = Program::load_elf(program_elf, u32::MAX)?;
+    let platform = Platform {
+        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        ..CENO_PLATFORM
+    };
+    let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
     Ok(())
 }
@@ -19,7 +24,12 @@ fn test_ceno_rt_mini() -> Result<()> {
 #[test]
 fn test_ceno_rt_panic() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_panic;
-    let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
+    let program = Program::load_elf(program_elf, u32::MAX)?;
+    let platform = Platform {
+        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        ..CENO_PLATFORM
+    };
+    let mut state = VMState::new(platform, Arc::new(program));
     let steps = run(&mut state)?;
     let last = steps.last().unwrap();
     assert_eq!(last.insn().kind, InsnKind::ECALL);
@@ -31,10 +41,15 @@ fn test_ceno_rt_panic() -> Result<()> {
 #[test]
 fn test_ceno_rt_mem() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_mem;
-    let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
+    let program = Program::load_elf(program_elf, u32::MAX)?;
+    let platform = Platform {
+        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        ..CENO_PLATFORM
+    };
+    let mut state = VMState::new(platform.clone(), Arc::new(program));
     let _steps = run(&mut state)?;
 
-    let value = state.peek_memory(CENO_PLATFORM.heap.start.into());
+    let value = state.peek_memory(platform.heap.start.into());
     assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
     Ok(())
 }
@@ -42,7 +57,12 @@ fn test_ceno_rt_mem() -> Result<()> {
 #[test]
 fn test_ceno_rt_alloc() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_alloc;
-    let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
+    let program = Program::load_elf(program_elf, u32::MAX)?;
+    let platform = Platform {
+        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        ..CENO_PLATFORM
+    };
+    let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
 
     // Search for the RAM action of the test program.
