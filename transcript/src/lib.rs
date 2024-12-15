@@ -7,7 +7,7 @@ pub mod basic;
 mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
-pub use statistics::{StatisticRecorder, BasicTranscriptWitStat};
+pub use statistics::{BasicTranscriptWitStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
 mod hasher;
 

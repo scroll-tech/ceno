@@ -18,14 +18,13 @@ use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::PolynomialCommitmentScheme;
-use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
     ops::Deref,
     sync::Arc,
 };
-use transcript::{BasicTranscript as Transcript, BasicTranscriptWitStat as TranscriptWithStat, StatisticRecorder};
+use transcript::BasicTranscript as Transcript;
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,
@@ -526,14 +525,12 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     exit_code: Option<u32>,
     max_steps: usize,
 ) {
-    let stat_recorder = StatisticRecorder::new();
-    let transcript = TranscriptWithStat::new(stat_recorder.clone(), b"riscv");
+    let transcript = Transcript::new(b"riscv");
     assert!(
         verifier
             .verify_proof_halt(zkvm_proof, transcript, exit_code.is_some())
             .expect("verify proof return with error"),
     );
-    println!("proof hashes count {}", stat_recorder.borrow().field_appended_num);
 
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),

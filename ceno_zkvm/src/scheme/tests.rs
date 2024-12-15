@@ -181,7 +181,10 @@ fn test_rw_lk_expression_combination() {
             .expect("verifier failed");
 
         drop(v_transcript);
-        println!("hashed fields {}", static_recorder.borrow().field_appended_num);
+        println!(
+            "hashed fields {}",
+            static_recorder.borrow().field_appended_num
+        );
     }
 
     // <lookup count, rw count>
@@ -304,7 +307,11 @@ fn test_single_add_instance_e2e() {
                 .expect("verify proof return with error"),
         );
     }
-    println!("encoded zkvm proof size: {}, hash_num: {}", encoded_bin.len(), static_recorder.borrow().field_appended_num);
+    println!(
+        "encoded zkvm proof size: {}, hash_num: {}",
+        encoded_bin.len(),
+        static_recorder.borrow().field_appended_num
+    );
 }
 
 /// test various product argument size, starting from minimal leaf size 2

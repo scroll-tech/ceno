@@ -1,17 +1,15 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
 use ff_ext::ExtensionField;
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Default)]
 pub struct StatisticRecorder {
     pub field_appended_num: u32,
 }
 
-type SharedStatisticRecorder=RefCell<StatisticRecorder>;
+type SharedStatisticRecorder = RefCell<StatisticRecorder>;
 
 impl StatisticRecorder {
-
     pub fn new() -> Rc<SharedStatisticRecorder> {
         Rc::new(RefCell::new(Default::default()))
     }
@@ -70,7 +68,6 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWitStat<E> {
     fn commit_rolling(&mut self) {
         self.inner.commit_rolling()
     }
-
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWitStat<E> {
