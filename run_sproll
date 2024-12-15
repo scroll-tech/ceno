@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euxo pipefail
+
+(
+  cd /home/matthias/scroll/prog/sproll-evm/program
+  cargo build --release
+)
+
+sproll="$(realpath ~/scroll/prog/sproll-evm/target/riscv32im-ceno-zkvm-elf/release/sproll-program)"
+hints="$(realpath ~/scroll/prog/sproll-evm/stdin.bin)"
+
+cargo build --release --package ceno_zkvm --bin e2e
+RUST_BACKTRACE=1 \
+time cargo run --release --package ceno_zkvm --bin e2e -- "${sproll}" --hints "${hints}"
+
+
+# 3221229683
+# 3221229683
