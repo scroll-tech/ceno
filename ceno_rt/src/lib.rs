@@ -45,11 +45,13 @@ pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
         X
     }
     // TODO(Matthias): this is a bit inefficient,
-    // we should fill whole u32 words at a time.
+    // we could fill whole u32 words at a time.
     // But it's just for testing.
     for i in 0..words {
         let element = recv_buf.add(i);
-        *element = step() as u8;
+        // The lower bits ain't really random, so might as well take
+        // the higher order ones, if we are only using 8 bits.
+        *element = step().to_le_bytes()[3];
     }
 }
 
