@@ -280,8 +280,14 @@ pub fn step<C: EmuContext>(ctx: &mut C) -> Result<()> {
         InsnCategory::System => step_system(ctx, insn.kind, &insn)?,
         InsnCategory::Invalid => {
             let _ = process_instruction(
-                &mut InstructionTranspiler { pc: pc.0, word: insn.raw }, insn.raw,);
-            ctx.trap(TrapCause::IllegalInstruction(insn.raw))?},
+                &mut InstructionTranspiler {
+                    pc: pc.0,
+                    word: insn.raw,
+                },
+                insn.raw,
+            );
+            ctx.trap(TrapCause::IllegalInstruction(insn.raw))?
+        }
     } {
         ctx.on_normal_end(&insn);
     };
