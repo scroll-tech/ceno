@@ -22,8 +22,6 @@ pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
     unimplemented!();
 }
 
-use rand::{Rng, SeedableRng, rngs::StdRng};
-
 /// Generates random bytes.
 ///
 /// # Safety
@@ -39,11 +37,11 @@ pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
     // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
     // Just for testing.
     unsafe fn step() -> u32 {
-        static mut x: u32 = 0xae569764;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        x
+        static mut X: u32 = 0xae569764;
+        X ^= X << 13;
+        X ^= X >> 17;
+        X ^= X << 5;
+        X
     }
     // TODO(Matthias): this is a bit inefficient,
     // we should fill whole u32 words at a time.
@@ -111,8 +109,3 @@ _start:
     ecall
     ",
 );
-
-extern "C" {
-    // The address of this variable is the start of the stack (growing downwards).
-    static _stack_start: u8;
-}

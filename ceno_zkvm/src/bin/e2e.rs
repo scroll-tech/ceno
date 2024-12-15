@@ -115,12 +115,16 @@ fn main() {
     );
 
     tracing::info!("Loading hints file: {:?}", args.hints);
-    let hints = memory_from_file(&args.hints);
+    // let hints = memory_from_file(&args.hints);
+    let hints = memory_from_file_sproll(&args.hints);
+
     assert!(
         hints.len() <= platform.hints.iter_addresses().len(),
         "hints must fit in {} bytes",
         platform.hints.len()
     );
+    println!("hints.len() = {}", hints.len());
+    println!("platform.hints = {:?}", platform.hints.len());
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
