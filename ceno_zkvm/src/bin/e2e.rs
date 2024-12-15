@@ -1,4 +1,5 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     with_panic_hook,
@@ -104,7 +105,9 @@ fn main() {
         args.heap_size,
         pub_io_size,
     );
-    tracing::info!("Running on platform {:?} {:?}", args.platform, platform);
+    // TODO(Matthias): this one prints a lot of spam.  Fix and perhaps restore.
+    // tracing::info!("Running on platform {:?} {:?}", args.platform, platform);
+    tracing::info!("Running on platform {:?}", args.platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
         args.stack_size,
@@ -175,6 +178,16 @@ fn memory_from_file(path: &Option<String>) -> Vec<u32> {
             buf.chunks_exact(WORD_SIZE)
                 .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
                 .collect_vec()
+        })
+        .unwrap_or_default()
+}
+
+fn memory_from_file_sproll(path: &Option<String>) -> Vec<u32> {
+    path.as_ref()
+        .map(|path| {
+            let mut hints = CenoStdin::default();
+            hints.write_slice(fs::read(path).expect("could not read file"));
+            hints.finalise()
         })
         .unwrap_or_default()
 }

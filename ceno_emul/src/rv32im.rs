@@ -16,7 +16,10 @@
 
 use anyhow::{Result, anyhow};
 use num_derive::ToPrimitive;
+use rrs_lib::process_instruction;
 use strum_macros::{Display, EnumIter};
+
+use crate::disassemble::InstructionTranspiler;
 
 use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 
@@ -275,7 +278,10 @@ pub fn step<C: EmuContext>(ctx: &mut C) -> Result<()> {
         InsnCategory::Load => step_load(ctx, insn.kind, &insn)?,
         InsnCategory::Store => step_store(ctx, insn.kind, &insn)?,
         InsnCategory::System => step_system(ctx, insn.kind, &insn)?,
-        InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.raw))?,
+        InsnCategory::Invalid => {
+            let _ = process_instruction(
+                &mut InstructionTranspiler { pc: pc.0, word: insn.raw }, insn.raw,);
+            ctx.trap(TrapCause::IllegalInstruction(insn.raw))?},
     } {
         ctx.on_normal_end(&insn);
     };

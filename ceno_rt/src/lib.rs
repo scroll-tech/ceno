@@ -22,6 +22,50 @@ pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
     unimplemented!();
 }
 
+use rand::{Rng, SeedableRng, rngs::StdRng};
+
+/// Generates random bytes.
+///
+/// # Safety
+///
+/// Make sure that `buf` has at least `nwords` words.
+/// This generator is terrible. :)
+#[no_mangle]
+#[linkage = "weak"]
+pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
+    // SYS_RAND_WARNING.call_once(|| {
+    //     println!("WARNING: Using insecure random number generator.");
+    // });
+    // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
+    // Just for testing.
+    unsafe fn step() -> u32 {
+        static mut x: u32 = 0xae569764;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        x
+    }
+    // TODO(Matthias): this is a bit inefficient,
+    // we should fill whole u32 words at a time.
+    // But it's just for testing.
+    for i in 0..words {
+        let element = recv_buf.add(i);
+        *element = step() as u8;
+    }
+}
+
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn syscall_hint_len() -> usize {
+    unimplemented!();
+}
+
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn syscall_hint_read(_ptr: *mut u8, _len: usize) {
+    unimplemented!();
+}
+
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]
     unsafe {

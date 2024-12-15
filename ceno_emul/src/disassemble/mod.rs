@@ -8,8 +8,8 @@ use rrs_lib::{
 
 /// A transpiler that converts the 32-bit encoded instructions into instructions.
 pub(crate) struct InstructionTranspiler {
-    pc: u32,
-    word: u32,
+    pub pc: u32,
+    pub word: u32,
 }
 
 impl Instruction {
@@ -317,6 +317,7 @@ impl InstructionProcessor for InstructionTranspiler {
     }
 
     fn process_ebreak(&mut self) -> Self::InstructionResult {
+        eprintln!("EBREAK at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
@@ -353,38 +354,47 @@ impl InstructionProcessor for InstructionTranspiler {
     }
 
     fn process_csrrc(&mut self, _: ITypeCSR) -> Self::InstructionResult {
+        eprintln!("csrrc at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_csrrci(&mut self, _: ITypeCSR) -> Self::InstructionResult {
+        eprintln!("csrrci at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_csrrs(&mut self, _: ITypeCSR) -> Self::InstructionResult {
+        eprintln!("csrrs at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_csrrsi(&mut self, _: ITypeCSR) -> Self::InstructionResult {
+        eprintln!("csrrsi at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_csrrw(&mut self, _: ITypeCSR) -> Self::InstructionResult {
+        eprintln!("csrrw at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_csrrwi(&mut self, _: ITypeCSR) -> Self::InstructionResult {
+        eprintln!("csrrwi at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_fence(&mut self, _: IType) -> Self::InstructionResult {
+        eprintln!("fence at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_mret(&mut self) -> Self::InstructionResult {
+        eprintln!("mret at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 
     fn process_wfi(&mut self) -> Self::InstructionResult {
+        eprintln!("wfi at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 }

@@ -285,6 +285,7 @@ dependencies = [
  "ark-std",
  "base64",
  "ceno_emul",
+ "ceno_host",
  "cfg-if",
  "clap",
  "criterion",

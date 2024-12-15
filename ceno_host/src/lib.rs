@@ -18,11 +18,11 @@ pub const RKYV_ALIGNMENT: usize = {
 
 #[derive(Default)]
 pub struct CenoStdin {
-    pub items: Vec<AlignedVec>,
+    pub items: Vec<Vec<u8>>,
 }
 
 impl CenoStdin {
-    pub fn write_slice(&mut self, bytes: AlignedVec) {
+    pub fn write_slice(&mut self, bytes: Vec<u8>) {
         self.items.push(bytes);
     }
 
@@ -30,7 +30,7 @@ impl CenoStdin {
         &mut self,
         item: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
     ) -> Result<(), Error> {
-        to_bytes::<Error>(item).map(|bytes| self.write_slice(bytes))
+        to_bytes::<Error>(item).map(|bytes| self.write_slice(bytes.to_vec()))
     }
 
     pub fn finalise(&self) -> Vec<u32> {

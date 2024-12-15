@@ -17,6 +17,7 @@ rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ceno_host = { path = "../ceno_host" }
 
 base64 = "0.22"
 ceno_emul = { path = "../ceno_emul" }
