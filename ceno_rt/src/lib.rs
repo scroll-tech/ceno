@@ -38,9 +38,10 @@ pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
     // Just for testing.
     unsafe fn step() -> u32 {
         static mut X: u32 = 0xae569764;
-        X ^= X << 13;
-        X ^= X >> 17;
-        X ^= X << 5;
+        // We are stealing Borland Delphi's random number generator.
+        // The random numbers here are only good enough to make eg
+        // HashMap works.
+        X = X.wrapping_mul(134775813) + 1;
         X
     }
     // TODO(Matthias): this is a bit inefficient,

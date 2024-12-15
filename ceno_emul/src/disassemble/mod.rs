@@ -374,7 +374,7 @@ impl InstructionProcessor for InstructionTranspiler {
     }
 
     fn process_csrrw(&mut self, _: ITypeCSR) -> Self::InstructionResult {
-        eprintln!("csrrw at 0x{:08x}", self.pc);
+        // eprintln!("csrrw at 0x{:08x}", self.pc);
         Instruction::unimp(self.word)
     }
 

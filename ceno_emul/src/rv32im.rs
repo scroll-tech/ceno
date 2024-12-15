@@ -112,7 +112,7 @@ pub enum TrapCause {
     EcallError,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Instruction {
     pub kind: InsnKind,
     pub rs1: RegIdx,
@@ -149,7 +149,7 @@ pub enum InsnFormat {
 use InsnFormat::*;
 
 #[derive(
-    Clone, Copy, Display, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter, ToPrimitive, Default,
+    Clone, Copy, Display, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter, ToPrimitive, Default, Hash
 )]
 #[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {

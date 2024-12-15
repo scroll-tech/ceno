@@ -434,6 +434,8 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
 
     // Emulate program
     let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
+    // TODO(Matthias): print out stats about the run.
+    print_stats(&emul_result);
 
     // Clone some emul_result fields before consuming
     let pi = emul_result.pi.clone();
@@ -477,6 +479,27 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
     }
 
     (None, Box::new(|| ()))
+}
+
+fn print_stats(res: &EmulationResult) {
+    let steps: &Vec<StepRecord> = &res.all_records;
+    eprintln!("{: >20}:\t{:>10}", "Total steps", steps.len());
+    let counts = steps.iter().map(|record| record.insn()).counts_by(|insn| {
+        (
+            insn.kind,
+            u32::from(insn.rs1 != 0),
+            u32::from(insn.rs2 != 0),
+            u32::from(insn.rd != 0),
+        )
+    });
+    counts
+        .into_iter()
+        .map(|(key, count)| (count, key))
+        .sorted()
+        .rev()
+        .for_each(|(count, key)| {
+            eprintln!("{: >20}:\t{:>10}", format!("{:?}", key), count);
+        });
 }
 
 // Runs program emulation + witness generation + proving
