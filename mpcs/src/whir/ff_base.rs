@@ -72,12 +72,9 @@ impl<E: FfExtField> Display for BaseFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> Distribution<BaseFieldWrapper<E>> for Standard
-where
-    Standard: Distribution<E::BaseField>,
-{
+impl<E: FfExtField> Distribution<BaseFieldWrapper<E>> for Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BaseFieldWrapper<E> {
-        BaseFieldWrapper(rng.gen())
+        BaseFieldWrapper(E::BaseField::from(rng.gen::<u64>()))
     }
 }
 
@@ -169,10 +166,7 @@ impl<E: FfExtField> From<i128> for BaseFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> AdditiveGroup for BaseFieldWrapper<E>
-where
-    Standard: Distribution<E::BaseField>,
-{
+impl<E: FfExtField> AdditiveGroup for BaseFieldWrapper<E> {
     type Scalar = Self;
 
     const ZERO: Self = Self(<E::BaseField as FfField>::ZERO);
@@ -224,10 +218,7 @@ impl<E: FfExtField> Into<BigInt<1>> for BaseFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> ark_ff::PrimeField for BaseFieldWrapper<E>
-where
-    Standard: Distribution<E::BaseField>,
-{
+impl<E: FfExtField> ark_ff::PrimeField for BaseFieldWrapper<E> {
     type BigInt = BigInt<1>;
 
     const MODULUS: Self::BigInt = Self::BigInt::new([E::BaseField::MODULUS_U64]);
@@ -252,10 +243,7 @@ where
     }
 }
 
-impl<E: FfExtField> Field for BaseFieldWrapper<E>
-where
-    Standard: Distribution<E::BaseField>,
-{
+impl<E: FfExtField> Field for BaseFieldWrapper<E> {
     type BasePrimeField = Self;
     const SQRT_PRECOMP: Option<ark_ff::SqrtPrecomputation<Self>> = None;
     const ONE: Self = Self(<E::BaseField as FfField>::ONE);
@@ -418,10 +406,7 @@ where
     }
 }
 
-impl<E: FfExtField> ark_ff::FftField for BaseFieldWrapper<E>
-where
-    Standard: Distribution<E::BaseField>,
-{
+impl<E: FfExtField> ark_ff::FftField for BaseFieldWrapper<E> {
     const GENERATOR: Self = Self(<E::BaseField as PrimeField>::MULTIPLICATIVE_GENERATOR);
     const TWO_ADICITY: u32 = <E::BaseField as PrimeField>::S;
     const TWO_ADIC_ROOT_OF_UNITY: Self = Self(<E::BaseField as PrimeField>::ROOT_OF_UNITY);

@@ -109,12 +109,14 @@ impl<E: FfExtField> Display for ExtensionFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> Distribution<ExtensionFieldWrapper<E>> for Standard
-where
-    Standard: Distribution<E>,
-{
+impl<E: FfExtField> Distribution<ExtensionFieldWrapper<E>> for Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ExtensionFieldWrapper<E> {
-        ExtensionFieldWrapper(rng.gen())
+        let mut limbs = vec![E::BaseField::ZERO; E::DEGREE];
+        for limb in &mut limbs {
+            let v: BaseFieldWrapper<E> = rng.gen();
+            *limb = v.0;
+        }
+        ExtensionFieldWrapper(E::from_limbs(&limbs))
     }
 }
 
@@ -206,10 +208,7 @@ impl<E: FfExtField> From<i128> for ExtensionFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> AdditiveGroup for ExtensionFieldWrapper<E>
-where
-    Standard: Distribution<E> + Distribution<E::BaseField>,
-{
+impl<E: FfExtField> AdditiveGroup for ExtensionFieldWrapper<E> {
     type Scalar = Self;
 
     const ZERO: Self = Self(<E as FfField>::ZERO);
@@ -229,10 +228,7 @@ where
     }
 }
 
-impl<E: FfExtField> Field for ExtensionFieldWrapper<E>
-where
-    Standard: Distribution<E> + Distribution<E::BaseField>,
-{
+impl<E: FfExtField> Field for ExtensionFieldWrapper<E> {
     type BasePrimeField = BaseFieldWrapper<E>;
     const SQRT_PRECOMP: Option<ark_ff::SqrtPrecomputation<Self>> = None;
     const ONE: Self = Self(<E as FfField>::ONE);
@@ -362,10 +358,7 @@ where
     }
 }
 
-impl<E: FfExtField> ark_ff::FftField for ExtensionFieldWrapper<E>
-where
-    Standard: Distribution<E> + Distribution<E::BaseField>,
-{
+impl<E: FfExtField> ark_ff::FftField for ExtensionFieldWrapper<E> {
     const GENERATOR: Self = Self(<E as FfExtField>::MULTIPLICATIVE_GENERATOR);
     const TWO_ADICITY: u32 = <E::BaseField as PrimeField>::S;
     const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::TWO_ADIC_ROOT_OF_UNITY);

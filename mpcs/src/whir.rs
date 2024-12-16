@@ -4,33 +4,48 @@ use ff_ext::ExtensionField;
 use rand::{distributions::Standard, prelude::Distribution};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::marker::PhantomData;
-use whir::ceno_binding::{PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner};
+use whir::{
+    ceno_binding::{
+        DigestIO, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
+        WhirSpec as WhirSpecInner,
+    },
+    whir::iopattern::WhirIOPattern,
+};
 
 mod ff;
 mod ff_base;
 use ff::ExtensionFieldWrapper as FieldWrapper;
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct Whir<E: ExtensionField> {
-    _marker: PhantomData<E>,
-    inner: WhirInner<E>,
+trait WhirSpec<E: ExtensionField>: std::fmt::Debug + Clone {
+    type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug
+    where
+        <Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig: DigestIO<FieldWrapper<E>>;
 }
 
-impl<E: ExtensionField> PolynomialCommitmentScheme<E> for Whir<E>
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>>
+where
+    <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig: DigestIO<FieldWrapper<E>>,
+{
+    inner: WhirInner<FieldWrapper<E>, Spec::Spec>,
+}
+
+type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spec>;
+
+impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
-    Standard: Distribution<E> + Distribution<E::BaseField>,
+    <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig: DigestIO<FieldWrapper<E>>,
 {
-    type Param = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
-    type ProverParam = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
-    type VerifierParam = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Param;
-    type Commitment = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Commitment;
-    type Proof = <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::Proof;
-    type CommitmentWithData =
-        <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::CommitmentWithData;
-    type CommitmentChunk =
-        <WhirInner<FieldWrapper<E>> as WhirPCS<FieldWrapper<E>>>::CommitmentChunk;
+    type Param = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
+    type ProverParam = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
+    type VerifierParam = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
+    type Commitment = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Commitment;
+    type Proof = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Proof;
+    type CommitmentWithWitness =
+        <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::CommitmentWithWitness;
+    type CommitmentChunk = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::CommitmentChunk;
 
     fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
         todo!()
@@ -131,5 +146,45 @@ where
         transcript: &mut transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ark_ff::{Field, Fp2, MontBackend, MontConfig};
+    use goldilocks::GoldilocksExt2;
+    use rand::Rng;
+
+    use super::*;
+
+    type F = ff::ExtensionFieldWrapper<GoldilocksExt2>;
+
+    use whir::ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec};
+
+    #[test]
+    fn single_point_verify() {
+        let poly_size = 10;
+        let num_coeffs = 1 << poly_size;
+        let pp = WhirInner::<F, WhirDefaultSpec>::setup(poly_size);
+
+        let poly = CoefficientList::new(
+            (0..num_coeffs)
+                .map(<F as Field>::BasePrimeField::from)
+                .collect(),
+        );
+
+        let io = IOPattern::<DefaultHash>::new("🌪️")
+            .commit_statement(&pp)
+            .add_whir_proof(&pp);
+        let mut merlin = io.to_merlin();
+
+        let witness = Whir::<F, Spec>::commit_and_write(&pp, &poly, &mut merlin).unwrap();
+
+        let mut rng = rand::thread_rng();
+        let point: Vec<F> = (0..poly_size).map(|_| F::from(rng.gen::<u64>())).collect();
+        let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
+
+        let proof = Whir::<F, Spec>::open(&pp, witness, &point, &eval, &mut merlin).unwrap();
+        Whir::<F, Spec>::verify(&pp, &point, &eval, &proof, &merlin).unwrap();
     }
 }
