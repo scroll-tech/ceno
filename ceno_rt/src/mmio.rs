@@ -4,28 +4,45 @@ use rkyv::{Portable, api::high::HighValidator, bytecheck::CheckBytes, rancor::Fa
 
 use core::slice::from_raw_parts;
 
-extern "C" {
-    /// The address of this variable is the start of the hints ROM.
-    ///
-    /// It is defined in the linker script.
-    static _hints_start: u8;
-    static _hints_end: u8;
+/// The memory region with our hints.
+///
+/// Logically, this is a static constant, but the tytpe system doesn't see it that way.
+/// (We hope that the optimiser is smart enough to see that it is a constant.)
+fn hints_region<'a>() -> &'a [u8] {
+    extern "C" {
+        /// The address of this variable is the start of the hints ROM.
+        ///
+        /// It is defined in the linker script.  The value of this variable is undefined.
+        static _hints_start: u8;
+        /// The _address_ of this variable is the length of the hints ROM
+        ///
+        /// It is defined in the linker script.  The value of this variable is undefined.
+        static _hints_length: usize;
+    }
+    unsafe {
+        let hints_length = &_hints_length as *const usize as usize;
+        from_raw_parts(&_hints_start, hints_length)
+    }
 }
 
-static mut NEXT_HINT_LEN_AT: *const u8 = &raw const _hints_start;
+/// Get the length of the next hint
+fn hint_len() -> usize {
+    extern "C" {
+        /// The address of this variable is the start of the slice that holds the length of the hints.
+        ///
+        /// It is defined in the linker script.  The value of this variable is undefined.
+        static _lengths_of_hints_start: usize;
+    }
+    static mut NEXT_HINT_LEN_AT: *const usize = &raw const _lengths_of_hints_start;
+    unsafe {
+        let len: usize = core::ptr::read(NEXT_HINT_LEN_AT);
+        NEXT_HINT_LEN_AT = NEXT_HINT_LEN_AT.add(1);
+        len
+    }
+}
 
 pub fn read_slice<'a>() -> &'a [u8] {
-    unsafe {
-        let len: u32 = core::ptr::read(NEXT_HINT_LEN_AT as *const u32);
-        NEXT_HINT_LEN_AT = NEXT_HINT_LEN_AT.add(4);
-
-        let hints_region = {
-            let total_length = (&raw const _hints_end).offset_from(&_hints_start) as usize;
-            from_raw_parts(&_hints_start, total_length)
-        };
-
-        &hints_region[..len as usize]
-    }
+    &hints_region()[..hint_len()]
 }
 
 pub fn read<'a, T>() -> &'a T
