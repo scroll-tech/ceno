@@ -101,8 +101,9 @@ impl From<&CenoStdin> for Vec<u32> {
         for item in &stdin.items {
             items.append(Item::from(item));
         }
-        let data = items.finalise();
-        data.into_iter()
+        items
+            .finalise()
+            .into_iter()
             .tuples()
             .map(|(a, b, c, d)| u32::from_le_bytes([a, b, c, d]))
             .collect()
