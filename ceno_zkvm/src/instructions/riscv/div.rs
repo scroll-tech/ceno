@@ -259,7 +259,7 @@ mod test {
         }
 
         #[test]
-        fn test_opcode_divu_unstatisfied() {
+        fn test_opcode_divu_unsatisfied() {
             verify("assert_outcome", 10, 2, 3, false);
         }
 
