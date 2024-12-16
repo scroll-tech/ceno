@@ -28,12 +28,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_witin(name_fn)
     }
 
-    pub fn create_structural_witin<NR, N>(&mut self, name_fn: N) -> StructuralWitIn
+    pub fn create_structural_witin<NR, N>(
+        &mut self,
+        name_fn: N,
+        max_len: usize,
+        offset: u32,
+        multi_factor: usize,
+    ) -> StructuralWitIn
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.create_structural_witin(name_fn)
+        self.cs
+            .create_structural_witin(name_fn, max_len, offset, multi_factor)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, ZKVMError>

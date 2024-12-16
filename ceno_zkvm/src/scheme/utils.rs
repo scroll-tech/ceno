@@ -244,7 +244,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
-        &|witness_id| structual_witnesses[witness_id as usize].clone(),
+        &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> =
@@ -368,7 +368,7 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     expr.evaluate::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
-        &|witness_id| structural_witnesses[witness_id as usize],
+        &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
@@ -392,7 +392,7 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
     expr.evaluate_with_instance::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
-        &|witness_id| structural_witnesses[witness_id as usize],
+        &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
         &|i| instance[i.0],
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {

@@ -8,7 +8,7 @@ use std::{
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
-use ceno_emul::InsnKind;
+use ceno_emul::{Addr, InsnKind};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -25,9 +25,9 @@ use crate::{
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
-    /// StructuralWitIn(WitnessId)
     /// same as witin, but it's structual witness and be evaluated by verifier succinctly.
-    StructuralWitIn(WitnessId),
+    /// WitnessId, max_len, offset, multi_factor
+    StructuralWitIn(WitnessId, usize, Addr, usize),
     /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values
@@ -60,7 +60,7 @@ impl<E: ExtensionField> Expression<E> {
         match self {
             Expression::Fixed(_) => 1,
             Expression::WitIn(_) => 1,
-            Expression::StructuralWitIn(_) => 1,
+            Expression::StructuralWitIn(..) => 1,
             Expression::Instance(_) => 0,
             Expression::Constant(_) => 0,
             Expression::Sum(a_expr, b_expr) => max(a_expr.degree(), b_expr.degree()),
@@ -75,7 +75,7 @@ impl<E: ExtensionField> Expression<E> {
         &self,
         fixed_in: &impl Fn(&Fixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
-        structural_wit_in: &impl Fn(WitnessId) -> T,
+        structural_wit_in: &impl Fn(WitnessId, usize, u32, usize) -> T,
         constant: &impl Fn(E::BaseField) -> T,
         challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
         sum: &impl Fn(T, T) -> T,
@@ -100,7 +100,7 @@ impl<E: ExtensionField> Expression<E> {
         &self,
         fixed_in: &impl Fn(&Fixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
-        structural_wit_in: &impl Fn(WitnessId) -> T,
+        structural_wit_in: &impl Fn(WitnessId, usize, u32, usize) -> T,
         instance: &impl Fn(Instance) -> T,
         constant: &impl Fn(E::BaseField) -> T,
         challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
@@ -111,7 +111,9 @@ impl<E: ExtensionField> Expression<E> {
         match self {
             Expression::Fixed(f) => fixed_in(f),
             Expression::WitIn(witness_id) => wit_in(*witness_id),
-            Expression::StructuralWitIn(witness_id) => structural_wit_in(*witness_id),
+            Expression::StructuralWitIn(witness_id, max_len, offset, multi_factor) => {
+                structural_wit_in(*witness_id, *max_len, *offset, *multi_factor)
+            }
             Expression::Instance(i) => instance(*i),
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Sum(a, b) => {
@@ -225,7 +227,7 @@ impl<E: ExtensionField> Expression<E> {
         match expr {
             Expression::Fixed(_) => false,
             Expression::WitIn(_) => false,
-            Expression::StructuralWitIn(_) => false,
+            Expression::StructuralWitIn(..) => false,
             Expression::Instance(_) => false,
             Expression::Constant(c) => *c == E::BaseField::ZERO,
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
@@ -242,7 +244,7 @@ impl<E: ExtensionField> Expression<E> {
             (
                 Expression::Fixed(_)
                 | Expression::WitIn(_)
-                | Expression::StructuralWitIn(_)
+                | Expression::StructuralWitIn(..)
                 | Expression::Challenge(..)
                 | Expression::Constant(_)
                 | Expression::Instance(_),
@@ -275,7 +277,7 @@ impl<E: ExtensionField> Neg for Expression<E> {
         match self {
             Expression::Fixed(_)
             | Expression::WitIn(_)
-            | Expression::StructuralWitIn(_)
+            | Expression::StructuralWitIn(..)
             | Expression::Instance(_) => Expression::ScaledSum(
                 Box::new(self),
                 Box::new(Expression::Constant(E::BaseField::ONE.neg())),
@@ -796,6 +798,9 @@ pub struct WitIn {
 #[derive(Clone, Debug, Copy)]
 pub struct StructuralWitIn {
     pub id: WitnessId,
+    pub max_len: usize,
+    pub offset: u32,
+    pub multi_factor: usize,
 }
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Fixed(pub usize);
@@ -837,29 +842,6 @@ impl WitIn {
 }
 
 impl StructuralWitIn {
-    pub fn from_expr<E: ExtensionField, N, NR>(
-        name: N,
-        circuit_builder: &mut CircuitBuilder<E>,
-        input: Expression<E>,
-        debug: bool,
-    ) -> Result<Self, ZKVMError>
-    where
-        NR: Into<String> + Clone,
-        N: FnOnce() -> NR,
-    {
-        circuit_builder.namespace(
-            || "from_expr",
-            |cb| {
-                let name = name().into();
-                let wit = cb.create_structural_witin(|| name.clone());
-                if !debug {
-                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
-                }
-                Ok(wit)
-            },
-        )
-    }
-
     pub fn assign<E: ExtensionField>(
         &self,
         instance: &mut [MaybeUninit<E::BaseField>],
@@ -891,14 +873,14 @@ impl<E: ExtensionField> ToExpr<E> for &WitIn {
 impl<E: ExtensionField> ToExpr<E> for StructuralWitIn {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
-        Expression::StructuralWitIn(self.id)
+        Expression::StructuralWitIn(self.id, self.max_len, self.offset, self.multi_factor)
     }
 }
 
 impl<E: ExtensionField> ToExpr<E> for &StructuralWitIn {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
-        Expression::StructuralWitIn(self.id)
+        Expression::StructuralWitIn(self.id, self.max_len, self.offset, self.multi_factor)
     }
 }
 
@@ -996,8 +978,11 @@ pub mod fmt {
                 }
                 format!("WitIn({})", wit_in)
             }
-            Expression::StructuralWitIn(wit_in) => {
-                format!("StructuralWitIn({})", wit_in)
+            Expression::StructuralWitIn(wit_in, max_len, offset, multi_factor) => {
+                format!(
+                    "StructuralWitIn({}, {}, {}, {})",
+                    wit_in, max_len, offset, multi_factor
+                )
             }
             Expression::Challenge(id, pow, scaler, offset) => {
                 if *pow == 1 && *scaler == 1.into() && *offset == 0.into() {

@@ -73,14 +73,6 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub table_len: usize,
 }
 
-// TODO encapsulate few information of table spec to SetTableAddrType value
-// once confirm syntax is friendly and parsed by recursive verifier
-#[derive(Clone, Debug)]
-pub enum SetTableAddrType {
-    FixedAddr,
-    DynamicAddr(DynamicAddr),
-}
-
 #[derive(Clone, Debug)]
 pub struct DynamicAddr {
     pub addr_witin_id: usize,
@@ -89,7 +81,6 @@ pub struct DynamicAddr {
 
 #[derive(Clone, Debug)]
 pub struct SetTableSpec {
-    pub addr_type: SetTableAddrType,
     pub len: usize,
 }
 
@@ -241,9 +232,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         n: N,
+        max_len: usize,
+        offset: u32,
+        multi_factor: usize,
     ) -> StructuralWitIn {
         let wit_in = StructuralWitIn {
             id: self.num_structural_witin,
+            max_len,
+            offset,
+            multi_factor,
         };
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 

@@ -1,13 +1,13 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
-use ceno_emul::{Addr, Cycle};
+use ceno_emul::{Addr, Cycle, WORD_SIZE};
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    circuit_builder::{CircuitBuilder, DynamicAddr, SetTableAddrType, SetTableSpec},
+    circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
@@ -79,7 +79,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "init_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::FixedAddr,
                 len: NVRAM::len(&cb.params),
             },
             init_table,
@@ -88,7 +87,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "final_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::FixedAddr,
                 len: NVRAM::len(&cb.params),
             },
             final_table,
@@ -223,7 +221,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "init_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::FixedAddr,
                 len: NVRAM::len(&cb.params),
             },
             init_table,
@@ -232,7 +229,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "final_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                addr_type: SetTableAddrType::FixedAddr,
                 len: NVRAM::len(&cb.params),
             },
             final_table,
@@ -312,7 +308,14 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
     ) -> Result<Self, ZKVMError> {
-        let addr = cb.create_structural_witin(|| "addr");
+        let multi_factor = WORD_SIZE;
+        let max_len = DVRAM::max_len(&cb.params, multi_factor);
+        let addr = cb.create_structural_witin(
+            || "addr",
+            max_len,
+            DVRAM::offset_addr(&cb.params),
+            multi_factor,
+        );
 
         let final_v = (0..DVRAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
@@ -346,25 +349,13 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb.w_table_record(
             || "init_table",
             DVRAM::RAM_TYPE,
-            SetTableSpec {
-                addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
-                    addr_witin_id: addr.id.into(),
-                    offset: DVRAM::offset_addr(&cb.params),
-                }),
-                len: DVRAM::max_len(&cb.params),
-            },
+            SetTableSpec { len: max_len },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
             DVRAM::RAM_TYPE,
-            SetTableSpec {
-                addr_type: SetTableAddrType::DynamicAddr(DynamicAddr {
-                    addr_witin_id: addr.id.into(),
-                    offset: DVRAM::offset_addr(&cb.params),
-                }),
-                len: DVRAM::max_len(&cb.params),
-            },
+            SetTableSpec { len: max_len },
             final_table,
         )?;
 
@@ -383,8 +374,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
-        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        assert!(final_mem.len() <= DVRAM::max_len(&self.params, self.addr.multi_factor));
+        assert!(DVRAM::max_len(&self.params, self.addr.multi_factor).is_power_of_two());
         let mut final_table = RowMajorMatrix::<F>::new(final_mem.len(), num_witness);
 
         final_table
@@ -393,7 +384,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .zip(final_mem.into_par_iter())
             .enumerate()
             .for_each(|(i, (row, rec))| {
-                assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
+                assert_eq!(
+                    rec.addr,
+                    DVRAM::addr(&self.params, i, self.addr.multi_factor)
+                );
                 // set_val!(row, self.addr, rec.addr as u64);
 
                 if self.final_v.len() == 1 {
@@ -430,8 +424,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_structural_witness: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
-        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        assert!(final_mem.len() <= DVRAM::max_len(&self.params, self.addr.multi_factor));
+        assert!(DVRAM::max_len(&self.params, self.addr.multi_factor).is_power_of_two());
         let mut final_table = RowMajorMatrix::<F>::new(final_mem.len(), num_structural_witness);
 
         final_table
@@ -440,7 +434,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .zip(final_mem.into_par_iter())
             .enumerate()
             .for_each(|(i, (row, rec))| {
-                assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
+                assert_eq!(
+                    rec.addr,
+                    DVRAM::addr(&self.params, i, self.addr.multi_factor)
+                );
                 set_val!(row, self.addr, rec.addr as u64);
             });
 
@@ -451,7 +448,11 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .skip(final_mem.len())
             .with_min_len(MIN_PAR_SIZE)
             .for_each(|(i, row)| {
-                set_val!(row, self.addr, DVRAM::addr(&self.params, i) as u64);
+                set_val!(
+                    row,
+                    self.addr,
+                    DVRAM::addr(&self.params, i, self.addr.multi_factor) as u64
+                );
             });
 
         Ok(final_table)

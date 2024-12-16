@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
+use ceno_emul::{Addr, Cycle, GetAddr, Word};
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -178,14 +178,14 @@ pub trait DynVolatileRamTable {
 
     fn name() -> &'static str;
 
-    fn max_len(params: &ProgramParams) -> usize {
-        let max_size =
-            (Self::end_addr(params) - Self::offset_addr(params)).div_ceil(WORD_SIZE as u32) as Addr;
+    fn max_len(params: &ProgramParams, multi_factor: usize) -> usize {
+        let max_size = (Self::end_addr(params) - Self::offset_addr(params))
+            .div_ceil(multi_factor as u32) as Addr;
         1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 
-    fn addr(params: &ProgramParams, entry_index: usize) -> Addr {
-        Self::offset_addr(params) + (entry_index * WORD_SIZE) as Addr
+    fn addr(params: &ProgramParams, entry_index: usize, multi_factor: usize) -> Addr {
+        Self::offset_addr(params) + (entry_index * multi_factor) as Addr
     }
 }
 

@@ -21,7 +21,6 @@ use sumcheck::{
 use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
-    circuit_builder::SetTableAddrType,
     error::ZKVMError,
     expression::Instance,
     scheme::{
@@ -1077,13 +1076,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         // (non uniform) collect dynamic address hints as witness for verifier
-        // for fix address, we just fill 0, as verifier will derive it from vk
-        let rw_hints_num_vars = izip!(&cs.r_table_expressions, r_set_wit.iter())
-            .map(|(t, mle)| match t.table_spec.addr_type {
-                // for fixed address, prover
-                SetTableAddrType::FixedAddr => 0,
-                SetTableAddrType::DynamicAddr(_) => mle.num_vars(),
-            })
+        let rw_hints_num_vars = structural_witnesses
+            .iter()
+            .map(|mle| mle.num_vars())
             .collect_vec();
         for var in rw_hints_num_vars.iter() {
             transcript.append_message(&var.to_le_bytes());

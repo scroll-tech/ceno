@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 use ark_std::iterable::Iterable;
-use ceno_emul::WORD_SIZE;
 use ff_ext::ExtensionField;
 
 use itertools::{Itertools, interleave, izip};
@@ -15,9 +14,8 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
-    circuit_builder::SetTableAddrType,
     error::ZKVMError,
-    expression::Instance,
+    expression::{Expression, Instance},
     instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
@@ -531,31 +529,32 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        let expected_rounds = izip!(
-            // w_table_expression round match with r_table_expression so it fine to check either of them
-            &cs.r_table_expressions,
-            &proof.rw_hints_num_vars
-        )
-        .flat_map(|(r, hint_num_vars)| match r.table_spec.addr_type {
-            // fixed address: get number of round from vk
-            SetTableAddrType::FixedAddr => {
-                let num_vars = ceil_log2(r.table_spec.len);
+        let mut idx_hint_num_vars = 0;
+        let expected_rounds = cs
+            .r_table_expressions
+            .iter()
+            .flat_map(|r| {
+                let num_vars = match r.expr {
+                    Expression::Fixed(_) => {
+                        ceil_log2(r.table_spec.len)
+                    }
+                    Expression::StructuralWitIn(addr_witin_id, max_len, _, _) => {
+                        let hint_num_vars = proof.rw_hints_num_vars[addr_witin_id as usize];
+                        idx_hint_num_vars += 1;
+                        assert!((1 << hint_num_vars) <= max_len);
+                        hint_num_vars
+                    }
+                    _ => 0,
+                };
                 [num_vars, num_vars]
-            }
-            // dynamic: respect prover hint
-            SetTableAddrType::DynamicAddr(_) => {
-                // check number of vars doesn't exceed max len defined in vk
-                // this is important to prevent address overlapping
-                assert!((1 << hint_num_vars) <= r.table_spec.len);
-                [*hint_num_vars, *hint_num_vars]
-            }
-        })
-        .chain(
-            cs.lk_table_expressions
-                .iter()
-                .map(|l| ceil_log2(l.table_len)),
-        )
-        .collect_vec();
+            })
+            .chain(
+                cs.lk_table_expressions
+                    .iter()
+                    .map(|l| ceil_log2(l.table_len)),
+            )
+            .collect_vec();
+
         let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
         let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
             TowerVerify::verify(
@@ -721,21 +720,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify dynamic address evaluation succinctly
-        // TODO we can also skip their mpcs proof
         for r_table in cs.r_table_expressions.iter() {
-            match &r_table.table_spec.addr_type {
-                SetTableAddrType::FixedAddr => (),
-                SetTableAddrType::DynamicAddr(spec) => {
-                    let expected_eval = eval_wellform_address_vec(
-                        spec.offset as u64,
-                        WORD_SIZE as u64,
-                        &input_opening_point,
-                    );
-                    if expected_eval != proof.wits_in_evals[spec.addr_witin_id] {
-                        return Err(ZKVMError::VerifyError(
-                            "dynamic addr evaluate != expected_evals".into(),
-                        ));
-                    }
+            if let Expression::StructuralWitIn(addr_witin_id, _, offset, scaled) = r_table.expr {
+                let expected_eval = eval_wellform_address_vec(
+                    offset as u64,
+                    scaled as u64,
+                    &input_opening_point,
+                );
+                if expected_eval != proof.wits_in_evals[addr_witin_id as usize] {
+                    return Err(ZKVMError::VerifyError(
+                        "dynamic addr evaluate != expected_evals".into(),
+                    ));
                 }
             }
         }

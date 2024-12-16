@@ -19,7 +19,7 @@ impl<E: ExtensionField> Expression<E> {
                 }]
             }
 
-            Fixed(_) | WitIn(_) | StructuralWitIn(_) | Instance(_) | Challenge(..) => {
+            Fixed(_) | WitIn(_) | StructuralWitIn(..) | Instance(_) | Challenge(..) => {
                 vec![Term {
                     coeff: Expression::ONE,
                     vars: vec![self.clone()],
