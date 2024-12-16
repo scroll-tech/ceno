@@ -75,7 +75,7 @@ pub fn halt(exit_code: u32) -> ! {
         unreachable!();
     }
     #[cfg(not(target_arch = "riscv32"))]
-    unimplemented!("Halt is not implemented for this target: {}", exit_code);
+    unimplemented!("Halt is not implemented for this target, exit_code: {}", exit_code); 
 }
 
 #[cfg(target_arch = "riscv32")]
@@ -96,8 +96,7 @@ _start:
     la sp, _stack_start
     mv fp, sp
 
-    // Call the Rust start function.
-    // jal zero, _start_rust
+    // Call Rust's main function.
     call main
 
     // If we return from main, we halt with success:

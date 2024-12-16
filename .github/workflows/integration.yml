@@ -47,7 +47,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-            guest/target/
+            example/target/
+            ceno_rt/target/
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
