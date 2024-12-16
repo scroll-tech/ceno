@@ -1,51 +1,116 @@
+use core::todo;
+
 use super::PolynomialCommitmentScheme;
-use ark_ff::{FftField, Field, PrimeField};
+
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
-use rand::{distributions::Standard, prelude::Distribution};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::marker::PhantomData;
 use whir::{
     ceno_binding::{
-        DigestIO, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
-        WhirSpec as WhirSpecInner,
+        Config, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner, WhirSpec as WhirSpecInner,
     },
-    whir::iopattern::WhirIOPattern,
+    whir::{
+        fs_utils::{DigestReader, DigestWriter},
+        iopattern::{Arthur, IOPattern, Merlin, WhirIOPattern},
+    },
 };
 
 mod ff;
 mod ff_base;
 use ff::ExtensionFieldWrapper as FieldWrapper;
 
-trait WhirSpec<E: ExtensionField>: std::fmt::Debug + Clone {
-    type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug
+pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
+    // TODO: Remove these horrifying where clauses
+    type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default
     where
-        <Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig: DigestIO<FieldWrapper<E>>;
+        Merlin: DigestWriter<<Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+        for<'a> Arthur<'a>:
+            DigestReader<<Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+        IOPattern: WhirIOPattern<
+                FieldWrapper<E>,
+                <Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
+            >;
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>>
+// TODO: Remove these horrifying where clauses
 where
-    <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig: DigestIO<FieldWrapper<E>>,
+    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
 {
     inner: WhirInner<FieldWrapper<E>, Spec::Spec>,
 }
 
 type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spec>;
 
+#[derive(Default, Clone, Debug)]
+pub struct WhirDigest<E: ExtensionField, Spec: WhirSpec<E>>
+where
+    // TODO: Remove these horrifying stuffs
+    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+{
+    inner: <<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig as Config>::InnerDigest,
+}
+
+impl<E: ExtensionField, Spec: WhirSpec<E>> Serialize for WhirDigest<E, Spec>
+where
+    // TODO: Remove these horrifying stuffs
+    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let digest = &self.inner;
+        // Create a buffer that implements the `Write` trait
+        let mut buffer = Vec::new();
+        digest.serialize_compressed(&mut buffer).unwrap();
+        serializer.serialize_bytes(&buffer)
+    }
+}
+
+impl<'de, E: ExtensionField, Spec: WhirSpec<E>> Deserialize<'de> for WhirDigest<E, Spec>
+where
+    // TODO: Remove these horrifying stuffs
+    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize the bytes into a buffer
+        let buffer: Vec<u8> = Deserialize::deserialize(deserializer)?;
+        // Deserialize the buffer into a proof
+        let inner = <<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig as Config>::InnerDigest::deserialize_compressed(&buffer[..]).unwrap();
+        Ok(WhirDigest { inner })
+    }
+}
+
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
-    <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig: DigestIO<FieldWrapper<E>>,
+    // TODO: Remove these horrifying stuffs
+    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
+    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
 {
     type Param = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
     type ProverParam = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
     type VerifierParam = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
-    type Commitment = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Commitment;
+    type Commitment = WhirDigest<E, Spec>;
     type Proof = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Proof;
     type CommitmentWithWitness =
         <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::CommitmentWithWitness;
-    type CommitmentChunk = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::CommitmentChunk;
+    type CommitmentChunk = WhirDigest<E, Spec>;
 
     fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
         todo!()
@@ -61,8 +126,8 @@ where
     fn commit(
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
-    ) -> Result<Self::Commitment, crate::Error> {
-        Ok(pp.clone())
+    ) -> Result<Self::CommitmentWithWitness, crate::Error> {
+        todo!()
     }
 
     fn write_commitment(
@@ -75,7 +140,7 @@ where
     fn open(
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
-        comm: &Self::Commitment,
+        comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
         transcript: &mut impl transcript::Transcript<E>,
@@ -93,21 +158,21 @@ where
     ) -> Result<(), crate::Error> {
         Ok(())
     }
-    fn get_pure_commitment(comm: &Self::CommitmentWithData) -> Self::Commitment {
+    fn get_pure_commitment(comm: &Self::CommitmentWithWitness) -> Self::Commitment {
         todo!()
     }
 
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
-    ) -> Result<Self::CommitmentWithData, crate::Error> {
+    ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         todo!()
     }
 
     fn batch_open(
         pp: &Self::ProverParam,
         polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithData],
+        comms: &[Self::CommitmentWithWitness],
         points: &[Vec<E>],
         evals: &[crate::Evaluation<E>],
         transcript: &mut impl transcript::Transcript<E>,
@@ -118,7 +183,7 @@ where
     fn simple_batch_open(
         pp: &Self::ProverParam,
         polys: &[multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension<E>],
-        comm: &Self::CommitmentWithData,
+        comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],
         transcript: &mut impl transcript::Transcript<E>,
