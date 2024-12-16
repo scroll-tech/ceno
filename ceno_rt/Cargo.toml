@@ -10,7 +10,6 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
-riscv = "0.12"
 rkyv = { version = "0.8", default-features = false, features = [
   "alloc",
   "bytecheck",

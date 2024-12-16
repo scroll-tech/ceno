@@ -77,7 +77,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
             I::INST_KIND,
-            &imm.expr(),
+            imm.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,

@@ -100,6 +100,12 @@ fn test_hints() -> Result<()> {
     Ok(())
 }
 
+fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
+    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    eprintln!("Emulator ran for {} steps.", steps.len());
+    Ok(steps)
+}
+
 #[test]
 fn test_sorting() -> Result<()> {
     use rand::Rng;
@@ -134,10 +140,4 @@ fn test_median() -> Result<()> {
         println!("{i}: {msg}");
     }
     Ok(())
-}
-
-fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
-    eprintln!("Emulator ran for {} steps.", steps.len());
-    Ok(steps)
 }
