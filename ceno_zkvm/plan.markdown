@@ -1,3 +1,0 @@
-- [ ] Change standalone guest to use a path dependency for now.
-- [ ] Move stuff into cento_rt, and perhaps ceno_host.
-- [ ] Oputional: Make ceno-rt buildable on native?  Later.
