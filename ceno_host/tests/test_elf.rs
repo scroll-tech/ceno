@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::{BTreeSet, HashSet}, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
@@ -124,12 +124,6 @@ fn test_hints() -> Result<()> {
     Ok(())
 }
 
-fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
-    eprintln!("Emulator ran for {} steps.", steps.len());
-    Ok(steps)
-}
-
 #[test]
 fn test_sorting() -> Result<()> {
     use rand::Rng;
@@ -164,4 +158,50 @@ fn test_median() -> Result<()> {
         println!("{i}: {msg}");
     }
     Ok(())
+}
+
+#[test]
+#[should_panic(expected = "Trap IllegalInstruction")]
+fn test_hashing_fail() {
+    use rand::Rng;
+    let mut hints = CenoStdin::default();
+    let mut rng = rand::thread_rng();
+
+    let mut nums = (0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>();
+    // Add a duplicate number to make uniqueness check fail:
+    nums[211] = nums[907];
+    hints.write(&nums).unwrap();
+
+    let _ = ceno_host::run(CENO_PLATFORM, ceno_examples::hashing, &hints);
+}
+
+#[test]
+fn test_hashing() -> Result<()> {
+    use rand::Rng;
+    let mut hints = CenoStdin::default();
+    let mut rng = rand::thread_rng();
+
+    // Provide some unique random numbers to verify:
+    let uniques: Vec<u32> = {
+        let mut seen_so_far = BTreeSet::default();
+        from_fn(move || Some(rng.gen::<u32>()))
+            .filter(|&item| seen_so_far.insert(item))
+            .take(1_000)
+            .collect::<Vec<_>>()
+    };
+
+    hints.write(&uniques)?;
+    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::hashing, &hints);
+    assert!(!all_messages.is_empty());
+    for (i, msg) in enumerate(&all_messages) {
+        println!("{i}: {msg}");
+    }
+    assert_eq!(all_messages[0], "The input is a set of unique numbers.\n");
+    Ok(())
+}
+
+fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
+    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    eprintln!("Emulator ran for {} steps.", steps.len());
+    Ok(steps)
 }

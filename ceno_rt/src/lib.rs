@@ -22,6 +22,34 @@ pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
     unimplemented!();
 }
 
+/// Generates random bytes.
+///
+/// # Safety
+///
+/// Make sure that `buf` has at least `nwords` words.
+/// This generator is terrible. :)
+#[no_mangle]
+#[linkage = "weak"]
+pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
+    unsafe fn step() -> u32 {
+        static mut X: u32 = 0xae569764;
+        // We are stealing Borland Delphi's random number generator.
+        // The random numbers here are only good enough to make eg
+        // HashMap works.
+        X = X.wrapping_mul(134775813) + 1;
+        X
+    }
+    // TODO(Matthias): this is a bit inefficient,
+    // we could fill whole u32 words at a time.
+    // But it's just for testing.
+    for i in 0..words {
+        let element = recv_buf.add(i);
+        // The lower bits ain't really random, so might as well take
+        // the higher order ones, if we are only using 8 bits.
+        *element = step().to_le_bytes()[3];
+    }
+}
+
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]
     unsafe {
