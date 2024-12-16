@@ -75,7 +75,7 @@ fn test_ceno_rt_io() -> Result<()> {
     let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
 
-    let all_messages = read_all_messages(&state);
+    let all_messages = messages_to_strings(&read_all_messages(&state));
     for msg in &all_messages {
         print!("{msg}");
     }
@@ -92,7 +92,8 @@ fn test_hints() -> Result<()> {
     hints.write(&1997_u32)?;
     hints.write(&1999_u32)?;
 
-    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::hints, &hints);
+    let all_messages =
+        messages_to_strings(&ceno_host::run(CENO_PLATFORM, ceno_examples::hints, &hints));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
     }
@@ -167,6 +168,13 @@ fn sample_keccak_f(count: usize) -> Vec<Vec<u64>> {
             state.into()
         })
         .collect_vec()
+}
+
+fn messages_to_strings(messages: &[Vec<u8>]) -> Vec<String> {
+    messages
+        .iter()
+        .map(|msg| String::from_utf8_lossy(msg).to_string())
+        .collect()
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
