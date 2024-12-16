@@ -84,8 +84,3 @@ unsafe extern "C" fn _start_rust() -> ! {
     bespoke_entrypoint();
     halt(0)
 }
-
-extern "C" {
-    // The address of this variable is the start of the stack (growing downwards).
-    static _stack_start: u8;
-}
