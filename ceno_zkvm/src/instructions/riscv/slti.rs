@@ -20,7 +20,6 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {
@@ -78,7 +77,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
             I::INST_KIND,
-            &imm.expr(),
+            imm.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
@@ -96,7 +95,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -234,7 +233,7 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm as u32);
+        let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
 
         let config = cb
             .namespace(

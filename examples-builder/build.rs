@@ -14,6 +14,7 @@ const EXAMPLES: &[&str] = &[
     "ceno_rt_mem",
     "ceno_rt_mini",
     "ceno_rt_panic",
+    "hints",
 ];
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -44,10 +45,9 @@ fn build_elfs() {
                 include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-unknown-none-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
-    let input_path = "../examples/";
+    println!("cargo:rerun-if-changed=../examples/");
+    println!("cargo:rerun-if-changed=../ceno_rt/");
     let elfs_path = "../examples/target/riscv32im-unknown-none-elf/release/examples/";
-
-    println!("cargo:rerun-if-changed={input_path}");
     println!("cargo:rerun-if-changed={elfs_path}");
 }
 

@@ -1,19 +1,5 @@
 [env]
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
-CORE = { script = ["nproc"] }
-CUR_TARGET = { script = ['''
-        if [ -z "${TARGET}" ]; then
-            TARGET=$(rustc -vV | grep "host" | awk '{print $2}')
-            echo "${TARGET}"
-        else
-            echo "${TARGET}"
-        fi
-        '''] }
-RAYON_NUM_THREADS = "${CORE}"
-
-[tasks.build]
-# Override the default `--all-features`, that's broken, because some of our features are mutually exclusive.
-args = ["build"]
 
 [tasks.tests]
 args = [
@@ -23,33 +9,13 @@ args = [
   "--bins",
   "--tests",
   "--examples",
-  "--release",
-  "--target",
-  "${CUR_TARGET}",
   "--workspace",
-  "--exclude",
-  "ceno_rt",
 ]
-command = "cargo"
-workspace = false
-
-[tasks.fmt-all-check]
-args = ["fmt", "--all", "--", "--check"]
-command = "cargo"
-workspace = false
-
-[tasks.fmt-all]
-args = ["fmt", "--all"]
 command = "cargo"
 workspace = false
 
 [tasks.clippy-all]
 args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
-command = "cargo"
-workspace = false
-
-[tasks.fmt]
-args = ["fmt", "-p", "ceno_zkvm", "--", "--check"]
 command = "cargo"
 workspace = false
 
@@ -63,10 +29,6 @@ args = [
   "clippy",
   "--workspace",
   "--all-targets",
-  "--exclude",
-  "ceno_rt",
-  "--target",
-  "${CUR_TARGET}",
   "--",
   "-D",
   "warnings",
