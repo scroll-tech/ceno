@@ -75,19 +75,14 @@ macro_rules! entry {
 /// _start_rust is called by the assembly entry point and it calls the Rust main().
 #[no_mangle]
 unsafe extern "C" fn _start_rust() -> ! {
-    allocator::init_heap();
-    {
-        extern "C" {
-            fn bespoke_entrypoint();
-        }
-        bespoke_entrypoint();
+    extern "C" {
+        fn bespoke_entrypoint();
     }
+    bespoke_entrypoint();
     halt(0)
 }
 
 extern "C" {
     // The address of this variable is the start of the stack (growing downwards).
     static _stack_start: u8;
-    // The address of this variable is the start of the heap (growing upwards).
-    static _sheap: u8;
 }
