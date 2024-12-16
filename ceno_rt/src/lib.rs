@@ -35,7 +35,7 @@ pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
         static mut X: u32 = 0xae569764;
         // We are stealing Borland Delphi's random number generator.
         // The random numbers here are only good enough to make eg
-        // HashMap works.
+        // HashMap work.
         X = X.wrapping_mul(134775813) + 1;
         X
     }
