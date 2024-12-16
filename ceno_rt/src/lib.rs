@@ -54,8 +54,7 @@ _start:
     la sp, _stack_start
     mv fp, sp
 
-    // Call the Rust start function.
-    // jal zero, _start_rust
+    // Call Rust's main function.
     call main
 
     // If we return from main, we halt with success:
