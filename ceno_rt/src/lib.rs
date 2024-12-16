@@ -31,24 +31,22 @@ pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
 #[no_mangle]
 #[linkage = "weak"]
 pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
-    // SYS_RAND_WARNING.call_once(|| {
-    //     println!("WARNING: Using insecure random number generator.");
-    // });
-    // Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs"
-    // Just for testing.
     unsafe fn step() -> u32 {
         static mut X: u32 = 0xae569764;
-        X ^= X << 13;
-        X ^= X >> 17;
-        X ^= X << 5;
+        // We are stealing Borland Delphi's random number generator.
+        // The random numbers here are only good enough to make eg
+        // HashMap works.
+        X = X.wrapping_mul(134775813) + 1;
         X
     }
     // TODO(Matthias): this is a bit inefficient,
-    // we should fill whole u32 words at a time.
+    // we could fill whole u32 words at a time.
     // But it's just for testing.
     for i in 0..words {
         let element = recv_buf.add(i);
-        *element = step() as u8;
+        // The lower bits ain't really random, so might as well take
+        // the higher order ones, if we are only using 8 bits.
+        *element = step().to_le_bytes()[3];
     }
 }
 
@@ -75,7 +73,10 @@ pub fn halt(exit_code: u32) -> ! {
         unreachable!();
     }
     #[cfg(not(target_arch = "riscv32"))]
-    unimplemented!("Halt is not implemented for this target, exit_code: {}", exit_code); 
+    unimplemented!(
+        "Halt is not implemented for this target, exit_code: {}",
+        exit_code
+    );
 }
 
 #[cfg(target_arch = "riscv32")]
