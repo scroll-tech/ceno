@@ -27,7 +27,7 @@ impl<E: ExtensionField> IInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        imm: &Expression<E>,
+        imm: Expression<E>,
         rs1_read: RegisterExpr<E>,
         rd_written: RegisterExpr<E>,
         branching: bool,
