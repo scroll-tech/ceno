@@ -1,4 +1,8 @@
-use std::{collections::{BTreeSet, HashSet}, iter::from_fn, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    iter::from_fn,
+    sync::Arc,
+};
 
 use anyhow::Result;
 use ceno_emul::{
