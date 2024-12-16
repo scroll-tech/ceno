@@ -79,12 +79,17 @@ impl Items {
         self.ends.push(end);
     }
 
+    /// Shift all the end cursors by `n`
     pub fn shift(&mut self, n: usize) {
         for end in &mut self.ends {
             *end += n;
         }
     }
 
+    /// Prepend the end cursors to the data buffer
+    ///
+    /// Taking care to adjust the recorded ends to account
+    /// for the space the ends themselves take up.
     pub fn finalise(mut self) -> Vec<u8> {
         let start_of_data = (size_of::<u32>() * self.ends.len()).next_multiple_of(RKYV_ALIGNMENT);
         self.shift(start_of_data);
