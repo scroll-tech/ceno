@@ -227,7 +227,7 @@ impl<E: ExtensionField> WriteRD<E> {
 
     pub fn assign_op(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
@@ -348,7 +348,7 @@ impl WriteMEM {
 
     pub fn assign_op<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,

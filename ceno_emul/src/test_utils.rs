@@ -7,7 +7,7 @@ use anyhow::Result;
 pub fn keccak_step() -> (StepRecord, Vec<Instruction>) {
     let instructions = vec![
         // Call Keccak-f.
-        load_immediate(Platform::reg_arg0() as u32, CENO_PLATFORM.ram.start),
+        load_immediate(Platform::reg_arg0() as u32, CENO_PLATFORM.heap.start),
         load_immediate(Platform::reg_ecall() as u32, KECCAK_PERMUTE),
         encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
         // Halt.

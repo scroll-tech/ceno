@@ -17,7 +17,6 @@ use crate::{
     set_val,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 trait EcallSpec {
     const NAME: &'static str;
@@ -51,7 +50,7 @@ impl<E: ExtensionField, S: EcallSpec> Instruction<E> for LargeEcallDummy<E, S> {
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let dummy_insn = DummyConfig::construct_circuit(
             cb,
-            InsnKind::EANY,
+            InsnKind::ECALL,
             true, // Read the ecall function code.
             false,
             false,
@@ -97,7 +96,7 @@ impl<E: ExtensionField, S: EcallSpec> Instruction<E> for LargeEcallDummy<E, S> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
