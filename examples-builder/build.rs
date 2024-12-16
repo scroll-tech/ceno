@@ -45,7 +45,6 @@ fn build_elfs() {
                 include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
-
     println!("cargo:rerun-if-changed=../examples/");
     println!("cargo:rerun-if-changed=../ceno_rt/");
     let elfs_path = "../examples/target/riscv32im-ceno-zkvm-elf/release/examples/";
