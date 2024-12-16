@@ -27,16 +27,12 @@ mod panic_handler {
 pub fn halt(exit_code: u32) -> ! {
     unsafe {
         asm!(
-            // Set the first argument.
-            "mv a0, {}",
-            // Set the ecall code HALT.
-            "li t0, 0x0",
-            in(reg) exit_code,
+            "ecall",
+            in ("a0") exit_code,
+            in ("t0") 0,
         );
-        riscv::asm::ecall();
     }
-    #[allow(clippy::empty_loop)]
-    loop {}
+    unreachable!();
 }
 
 global_asm!(
