@@ -67,7 +67,7 @@ where
 
     fn write_commitment(
         comm: &Self::Commitment,
-        transcript: &mut transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
         Ok(())
     }
@@ -78,7 +78,7 @@ where
         comm: &Self::Commitment,
         point: &[E],
         eval: &E,
-        transcript: &mut transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
@@ -89,7 +89,7 @@ where
         point: &[E],
         eval: &E,
         proof: &Self::Proof,
-        transcript: &mut transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
         Ok(())
     }
@@ -110,7 +110,7 @@ where
         comms: &[Self::CommitmentWithData],
         points: &[Vec<E>],
         evals: &[crate::Evaluation<E>],
-        transcript: &mut transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
@@ -121,7 +121,7 @@ where
         comm: &Self::CommitmentWithData,
         point: &[E],
         evals: &[E],
-        transcript: &mut transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
@@ -132,7 +132,7 @@ where
         points: &[Vec<E>],
         evals: &[crate::Evaluation<E>],
         proof: &Self::Proof,
-        transcript: &mut transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
     }
@@ -143,7 +143,7 @@ where
         point: &[E],
         evals: &[E],
         proof: &Self::Proof,
-        transcript: &mut transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
     }
@@ -159,7 +159,11 @@ mod tests {
 
     type F = ff::ExtensionFieldWrapper<GoldilocksExt2>;
 
-    use whir::ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec};
+    use whir::{
+        ceno_binding::{DefaultHash, PolynomialCommitmentScheme, WhirDefaultSpec},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+        whir::iopattern::IOPattern,
+    };
 
     #[test]
     fn single_point_verify() {
@@ -173,18 +177,18 @@ mod tests {
                 .collect(),
         );
 
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_statement(&pp)
-            .add_whir_proof(&pp);
+        let io = IOPattern::<DefaultHash>::new("🌪️");
         let mut merlin = io.to_merlin();
 
-        let witness = Whir::<F, Spec>::commit_and_write(&pp, &poly, &mut merlin).unwrap();
+        let witness =
+            WhirInner::<F, WhirDefaultSpec>::commit_and_write(&pp, &poly, &mut merlin).unwrap();
 
         let mut rng = rand::thread_rng();
         let point: Vec<F> = (0..poly_size).map(|_| F::from(rng.gen::<u64>())).collect();
         let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
 
-        let proof = Whir::<F, Spec>::open(&pp, witness, &point, &eval, &mut merlin).unwrap();
-        Whir::<F, Spec>::verify(&pp, &point, &eval, &proof, &merlin).unwrap();
+        let proof = WhirInner::<F, WhirDefaultSpec>::open(&pp, witness, &point, &eval, &mut merlin)
+            .unwrap();
+        WhirInner::<F, WhirDefaultSpec>::verify(&pp, &point, &eval, &proof, &merlin).unwrap();
     }
 }
