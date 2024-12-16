@@ -123,7 +123,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
     use goldilocks::GoldilocksExt2;
 
     use crate::{
@@ -190,7 +190,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
+        let insn_code = encode_rv32u(I::INST_KIND, 2, 0, 4, imm);
         let (raw_witin, lkm) = LogicInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,

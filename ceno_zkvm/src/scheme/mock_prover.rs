@@ -17,7 +17,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
-use ceno_emul::{ByteAddr, CENO_PLATFORM, PC_WORD_SIZE, Program};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, Program};
 use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
@@ -26,7 +26,7 @@ use itertools::{Itertools, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
 use rand::thread_rng;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -400,7 +400,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         Self::run_maybe_challenge(cb, wits_in, programs, &[], None, lkm)
@@ -409,33 +409,16 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        input_programs: &[u32],
+        input_programs: &[ceno_emul::Instruction],
         pi: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        // fix the program table
-        let instructions = input_programs
-            .iter()
-            .cloned()
-            .chain(std::iter::repeat(0))
-            .take(MOCK_PROGRAM_SIZE)
-            .collect_vec();
-        let image = instructions
-            .iter()
-            .enumerate()
-            .map(|(insn_idx, &insn)| {
-                (
-                    CENO_PLATFORM.pc_base() + (insn_idx * PC_WORD_SIZE) as u32,
-                    insn,
-                )
-            })
-            .collect::<BTreeMap<u32, u32>>();
         let program = Program::new(
             CENO_PLATFORM.pc_base(),
             CENO_PLATFORM.pc_base(),
-            instructions,
-            image,
+            input_programs.to_vec(),
+            Default::default(),
         );
 
         // load tables
@@ -667,7 +650,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         constraint_names: &[&str],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
@@ -719,7 +702,7 @@ Hints:
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
         raw_witin: RowMajorMatrix<E::BaseField>,
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
@@ -734,7 +717,7 @@ Hints:
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {

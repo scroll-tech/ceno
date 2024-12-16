@@ -8,6 +8,3 @@ name = "ceno_rt"
 readme = "README.md"
 repository.workspace = true
 version.workspace = true
-
-[dependencies]
-riscv = "0.12"

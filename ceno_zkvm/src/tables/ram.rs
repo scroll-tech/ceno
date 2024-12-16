@@ -19,11 +19,11 @@ impl DynVolatileRamTable for DynMemTable {
     const ZERO_INIT: bool = true;
 
     fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram.start
+        params.platform.heap.start
     }
 
     fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.ram.end
+        params.platform.heap.end
     }
 
     fn name() -> &'static str {
