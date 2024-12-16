@@ -1,4 +1,5 @@
 #![deny(clippy::cargo)]
+#![feature(step_trait)]
 mod addr;
 pub use addr::*;
 
@@ -25,3 +26,5 @@ mod syscalls;
 pub use syscalls::{KECCAK_PERMUTE, keccak_permute::KECCAK_WORDS};
 
 pub mod test_utils;
+
+pub mod host_utils;

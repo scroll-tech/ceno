@@ -51,7 +51,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let i_insn = IInstructionConfig::construct_circuit(
             circuit_builder,
             InsnKind::JALR,
-            &imm.expr(),
+            imm.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             true,
