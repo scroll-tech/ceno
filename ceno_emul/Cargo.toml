@@ -10,7 +10,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-anyhow = { version = "1.0", default-features = false }
+anyhow.workspace = true
 elf = "0.7"
 itertools.workspace = true
 num-derive.workspace = true
@@ -20,9 +20,6 @@ strum.workspace = true
 strum_macros.workspace = true
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing.workspace = true
-
-[dev-dependencies]
-ceno-examples = { path = "../examples-builder" }
 
 [features]
 default = ["forbid_overflow"]
