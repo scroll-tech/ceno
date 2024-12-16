@@ -4,11 +4,7 @@ use core::fmt::Write;
 use itertools::{Itertools, izip};
 use rkyv::vec::ArchivedVec;
 
-fn main() {
-    // We take the input numbers from the hints for convenience.
-    // But just pretend that in the real world, the input would be
-    // committed to via public IO.
-    let input: &ArchivedVec<u32> = ceno_rt::read();
+fn my_sort(input: &ArchivedVec<u32>) -> &ArchivedVec<u32> {
     let answer: &ArchivedVec<u32> = ceno_rt::read();
     let places: &ArchivedVec<u32> = ceno_rt::read();
 
@@ -24,5 +20,14 @@ fn main() {
         assert!(std::mem::replace(&mut scratch[place as usize], false));
         assert_eq!(input[place as usize], *answer);
     }
-    println!("All checks passed!");
+    answer
+}
+
+fn main() {
+    // We take the input numbers from the hints for convenience.
+    // But just pretend that in the real world, the input would be
+    // committed to via public IO.
+    let input: &ArchivedVec<u32> = ceno_rt::read();
+    my_sort(input);
+    println!("We successfully sorted the input!");
 }
