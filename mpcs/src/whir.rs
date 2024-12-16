@@ -1,13 +1,15 @@
 use core::todo;
 
 use super::PolynomialCommitmentScheme;
+pub use whir::ceno_binding::Error;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use whir::{
     ceno_binding::{
-        Config, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner, WhirSpec as WhirSpecInner,
+        Config, DefaultHash, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
+        WhirSpec as WhirSpecInner,
     },
     whir::{
         fs_utils::{DigestReader, DigestWriter},
@@ -113,21 +115,37 @@ where
     type CommitmentChunk = WhirDigest<E, Spec>;
 
     fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
-        todo!()
+        Ok(WhirInnerT::<E, Spec>::setup(poly_size))
     }
 
     fn trim(
         param: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        todo!()
+        if poly_size > (1 << param.num_variables) {
+            return Err(crate::Error::InvalidPcsParam(
+                "Poly size is greater than param poly size".to_string(),
+            ));
+        }
+        // TODO: Do the real trim instead of regenerating.
+        let param = WhirInnerT::<E, Spec>::setup(poly_size);
+        Ok((param.clone(), param.clone()))
     }
 
     fn commit(
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        todo!()
+        // WhirInner only provides commit_and_write, which directly writes the
+        // commitment to the transcript. We provide it with a temporary merlin
+        // transcript.
+
+        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let mut merlin = io.to_merlin();
+
+        let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly, &mut merlin)?;
+
+        Ok(witness)
     }
 
     fn write_commitment(
