@@ -23,7 +23,7 @@ fn read_message(state: &VMState, offset: WordAddr) -> String {
 
     String::from_utf8_lossy(
         &(out_addr + 1_usize..)
-            .map(|memory| state.peek_memory(memory))
+            .map(|address| state.peek_memory(address))
             .flat_map(u32::to_le_bytes)
             .take(byte_len)
             .collect::<Vec<_>>(),
