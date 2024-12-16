@@ -23,5 +23,8 @@ pub use elf::Program;
 pub mod disassemble;
 
 mod syscalls;
+pub use syscalls::{KECCAK_PERMUTE, keccak_permute::KECCAK_WORDS};
+
+pub mod test_utils;
 
 pub mod host_utils;
