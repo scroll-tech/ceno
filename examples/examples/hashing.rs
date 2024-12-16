@@ -1,3 +1,9 @@
+//! Here's an example that really makes use of the standard library and couldn't be done without.
+//!
+//! I mean `HashSet` really lives only in the proper standard library, and not in `alloc` or `core`.
+//! You could, of course, rerwite the example to use `alloc::collections::btree_set::BTreeSet`
+//! instead of `HashSet`.
+
 extern crate ceno_rt;
 use ceno_rt::println;
 use core::fmt::Write;
