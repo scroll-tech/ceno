@@ -1,5 +1,7 @@
 use anyhow::Result;
 use ceno_emul::{ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, Platform, StepRecord, VMState};
+use itertools::{Itertools, izip};
+use tiny_keccak::keccakf;
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -27,7 +29,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     let mut state = VMState::new_from_elf(CENO_PLATFORM, program_elf)?;
     let _steps = run(&mut state)?;
 
-    let value = state.peek_memory(CENO_PLATFORM.ram.start.into());
+    let value = state.peek_memory(CENO_PLATFORM.heap.start.into());
     assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
     Ok(())
 }
@@ -70,6 +72,75 @@ fn test_ceno_rt_io() -> Result<()> {
     assert_eq!(&all_messages[0], "📜📜📜 Hello, World!\n".as_bytes());
     assert_eq!(&all_messages[1], "🌏🌍🌎\n".as_bytes());
     Ok(())
+}
+
+#[test]
+fn test_ceno_rt_keccak() -> Result<()> {
+    let program_elf = ceno_examples::ceno_rt_keccak;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    // Expect the program to have written successive states between Keccak permutations.
+    const ITERATIONS: usize = 3;
+    let keccak_outs = sample_keccak_f(ITERATIONS);
+
+    let all_messages = read_all_messages(&state);
+    assert_eq!(all_messages.len(), ITERATIONS);
+    for (got, expect) in izip!(&all_messages, &keccak_outs) {
+        let got = got
+            .chunks_exact(8)
+            .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
+            .collect_vec();
+        assert_eq!(&got, expect);
+    }
+
+    // Find the syscall records.
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), ITERATIONS);
+
+    // Check the syscall effects.
+    for (witness, expect) in izip!(syscalls, keccak_outs) {
+        assert_eq!(witness.reg_accesses.len(), 1);
+        assert_eq!(
+            witness.reg_accesses[0].register_index(),
+            Platform::reg_arg0()
+        );
+
+        assert_eq!(witness.mem_writes.len(), expect.len() * 2);
+        let got = witness
+            .mem_writes
+            .chunks_exact(2)
+            .map(|write_ops| {
+                assert_eq!(
+                    write_ops[1].addr.baddr(),
+                    write_ops[0].addr.baddr() + WORD_SIZE as u32
+                );
+                let lo = write_ops[0].value.after as u64;
+                let hi = write_ops[1].value.after as u64;
+                lo | (hi << 32)
+            })
+            .collect_vec();
+        assert_eq!(got, expect);
+    }
+
+    Ok(())
+}
+
+fn unsafe_platform() -> Platform {
+    let mut platform = CENO_PLATFORM;
+    platform.unsafe_ecall_nop = true;
+    platform
+}
+
+fn sample_keccak_f(count: usize) -> Vec<Vec<u64>> {
+    let mut state = [0_u64; 25];
+
+    (0..count)
+        .map(|_| {
+            keccakf(&mut state);
+            state.into()
+        })
+        .collect_vec()
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {

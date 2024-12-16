@@ -14,6 +14,7 @@ anyhow.workspace = true
 ceno_emul = { path = "../ceno_emul" }
 itertools.workspace = true
 rkyv = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }
+tiny-keccak.workspace = true
 
 [dev-dependencies]
 ceno-examples = { path = "../examples-builder" }

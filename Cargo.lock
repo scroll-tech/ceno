@@ -277,6 +277,7 @@ dependencies = [
  "itertools 0.13.0",
  "rand",
  "rkyv",
+ "tiny-keccak",
 ]
 
 [[package]]
