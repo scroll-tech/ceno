@@ -38,7 +38,7 @@ use strum::IntoEnumIterator;
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
-pub static MOCK_PC_START: ByteAddr = ByteAddr({
+pub const MOCK_PC_START: ByteAddr = ByteAddr({
     static CENO_PLATFORM: Platform = ceno_emul::CENO_PLATFORM;
     CENO_PLATFORM.pc_base()
 });
