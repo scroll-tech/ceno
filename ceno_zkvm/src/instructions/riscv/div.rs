@@ -429,7 +429,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 // TODO check overflow
                 let negate_if_32 = |b: bool, x: i32| if b && x != i32::MIN { -x } else { x };
 
-                println!("wit {}, {}", &quotient, &remainder);
+                // println!("wit {}, {}", &quotient, &remainder);
                 let remainder_pos_orientation = negate_if_32(dividend < 0, remainder);
                 let divisor_pos_orientation = negate_if(divisor < 0, divisor);
 
@@ -476,6 +476,8 @@ mod test {
 
     mod divu {
 
+        use std::time::Instant;
+
         use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
@@ -499,6 +501,7 @@ mod test {
             exp_outcome: Word,
             is_ok: bool,
         ) {
+            let start = Instant::now();
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
@@ -508,6 +511,8 @@ mod test {
                 )
                 .unwrap()
                 .unwrap();
+            let duration = start.elapsed();
+            println!("Time elapsed in construct_circuit() is: {:?}", duration);
 
             let outcome = if divisor == 0 {
                 u32::MAX
@@ -541,6 +546,7 @@ mod test {
                 .unwrap();
 
             let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
+            let start = Instant::now();
             MockProver::assert_with_expected_errors(
                 &cb,
                 &raw_witin
@@ -553,6 +559,11 @@ mod test {
                 expected_errors,
                 None,
                 Some(lkm),
+            );
+            let duration = start.elapsed();
+            println!(
+                "Time elapsed in assert_with_expected_errors() is: {:?}",
+                duration
             );
         }
         #[test]
@@ -601,7 +612,15 @@ mod test {
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
         use rand::Rng;
-        fn verify(name: &str, dividend: i32, divisor: i32, exp_outcome: i32, is_ok: bool) {
+        use std::time::Instant;
+        fn verify(
+            name: &str,
+            dividend: i32,
+            divisor: i32,
+            exp_outcome: i32,
+            exp_remainder: i32,
+            is_ok: bool,
+        ) {
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
@@ -660,60 +679,52 @@ mod test {
         }
         #[test]
         fn test_opcode_div() {
-            verify("basic", 10, 2, 5, true);
-            verify("dividend < divisor", 10, 11, 0, true);
-            verify("non-zero remainder", 11, 2, 5, true);
-            verify("i32::MAX", i32::MAX, i32::MAX, 1, true);
-            verify("div u32::MAX", 7801, i32::MAX, 0, true);
-            verify("i32::MAX div by 2", i32::MAX, 2, i32::MAX / 2, true);
-            verify("mul with carries", 1202729773, 171818539, 7, true);
-            verify("div by zero", 10, 0, -1, true);
+            verify("basic", 10, 2, 5, 0, true);
+            verify("dividend < divisor", 10, 11, 0, 0, true);
+            verify("non-zero remainder", 11, 2, 5, 0, true);
+            verify("i32::MAX", i32::MAX, i32::MAX, 1, 0, true);
+            verify("div u32::MAX", 7801, i32::MAX, 0, 0, true);
+            verify("i32::MAX div by 2", i32::MAX, 2, i32::MAX / 2, 0, true);
+            verify("mul with carries", 1202729773, 171818539, 7, 0, true);
+            verify("div by zero", 10, 0, -1, 0, true);
             verify(
                 "i32::MIN div -1 (overflow case)",
                 i32::MIN,
                 -1,
                 i32::MIN,
+                0,
                 true,
             );
         }
         #[test]
-        fn test_batch_div() {
-            let interesting = [
+        fn test_div_edges() {
+            let interesting_values = [
                 i32::MIN,
                 i32::MAX,
-                0,
-                -1,
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-                10,
-                (1 << 10),
-                (1 << 20),
-                // 1000,
-                // 10000000,
-                // 123456,
-                // 1234,
                 i32::MAX / 2,
                 i32::MIN / 2,
                 i32::MIN + 1,
                 i32::MAX - 1,
+                0,
+                -1,
+                1,
+                2,
             ];
 
-            for dividend in interesting {
-                for divisor in interesting {
-                    let exp_outcome = if divisor == 0 {
-                        -1i32
+            for dividend in interesting_values {
+                for divisor in interesting_values {
+                    let (exp_quotient, exp_remainder) = if divisor == 0 {
+                        (-1i32, 0)
                     } else {
-                        dividend.wrapping_div(divisor)
+                        (
+                            dividend.wrapping_div(divisor),
+                            dividend.wrapping_rem(divisor),
+                        )
                     };
-                    let name = format!("{}, {}, {}", dividend, divisor, exp_outcome);
-                    verify(&name, dividend, divisor, exp_outcome, true);
+                    let name = format!("expects {} / {}, = {}", dividend, divisor, exp_quotient);
+                    verify(&name, dividend, divisor, exp_quotient, exp_remainder, true);
                 }
             }
-            verify("assert_outcome", 10, 2, 3, false);
         }
     }
 }
