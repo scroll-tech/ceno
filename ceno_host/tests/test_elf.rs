@@ -116,7 +116,6 @@ fn test_bubble_sorting() -> Result<()> {
     Ok(())
 }
 
-
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
     let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
     eprintln!("Emulator ran for {} steps.", steps.len());
