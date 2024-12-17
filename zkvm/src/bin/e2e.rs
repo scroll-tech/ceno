@@ -1,8 +1,4 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
-use ceno_zkvm::{
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    with_panic_hook,
-};
 use clap::Parser;
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -15,6 +11,10 @@ use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 use transcript::BasicTranscript as Transcript;
+use zkvm::{
+    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    with_panic_hook,
+};
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]

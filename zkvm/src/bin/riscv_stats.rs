@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use ceno_zkvm::{
+use goldilocks::GoldilocksExt2;
+use zkvm::{
     instructions::riscv::Rv32imConfig,
     stats::{StaticReport, TraceReport},
     structs::ZKVMConstraintSystem,
 };
-use goldilocks::GoldilocksExt2;
 type E = GoldilocksExt2;
 fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();

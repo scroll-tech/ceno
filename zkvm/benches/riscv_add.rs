@@ -1,21 +1,21 @@
 use std::time::{Duration, Instant};
 
 use ark_std::test_rng;
-use ceno_zkvm::{
+use criterion::*;
+use zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
     scheme::prover::ZKVMProver,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
-use criterion::*;
 
-use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
 use transcript::{BasicTranscript, Transcript};
+use zkvm::scheme::constants::MAX_NUM_VARIABLES;
 
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {

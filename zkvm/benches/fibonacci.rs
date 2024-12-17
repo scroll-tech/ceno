@@ -5,11 +5,11 @@ use std::{
 };
 
 use ceno_emul::{Platform, Program};
-use ceno_zkvm::{
+use criterion::*;
+use zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
-use criterion::*;
 
 use goldilocks::GoldilocksExt2;
 use mpcs::BasefoldDefault;

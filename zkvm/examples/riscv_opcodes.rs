@@ -1,6 +1,7 @@
 use std::{panic, sync::Arc, time::Instant};
 
-use ceno_zkvm::{
+use clap::Parser;
+use zkvm::{
     instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
     scheme::{mock_prover::MockProver, prover::ZKVMProver},
     state::GlobalState,
@@ -8,18 +9,12 @@ use ceno_zkvm::{
     tables::{MemFinalRecord, ProgramTableCircuit},
     with_panic_hook,
 };
-use clap::Parser;
 
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, ADDI, BLTU, ECALL, LW},
     Instruction, Platform, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
     encode_rv32u,
-};
-use ceno_zkvm::{
-    scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
-    stats::{StaticReport, TraceReport},
-    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
 use ff_ext::ff::Field;
 use goldilocks::{Goldilocks, GoldilocksExt2};
@@ -28,6 +23,11 @@ use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use sumcheck::macros::{entered_span, exit_span};
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::BasicTranscript as Transcript;
+use zkvm::{
+    scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    stats::{StaticReport, TraceReport},
+    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+};
 // For now, we assume registers
 //  - x0 is not touched,
 //  - x1 is initialized to 1,

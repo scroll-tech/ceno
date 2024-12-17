@@ -294,45 +294,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno_zkvm"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "base64",
- "ceno_emul",
- "cfg-if",
- "clap",
- "criterion",
- "ff",
- "ff_ext",
- "generic_static",
- "glob",
- "goldilocks",
- "itertools 0.13.0",
- "mpcs",
- "multilinear_extensions",
- "num-traits",
- "paste",
- "pprof2",
- "prettytable-rs",
- "proptest",
- "rand",
- "rand_chacha",
- "rayon",
- "serde",
- "serde_json",
- "strum",
- "strum_macros",
- "sumcheck",
- "tempfile",
- "thread_local",
- "tracing",
- "tracing-forest",
- "tracing-subscriber",
- "transcript",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2557,4 +2518,43 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.90",
+]
+
+[[package]]
+name = "zkvm"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "base64",
+ "ceno_emul",
+ "cfg-if",
+ "clap",
+ "criterion",
+ "ff",
+ "ff_ext",
+ "generic_static",
+ "glob",
+ "goldilocks",
+ "itertools 0.13.0",
+ "mpcs",
+ "multilinear_extensions",
+ "num-traits",
+ "paste",
+ "pprof2",
+ "prettytable-rs",
+ "proptest",
+ "rand",
+ "rand_chacha",
+ "rayon",
+ "serde",
+ "serde_json",
+ "strum",
+ "strum_macros",
+ "sumcheck",
+ "tempfile",
+ "thread_local",
+ "tracing",
+ "tracing-forest",
+ "tracing-subscriber",
+ "transcript",
 ]

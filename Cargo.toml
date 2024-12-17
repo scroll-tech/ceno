@@ -3,13 +3,13 @@ exclude = ["ceno_rt", "examples"]
 members = [
   "ceno_emul",
   "ceno_host",
-  "ceno_zkvm",
   "examples-builder",
   "mpcs",
   "multilinear_extensions",
   "poseidon",
   "sumcheck",
   "transcript",
+  "zkvm",
 ]
 resolver = "2"
 
