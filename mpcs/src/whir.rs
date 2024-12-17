@@ -93,7 +93,7 @@ where
         // Deserialize the bytes into a buffer
         let buffer: Vec<u8> = Deserialize::deserialize(deserializer)?;
         // Deserialize the buffer into a proof
-        let inner = <<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig as Config>::InnerDigest::deserialize_compressed(&buffer[..]).unwrap();
+        let inner = <<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig as Config>::InnerDigest::deserialize_compressed(&buffer[..]).map_err(serde::de::Error::custom)?;
         Ok(WhirDigest { inner })
     }
 }
@@ -155,6 +155,11 @@ where
         comm: &Self::Commitment,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
+        let mut buffer = Vec::new();
+        comm.inner
+            .serialize_compressed(&mut buffer)
+            .map_err(|err| crate::Error::Serialization(err.to_string()))?;
+        transcript.append_message(&buffer);
         Ok(())
     }
 
