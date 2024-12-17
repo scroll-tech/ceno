@@ -22,7 +22,7 @@ use super::ff_base::BaseFieldWrapper;
 #[derive(
     PartialEq, PartialOrd, Eq, Ord, Default, Copy, Clone, Debug, Hash, Serialize, Deserialize,
 )]
-pub struct ExtensionFieldWrapper<E: FfExtField>(E);
+pub struct ExtensionFieldWrapper<E: FfExtField>(pub(crate) E);
 
 impl<E: FfExtField> ExtensionFieldWrapper<E> {
     pub fn inner(&self) -> &E {

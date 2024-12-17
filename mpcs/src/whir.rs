@@ -1,6 +1,7 @@
 use core::todo;
 
 use super::PolynomialCommitmentScheme;
+use utils::poly2whir;
 pub use whir::ceno_binding::Error;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -19,6 +20,7 @@ use whir::{
 
 mod ff;
 mod ff_base;
+mod utils;
 use ff::ExtensionFieldWrapper as FieldWrapper;
 
 pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
@@ -143,7 +145,8 @@ where
         let io = IOPattern::<DefaultHash>::new("🌪️");
         let mut merlin = io.to_merlin();
 
-        let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly, &mut merlin)?;
+        let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly2whir(&poly), &mut merlin)
+            .map_err(crate::Error::WhirError)?;
 
         Ok(witness)
     }
