@@ -16,6 +16,7 @@ const EXAMPLES: &[&str] = &[
     "ceno_rt_panic",
     "hints",
     "sorting",
+    "sorting_with_hints",
     "median",
     "hashing",
 ];

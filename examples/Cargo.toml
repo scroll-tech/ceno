@@ -11,6 +11,7 @@ version = "0.1.0"
 
 [dependencies]
 ceno_rt = { path = "../ceno_rt" }
+itertools = "0.13"
 rkyv = { version = "0.8", default-features = false, features = [
   "alloc",
   "bytecheck",

@@ -10,7 +10,7 @@ use ceno_emul::{
     host_utils::read_all_messages,
 };
 use ceno_host::CenoStdin;
-use itertools::enumerate;
+use itertools::{Itertools, enumerate};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -135,9 +135,40 @@ fn test_sorting() -> Result<()> {
     let mut rng = rand::thread_rng();
 
     // Provide some random numbers to sort.
-    hints.write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
+    hints.write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
 
     let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::sorting, &hints);
+    for (i, msg) in enumerate(&all_messages) {
+        println!("{i}: {msg}");
+    }
+    Ok(())
+}
+
+/// Sorting with hints
+///
+/// This is an example of using non-deterministic computation in the guest (ie hints) to
+/// sort faster.  For one million numbers of input, this takes 25_750_500 cycles to run.
+/// While `test_sorting` above takes around 302_674_458 cycles.  That's a 10x speedup!
+#[test]
+fn test_sorting_with_hints() -> Result<()> {
+    use rand::Rng;
+    let mut hints = CenoStdin::default();
+    let mut rng = rand::thread_rng();
+
+    // Provide some random numbers to sort.
+    let nums = (0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>();
+    hints.write(&nums)?;
+    // Provide both the sorted answer, and the places where you can find the original number.
+    let (answer, places): (Vec<_>, Vec<_>) = enumerate(nums)
+        .map(|(i, x)| (x, i as u32))
+        .sorted()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .unzip();
+    hints.write(&answer)?;
+    hints.write(&places)?;
+
+    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::sorting_with_hints, &hints);
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
     }
