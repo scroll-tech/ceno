@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeSet, HashSet},
-    iter::from_fn,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
@@ -17,7 +13,7 @@ fn test_ceno_rt_mini() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_mini;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
     let mut state = VMState::new(platform, Arc::new(program));
@@ -35,7 +31,7 @@ fn test_ceno_rt_panic() {
     let program_elf = ceno_examples::ceno_rt_panic;
     let program = Program::load_elf(program_elf, u32::MAX).unwrap();
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
     let mut state = VMState::new(platform, Arc::new(program));
@@ -51,7 +47,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_mem;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
     let mut state = VMState::new(platform.clone(), Arc::new(program));
@@ -67,7 +63,7 @@ fn test_ceno_rt_alloc() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_alloc;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
     let mut state = VMState::new(platform, Arc::new(program));
@@ -97,7 +93,7 @@ fn test_ceno_rt_io() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_io;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
     let mut state = VMState::new(platform, Arc::new(program));
