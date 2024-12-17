@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     iter::{repeat, zip},
     sync::Arc,
 };
@@ -131,7 +130,7 @@ impl CenoStdin {
 pub fn run(platform: Platform, elf: &[u8], hints: &CenoStdin) -> Vec<String> {
     let program = Program::load_elf(elf, u32::MAX).unwrap();
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..platform
     };
 
