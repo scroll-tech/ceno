@@ -81,8 +81,8 @@ pub struct DynamicAddr {
 
 #[derive(Clone, Debug)]
 pub struct SetTableSpec<E: ExtensionField> {
-    pub len: usize,
-    pub structural_witin_expr: Vec<Expression<E>>,
+    pub len: Option<usize>,
+    pub structural_witins: Vec<Expression<E>>,
 }
 
 #[derive(Clone, Debug)]

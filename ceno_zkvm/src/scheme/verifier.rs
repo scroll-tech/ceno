@@ -518,31 +518,35 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .zip_eq(cs.w_table_expressions.iter())
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
-        let is_skip_same_point_sumcheck = cs
-            .r_table_expressions
-            .iter()
-            .chain(cs.w_table_expressions.iter())
-            .map(|rw| rw.table_spec.len)
-            .chain(cs.lk_table_expressions.iter().map(|lk| lk.table_len))
-            .all_equal();
+        // in table proof, we always skip same point sumcheck for now
+        // as tower sumcheck batch product argument/logup in same length
+        let is_skip_same_point_sumcheck = true;
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        let mut idx_hint_num_vars = 0;
         let expected_rounds = cs
             .r_table_expressions
             .iter()
             .flat_map(|r| {
-                let num_vars = match r.expr {
-                    Expression::Fixed(_) => ceil_log2(r.table_spec.len),
-                    Expression::StructuralWitIn(addr_witin_id, max_len, _, _) => {
-                        let hint_num_vars = proof.rw_hints_num_vars[addr_witin_id as usize];
-                        idx_hint_num_vars += 1;
-                        assert!((1 << hint_num_vars) <= max_len);
-                        hint_num_vars
-                    }
-                    _ => 0,
+                // iterate through structural witins and collect max round.
+                let Some(num_vars) = r.table_spec.len.map(ceil_log2).or_else(|| {
+                    r.table_spec
+                        .structural_witins
+                        .iter()
+                        .map(|structural_witin| {
+                            let Expression::StructuralWitIn(addr_witin_id, max_len, _, _) =
+                                structural_witin
+                            else {
+                                panic!("illegal expression type")
+                            };
+                            let hint_num_vars = proof.rw_hints_num_vars[*addr_witin_id as usize];
+                            assert!((1 << hint_num_vars) <= *max_len);
+                            hint_num_vars
+                        })
+                        .max()
+                }) else {
+                    unreachable!()
                 };
                 [num_vars, num_vars]
             })
@@ -552,6 +556,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .map(|l| ceil_log2(l.table_len)),
             )
             .collect_vec();
+
+        for var in proof.rw_hints_num_vars.iter() {
+            transcript.append_message(&var.to_le_bytes());
+        }
 
         let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
         let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
@@ -698,7 +706,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .flat_map(|set_table_expression| {
                 set_table_expression
                     .table_spec
-                    .structural_witin_expr
+                    .structural_witins
                     .iter()
                     .map(|expr| {
                         let Expression::StructuralWitIn(_, _, offset, scaled) = expr else {
@@ -754,10 +762,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             tracing::debug!(
                 "[table {name}] verified public inputs on index {idx} with point {input_opening_point:?}",
             );
-        }
-
-        for var in proof.rw_hints_num_vars.iter() {
-            transcript.append_message(&var.to_le_bytes());
         }
 
         // do optional check of fixed_commitment openings by vk

@@ -112,7 +112,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         &mut self,
         name_fn: N,
         ram_type: RAMType,
-        table_spec: SetTableSpec,
+        table_spec: SetTableSpec<E>,
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
@@ -127,7 +127,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         &mut self,
         name_fn: N,
         ram_type: RAMType,
-        table_spec: SetTableSpec,
+        table_spec: SetTableSpec<E>,
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
