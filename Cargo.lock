@@ -263,6 +263,7 @@ dependencies = [
  "rrs-succinct",
  "strum",
  "strum_macros",
+ "tiny-keccak",
  "tracing",
 ]
 
@@ -276,6 +277,7 @@ dependencies = [
  "itertools 0.13.0",
  "rand",
  "rkyv",
+ "tiny-keccak",
 ]
 
 [[package]]
