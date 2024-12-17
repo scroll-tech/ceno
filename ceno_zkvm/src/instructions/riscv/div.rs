@@ -573,10 +573,12 @@ mod test {
 
         #[test]
         fn test_opcode_divu_random() {
-            let mut rng = rand::thread_rng();
-            let a: u32 = rng.gen();
-            let b: u32 = rng.gen_range(1..u32::MAX);
-            verify("random", a, b, a / b, true);
+            for i in 0..100 {
+                let mut rng = rand::thread_rng();
+                let a: u32 = rng.gen();
+                let b: u32 = rng.gen_range(1..u32::MAX);
+                verify("random", a, b, a / b, true);
+            }
         }
     }
 
@@ -611,7 +613,7 @@ mod test {
             let outcome = if divisor == 0 {
                 -1i32
             } else if dividend == i32::MIN && divisor == -1 {
-                i32::MAX
+                i32::MIN
             } else {
                 dividend / divisor
             };
@@ -635,6 +637,7 @@ mod test {
                     .as_u16_limbs()
                     .to_vec(),
             );
+
             config
                 .quotient
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
@@ -657,13 +660,20 @@ mod test {
         #[test]
         fn test_opcode_div() {
             verify("basic", 10, 2, 5, true);
-            // verify("dividend < divisor", 10, 11, 0, true);
-            // verify("remainder", 11, 2, 5, true);
-            // verify("i32::MAX", i32::MAX, i32::MAX, 1, true);
-            // verify("div u32::MAX", 3, i32::MAX, 0, true);
-            // verify("i32::MAX div by 2", i32::MAX, 2, i32::MAX / 2, true);
-            // verify("mul with carries", 1202729773, 171818539, 7, true);
-            // verify("div by zero", 10, 0, -1, true);
+            verify("dividend < divisor", 10, 11, 0, true);
+            verify("non-zero remainder", 11, 2, 5, true);
+            verify("i32::MAX", i32::MAX, i32::MAX, 1, true);
+            verify("div u32::MAX", 7801, i32::MAX, 0, true);
+            verify("i32::MAX div by 2", i32::MAX, 2, i32::MAX / 2, true);
+            verify("mul with carries", 1202729773, 171818539, 7, true);
+            verify("div by zero", 10, 0, -1, true);
+            verify(
+                "i32::MIN div -1 (overflow case)",
+                i32::MIN,
+                -1,
+                i32::MIN,
+                true,
+            );
         }
         #[test]
         fn test_opcode_div_unsatisfied() {
