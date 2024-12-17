@@ -6,6 +6,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    instructions::InstancePaddingStrategy,
     structs::{ProgramParams, RAMType},
     tables::TableCircuit,
     witness::RowMajorMatrix,
@@ -204,7 +205,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         _num_fixed: usize,
         _init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
-        RowMajorMatrix::<E::BaseField>::new(0, 0)
+        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
     }
 
     fn assign_instances(

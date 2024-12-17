@@ -124,12 +124,9 @@ mod tests {
         for (i, row) in fixed.iter_rows().enumerate() {
             let (base, exp) = PowTable::unpack(i as u64);
             assert_eq!(PowTable::pack(base, exp), i as u64);
-            assert_eq!(base, unsafe { row[0].assume_init() }.to_canonical_u64());
-            assert_eq!(exp, unsafe { row[1].assume_init() }.to_canonical_u64());
-            assert_eq!(
-                base.pow(exp.try_into().unwrap()),
-                unsafe { row[2].assume_init() }.to_canonical_u64()
-            );
+            assert_eq!(base, row[0].to_canonical_u64());
+            assert_eq!(exp, row[1].to_canonical_u64());
+            assert_eq!(base.pow(exp.try_into().unwrap()), row[2].to_canonical_u64());
         }
     }
 }

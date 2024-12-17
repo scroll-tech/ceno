@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
@@ -41,7 +41,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             Self::INST_KIND,
-            &imm.value(),
+            imm.value(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
@@ -57,7 +57,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -89,7 +89,7 @@ mod test {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::test_utils::imm_i},
+        instructions::Instruction,
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
@@ -110,7 +110,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, 3);
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
@@ -143,7 +143,8 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm_i(-3));
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, -3);
+
         let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
             &config,
             cb.cs.num_witin as usize,

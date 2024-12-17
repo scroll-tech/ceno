@@ -10,7 +10,6 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 
 /// This config handles the common part of I-type instructions:
 /// - PC, cycle, fetch.
@@ -28,7 +27,7 @@ impl<E: ExtensionField> IInstructionConfig<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
-        imm: &Expression<E>,
+        imm: Expression<E>,
         rs1_read: RegisterExpr<E>,
         rd_written: RegisterExpr<E>,
         branching: bool,
@@ -57,7 +56,7 @@ impl<E: ExtensionField> IInstructionConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {

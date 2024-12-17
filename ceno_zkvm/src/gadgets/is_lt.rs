@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem::MaybeUninit};
+use std::fmt::Display;
 
 use ceno_emul::{SWord, Word};
 use ff_ext::ExtensionField;
@@ -20,9 +20,9 @@ use super::SignedExtendConfig;
 
 // TODO rename to AssertLtConfig (LT -> Lt) to fit naming conventions
 #[derive(Debug, Clone)]
-pub struct AssertLTConfig(InnerLtConfig);
+pub struct AssertLtConfig(InnerLtConfig);
 
-impl AssertLTConfig {
+impl AssertLtConfig {
     pub fn construct_circuit<
         E: ExtensionField,
         NR: Into<String> + Display + Clone,
@@ -53,7 +53,7 @@ impl AssertLTConfig {
 
     pub fn assign_instance<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         lkm: &mut LkMultiplicity,
         lhs: u64,
         rhs: u64,
@@ -64,7 +64,7 @@ impl AssertLTConfig {
 
     pub fn assign_instance_signed<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         lkm: &mut LkMultiplicity,
         lhs: i32,
         rhs: i32,
@@ -118,7 +118,7 @@ impl IsLtConfig {
 
     pub fn assign_instance<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         lkm: &mut LkMultiplicity,
         lhs: u64,
         rhs: u64,
@@ -130,7 +130,7 @@ impl IsLtConfig {
 
     pub fn assign_instance_signed<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
@@ -196,7 +196,7 @@ impl InnerLtConfig {
 
     pub fn assign_instance<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         lkm: &mut LkMultiplicity,
         lhs: u64,
         rhs: u64,
@@ -214,7 +214,7 @@ impl InnerLtConfig {
     // TODO: refactor with the above function
     pub fn assign_instance_signed<F: SmallField>(
         &self,
-        instance: &mut [MaybeUninit<F>],
+        instance: &mut [F],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
@@ -268,7 +268,7 @@ impl<E: ExtensionField> AssertSignedLtConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
@@ -311,7 +311,7 @@ impl<E: ExtensionField> SignedLtConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,
@@ -363,7 +363,7 @@ impl<E: ExtensionField> InnerSignedLtConfig<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         lhs: SWord,
         rhs: SWord,

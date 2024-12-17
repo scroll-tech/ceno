@@ -33,7 +33,7 @@ impl<E: ExtensionField> Signed<E> {
 
     pub fn assign_instance(
         &self,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         val: &Value<u32>,
     ) -> Result<i32, ZKVMError> {

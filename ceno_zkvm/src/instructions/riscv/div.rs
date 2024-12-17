@@ -81,14 +81,13 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::{AssertLTConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
+    gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
     set_val,
     uint::Value,
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
-use core::mem::MaybeUninit;
 use std::marker::PhantomData;
 
 pub struct DivRemConfig<E: ExtensionField> {
@@ -116,7 +115,7 @@ enum InternalDivRem<E: ExtensionField> {
         is_dividend_max_negative: IsEqualConfig,
         is_divisor_minus_one: IsEqualConfig,
         is_signed_overflow: WitIn,
-        remainder_nonnegative: AssertLTConfig,
+        remainder_nonnegative: AssertLtConfig,
     },
 }
 
@@ -256,10 +255,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let divisor_pos_orientation =
                     (1 - 2 * divisor_signed.is_negative.expr()) * divisor_signed.expr();
 
-                let remainder_nonnegative = AssertLTConfig::construct_circuit(
+                let remainder_nonnegative = AssertLtConfig::construct_circuit(
                     cb,
                     || "oriented_remainder_nonnegative",
-                    (-1).into(),
+                    (-1i32).into(),
                     remainder_pos_orientation.clone(),
                     UINT_LIMBS,
                 )?;
@@ -348,7 +347,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -481,7 +480,6 @@ mod test {
         use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
-        use multilinear_extensions::mle::IntoMLEs;
         use rand::Rng;
 
         use crate::{
@@ -550,7 +548,6 @@ mod test {
             MockProver::assert_with_expected_errors(
                 &cb,
                 &raw_witin
-                    .de_interleaving()
                     .into_mles()
                     .into_iter()
                     .map(|v| v.into())
@@ -666,7 +663,6 @@ mod test {
             MockProver::assert_with_expected_errors(
                 &cb,
                 &raw_witin
-                    .de_interleaving()
                     .into_mles()
                     .into_iter()
                     .map(|v| v.into())

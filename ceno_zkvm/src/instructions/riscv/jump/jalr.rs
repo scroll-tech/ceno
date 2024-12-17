@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -51,7 +51,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let i_insn = IInstructionConfig::construct_circuit(
             circuit_builder,
             InsnKind::JALR,
-            &imm.expr(),
+            imm.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             true,
@@ -110,7 +110,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
