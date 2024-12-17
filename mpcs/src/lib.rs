@@ -299,7 +299,7 @@ impl<F> Evaluation<F> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Error {
     InvalidSumcheck(String),
     InvalidPcsParam(String),

@@ -86,7 +86,7 @@ impl<E: ExtensionField> LogicConfig<E> {
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
             insn_kind,
-            &imm.value(),
+            imm.value(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
