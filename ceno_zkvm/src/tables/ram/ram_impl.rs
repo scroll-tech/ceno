@@ -80,6 +80,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 len: NVRAM::len(&cb.params),
+                structural_witin_expr: vec![],
             },
             init_table,
         )?;
@@ -88,6 +89,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 len: NVRAM::len(&cb.params),
+                structural_witin_expr: vec![],
             },
             final_table,
         )?;
@@ -222,6 +224,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 len: NVRAM::len(&cb.params),
+                structural_witin_expr: vec![],
             },
             init_table,
         )?;
@@ -230,6 +233,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             NVRAM::RAM_TYPE,
             SetTableSpec {
                 len: NVRAM::len(&cb.params),
+                structural_witin_expr: vec![],
             },
             final_table,
         )?;
@@ -349,13 +353,19 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb.w_table_record(
             || "init_table",
             DVRAM::RAM_TYPE,
-            SetTableSpec { len: max_len },
+            SetTableSpec {
+                len: max_len,
+                structural_witin_expr: vec![addr.expr()],
+            },
             init_table,
         )?;
         cb.r_table_record(
             || "final_table",
             DVRAM::RAM_TYPE,
-            SetTableSpec { len: max_len },
+            SetTableSpec {
+                len: max_len,
+                structural_witin_expr: vec![addr.expr()],
+            },
             final_table,
         )?;
 
