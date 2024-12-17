@@ -41,24 +41,10 @@ impl NameSpace {
     }
 
     pub(crate) fn compute_path(&self, this: String) -> String {
-        let ns = self.get_namespaces();
-        if this.chars().any(|a| a == '/') {
+        if this.chars().contains(&'/') {
             panic!("'/' is not allowed in names");
         }
-
-        let mut name = String::new();
-
-        let mut needs_separation = false;
-        for ns in chain!(ns, once(&this)) {
-            if needs_separation {
-                name += "/";
-            }
-
-            name += ns;
-            needs_separation = true;
-        }
-
-        name
+        chain!(self.get_namespaces(), once(&this)).join("/")
     }
 
     pub fn get_namespaces(&self) -> &[String] {
@@ -205,14 +191,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
     ) -> ProvingKey<E, PCS> {
         // transpose from row-major to column-major
-        let fixed_traces = fixed_traces.map(|t| t.into_mles().into_iter().collect_vec());
+        let fixed_traces = fixed_traces.map(RowMajorMatrix::into_mles);
 
         let fixed_commit_wd = fixed_traces
             .as_ref()
             .map(|traces| PCS::batch_commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd
-            .as_ref()
-            .map(|commit_wd| PCS::get_pure_commitment(commit_wd));
+        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
 
         ProvingKey {
             fixed_traces,
