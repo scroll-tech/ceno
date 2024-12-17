@@ -39,6 +39,15 @@ use strum::IntoEnumIterator;
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
 pub const MOCK_PC_START: ByteAddr = ByteAddr({
+    // This needs to be a static, because otherwise the compiler complains
+    // that 'the destructor for [Platform] cannot be evaluated in constants'
+    // The `static` keyword means that we keep exactly one copy of the variable
+    // around per process, and never deallocate it.  Thus never having to call
+    // the destructor.
+    //
+    // At least conceptually.  In practice with anything beyond -O0, the optimizer
+    // will inline and fold constants and replace `MOCK_PC_START` with
+    // a simple number.
     static CENO_PLATFORM: Platform = ceno_emul::CENO_PLATFORM;
     CENO_PLATFORM.pc_base()
 });
