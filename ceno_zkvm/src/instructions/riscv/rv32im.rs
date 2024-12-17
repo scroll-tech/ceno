@@ -7,7 +7,7 @@ use crate::{
             branch::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
-            div::DivUInstruction,
+            div::DivuInstruction,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -61,7 +61,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub mulh_config: <MulhInstruction<E> as Instruction<E>>::InstructionConfig,
     pub mulhsu_config: <MulhsuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub mulhu_config: <MulhuInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub divu_config: <DivUInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub divu_config: <DivuInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // ALU with imm
     pub addi_config: <AddiInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -128,7 +128,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mulh_config = cs.register_opcode_circuit::<MulhInstruction<E>>();
         let mulhsu_config = cs.register_opcode_circuit::<MulhsuInstruction<E>>();
         let mulhu_config = cs.register_opcode_circuit::<MulhuInstruction<E>>();
-        let divu_config = cs.register_opcode_circuit::<DivUInstruction<E>>();
+        let divu_config = cs.register_opcode_circuit::<DivuInstruction<E>>();
 
         // alu with imm opcodes
         let addi_config = cs.register_opcode_circuit::<AddiInstruction<E>>();
@@ -257,7 +257,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<MulhInstruction<E>>(cs);
         fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs);
         fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<DivUInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<DivuInstruction<E>>(cs);
         // alu with imm
         fixed.register_opcode_circuit::<AddiInstruction<E>>(cs);
         fixed.register_opcode_circuit::<AndiInstruction<E>>(cs);
@@ -360,7 +360,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(MULH, MulhInstruction<E>, mulh_config);
         assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
         assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
-        assign_opcode!(DIVU, DivUInstruction<E>, divu_config);
+        assign_opcode!(DIVU, DivuInstruction<E>, divu_config);
         // alu with imm
         assign_opcode!(ADDI, AddiInstruction<E>, addi_config);
         assign_opcode!(ANDI, AndiInstruction<E>, andi_config);

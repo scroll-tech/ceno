@@ -11,15 +11,15 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program,
-    StepRecord, Tracer, VMState, WORD_SIZE, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord,
+    Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::PolynomialCommitmentScheme;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     iter::zip,
     ops::Deref,
     sync::Arc,
@@ -183,7 +183,7 @@ pub fn setup_platform(
         },
     };
 
-    let prog_data = program.image.keys().copied().collect::<HashSet<Addr>>();
+    let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
     let stack = preset.stack.end - stack_size..preset.stack.end;
     let heap = {
         // Detect heap as starting after program data.
@@ -203,7 +203,7 @@ pub fn setup_platform(
     Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
-        prog_data: Some(prog_data),
+        prog_data,
         stack,
         heap,
         public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),

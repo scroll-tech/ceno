@@ -1,0 +1,20 @@
+[package]
+categories.workspace = true
+description = "Support for the host port of a Ceno application"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "ceno_host"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ceno_emul = { path = "../ceno_emul" }
+itertools.workspace = true
+rkyv = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }
+
+[dev-dependencies]
+ceno-examples = { path = "../examples-builder" }
+rand.workspace = true
