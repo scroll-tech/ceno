@@ -427,7 +427,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 let negate_if = |b: bool, x: i32| if b { -(x as i64) } else { x as i64 };
                 // TODO check overflow
-                let negate_if_32 = |b: bool, x: i32| if b { -x } else { x };
+                let negate_if_32 = |b: bool, x: i32| if b && x != i32::MIN { -x } else { x };
 
                 let remainder_pos_orientation = negate_if_32(negative_division_b, remainder);
                 let divisor_pos_orientation = negate_if(divisor < 0, divisor);
@@ -600,7 +600,7 @@ mod test {
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
         use rand::Rng;
-        fn verify(name: &'static str, dividend: i32, divisor: i32, exp_outcome: i32, is_ok: bool) {
+        fn verify(name: &str, dividend: i32, divisor: i32, exp_outcome: i32, is_ok: bool) {
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
@@ -676,7 +676,42 @@ mod test {
             );
         }
         #[test]
-        fn test_opcode_div_unsatisfied() {
+        fn test_batch_div() {
+            let interesting = [
+                i32::MIN,
+                i32::MAX,
+                0,
+                -1,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                10,
+                (1 << 10),
+                (1 << 20),
+                // 1000,
+                // 10000000,
+                // 123456,
+                // 1234,
+                i32::MAX / 2,
+                i32::MIN / 2,
+                i32::MIN + 1,
+                i32::MAX - 1,
+            ];
+
+            for dividend in interesting {
+                for divisor in interesting {
+                    let exp_outcome = if divisor == 0 {
+                        -1i32
+                    } else {
+                        dividend.wrapping_div(divisor)
+                    };
+                    let name = format!("{}, {}, {}", dividend, divisor, exp_outcome);
+                    verify(&name, dividend, divisor, exp_outcome, true);
+                }
+            }
             verify("assert_outcome", 10, 2, 3, false);
         }
     }
