@@ -1228,3 +1228,79 @@ macro_rules! commutative_op_mle_pair {
         commutative_op_mle_pair!(|$a, $b| $op, |out| out)
     };
 }
+
+/// macro support op(a, b) and tackles type matching internally.
+/// Please noted that op must satisfy commutative rule w.r.t op(b, a) operand swap.
+#[macro_export]
+macro_rules! commutative_op_mle_pair_pool {
+    (|$first:ident, $second:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
+        match (&$first.evaluations(), &$second.evaluations()) {
+            ($crate::mle::FieldType::Base(base1), $crate::mle::FieldType::Base(base2)) => {
+                let $first = if let Some((start, offset)) = $first.evaluations_range() {
+                    &base1[start..][..offset]
+                } else {
+                    &base1[..]
+                };
+                let $second = if let Some((start, offset)) = $second.evaluations_range() {
+                    &base2[start..][..offset]
+                } else {
+                    &base2[..]
+                };
+                let $res = $pool_b.borrow();
+                let $bb_out = $op;
+                $op_bb_out
+            }
+            ($crate::mle::FieldType::Ext(ext), $crate::mle::FieldType::Base(base)) => {
+                let $first = if let Some((start, offset)) = $first.evaluations_range() {
+                    &ext[start..][..offset]
+                } else {
+                    &ext[..]
+                };
+                let $second = if let Some((start, offset)) = $second.evaluations_range() {
+                    &base[start..][..offset]
+                } else {
+                    &base[..]
+                };
+                let $res = $pool_e.borrow();
+                $op
+            }
+            ($crate::mle::FieldType::Base(base), $crate::mle::FieldType::Ext(ext)) => {
+                let base = if let Some((start, offset)) = $first.evaluations_range() {
+                    &base[start..][..offset]
+                } else {
+                    &base[..]
+                };
+                let ext = if let Some((start, offset)) = $second.evaluations_range() {
+                    &ext[start..][..offset]
+                } else {
+                    &ext[..]
+                };
+                // swap first and second to make ext field come first before base field.
+                // so the same coding template can apply.
+                // that's why first and second operand must be commutative
+                let $first = ext;
+                let $second = base;
+                let $res = $pool_e.borrow();
+                $op
+            }
+            ($crate::mle::FieldType::Ext(ext), $crate::mle::FieldType::Ext(base)) => {
+                let $first = if let Some((start, offset)) = $first.evaluations_range() {
+                    &ext[start..][..offset]
+                } else {
+                    &ext[..]
+                };
+                let $second = if let Some((start, offset)) = $second.evaluations_range() {
+                    &base[start..][..offset]
+                } else {
+                    &base[..]
+                };
+                let $res = $pool_e.borrow();
+                $op
+            }
+            _ => unreachable!(),
+        }
+    };
+    (|$a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
+        commutative_op_mle_pair_pool!(|$a, $b, $res| $op, $pool_e, $pool_b, |out| out)
+    };
+}

@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{cell::SyncUnsafeCell, ops::Add, sync::Arc};
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    commutative_op_mle_pair,
+    commutative_op_mle_pair, commutative_op_mle_pair_pool,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
     op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
@@ -19,7 +19,8 @@ use rayon::{
 };
 
 use crate::{
-    expression::Expression, scheme::constants::MIN_PAR_SIZE, utils::next_pow2_instance_padding,
+    expression::Expression, scheme::constants::MIN_PAR_SIZE, uint::util::SimpleVecPool,
+    utils::next_pow2_instance_padding,
 };
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
@@ -347,6 +348,29 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
+fn mutable_a_plus_c<A, B>(n_threads: usize, a: &A, b: &[B], res: &mut [A])
+where
+    B: Sync + Send + Copy,
+    A: Sync + Send + Copy + Add<B, Output = A> + Default,
+{
+    unsafe {
+        let res = SyncUnsafeCell::new(res);
+        (0..n_threads).into_par_iter().for_each(|thread_id| {
+            let ptr = (*res.get()).as_mut_ptr();
+            (0..b.len())
+                .skip(thread_id)
+                .step_by(n_threads)
+                .for_each(|i| {
+                    *ptr.add(i) = *a + b[i];
+                })
+        });
+    }
+}
+
+use ff::Field;
+
+const POOL_CAP: usize = 2;
+
 pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
@@ -356,7 +380,22 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
     n_threads: usize,
     mutable_res: ArcMultilinearExtension<'a, E>,
 ) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
+    let len = witnesses[0].evaluations().len();
+    let mut pool_e: SimpleVecPool<Vec<_>> = SimpleVecPool::new(POOL_CAP, || {
+        (0..len)
+            .into_par_iter()
+            .with_min_len(MIN_PAR_SIZE)
+            .map(|_| E::ZERO)
+            .collect::<Vec<E>>()
+    });
+    let mut pool_b: SimpleVecPool<Vec<_>> = SimpleVecPool::new(POOL_CAP, || {
+        (0..len)
+            .into_par_iter()
+            .with_min_len(MIN_PAR_SIZE)
+            .map(|_| E::BaseField::ZERO)
+            .collect::<Vec<E::BaseField>>()
+    });
+    expr.evaluate_with_instance_pool::<ArcMultilinearExtension<'_, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
@@ -377,50 +416,60 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
             );
             challenge
         },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] + b[0]],
-                    )),
-                    (1, _) => {
-                        (0..n_threads).into_par_iter().for_each(|thread_id| {
-                            (0..b.len())
-                                .skip(thread_id)
-                                .step_by(n_threads)
-                                .for_each(|i| {
-                                    let _ = a[0] + b[i];
-                                })
-                        });
-                        mutable_res.clone()
+        &|a, b, pool_e, pool_b| {
+            commutative_op_mle_pair_pool!(
+                |a, b, res| {
+                    match (a.len(), b.len()) {
+                        (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                            0,
+                            vec![a[0] + b[0]],
+                        )),
+                        (1, _) => {
+                            let res = SyncUnsafeCell::new(res);
+                            (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                let ptr = (*res.get()).as_mut_ptr();
+                                (0..b.len())
+                                    .skip(thread_id)
+                                    .step_by(n_threads)
+                                    .for_each(|i| {
+                                        *ptr.add(i) = a[0] + b[i];
+                                    })
+                            });
+                            res.into_inner().into_mle().into()
+                        }
+                        (_, 1) => {
+                            let res = SyncUnsafeCell::new(res);
+                            (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                let ptr = (*res.get()).as_mut_ptr();
+                                (0..a.len())
+                                    .skip(thread_id)
+                                    .step_by(n_threads)
+                                    .for_each(|i| {
+                                        *ptr.add(i) = a[i] + b[0];
+                                    })
+                            });
+                            res.into_inner().into_mle().into()
+                        }
+                        (_, _) => {
+                            let res = SyncUnsafeCell::new(res);
+                            (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                let ptr = (*res.get()).as_mut_ptr();
+                                (0..a.len())
+                                    .skip(thread_id)
+                                    .step_by(n_threads)
+                                    .for_each(|i| {
+                                        *ptr.add(i) = a[i] + b[i];
+                                    })
+                            });
+                            res.into_inner().into_mle().into()
+                        }
                     }
-                    (_, 1) => {
-                        (0..n_threads).into_par_iter().for_each(|thread_id| {
-                            (0..a.len())
-                                .skip(thread_id)
-                                .step_by(n_threads)
-                                .for_each(|i| {
-                                    let _ = a[i] + b[0];
-                                })
-                        });
-                        mutable_res.clone()
-                    }
-                    (_, _) => {
-                        (0..n_threads).into_par_iter().for_each(|thread_id| {
-                            (0..a.len())
-                                .skip(thread_id)
-                                .step_by(n_threads)
-                                .for_each(|i| {
-                                    let _ = a[i] + b[i];
-                                })
-                        });
-                        mutable_res.clone()
-                    }
-                }
-            })
+                },
+                pool_e,
+                pool_b
+            )
         },
-        &|a, b| {
+        &|a, b, pool_e, pool_b| {
             commutative_op_mle_pair!(|a, b| {
                 match (a.len(), b.len()) {
                     (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
@@ -466,7 +515,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                 }
             })
         },
-        &|x, a, b| {
+        &|x, a, b, pool_e, pool_b| {
             op_mle_xa_b!(|x, a, b| {
                 assert_eq!(a.len(), 1);
                 assert_eq!(b.len(), 1);
@@ -482,6 +531,8 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                 mutable_res.clone()
             })
         },
+        &mut pool_e,
+        &mut pool_b,
     )
 }
 

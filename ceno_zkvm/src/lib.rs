@@ -3,6 +3,7 @@
 #![feature(stmt_expr_attributes)]
 #![feature(variant_count)]
 #![feature(strict_overflow_ops)]
+#![feature(sync_unsafe_cell)]
 
 pub mod error;
 pub mod instructions;
