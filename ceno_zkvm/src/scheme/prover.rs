@@ -9,11 +9,13 @@ use itertools::{Itertools, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
-    util::ceil_log2,
+    util::{ceil_log2, max_usable_threads},
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
 };
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverStateV2},
@@ -25,10 +27,10 @@ use crate::{
     error::ZKVMError,
     expression::Instance,
     scheme::{
-        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
+        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, MIN_PAR_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-            wit_infer_by_expr,
+            wit_infer_by_expr, wit_infer_by_expr_in_place,
         },
     },
     structs::{
@@ -238,14 +240,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let wit_inference_span = entered_span!("wit_inference", profiling_3 = true);
         // main constraint: read/write record witness inference
         let record_span = entered_span!("record");
+        // let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
+        //     .r_expressions
+        //     .par_iter()
+        //     .chain(cs.w_expressions.par_iter())
+        //     .chain(cs.lk_expressions.par_iter())
+        //     .map(|expr| {
+        //         assert_eq!(expr.degree(), 1);
+        //         wit_infer_by_expr(&[], &witnesses, pi, challenges, expr)
+        //     })
+        //     .collect();
+        let n_threads = max_usable_threads();
         let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_expressions
-            .par_iter()
-            .chain(cs.w_expressions.par_iter())
-            .chain(cs.lk_expressions.par_iter())
+            .iter()
+            .chain(cs.w_expressions.iter())
+            .chain(cs.lk_expressions.iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&[], &witnesses, pi, challenges, expr)
+                let len = witnesses[0].evaluations().len();
+                let data = (0..len)
+                    .into_par_iter()
+                    .with_min_len(MIN_PAR_SIZE)
+                    .map(|_| E::ZERO)
+                    .collect::<Vec<E>>()
+                    .into_mle()
+                    .into();
+                // data.into_mle().into()
+                wit_infer_by_expr_in_place(&[], &witnesses, pi, challenges, expr, n_threads, data)
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());

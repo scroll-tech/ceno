@@ -347,6 +347,144 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
+pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
+    fixed: &[ArcMultilinearExtension<'a, E>],
+    witnesses: &[ArcMultilinearExtension<'a, E>],
+    instance: &[ArcMultilinearExtension<'a, E>],
+    challenges: &[E; N],
+    expr: &Expression<E>,
+    n_threads: usize,
+    mutable_res: ArcMultilinearExtension<'a, E>,
+) -> ArcMultilinearExtension<'a, E> {
+    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
+        &|f| fixed[f.0].clone(),
+        &|witness_id| witnesses[witness_id as usize].clone(),
+        &|i| instance[i.0].clone(),
+        &|scalar| {
+            let scalar: ArcMultilinearExtension<E> =
+                Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
+                    scalar,
+                ]));
+            scalar
+        },
+        &|challenge_id, pow, scalar, offset| {
+            // TODO cache challenge power to be acquired once for each power
+            let challenge = challenges[challenge_id as usize];
+            let challenge: ArcMultilinearExtension<E> = Arc::new(
+                DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
+                    challenge.pow([pow as u64]) * scalar + offset,
+                ]),
+            );
+            challenge
+        },
+        &|a, b| {
+            commutative_op_mle_pair!(|a, b| {
+                match (a.len(), b.len()) {
+                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                        0,
+                        vec![a[0] + b[0]],
+                    )),
+                    (1, _) => {
+                        (0..n_threads).into_par_iter().for_each(|thread_id| {
+                            (0..b.len())
+                                .skip(thread_id)
+                                .step_by(n_threads)
+                                .for_each(|i| {
+                                    let _ = a[0] + b[i];
+                                })
+                        });
+                        mutable_res.clone()
+                    }
+                    (_, 1) => {
+                        (0..n_threads).into_par_iter().for_each(|thread_id| {
+                            (0..a.len())
+                                .skip(thread_id)
+                                .step_by(n_threads)
+                                .for_each(|i| {
+                                    let _ = a[i] + b[0];
+                                })
+                        });
+                        mutable_res.clone()
+                    }
+                    (_, _) => {
+                        (0..n_threads).into_par_iter().for_each(|thread_id| {
+                            (0..a.len())
+                                .skip(thread_id)
+                                .step_by(n_threads)
+                                .for_each(|i| {
+                                    let _ = a[i] + b[i];
+                                })
+                        });
+                        mutable_res.clone()
+                    }
+                }
+            })
+        },
+        &|a, b| {
+            commutative_op_mle_pair!(|a, b| {
+                match (a.len(), b.len()) {
+                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                        0,
+                        vec![a[0] * b[0]],
+                    )),
+                    (1, _) => {
+                        (0..n_threads).into_par_iter().for_each(|thread_id| {
+                            (0..a.len())
+                                .skip(thread_id)
+                                .step_by(n_threads)
+                                .for_each(|i| {
+                                    let _ = a[0] * b[i];
+                                })
+                        });
+                        mutable_res.clone()
+                    }
+                    (_, 1) => {
+                        (0..n_threads).into_par_iter().for_each(|thread_id| {
+                            (0..a.len())
+                                .skip(thread_id)
+                                .step_by(n_threads)
+                                .for_each(|i| {
+                                    let _ = a[i] * b[0];
+                                })
+                        });
+                        mutable_res.clone()
+                    }
+                    (_, _) => {
+                        assert_eq!(a.len(), b.len());
+                        // we do the pointwise evaluation multiplication here without involving FFT
+                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
+                        (0..n_threads).into_par_iter().for_each(|thread_id| {
+                            (0..a.len())
+                                .skip(thread_id)
+                                .step_by(n_threads)
+                                .for_each(|i| {
+                                    let _ = a[i] * b[i];
+                                })
+                        });
+                        mutable_res.clone()
+                    }
+                }
+            })
+        },
+        &|x, a, b| {
+            op_mle_xa_b!(|x, a, b| {
+                assert_eq!(a.len(), 1);
+                assert_eq!(b.len(), 1);
+                let (a, b) = (a[0], b[0]);
+                (0..n_threads).into_par_iter().for_each(|thread_id| {
+                    (0..x.len())
+                        .skip(thread_id)
+                        .step_by(n_threads)
+                        .for_each(|i| {
+                            let _ = a * x[i] + b;
+                        })
+                });
+                mutable_res.clone()
+            })
+        },
+    )
+}
+
 pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     challenges: &[E],
