@@ -6,15 +6,15 @@ use std::{
 };
 
 use ceno_emul::{
-    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, Platform, Program, StepRecord, Tracer,
-    VMState, WordAddr, encode_rv32,
+    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, MOCK_BASE, MOCK_ENTRY_POINT, Platform,
+    Program, StepRecord, Tracer, VMState, WordAddr, encode_rv32,
 };
 
 #[test]
 fn test_vm_trace() -> Result<()> {
     let program = Program::new(
-        CENO_PLATFORM.pc_base(),
-        CENO_PLATFORM.pc_base(),
+        MOCK_ENTRY_POINT,
+        MOCK_BASE,
         program_fibonacci_20(),
         Default::default(),
     );
@@ -40,12 +40,7 @@ fn test_vm_trace() -> Result<()> {
 
 #[test]
 fn test_empty_program() -> Result<()> {
-    let empty_program = Program::new(
-        CENO_PLATFORM.pc_base(),
-        CENO_PLATFORM.pc_base(),
-        vec![],
-        BTreeMap::new(),
-    );
+    let empty_program = Program::new(MOCK_ENTRY_POINT, MOCK_BASE, vec![], BTreeMap::new());
     let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(empty_program));
     let res = run(&mut ctx);
     assert!(matches!(res, Err(e) if e.to_string().contains("InstructionAccessFault")),);
