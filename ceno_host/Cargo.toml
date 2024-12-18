@@ -18,3 +18,6 @@ rkyv = { version = "0.8", features = ["pointer_width_32"] }
 [dev-dependencies]
 ceno-examples = { path = "../examples-builder" }
 rand.workspace = true
+prime_factorization = "1.0"
+mod_exp = "1.0"
+proptest = "1"
