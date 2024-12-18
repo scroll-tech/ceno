@@ -155,9 +155,9 @@ fn test_rw_lk_expression_combination() {
             .expect("create_proof failed");
 
         // verify proof
-        let static_recorder = StatisticRecorder::new();
+        let statistic_recorder = SharedStatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWitStat::new(static_recorder.clone(), b"test");
+        let mut v_transcript = BasicTranscriptWitStat::new(&statistic_recorder, b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -179,11 +179,9 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
-
-        drop(v_transcript);
         println!(
             "hashed fields {}",
-            static_recorder.borrow().field_appended_num
+            statistic_recorder.borrow().field_appended_num
         );
     }
 
