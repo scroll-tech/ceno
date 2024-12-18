@@ -453,16 +453,22 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     }
 }
 
-trait TestOutput<E: ExtensionField>
+trait TestInstance<E: ExtensionField>
 where
     Self: Instruction<E>,
 {
+    type NumType: Copy;
+    fn as_u32(val: Self::NumType) -> u32;
     fn output(config: Self::InstructionConfig) -> UInt<E>;
-    fn correct(dividend: i32, divisor: i32) -> i32;
+    fn correct(dividend: Self::NumType, divisor: Self::NumType) -> Self::NumType;
     const INSN_KIND: InsnKind;
 }
 
-impl<E: ExtensionField> TestOutput<E> for DivInstruction<E> {
+impl<E: ExtensionField> TestInstance<E> for DivInstruction<E> {
+    type NumType = i32;
+    fn as_u32(val: Self::NumType) -> u32 {
+        val as u32
+    }
     fn output(config: DivRemConfig<E>) -> UInt<E> {
         config.quotient
     }
@@ -476,7 +482,11 @@ impl<E: ExtensionField> TestOutput<E> for DivInstruction<E> {
     const INSN_KIND: InsnKind = InsnKind::DIV;
 }
 
-impl<E: ExtensionField> TestOutput<E> for RemInstruction<E> {
+impl<E: ExtensionField> TestInstance<E> for RemInstruction<E> {
+    type NumType = i32;
+    fn as_u32(val: Self::NumType) -> u32 {
+        val as u32
+    }
     fn output(config: DivRemConfig<E>) -> UInt<E> {
         config.remainder
     }
@@ -490,129 +500,46 @@ impl<E: ExtensionField> TestOutput<E> for RemInstruction<E> {
     const INSN_KIND: InsnKind = InsnKind::REM;
 }
 
+impl<E: ExtensionField> TestInstance<E> for DivuInstruction<E> {
+    type NumType = u32;
+    fn as_u32(val: Self::NumType) -> u32 {
+        val as u32
+    }
+    fn output(config: DivRemConfig<E>) -> UInt<E> {
+        config.quotient
+    }
+    fn correct(dividend: u32, divisor: u32) -> u32 {
+        if divisor == 0 {
+            u32::MAX
+        } else {
+            dividend / divisor
+        }
+    }
+    const INSN_KIND: InsnKind = InsnKind::DIVU;
+}
+
+impl<E: ExtensionField> TestInstance<E> for RemuInstruction<E> {
+    type NumType = u32;
+    fn as_u32(val: Self::NumType) -> u32 {
+        val as u32
+    }
+    fn output(config: DivRemConfig<E>) -> UInt<E> {
+        config.remainder
+    }
+    fn correct(dividend: u32, divisor: u32) -> u32 {
+        if divisor == 0 {
+            dividend
+        } else {
+            dividend % divisor
+        }
+    }
+    const INSN_KIND: InsnKind = InsnKind::REMU;
+}
+
 // TODO Tests
 
 #[cfg(test)]
 mod test {
-
-    mod divu {
-
-        use std::time::Instant;
-
-        use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
-        use goldilocks::GoldilocksExt2;
-        use itertools::Itertools;
-        use rand::Rng;
-
-        use crate::{
-            Value,
-            circuit_builder::{CircuitBuilder, ConstraintSystem},
-            instructions::{
-                Instruction,
-                riscv::{constants::UInt, div::DivuInstruction},
-            },
-            scheme::mock_prover::{MOCK_PC_START, MockProver},
-        };
-
-        fn verify(
-            name: &'static str,
-            dividend: Word,
-            divisor: Word,
-            exp_outcome: Word,
-            is_ok: bool,
-        ) {
-            let start = Instant::now();
-            let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-            let mut cb = CircuitBuilder::new(&mut cs);
-            let config = cb
-                .namespace(
-                    || format!("divu_({name})"),
-                    |cb| Ok(DivuInstruction::construct_circuit(cb)),
-                )
-                .unwrap()
-                .unwrap();
-            let duration = start.elapsed();
-            println!("Time elapsed in construct_circuit() is: {:?}", duration);
-
-            let outcome = if divisor == 0 {
-                u32::MAX
-            } else {
-                dividend / divisor
-            };
-
-            let insn_code = encode_rv32(InsnKind::DIVU, 2, 3, 4, 0);
-            // values assignment
-            let (raw_witin, lkm) =
-                DivuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                    StepRecord::new_r_instruction(
-                        3,
-                        MOCK_PC_START,
-                        insn_code,
-                        dividend,
-                        divisor,
-                        Change::new(0, outcome),
-                        0,
-                    ),
-                ])
-                .unwrap();
-
-            let expected_rd_written = UInt::from_const_unchecked(
-                Value::new_unchecked(exp_outcome).as_u16_limbs().to_vec(),
-            );
-
-            config
-                .quotient
-                .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
-                .unwrap();
-
-            let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
-            let start = Instant::now();
-            MockProver::assert_with_expected_errors(
-                &cb,
-                &raw_witin
-                    .into_mles()
-                    .into_iter()
-                    .map(|v| v.into())
-                    .collect_vec(),
-                &[insn_code],
-                expected_errors,
-                None,
-                Some(lkm),
-            );
-            let duration = start.elapsed();
-            println!(
-                "Time elapsed in assert_with_expected_errors() is: {:?}",
-                duration
-            );
-        }
-        #[test]
-        fn test_opcode_divu() {
-            verify("basic", 10, 2, 5, true);
-            verify("dividend > divisor", 10, 11, 0, true);
-            verify("remainder", 11, 2, 5, true);
-            verify("u32::MAX", u32::MAX, u32::MAX, 1, true);
-            verify("div u32::MAX", 3, u32::MAX, 0, true);
-            verify("u32::MAX div by 2", u32::MAX, 2, u32::MAX / 2, true);
-            verify("mul with carries", 1202729773, 171818539, 7, true);
-            verify("div by zero", 10, 0, u32::MAX, true);
-        }
-
-        #[test]
-        fn test_opcode_divu_unsatisfied() {
-            verify("assert_outcome", 10, 2, 3, false);
-        }
-
-        #[test]
-        fn test_opcode_divu_random() {
-            for i in 0..1 {
-                let mut rng = rand::thread_rng();
-                let a: u32 = rng.gen();
-                let b: u32 = rng.gen_range(1..u32::MAX);
-                verify("random", a, b, a / b, true);
-            }
-        }
-    }
-
     mod div {
         use crate::{
             Value,
@@ -622,7 +549,10 @@ mod test {
                 riscv::{
                     arith::ArithConfig,
                     constants::UInt,
-                    div::{DivInstruction, DivuInstruction, RemInstruction, TestOutput},
+                    div::{
+                        DivInstruction, DivuInstruction, RemInstruction, RemuInstruction,
+                        TestInstance,
+                    },
                 },
             },
             scheme::mock_prover::{MOCK_PC_START, MockProver},
@@ -632,14 +562,17 @@ mod test {
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
+        use num_traits::Num;
         use rand::Rng;
         use std::time::Instant;
 
-        fn verify<Insn: Instruction<GoldilocksExt2> + TestOutput<GoldilocksExt2>>(
+        type GE = GoldilocksExt2;
+
+        fn verify<Insn: Instruction<GE> + TestInstance<GE>>(
             name: &str,
-            dividend: i32,
-            divisor: i32,
-            exp_outcome: i32,
+            dividend: <Insn as TestInstance<GE>>::NumType,
+            divisor: <Insn as TestInstance<GE>>::NumType,
+            exp_outcome: <Insn as TestInstance<GE>>::NumType,
             is_ok: bool,
         ) {
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -659,15 +592,15 @@ mod test {
                     3,
                     MOCK_PC_START,
                     insn_code,
-                    dividend as u32,
-                    divisor as u32,
-                    Change::new(0, outcome as u32),
+                    Insn::as_u32(dividend),
+                    Insn::as_u32(divisor),
+                    Change::new(0, Insn::as_u32(outcome)),
                     0,
                 ),
             ])
             .unwrap();
             let expected_rd_written = UInt::from_const_unchecked(
-                Value::new_unchecked(exp_outcome as u32)
+                Value::new_unchecked(Insn::as_u32(exp_outcome))
                     .as_u16_limbs()
                     .to_vec(),
             );
@@ -691,32 +624,11 @@ mod test {
             );
         }
 
-        type Div = DivInstruction<GoldilocksExt2>;
-        type Rem = RemInstruction<GoldilocksExt2>;
-        #[test]
-        fn test_divrem() {
-            let test_cases = [
-                ("basic", 10, 2),
-                ("dividend < divisor", 10, 11),
-                ("non-zero remainder", 11, 2),
-                ("i32::MAX", i32::MAX, i32::MAX),
-                ("div u32::MAX", 7801, i32::MAX),
-                ("i32::MAX div by 2", i32::MAX, 2),
-                ("mul with carries", 1202729773, 171818539),
-                ("div by zero", 10, 0),
-                ("i32::MIN div -1 (overflow case)", i32::MIN, -1),
-            ];
-
-            for (name, dividend, divisor) in test_cases.into_iter() {
-                verify_positive::<Div>(name, dividend, divisor);
-                verify_positive::<Rem>(name, dividend, divisor);
-            }
-        }
-
-        fn verify_positive<Insn: Instruction<GoldilocksExt2> + TestOutput<GoldilocksExt2>>(
+        // shortcut to verify given pair produces correct output
+        fn verify_positive<Insn: Instruction<GE> + TestInstance<GE>>(
             name: &str,
-            dividend: i32,
-            divisor: i32,
+            dividend: <Insn as TestInstance<GE>>::NumType,
+            divisor: <Insn as TestInstance<GE>>::NumType,
         ) {
             verify::<Insn>(
                 name,
@@ -727,20 +639,82 @@ mod test {
             );
         }
 
+        // Test unsigned opcodes
+        type Divu = DivuInstruction<GoldilocksExt2>;
+        type Remu = RemuInstruction<GoldilocksExt2>;
+
         #[test]
-        fn test_divrem_edges() {
-            let interesting_values = [
-                i32::MIN,
-                i32::MAX,
-                i32::MAX / 2,
-                i32::MIN / 2,
-                i32::MIN + 1,
-                i32::MAX - 1,
-                0,
-                -1,
-                1,
-                2,
+        fn test_divrem_unsigned_handmade() {
+            let test_cases = [
+                ("10 / 2", 10, 2),
+                ("10 / 11", 10, 11),
+                ("11 / 2", 11, 2),
+                ("large values 1", 1234 * 5678 * 100, 1234),
+                ("large values 2", 1202729773, 171818539),
             ];
+
+            for (name, dividend, divisor) in test_cases.into_iter() {
+                verify_positive::<Divu>(name, dividend, divisor);
+                verify_positive::<Remu>(name, dividend, divisor);
+            }
+        }
+
+        #[test]
+        fn test_divrem_unsigned_edges() {
+            let interesting_values = [u32::MAX, u32::MAX - 1, 0, 1, 2];
+
+            for dividend in interesting_values {
+                for divisor in interesting_values {
+                    let name = format!("dividend = {}, divisor = {}", dividend, divisor);
+                    verify_positive::<Divu>(&name, dividend, divisor);
+                    verify_positive::<Remu>(&name, dividend, divisor);
+                }
+            }
+        }
+
+        #[test]
+        fn test_divrem_unsigned_unsatisfied() {
+            verify::<Divu>("assert_outcome", 10, 2, 3, false);
+        }
+
+        #[test]
+        fn test_divrem_unsigned_random() {
+            for _ in 0..10 {
+                let mut rng = rand::thread_rng();
+                let dividend: u32 = rng.gen();
+                let divisor: u32 = rng.gen();
+                let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
+                verify_positive::<Divu>(&name, dividend, divisor);
+                verify_positive::<Remu>(&name, dividend, divisor);
+            }
+        }
+
+        // Test signed opcodes
+        type Div = DivInstruction<GoldilocksExt2>;
+        type Rem = RemInstruction<GoldilocksExt2>;
+
+        #[test]
+        fn test_divrem_signed_handmade() {
+            let test_cases = [
+                ("10 / 2", 10, 2),
+                ("10 / 11", 10, 11),
+                ("11 / 2", 11, 2),
+                ("-10 / 3", -10, 3),
+                ("-10 / -3", -10, -3),
+                ("large values 1", -1234 * 5678 * 100, 5678),
+                ("large values 2", 1234 * 5678 * 100, 1234),
+                ("large values 3", 1202729773, 171818539),
+            ];
+
+            for (name, dividend, divisor) in test_cases.into_iter() {
+                verify_positive::<Div>(name, dividend, divisor);
+                verify_positive::<Rem>(name, dividend, divisor);
+            }
+        }
+
+        #[test]
+        fn test_divrem_signed_edges() {
+            let interesting_values = [i32::MIN, i32::MAX, i32::MIN + 1, i32::MAX - 1, 0, -1, 1, 2];
 
             for dividend in interesting_values {
                 for divisor in interesting_values {
@@ -748,6 +722,17 @@ mod test {
                     verify_positive::<Div>(&name, dividend, divisor);
                     verify_positive::<Rem>(&name, dividend, divisor);
                 }
+            }
+        }
+        #[test]
+        fn test_divrem_signed_random() {
+            for _ in 0..10 {
+                let mut rng = rand::thread_rng();
+                let dividend: i32 = rng.gen();
+                let divisor: i32 = rng.gen();
+                let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
+                verify_positive::<Div>(&name, dividend, divisor);
+                verify_positive::<Rem>(&name, dividend, divisor);
             }
         }
     }
