@@ -459,6 +459,7 @@ where
 {
     fn output(config: Self::InstructionConfig) -> UInt<E>;
     fn correct(dividend: i32, divisor: i32) -> i32;
+    const INSN_KIND: InsnKind;
 }
 
 impl<E: ExtensionField> TestOutput<E> for DivInstruction<E> {
@@ -472,6 +473,7 @@ impl<E: ExtensionField> TestOutput<E> for DivInstruction<E> {
             dividend.wrapping_div(divisor)
         }
     }
+    const INSN_KIND: InsnKind = InsnKind::DIV;
 }
 
 impl<E: ExtensionField> TestOutput<E> for RemInstruction<E> {
@@ -480,11 +482,12 @@ impl<E: ExtensionField> TestOutput<E> for RemInstruction<E> {
     }
     fn correct(dividend: i32, divisor: i32) -> i32 {
         if divisor == 0 {
-            0
+            dividend
         } else {
             dividend.wrapping_rem(divisor)
         }
     }
+    const INSN_KIND: InsnKind = InsnKind::REM;
 }
 
 // TODO Tests
@@ -617,6 +620,7 @@ mod test {
             instructions::{
                 Instruction,
                 riscv::{
+                    arith::ArithConfig,
                     constants::UInt,
                     div::{DivInstruction, DivuInstruction, RemInstruction, TestOutput},
                 },
@@ -642,13 +646,13 @@ mod test {
             let mut cb = CircuitBuilder::new(&mut cs);
             let config = cb
                 .namespace(
-                    || format!("div_({name})"),
+                    || format!("{}_({})", Insn::name(), name),
                     |cb| Ok(Insn::construct_circuit(cb)),
                 )
                 .unwrap()
                 .unwrap();
             let outcome = Insn::correct(dividend, divisor);
-            let insn_code = encode_rv32(InsnKind::DIV, 2, 3, 4, 0);
+            let insn_code = encode_rv32(Insn::INSN_KIND, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, lkm) = Insn::assign_instances(&config, cb.cs.num_witin as usize, vec![
                 StepRecord::new_r_instruction(
