@@ -14,7 +14,7 @@ use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentSche
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
 };
-use transcript::{BasicTranscript, BasicTranscriptWitStat, StatisticRecorder, Transcript};
+use transcript::{BasicTranscript, BasicTranscriptWitStat, SharedStatisticRecorder, Transcript};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -298,9 +298,9 @@ fn test_single_add_instance_e2e() {
 
     let encoded_bin = bincode::serialize(&zkvm_proof).unwrap();
 
-    let static_recorder = StatisticRecorder::new();
+    let recorder = SharedStatisticRecorder::default();
     {
-        let transcript = BasicTranscriptWitStat::new(static_recorder.clone(), b"riscv");
+        let transcript = BasicTranscriptWitStat::new(&recorder, b"riscv");
         assert!(
             verifier
                 .verify_proof(zkvm_proof, transcript)
@@ -310,7 +310,7 @@ fn test_single_add_instance_e2e() {
     println!(
         "encoded zkvm proof size: {}, hash_num: {}",
         encoded_bin.len(),
-        static_recorder.borrow().field_appended_num
+        recorder.borrow().field_appended_num
     );
 }
 

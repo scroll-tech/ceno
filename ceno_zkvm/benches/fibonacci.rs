@@ -10,7 +10,7 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 use criterion::*;
-use transcript::{BasicTranscriptWitStat, StatisticRecorder};
+use transcript::{BasicTranscriptWitStat, SharedStatisticRecorder};
 
 use goldilocks::GoldilocksExt2;
 use mpcs::BasefoldDefault;
@@ -58,8 +58,8 @@ fn fibonacci_prove(c: &mut Criterion) {
         );
         if let Some((proof, verifier)) = sanity_check_state {
             let serialize_size = bincode::serialize(&proof).unwrap().len();
-            let stat_recorder = StatisticRecorder::new();
-            let transcript = BasicTranscriptWitStat::new(stat_recorder.clone(), b"riscv");
+            let stat_recorder = SharedStatisticRecorder::default();
+            let transcript = BasicTranscriptWitStat::new(&stat_recorder, b"riscv");
             assert!(
                 verifier
                     .verify_proof_halt(proof, transcript, false)
