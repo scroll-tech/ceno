@@ -5,7 +5,7 @@ use poseidon::poseidon_permutation::PoseidonPermutation;
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct BasicTranscript<E: ExtensionField> {
     permutation: PoseidonPermutation<E::BaseField>,
 }
