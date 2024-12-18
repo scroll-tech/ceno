@@ -182,7 +182,7 @@ where
         self.inner.iter()
     }
 
-    pub fn write_transcript(&self, transcript: &mut Transcript<E>) {
+    pub fn write_transcript(&self, transcript: &mut impl Transcript<E>) {
         self.inner
             .iter()
             .for_each(|hash| write_digest_to_transcript(hash, transcript));

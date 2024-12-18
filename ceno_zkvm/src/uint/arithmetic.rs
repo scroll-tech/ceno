@@ -7,7 +7,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLTConfig,
+    gadgets::AssertLtConfig,
     instructions::riscv::config::IsEqualConfig,
 };
 
@@ -137,7 +137,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             .iter()
             .enumerate()
             .map(|(i, carry)| {
-                AssertLTConfig::construct_circuit(
+                AssertLtConfig::construct_circuit(
                     circuit_builder,
                     || format!("carry_{i}_in_less_than"),
                     carry.expr(),
@@ -145,7 +145,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
                 )
             })
-            .collect::<Result<Vec<AssertLTConfig>, ZKVMError>>()?;
+            .collect::<Result<Vec<AssertLtConfig>, ZKVMError>>()?;
 
         // creating a witness constrained as expression to reduce overall degree
         let mut swap_witin = |name: &str,
@@ -274,9 +274,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 .into_iter()
                 .unzip();
 
-        let sum_expr = is_equal_per_limb
-            .iter()
-            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
+        let sum_expr = is_equal_per_limb.iter().map(ToExpr::expr).sum();
 
         let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
         let (is_equal, diff_inv) =

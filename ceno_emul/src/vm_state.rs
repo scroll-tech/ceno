@@ -5,7 +5,7 @@ use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
-    rv32im::{DecodedInstruction, Emulator, TrapCause},
+    rv32im::{Instruction, TrapCause},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -29,9 +29,8 @@ impl VMState {
     /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
     pub const REG_COUNT: usize = 32 + 1;
 
-    pub fn new(platform: Platform, program: Program) -> Self {
+    pub fn new(platform: Platform, program: Arc<Program>) -> Self {
         let pc = program.entry;
-        let program = Arc::new(program);
 
         let mut vm = Self {
             pc,
@@ -52,7 +51,7 @@ impl VMState {
     }
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
-        let program = Program::load_elf(elf, u32::MAX)?;
+        let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
         Ok(Self::new(platform, program))
     }
 
@@ -78,18 +77,17 @@ impl VMState {
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
-        let emu = Emulator::new();
         from_fn(move || {
             if self.halted() {
                 None
             } else {
-                Some(self.step(&emu))
+                Some(self.step())
             }
         })
     }
 
-    fn step(&mut self, emu: &Emulator) -> Result<StepRecord> {
-        emu.step(self)?;
+    fn step(&mut self) -> Result<StepRecord> {
+        crate::rv32im::step(self)?;
         let step = self.tracer.advance();
         if step.is_busy_loop() && !self.halted() {
             Err(anyhow!("Stuck in loop {}", "{}"))
@@ -122,9 +120,9 @@ impl EmuContext for VMState {
             // Treat unknown ecalls as all powerful instructions:
             // Read two registers, write one register, write one memory word, and branch.
             tracing::warn!("ecall ignored: syscall_id={}", function);
-            self.store_register(DecodedInstruction::RD_NULL as RegIdx, 0)?;
+            self.store_register(Instruction::RD_NULL as RegIdx, 0)?;
             // Example ecall effect - any writable address will do.
-            let addr = (self.platform.stack_top - WORD_SIZE as u32).into();
+            let addr = (self.platform.stack.end - WORD_SIZE as u32).into();
             self.store_memory(addr, self.peek_memory(addr))?;
             self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
             Ok(true)
@@ -137,7 +135,7 @@ impl EmuContext for VMState {
         Err(anyhow!("Trap {:?}", cause)) // Crash.
     }
 
-    fn on_normal_end(&mut self, _decoded: &DecodedInstruction) {
+    fn on_normal_end(&mut self, _decoded: &Instruction) {
         self.tracer.store_pc(ByteAddr(self.pc));
     }
 
@@ -190,10 +188,13 @@ impl EmuContext for VMState {
         *self.memory.get(&addr).unwrap_or(&0)
     }
 
-    fn fetch(&mut self, pc: WordAddr) -> Result<Word> {
-        let value = self.peek_memory(pc);
-        self.tracer.fetch(pc, value);
-        Ok(value)
+    fn fetch(&mut self, pc: WordAddr) -> Option<Instruction> {
+        let byte_pc: ByteAddr = pc.into();
+        let relative_pc = byte_pc.0.wrapping_sub(self.program.base_address);
+        let idx = (relative_pc / WORD_SIZE as u32) as usize;
+        let word = self.program.instructions.get(idx).copied()?;
+        self.tracer.fetch(pc, word);
+        Some(word)
     }
 
     fn check_data_load(&self, addr: ByteAddr) -> bool {
@@ -202,9 +203,5 @@ impl EmuContext for VMState {
 
     fn check_data_store(&self, addr: ByteAddr) -> bool {
         self.platform.can_write(addr.0)
-    }
-
-    fn check_insn_load(&self, addr: ByteAddr) -> bool {
-        self.platform.can_execute(addr.0)
     }
 }

@@ -17,7 +17,7 @@ use crate::{
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
-use ceno_emul::{ByteAddr, CENO_PLATFORM, PC_WORD_SIZE, Program};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, Program};
 use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
@@ -26,7 +26,7 @@ use itertools::{Itertools, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
 use rand::thread_rng;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fs::File,
     hash::Hash,
     io::{BufReader, ErrorKind},
@@ -400,7 +400,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
         Self::run_maybe_challenge(cb, wits_in, programs, &[], None, lkm)
@@ -409,33 +409,16 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        input_programs: &[u32],
+        input_programs: &[ceno_emul::Instruction],
         pi: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        // fix the program table
-        let instructions = input_programs
-            .iter()
-            .cloned()
-            .chain(std::iter::repeat(0))
-            .take(MOCK_PROGRAM_SIZE)
-            .collect_vec();
-        let image = instructions
-            .iter()
-            .enumerate()
-            .map(|(insn_idx, &insn)| {
-                (
-                    CENO_PLATFORM.pc_base() + (insn_idx * PC_WORD_SIZE) as u32,
-                    insn,
-                )
-            })
-            .collect::<BTreeMap<u32, u32>>();
         let program = Program::new(
             CENO_PLATFORM.pc_base(),
             CENO_PLATFORM.pc_base(),
-            instructions,
-            image,
+            input_programs.to_vec(),
+            Default::default(),
         );
 
         // load tables
@@ -653,10 +636,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
-                let row = row
-                    .iter()
-                    .map(|v| unsafe { (*v).assume_init() }.into())
-                    .collect::<Vec<_>>();
+                let row = row.iter().map(|v| (*v).into()).collect::<Vec<E>>();
                 let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
@@ -670,7 +650,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         constraint_names: &[&str],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
@@ -722,12 +702,11 @@ Hints:
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
         raw_witin: RowMajorMatrix<E::BaseField>,
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
         let wits_in = raw_witin
-            .de_interleaving()
             .into_mles()
             .into_iter()
             .map(|v| v.into())
@@ -738,7 +717,7 @@ Hints:
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[u32],
+        programs: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
@@ -746,7 +725,7 @@ Hints:
     }
 
     pub fn assert_satisfied_full(
-        cs: ZKVMConstraintSystem<E>,
+        cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
         pi: &PublicValues<u32>,
@@ -1206,14 +1185,14 @@ Hints:
 
 #[cfg(test)]
 mod tests {
-    use std::mem::MaybeUninit;
 
     use super::*;
     use crate::{
         ROMType::U5,
         error::ZKVMError,
         expression::{ToExpr, WitIn},
-        gadgets::{AssertLTConfig, IsLtConfig},
+        gadgets::{AssertLtConfig, IsLtConfig},
+        instructions::InstancePaddingStrategy,
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
@@ -1357,7 +1336,7 @@ mod tests {
     struct AssertLtCircuit {
         pub a: WitIn,
         pub b: WitIn,
-        pub lt_wtns: AssertLTConfig,
+        pub lt_wtns: AssertLtConfig,
     }
 
     struct AssertLtCircuitInput {
@@ -1369,13 +1348,13 @@ mod tests {
         fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a");
             let b = cb.create_witin(|| "b");
-            let lt_wtns = AssertLTConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
+            let lt_wtns = AssertLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
             Ok(Self { a, b, lt_wtns })
         }
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: AssertLtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
@@ -1393,7 +1372,11 @@ mod tests {
             instances: Vec<AssertLtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter
@@ -1489,7 +1472,7 @@ mod tests {
 
         fn assign_instance<E: ExtensionField>(
             &self,
-            instance: &mut [MaybeUninit<E::BaseField>],
+            instance: &mut [E::BaseField],
             input: LtCircuitInput,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<(), ZKVMError> {
@@ -1507,7 +1490,11 @@ mod tests {
             instances: Vec<LtCircuitInput>,
             lk_multiplicity: &mut LkMultiplicity,
         ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(instances.len(), num_witin);
+            let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+                instances.len(),
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
             let raw_witin_iter = raw_witin.iter_mut();
 
             raw_witin_iter

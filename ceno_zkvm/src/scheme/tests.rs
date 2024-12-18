@@ -1,10 +1,10 @@
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 use ark_std::test_rng;
 use ceno_emul::{
     CENO_PLATFORM,
-    InsnKind::{ADD, EANY},
-    PC_WORD_SIZE, Platform, Program, StepRecord, VMState,
+    InsnKind::{ADD, ECALL},
+    Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -14,11 +14,10 @@ use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentSche
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
 };
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 use crate::{
     circuit_builder::CircuitBuilder,
-    declare_program,
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
@@ -77,7 +76,7 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -126,7 +125,7 @@ fn test_rw_lk_expression_combination() {
 
         // get proof
         let prover = ZKVMProver::new(pk);
-        let mut transcript = Transcript::new(b"test");
+        let mut transcript = BasicTranscript::new(b"test");
         let wits_in = zkvm_witness
             .into_iter_sorted()
             .next()
@@ -157,7 +156,7 @@ fn test_rw_lk_expression_combination() {
 
         // verify proof
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = Transcript::new(b"test");
+        let mut v_transcript = BasicTranscript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -187,23 +186,12 @@ fn test_rw_lk_expression_combination() {
     test_rw_lk_expression_combination_inner::<17, 61>();
 }
 
-const PROGRAM_SIZE: usize = 4;
-#[allow(clippy::unusual_byte_groupings)]
-const ECALL_HALT: u32 = 0b_000000000000_00000_000_00000_1110011;
-#[allow(clippy::unusual_byte_groupings)]
-const PROGRAM_CODE: [u32; PROGRAM_SIZE] = {
-    let mut program: [u32; PROGRAM_SIZE] = [ECALL_HALT; PROGRAM_SIZE];
-
-    declare_program!(
-        program,
-        // func7   rs2   rs1   f3  rd    opcode
-        0b_0000000_00100_00001_000_00100_0110011, // add x4, x4, x1 <=> addi x4, x4, 1
-        ECALL_HALT,                               // ecall halt
-        ECALL_HALT,                               // ecall halt
-        ECALL_HALT,                               // ecall halt
-    );
-    program
-};
+const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
+    encode_rv32(ADD, 4, 1, 4, 0),
+    encode_rv32(ECALL, 0, 0, 0, 0),
+    encode_rv32(ECALL, 0, 0, 0, 0),
+    encode_rv32(ECALL, 0, 0, 0, 0),
+];
 
 #[ignore = "this case is already tested in riscv_example as ecall_halt has only one instance"]
 #[test]
@@ -216,16 +204,7 @@ fn test_single_add_instance_e2e() {
         CENO_PLATFORM.pc_base(),
         CENO_PLATFORM.pc_base(),
         PROGRAM_CODE.to_vec(),
-        PROGRAM_CODE
-            .iter()
-            .enumerate()
-            .map(|(insn_idx, &insn)| {
-                (
-                    (insn_idx * PC_WORD_SIZE) as u32 + CENO_PLATFORM.pc_base(),
-                    insn,
-                )
-            })
-            .collect(),
+        Default::default(),
     );
 
     let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
@@ -261,7 +240,7 @@ fn test_single_add_instance_e2e() {
     let vk = pk.get_vk();
 
     // single instance
-    let mut vm = VMState::new(CENO_PLATFORM, program.clone());
+    let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
     let all_records = vm
         .iter_until_halt()
         .collect::<Result<Vec<StepRecord>, _>>()
@@ -271,10 +250,10 @@ fn test_single_add_instance_e2e() {
     let mut add_records = vec![];
     let mut halt_records = vec![];
     all_records.into_iter().for_each(|record| {
-        let kind = record.insn().codes().kind;
+        let kind = record.insn().kind;
         match kind {
             ADD => add_records.push(record),
-            EANY => {
+            ECALL => {
                 if record.rs1().unwrap().value == Platform::ecall_halt() {
                     halt_records.push(record);
                 }
@@ -305,12 +284,12 @@ fn test_single_add_instance_e2e() {
         .unwrap();
 
     let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
-    let transcript = Transcript::new(b"riscv");
+    let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let transcript = Transcript::new(b"riscv");
+    let transcript = BasicTranscript::new(b"riscv");
     assert!(
         verifier
             .verify_proof(zkvm_proof, transcript)
@@ -325,7 +304,7 @@ fn test_tower_proof_various_prod_size() {
         let num_vars = ceil_log2(leaf_layer_size);
         let mut rng = test_rng();
         type E = GoldilocksExt2;
-        let mut transcript = Transcript::new(b"test_tower_proof");
+        let mut transcript = BasicTranscript::new(b"test_tower_proof");
         let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)
             .map(|_| E::random(&mut rng))
             .collect_vec()
@@ -348,7 +327,7 @@ fn test_tower_proof_various_prod_size() {
             &mut transcript,
         );
 
-        let mut transcript = Transcript::new(b"test_tower_proof");
+        let mut transcript = BasicTranscript::new(b"test_tower_proof");
         let (rt_tower_v, prod_point_and_eval, _, _) = TowerVerify::verify(
             vec![
                 layers[0]
