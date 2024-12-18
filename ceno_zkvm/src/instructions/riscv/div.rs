@@ -84,7 +84,7 @@ use crate::{
     gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
     set_val,
-    uint::Value,
+    uint::{UIntLimbs, Value},
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
@@ -111,7 +111,6 @@ enum InternalDivRem<E: ExtensionField> {
         divisor_signed: Signed<E>,
         quotient_signed: Signed<E>,
         remainder_signed: Signed<E>,
-        negative_division: WitIn,
         is_dividend_max_negative: IsEqualConfig,
         is_divisor_minus_one: IsEqualConfig,
         is_signed_overflow: WitIn,
@@ -193,15 +192,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let remainder_signed =
                     Signed::construct_circuit(cb, || "remainder_signed", &remainder)?;
 
-                // The quotient and remainder can be interpreted as non-positive
-                // values when exactly one of dividend and divisor is negative
-                let neg_div_expr = {
-                    let a_neg = dividend_signed.is_negative.expr();
-                    let b_neg = divisor_signed.is_negative.expr();
-                    &a_neg * (1 - &b_neg) + (1 - &a_neg) * &b_neg
-                };
-                let negative_division = cb.flatten_expr(|| "neg_division", neg_div_expr)?;
-
                 // Check for signed division overflow: i32::MIN / -1
                 let is_dividend_max_negative = IsEqualConfig::construct_circuit(
                     cb,
@@ -269,7 +259,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         divisor_signed,
                         quotient_signed,
                         remainder_signed,
-                        negative_division,
                         is_dividend_max_negative,
                         is_divisor_minus_one,
                         is_signed_overflow,
@@ -389,7 +378,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             InternalDivRem::Signed {
                 dividend_signed,
                 divisor_signed,
-                negative_division,
                 is_dividend_max_negative,
                 is_divisor_minus_one,
                 is_signed_overflow,
@@ -403,9 +391,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 dividend_signed.assign_instance(instance, lkm, &dividend_v)?;
                 divisor_signed.assign_instance(instance, lkm, &divisor_v)?;
-
-                let negative_division_b = (dividend < 0) ^ (divisor < 0);
-                set_val!(instance, negative_division, negative_division_b as u64);
 
                 is_dividend_max_negative.assign_instance(
                     instance,
@@ -465,6 +450,40 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config.r_insn.assign_instance(instance, lkm, step)?;
 
         Ok(())
+    }
+}
+
+trait TestOutput<E: ExtensionField>
+where
+    Self: Instruction<E>,
+{
+    fn output(config: Self::InstructionConfig) -> UInt<E>;
+    fn correct(dividend: i32, divisor: i32) -> i32;
+}
+
+impl<E: ExtensionField> TestOutput<E> for DivInstruction<E> {
+    fn output(config: DivRemConfig<E>) -> UInt<E> {
+        config.quotient
+    }
+    fn correct(dividend: i32, divisor: i32) -> i32 {
+        if divisor == 0 {
+            -1i32
+        } else {
+            dividend.wrapping_div(divisor)
+        }
+    }
+}
+
+impl<E: ExtensionField> TestOutput<E> for RemInstruction<E> {
+    fn output(config: DivRemConfig<E>) -> UInt<E> {
+        config.remainder
+    }
+    fn correct(dividend: i32, divisor: i32) -> i32 {
+        if divisor == 0 {
+            0
+        } else {
+            dividend.wrapping_rem(divisor)
+        }
     }
 }
 
@@ -599,23 +618,24 @@ mod test {
                 Instruction,
                 riscv::{
                     constants::UInt,
-                    div::{DivInstruction, DivuInstruction},
+                    div::{DivInstruction, DivuInstruction, RemInstruction, TestOutput},
                 },
             },
             scheme::mock_prover::{MOCK_PC_START, MockProver},
         };
         use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
+        use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::mle::IntoMLEs;
         use rand::Rng;
         use std::time::Instant;
-        fn verify(
+
+        fn verify<Insn: Instruction<GoldilocksExt2> + TestOutput<GoldilocksExt2>>(
             name: &str,
             dividend: i32,
             divisor: i32,
             exp_outcome: i32,
-            exp_remainder: i32,
             is_ok: bool,
         ) {
             let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -623,42 +643,35 @@ mod test {
             let config = cb
                 .namespace(
                     || format!("div_({name})"),
-                    |cb| Ok(DivInstruction::construct_circuit(cb)),
+                    |cb| Ok(Insn::construct_circuit(cb)),
                 )
                 .unwrap()
                 .unwrap();
-            let outcome = if divisor == 0 {
-                -1i32
-            } else if dividend == i32::MIN && divisor == -1 {
-                i32::MIN
-            } else {
-                dividend / divisor
-            };
+            let outcome = Insn::correct(dividend, divisor);
             let insn_code = encode_rv32(InsnKind::DIV, 2, 3, 4, 0);
             // values assignment
-            let (raw_witin, lkm) =
-                DivInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-                    StepRecord::new_r_instruction(
-                        3,
-                        MOCK_PC_START,
-                        insn_code,
-                        dividend as u32,
-                        divisor as u32,
-                        Change::new(0, outcome as u32),
-                        0,
-                    ),
-                ])
-                .unwrap();
+            let (raw_witin, lkm) = Insn::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    dividend as u32,
+                    divisor as u32,
+                    Change::new(0, outcome as u32),
+                    0,
+                ),
+            ])
+            .unwrap();
             let expected_rd_written = UInt::from_const_unchecked(
                 Value::new_unchecked(exp_outcome as u32)
                     .as_u16_limbs()
                     .to_vec(),
             );
 
-            config
-                .quotient
+            Insn::output(config)
                 .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
                 .unwrap();
+
             let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
             MockProver::assert_with_expected_errors(
                 &cb,
@@ -673,27 +686,45 @@ mod test {
                 Some(lkm),
             );
         }
+
+        type Div = DivInstruction<GoldilocksExt2>;
+        type Rem = RemInstruction<GoldilocksExt2>;
         #[test]
-        fn test_opcode_div() {
-            verify("basic", 10, 2, 5, 0, true);
-            verify("dividend < divisor", 10, 11, 0, 0, true);
-            verify("non-zero remainder", 11, 2, 5, 0, true);
-            verify("i32::MAX", i32::MAX, i32::MAX, 1, 0, true);
-            verify("div u32::MAX", 7801, i32::MAX, 0, 0, true);
-            verify("i32::MAX div by 2", i32::MAX, 2, i32::MAX / 2, 0, true);
-            verify("mul with carries", 1202729773, 171818539, 7, 0, true);
-            verify("div by zero", 10, 0, -1, 0, true);
-            verify(
-                "i32::MIN div -1 (overflow case)",
-                i32::MIN,
-                -1,
-                i32::MIN,
-                0,
+        fn test_divrem() {
+            let test_cases = [
+                ("basic", 10, 2),
+                ("dividend < divisor", 10, 11),
+                ("non-zero remainder", 11, 2),
+                ("i32::MAX", i32::MAX, i32::MAX),
+                ("div u32::MAX", 7801, i32::MAX),
+                ("i32::MAX div by 2", i32::MAX, 2),
+                ("mul with carries", 1202729773, 171818539),
+                ("div by zero", 10, 0),
+                ("i32::MIN div -1 (overflow case)", i32::MIN, -1),
+            ];
+
+            for (name, dividend, divisor) in test_cases.into_iter() {
+                verify_positive::<Div>(name, dividend, divisor);
+                verify_positive::<Rem>(name, dividend, divisor);
+            }
+        }
+
+        fn verify_positive<Insn: Instruction<GoldilocksExt2> + TestOutput<GoldilocksExt2>>(
+            name: &str,
+            dividend: i32,
+            divisor: i32,
+        ) {
+            verify::<Insn>(
+                name,
+                dividend,
+                divisor,
+                Insn::correct(dividend, divisor),
                 true,
             );
         }
+
         #[test]
-        fn test_div_edges() {
+        fn test_divrem_edges() {
             let interesting_values = [
                 i32::MIN,
                 i32::MAX,
@@ -709,16 +740,9 @@ mod test {
 
             for dividend in interesting_values {
                 for divisor in interesting_values {
-                    let (exp_quotient, exp_remainder) = if divisor == 0 {
-                        (-1i32, 0)
-                    } else {
-                        (
-                            dividend.wrapping_div(divisor),
-                            dividend.wrapping_rem(divisor),
-                        )
-                    };
-                    let name = format!("expects {} / {}, = {}", dividend, divisor, exp_quotient);
-                    verify(&name, dividend, divisor, exp_quotient, exp_remainder, true);
+                    let name = format!("dividend = {}, divisor = {}", dividend, divisor);
+                    verify_positive::<Div>(&name, dividend, divisor);
+                    verify_positive::<Rem>(&name, dividend, divisor);
                 }
             }
         }
