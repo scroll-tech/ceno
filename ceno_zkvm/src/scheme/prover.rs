@@ -925,6 +925,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             })
             .collect_vec();
 
+        // (non uniform) collect dynamic address hints as witness for verifier
+        let rw_hints_num_vars = structural_witnesses
+            .iter()
+            .map(|mle| mle.num_vars())
+            .collect_vec();
+        for var in rw_hints_num_vars.iter() {
+            transcript.append_message(&var.to_le_bytes());
+        }
+
         let (rt_tower, tower_proof) = TowerProver::create_proof(
             // pattern [r1, w1, r2, w2, ...] same pair are chain together
             r_wit_layers
@@ -1074,15 +1083,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             exit_span!(span);
         }
         exit_span!(span);
-
-        // (non uniform) collect dynamic address hints as witness for verifier
-        let rw_hints_num_vars = structural_witnesses
-            .iter()
-            .map(|mle| mle.num_vars())
-            .collect_vec();
-        for var in rw_hints_num_vars.iter() {
-            transcript.append_message(&var.to_le_bytes());
-        }
 
         let pcs_opening = entered_span!("pcs_opening");
         let (fixed_opening_proof, _fixed_commit) = if !fixed.is_empty() {
