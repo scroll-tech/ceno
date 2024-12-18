@@ -103,7 +103,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             Vec<(
                 RowMajorMatrix<_>,
                 Vec<DenseMultilinearExtension<_>>,
-                PCS::CommitmentWithData,
+                PCS::CommitmentWithWitness,
             )>,
         > = BTreeMap::new();
 
