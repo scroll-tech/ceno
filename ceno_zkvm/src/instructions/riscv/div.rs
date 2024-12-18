@@ -39,11 +39,11 @@ impl RIVInstruction for DivOp {
 }
 pub type DivDummy<E> = DummyInstruction<E, DivOp>; // TODO: implement DivInstruction.
 
-pub struct DivUOp;
-impl RIVInstruction for DivUOp {
+pub struct DivuOp;
+impl RIVInstruction for DivuOp {
     const INST_KIND: InsnKind = InsnKind::DIVU;
 }
-pub type DivUInstruction<E> = ArithInstruction<E, DivUOp>;
+pub type DivuInstruction<E> = ArithInstruction<E, DivuOp>;
 
 pub struct RemOp;
 impl RIVInstruction for RemOp {
@@ -179,7 +179,7 @@ mod test {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             instructions::{
                 Instruction,
-                riscv::{constants::UInt, div::DivUInstruction},
+                riscv::{constants::UInt, div::DivuInstruction},
             },
             scheme::mock_prover::{MOCK_PC_START, MockProver},
         };
@@ -196,7 +196,7 @@ mod test {
             let config = cb
                 .namespace(
                     || format!("divu_({name})"),
-                    |cb| Ok(DivUInstruction::construct_circuit(cb)),
+                    |cb| Ok(DivuInstruction::construct_circuit(cb)),
                 )
                 .unwrap()
                 .unwrap();
@@ -210,7 +210,7 @@ mod test {
             let insn_code = encode_rv32(InsnKind::DIVU, 2, 3, 4, 0);
             // values assignment
             let (raw_witin, lkm) =
-                DivUInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                DivuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
                     StepRecord::new_r_instruction(
                         3,
                         MOCK_PC_START,
@@ -259,7 +259,7 @@ mod test {
         }
 
         #[test]
-        fn test_opcode_divu_unstatisfied() {
+        fn test_opcode_divu_unsatisfied() {
             verify("assert_outcome", 10, 2, 3, false);
         }
 

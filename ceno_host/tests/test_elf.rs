@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
 use ceno_emul::{
@@ -69,7 +69,7 @@ fn test_ceno_rt_io() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_io;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: Some(program.image.keys().copied().collect::<HashSet<u32>>()),
+        prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
     let mut state = VMState::new(platform, Arc::new(program));
@@ -104,4 +104,40 @@ fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
     let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
     eprintln!("Emulator ran for {} steps.", steps.len());
     Ok(steps)
+}
+
+#[test]
+fn test_sorting() -> Result<()> {
+    use rand::Rng;
+    let mut hints = CenoStdin::default();
+    let mut rng = rand::thread_rng();
+
+    // Provide some random numbers to sort.
+    hints.write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
+
+    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::sorting, &hints);
+    for (i, msg) in enumerate(&all_messages) {
+        println!("{i}: {msg}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_median() -> Result<()> {
+    use rand::Rng;
+    let mut hints = CenoStdin::default();
+    let mut rng = rand::thread_rng();
+
+    // Provide some random numbers to find the median of.
+    let mut nums = (0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>();
+    hints.write(&nums)?;
+    nums.sort();
+    hints.write(&nums[nums.len() / 2])?;
+
+    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::median, &hints);
+    assert!(!all_messages.is_empty());
+    for (i, msg) in enumerate(&all_messages) {
+        println!("{i}: {msg}");
+    }
+    Ok(())
 }
