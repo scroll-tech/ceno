@@ -62,8 +62,9 @@
 //! we require just that the sum of these booleans is equal to 1.
 
 use ceno_emul::{InsnKind, StepRecord};
+use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use goldilocks::{Goldilocks, SmallField};
 
 use super::{
     RIVInstruction,
@@ -78,6 +79,7 @@ use crate::{
     instructions::Instruction,
     set_val,
     uint::Value,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use std::marker::PhantomData;
@@ -349,6 +351,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 let divisor = divisor as i32;
 
                 let (quotient, remainder) = if divisor == 0 {
+                    // i32::MIN / 0 => remainder == i32::MIN
                     (-1i32, dividend)
                 } else {
                     // these correctly handle signed division overflow
@@ -405,15 +408,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 // TODO check overflow
                 let negate_if_32 = |b: bool, x: i32| if b && x != i32::MIN { -x } else { x };
 
-                // println!("wit {}, {}", &quotient, &remainder);
-                let remainder_pos_orientation = negate_if_32(dividend < 0, remainder);
+                let remainder_pos_orientation = negate_if(dividend < 0, remainder);
                 let divisor_pos_orientation = negate_if(divisor < 0, divisor);
 
-                remainder_nonnegative.assign_instance_signed(
+                // input: dividend = i32::MIN, divisor = 0
+                // desired output: quotient = -1, remainder = i32::MIN
+
+                remainder_nonnegative.assign_instance(
                     instance,
                     lkm,
-                    -1i32,
-                    remainder_pos_orientation,
+                    (-Goldilocks::ONE).to_canonical_u64(),
+                    i64_to_base::<Goldilocks>(remainder_pos_orientation).to_canonical_u64(),
                 )?;
 
                 (
