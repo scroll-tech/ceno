@@ -37,6 +37,7 @@ pub fn halt(exit_code: u32) -> ! {
     unreachable!();
 }
 
+// Look in the linker scripts `ceno_link.x` and `memory.x` for symbols like `_stack_start`.
 global_asm!(
     "
 // The entry point for the program.
