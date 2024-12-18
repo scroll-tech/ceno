@@ -32,8 +32,7 @@ impl<E: ExtensionField> BasicTranscriptWitStat<E> {
     }
 
     fn sync_stat(&mut self) {
-        let cur_num = self.field_appended_num;
-        self.stat.borrow_mut().field_appended_num += cur_num;
+        self.stat.borrow_mut().field_appended_num += self.field_appended_num;
         self.field_appended_num = 0;
     }
 }
