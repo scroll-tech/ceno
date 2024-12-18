@@ -41,15 +41,9 @@
 //!
 //! `0 <= remainder < divisor` (3)
 //!
-//! for signed inputs, the inequality is a little more complicated: for
-//! `dividend` and `divisor` with the same sign, quotient and remainder are
-//! non-negative, and we require
-//!
-//! `0 <= remainder < |divisor|` (4)
-//!
-//! When `dividend` and `divisor` have different signs, `quotient` and
-//! `remainder` are non-positive values, and we instead require
-//!
+//! when `dividend` is negative, `quotient` and `remainder` are negative, we
+//! need
+//! TODO: finish this part of the docs
 //! `-|divisor| < remainder <= 0` (5)
 //!
 //! To handle these variations of the remainder inequalities in a uniform
