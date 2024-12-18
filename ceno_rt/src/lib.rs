@@ -5,6 +5,7 @@
 #[cfg(target_arch = "riscv32")]
 use core::arch::{asm, global_asm};
 
+#[cfg(target_arch = "riscv32")]
 mod allocator;
 
 mod mmio;

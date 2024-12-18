@@ -300,6 +300,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ceno_rt"
+version = "0.1.0"
+dependencies = [
+ "rkyv",
+]
+
+[[package]]
 name = "ceno_zkvm"
 version = "0.1.0"
 dependencies = [
