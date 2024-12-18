@@ -1,14 +1,16 @@
 [workspace]
-exclude = ["guest"]
+exclude = ["examples"]
 members = [
   "ceno_emul",
+  "ceno_host",
+  "ceno_rt",
+  "ceno_zkvm",
   "examples-builder",
   "mpcs",
   "multilinear_extensions",
+  "poseidon",
   "sumcheck",
   "transcript",
-  "ceno_zkvm",
-  "poseidon",
 ]
 resolver = "2"
 
@@ -22,6 +24,7 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [workspace.dependencies]
+anyhow = { version = "1.0", default-features = false }
 ark-std = "0.4"
 cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -36,6 +39,7 @@ plonky2 = "0.2"
 poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
+proptest = "1"
 rand = "0.8"
 rand_chacha = { version = "0.3", features = ["serde1"] }
 rand_core = "0.6"

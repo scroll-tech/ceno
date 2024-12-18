@@ -1,15 +1,13 @@
-[workspace]
-members = ["examples", "ceno_rt"]
-resolver = "2"
-
-[workspace.package]
+[package]
 categories = ["cryptography", "zk", "blockchain", "ceno"]
+description = "Ceno runtime library"
 edition = "2021"
 keywords = ["cryptography", "zk", "blockchain", "ceno"]
 license = "MIT OR Apache-2.0"
-readme = "../README.md"
+name = "ceno_rt"
+readme = "README.md"
 repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
-[profile.release]
-lto = "thin"
+[dependencies]
+rkyv = { version = "0.8", features = ["pointer_width_32"] }

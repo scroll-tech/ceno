@@ -61,6 +61,17 @@ impl AssertLtConfig {
         self.0.assign_instance(instance, lkm, lhs, rhs)?;
         Ok(())
     }
+
+    pub fn assign_instance_signed<F: SmallField>(
+        &self,
+        instance: &mut [F],
+        lkm: &mut LkMultiplicity,
+        lhs: i32,
+        rhs: i32,
+    ) -> Result<(), ZKVMError> {
+        self.0.assign_instance_signed(instance, lkm, lhs, rhs)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
