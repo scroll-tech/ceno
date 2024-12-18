@@ -62,7 +62,10 @@ pub fn halt(exit_code: u32) -> ! {
         unreachable!();
     }
     #[cfg(not(target_arch = "riscv32"))]
-    unimplemented!("Halt is not implemented for this target, exit_code: {}", exit_code); 
+    unimplemented!(
+        "Halt is only implemented for RiscV, not for this target, exit_code: {}",
+        exit_code
+    );
 }
 
 #[cfg(target_arch = "riscv32")]
