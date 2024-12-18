@@ -1,5 +1,3 @@
-#![no_main]
-#![no_std]
 use core::ptr::{addr_of, read_volatile};
 
 extern crate ceno_rt;
@@ -9,7 +7,6 @@ use alloc::{vec, vec::Vec};
 
 static mut OUTPUT: u32 = 0;
 
-ceno_rt::entry!(main);
 fn main() {
     // Test writing to a global variable.
     unsafe {
