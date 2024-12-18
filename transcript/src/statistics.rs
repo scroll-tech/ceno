@@ -3,20 +3,20 @@ use ff_ext::ExtensionField;
 use std::cell::RefCell;
 
 #[derive(Debug, Default)]
-pub struct StatisticRecorder {
+pub struct Statistic {
     pub field_appended_num: u32,
 }
 
-pub type SharedStatisticRecorder = RefCell<StatisticRecorder>;
+pub type StatisticRecorder = RefCell<Statistic>;
 
 #[derive(Clone)]
 pub struct BasicTranscriptWitStat<'a, E: ExtensionField> {
     inner: BasicTranscript<E>,
-    stat: &'a SharedStatisticRecorder,
+    stat: &'a StatisticRecorder,
 }
 
 impl<'a, E: ExtensionField> BasicTranscriptWitStat<'a, E> {
-    pub fn new(stat: &'a SharedStatisticRecorder, label: &'static [u8]) -> Self {
+    pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
         Self {
             inner: BasicTranscript::<_>::new(label),
             stat,
