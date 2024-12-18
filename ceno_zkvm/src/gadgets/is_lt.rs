@@ -234,7 +234,7 @@ impl InnerLtConfig {
 
 pub fn cal_lt_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
     (if is_lt {
-        1u64 << (u16::BITS as usize * max_num_u16_limbs)
+        InnerLtConfig::range(max_num_u16_limbs)
     } else {
         0
     } + lhs
