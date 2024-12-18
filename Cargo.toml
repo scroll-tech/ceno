@@ -38,6 +38,7 @@ plonky2 = "0.2"
 poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
+proptest = "1"
 rand = "0.8"
 rand_chacha = { version = "0.3", features = ["serde1"] }
 rand_core = "0.6"
