@@ -70,7 +70,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                 "max_steps = {}, proof size = {}, hashes count = {}",
                 max_steps,
                 serialize_size,
-                stat_recorder.borrow().field_appended_num
+                stat_recorder.into_inner().field_appended_num
             );
         }
 
