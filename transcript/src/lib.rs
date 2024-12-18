@@ -8,8 +8,6 @@ pub mod syncronized;
 pub use basic::BasicTranscript;
 pub use syncronized::TranscriptSyncronized;
 
-mod hasher;
-
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Challenge<F> {
     pub elements: F,
@@ -21,7 +19,7 @@ use goldilocks::SmallField;
 pub trait Transcript<E: ExtensionField> {
     /// Append a slice of base field elemets to the transcript.
     ///
-    /// Implementation has to provide at least one of
+    /// An implementation has to provide at least one of
     /// `append_field_elements` / `append_field_element`
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
         for e in elements {
@@ -31,7 +29,7 @@ pub trait Transcript<E: ExtensionField> {
 
     /// Append a single field element to the transcript.
     ///
-    /// Implementation has to provide at least one of
+    /// An implementation has to provide at least one of
     /// `append_field_elements` / `append_field_element`
     fn append_field_element(&mut self, element: &E::BaseField) {
         self.append_field_elements(&[*element])
@@ -43,17 +41,17 @@ pub trait Transcript<E: ExtensionField> {
         self.append_field_elements(&msg_f);
     }
 
-    /// Append a field extension element to the transcript.
+    /// Append an extension field element to the transcript.
     ///
-    /// Implementation has to override at least one of
+    /// An implementation has to override at least one of
     /// `append_field_element_ext` / `append_field_element_exts`
     fn append_field_element_ext(&mut self, element: &E) {
         self.append_field_element_exts(&[*element])
     }
 
-    /// Append slice of field extension elements to the transcript.
+    /// Append a slice of extension field elements to the transcript.
     ///
-    /// Implementation has to override at least one of
+    /// An implementation has to override at least one of
     /// `append_field_element_ext` / `append_field_element_exts`
     fn append_field_element_exts(&mut self, element: &[E]) {
         for e in element {
