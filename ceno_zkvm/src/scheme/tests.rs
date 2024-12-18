@@ -155,9 +155,9 @@ fn test_rw_lk_expression_combination() {
             .expect("create_proof failed");
 
         // verify proof
-        let static_recorder = StatisticRecorder::new();
+        let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWitStat::new(static_recorder.clone(), b"test");
+        let mut v_transcript = BasicTranscriptWitStat::new(&stat_recorder, b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -179,11 +179,9 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
-
-        drop(v_transcript);
         println!(
             "hashed fields {}",
-            static_recorder.borrow().field_appended_num
+            stat_recorder.into_inner().field_appended_num
         );
     }
 
@@ -298,9 +296,9 @@ fn test_single_add_instance_e2e() {
 
     let encoded_bin = bincode::serialize(&zkvm_proof).unwrap();
 
-    let static_recorder = StatisticRecorder::new();
+    let stat_recorder = StatisticRecorder::default();
     {
-        let transcript = BasicTranscriptWitStat::new(static_recorder.clone(), b"riscv");
+        let transcript = BasicTranscriptWitStat::new(&stat_recorder, b"riscv");
         assert!(
             verifier
                 .verify_proof(zkvm_proof, transcript)
@@ -310,7 +308,7 @@ fn test_single_add_instance_e2e() {
     println!(
         "encoded zkvm proof size: {}, hash_num: {}",
         encoded_bin.len(),
-        static_recorder.borrow().field_appended_num
+        stat_recorder.into_inner().field_appended_num
     );
 }
 

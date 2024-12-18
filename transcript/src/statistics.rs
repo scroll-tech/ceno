@@ -1,51 +1,37 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
 use ff_ext::ExtensionField;
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 #[derive(Debug, Default)]
-pub struct StatisticRecorder {
+pub struct Statistic {
     pub field_appended_num: u32,
 }
 
-type SharedStatisticRecorder = RefCell<StatisticRecorder>;
-
-impl StatisticRecorder {
-    pub fn new() -> Rc<SharedStatisticRecorder> {
-        Rc::new(RefCell::new(Default::default()))
-    }
-}
+pub type StatisticRecorder = RefCell<Statistic>;
 
 #[derive(Clone)]
-pub struct BasicTranscriptWitStat<E: ExtensionField> {
+pub struct BasicTranscriptWitStat<'a, E: ExtensionField> {
     inner: BasicTranscript<E>,
-    stat: Rc<SharedStatisticRecorder>,
-    field_appended_num: u32,
+    stat: &'a StatisticRecorder,
 }
 
-impl<E: ExtensionField> BasicTranscriptWitStat<E> {
-    pub fn new(stat: Rc<SharedStatisticRecorder>, label: &'static [u8]) -> Self {
+impl<'a, E: ExtensionField> BasicTranscriptWitStat<'a, E> {
+    pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
         Self {
             inner: BasicTranscript::<_>::new(label),
-            stat: stat.clone(),
-            field_appended_num: 0,
+            stat,
         }
-    }
-
-    fn sync_stat(&mut self) {
-        let cur_num = self.field_appended_num;
-        self.stat.borrow_mut().field_appended_num += cur_num;
-        self.field_appended_num = 0;
     }
 }
 
-impl<E: ExtensionField> Transcript<E> for BasicTranscriptWitStat<E> {
+impl<E: ExtensionField> Transcript<E> for BasicTranscriptWitStat<'_, E> {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
-        self.field_appended_num += 1;
+        self.stat.borrow_mut().field_appended_num += 1;
         self.inner.append_field_elements(elements)
     }
 
     fn append_field_element_ext(&mut self, element: &E) {
-        self.field_appended_num += E::DEGREE as u32;
+        self.stat.borrow_mut().field_appended_num += E::DEGREE as u32;
         self.inner.append_field_element_ext(element)
     }
 
@@ -70,21 +56,4 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWitStat<E> {
     }
 }
 
-impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWitStat<E> {
-    fn fork(mut self, n: usize) -> Vec<Self> {
-        self.sync_stat();
-        let mut forks = Vec::with_capacity(n);
-        for i in 0..n {
-            let mut fork = self.clone();
-            fork.append_field_element(&(i as u64).into());
-            forks.push(fork);
-        }
-        forks
-    }
-}
-
-impl<E: ExtensionField> std::ops::Drop for BasicTranscriptWitStat<E> {
-    fn drop(&mut self) {
-        self.sync_stat();
-    }
-}
+impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWitStat<'_, E> {}

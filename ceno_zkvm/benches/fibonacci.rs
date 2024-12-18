@@ -58,8 +58,8 @@ fn fibonacci_prove(c: &mut Criterion) {
         );
         if let Some((proof, verifier)) = sanity_check_state {
             let serialize_size = bincode::serialize(&proof).unwrap().len();
-            let stat_recorder = StatisticRecorder::new();
-            let transcript = BasicTranscriptWitStat::new(stat_recorder.clone(), b"riscv");
+            let stat_recorder = StatisticRecorder::default();
+            let transcript = BasicTranscriptWitStat::new(&stat_recorder, b"riscv");
             assert!(
                 verifier
                     .verify_proof_halt(proof, transcript, false)
@@ -70,7 +70,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                 "max_steps = {}, proof size = {}, hashes count = {}",
                 max_steps,
                 serialize_size,
-                stat_recorder.borrow().field_appended_num
+                stat_recorder.into_inner().field_appended_num
             );
         }
 
