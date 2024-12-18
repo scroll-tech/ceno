@@ -13,8 +13,8 @@ use clap::Parser;
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,
     InsnKind::{ADD, ADDI, BLTU, ECALL, LW},
-    Instruction, Platform, Program, StepRecord, Tracer, VMState, Word, WordAddr, encode_rv32,
-    encode_rv32u,
+    Instruction, MOCK_BASE, MOCK_ENTRY_POINT, Platform, Program, StepRecord, Tracer, VMState, Word,
+    WordAddr, encode_rv32, encode_rv32u,
 };
 use ceno_zkvm::{
     scheme::{PublicValues, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
@@ -71,8 +71,8 @@ fn main() {
     let program_size = program_code.len();
 
     let program = Program::new(
-        CENO_PLATFORM.pc_base(),
-        CENO_PLATFORM.pc_base(),
+        MOCK_ENTRY_POINT,
+        MOCK_BASE,
         program_code,
         Default::default(),
     );

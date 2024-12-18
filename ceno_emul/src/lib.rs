@@ -4,7 +4,7 @@ mod addr;
 pub use addr::*;
 
 mod platform;
-pub use platform::{CENO_PLATFORM, Platform};
+pub use platform::{CENO_PLATFORM, MOCK_BASE, MOCK_ENTRY_POINT, Platform};
 
 mod tracer;
 pub use tracer::{Change, MemOp, ReadOp, StepRecord, Tracer, WriteOp};
