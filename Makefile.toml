@@ -14,11 +14,6 @@ args = [
 command = "cargo"
 workspace = false
 
-[tasks.clippy-all]
-args = ["clippy", "--all-features", "--all-targets", "--", "-D", "warnings"]
-command = "cargo"
-workspace = false
-
 [tasks.riscv_stats]
 args = ["run", "--bin", "riscv_stats"]
 command = "cargo"

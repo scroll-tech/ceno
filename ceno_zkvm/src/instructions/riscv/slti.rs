@@ -138,12 +138,15 @@ mod test {
     use ceno_emul::{Change, PC_STEP_SIZE, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
 
-    use rand::Rng;
+    use proptest::proptest;
 
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
+        instructions::{
+            Instruction,
+            riscv::test_utils::{i32_extra, imm_extra, immu_extra, u32_extra},
+        },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
 
@@ -176,13 +179,14 @@ mod test {
         verify("lt = false, imm lower bondary", u32::MAX, -2048);
     }
 
-    #[test]
-    fn test_sltiu_random() {
-        let mut rng = rand::thread_rng();
-        let a: u32 = rng.gen::<u32>();
-        let b: i32 = rng.gen_range(-2048..2048);
-        println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify::<SltiuOp>("random unsigned comparison", a, b, a < (b as u32));
+    proptest! {
+        #[test]
+        fn test_sltiu_prop(
+            a in u32_extra(),
+            imm in immu_extra(12),
+        ) {
+            verify::<SltiuOp>("random SltiuOp", a, imm as i32, a < imm);
+        }
     }
 
     #[test]
@@ -214,13 +218,14 @@ mod test {
         verify("lt = false, imm lower bondary", i32::MAX, -2048);
     }
 
-    #[test]
-    fn test_slti_random() {
-        let mut rng = rand::thread_rng();
-        let a: i32 = rng.gen();
-        let b: i32 = rng.gen_range(-2048..2048);
-        println!("random: {} <? {}", a, b); // For debugging, do not delete.
-        verify::<SltiOp>("random 1", a as u32, b, a < b);
+    proptest! {
+        #[test]
+        fn test_slti_prop(
+            a in i32_extra(),
+            imm in imm_extra(12),
+        ) {
+            verify::<SltiOp>("random SltiOp", a as u32, imm, a < imm);
+        }
     }
 
     fn verify<I: RIVInstruction>(name: &'static str, rs1_read: u32, imm: i32, expected_rd: bool) {
