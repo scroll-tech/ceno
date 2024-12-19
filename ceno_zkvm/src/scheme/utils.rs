@@ -470,50 +470,60 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
             )
         },
         &|a, b, pool_e, pool_b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] * b[0]],
-                    )),
-                    (1, _) => {
-                        (0..n_threads).into_par_iter().for_each(|thread_id| {
-                            (0..a.len())
-                                .skip(thread_id)
-                                .step_by(n_threads)
-                                .for_each(|i| {
-                                    let _ = a[0] * b[i];
-                                })
-                        });
-                        mutable_res.clone()
+            commutative_op_mle_pair_pool!(
+                |a, b, res| {
+                    match (a.len(), b.len()) {
+                        (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                            0,
+                            vec![a[0] * b[0]],
+                        )),
+                        (1, _) => {
+                            let res = SyncUnsafeCell::new(res);
+                            (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                let ptr = (*res.get()).as_mut_ptr();
+                                (0..a.len())
+                                    .skip(thread_id)
+                                    .step_by(n_threads)
+                                    .for_each(|i| {
+                                        *ptr.add(i) = a[0] * b[i];
+                                    })
+                            });
+                            res.into_inner().into_mle().into()
+                        }
+                        (_, 1) => {
+                            let res = SyncUnsafeCell::new(res);
+                            (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                let ptr = (*res.get()).as_mut_ptr();
+                                (0..a.len())
+                                    .skip(thread_id)
+                                    .step_by(n_threads)
+                                    .for_each(|i| {
+                                        *ptr.add(i) = a[i] * b[0];
+                                    })
+                            });
+                            res.into_inner().into_mle().into()
+                        }
+                        (_, _) => {
+                            assert_eq!(a.len(), b.len());
+                            // we do the pointwise evaluation multiplication here without involving FFT
+                            // the evaluations outside of range will be checked via sumcheck + identity polynomial
+                            let res = SyncUnsafeCell::new(res);
+                            (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                let ptr = (*res.get()).as_mut_ptr();
+                                (0..a.len())
+                                    .skip(thread_id)
+                                    .step_by(n_threads)
+                                    .for_each(|i| {
+                                        *ptr.add(i) = a[i] * b[i];
+                                    })
+                            });
+                            res.into_inner().into_mle().into()
+                        }
                     }
-                    (_, 1) => {
-                        (0..n_threads).into_par_iter().for_each(|thread_id| {
-                            (0..a.len())
-                                .skip(thread_id)
-                                .step_by(n_threads)
-                                .for_each(|i| {
-                                    let _ = a[i] * b[0];
-                                })
-                        });
-                        mutable_res.clone()
-                    }
-                    (_, _) => {
-                        assert_eq!(a.len(), b.len());
-                        // we do the pointwise evaluation multiplication here without involving FFT
-                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
-                        (0..n_threads).into_par_iter().for_each(|thread_id| {
-                            (0..a.len())
-                                .skip(thread_id)
-                                .step_by(n_threads)
-                                .for_each(|i| {
-                                    let _ = a[i] * b[i];
-                                })
-                        });
-                        mutable_res.clone()
-                    }
-                }
-            })
+                },
+                pool_e,
+                pool_b
+            )
         },
         &|x, a, b, pool_e, pool_b| {
             op_mle_xa_b!(|x, a, b| {
