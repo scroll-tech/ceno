@@ -62,6 +62,10 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
             _ => panic!("evaluation not in base field"),
         }
     }
+
+    fn dyn_try_unwrap(
+        self: Arc<Self>,
+    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output>>>;
 }
 
 impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
@@ -821,6 +825,12 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
             FieldType::Unreachable => unreachable!(),
         }
     }
+
+    fn dyn_try_unwrap(
+        self: Arc<Self>,
+    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output>>> {
+        Arc::try_unwrap(self).ok().map(|it| Box::new(it) as _)
+    }
 }
 
 pub struct RangedMultilinearExtension<'a, E: ExtensionField> {
@@ -990,6 +1000,12 @@ impl<'a, E: ExtensionField> MultilinearExtension<E> for RangedMultilinearExtensi
     }
 
     fn dup(&self, _num_instances: usize, _num_dups: usize) -> DenseMultilinearExtension<E> {
+        unimplemented!()
+    }
+
+    fn dyn_try_unwrap(
+        self: Arc<Self>,
+    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output>>> {
         unimplemented!()
     }
 }

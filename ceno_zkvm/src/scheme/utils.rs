@@ -5,10 +5,10 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair_pool,
-    mle::{DenseMultilinearExtension, FieldType, IntoMLE},
+    mle::{DenseMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     op_mle_xa_b_pool, op_mle3_range_pool,
     util::ceil_log2,
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly_v2::{ArcMultilinearExtension, DynMultilinearExtension},
 };
 
 use ff::Field;
@@ -267,7 +267,10 @@ fn try_recycle_arcpoly<E: ExtensionField>(
         match poly {
             Cow::Borrowed(_) => (),
             Cow::Owned(_) => {
-                let poly = downcast_arc(poly.into_owned());
+                let poly = poly.into_owned();
+                let poly: Box<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>> =
+                    poly.dyn_try_unwrap().unwrap();
+                let poly = Box::downcast::<DenseMultilinearExtension<E>>(poly).unwrap();
 
                 match poly.evaluations {
                     FieldType::Base(vec) => pool_b.return_to_pool(vec),
