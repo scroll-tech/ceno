@@ -1091,6 +1091,45 @@ macro_rules! op_mle_xa_b {
     };
 }
 
+/// deal with x * a + b
+#[macro_export]
+macro_rules! op_mle_xa_b_pool {
+    (|$x:ident, $a:ident, $b:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
+        match (&$x.evaluations(), &$a.evaluations(), &$b.evaluations()) {
+            (
+                $crate::mle::FieldType::Base(x_vec),
+                $crate::mle::FieldType::Base(a_vec),
+                $crate::mle::FieldType::Base(b_vec),
+            ) => {
+                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+            }
+            (
+                $crate::mle::FieldType::Base(x_vec),
+                $crate::mle::FieldType::Ext(a_vec),
+                $crate::mle::FieldType::Base(b_vec),
+            ) => {
+                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+            }
+            (
+                $crate::mle::FieldType::Base(x_vec),
+                $crate::mle::FieldType::Ext(a_vec),
+                $crate::mle::FieldType::Ext(b_vec),
+            ) => {
+                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+            }
+            (x, a, b) => unreachable!(
+                "unmatched pattern {:?} {:?} {:?}",
+                x.variant_name(),
+                a.variant_name(),
+                b.variant_name()
+            ),
+        }
+    };
+    (|$x:ident, $a:ident, $b:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
+        op_mle_xa_b_pool!(|$x, $a, $b| $op, $pool_e, $pool_b, |out| out)
+    };
+}
+
 /// deal with f1 * f2 * f3
 /// applying cumulative rule for f1, f2, f3 to canonical form: Ext field comes first following by Base Field
 #[macro_export]

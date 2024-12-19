@@ -1,4 +1,4 @@
-use std::{cell::SyncUnsafeCell, ops::Add, sync::Arc};
+use std::{borrow::Cow, cell::SyncUnsafeCell, ops::Add, sync::Arc};
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
@@ -6,7 +6,7 @@ use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair, commutative_op_mle_pair_pool,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
-    op_mle_xa_b, op_mle3_range,
+    op_mle_xa_b, op_mle_xa_b_pool, op_mle3_range,
     util::ceil_log2,
     virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -369,7 +369,25 @@ where
 
 use ff::Field;
 
-const POOL_CAP: usize = 2;
+const POOL_CAP: usize = 12;
+
+// fn recycle_arcpoly<E: ExtensionField>(
+//     poly: Cow<ArcMultilinearExtension<'_, E>>,
+//     pool_e: &mut SimpleVecPool<Vec<E>>,
+//     pool_b: &mut SimpleVecPool<Vec<E::BaseField>>,
+// ) {
+//     match poly {
+//         Cow::Borrowed(_) => (),
+//         Cow::Owned(_) => {
+//             let poly = Arc::try_unwrap(poly.into_owned()).unwrap().downcast::<_>();
+//             match poly.evaluations_to_owned() {
+//                 FieldType::Base(vec) => pool_b.return_to_pool(vec),
+//                 FieldType::Ext(vec) => pool_e.return_to_pool(vec),
+//                 _ => unreachable!(),
+//             };
+//         }
+//     };
+// }
 
 pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
@@ -395,16 +413,16 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
             .map(|_| E::BaseField::ZERO)
             .collect::<Vec<E::BaseField>>()
     });
-    expr.evaluate_with_instance_pool::<ArcMultilinearExtension<'_, E>>(
-        &|f| fixed[f.0].clone(),
-        &|witness_id| witnesses[witness_id as usize].clone(),
-        &|i| instance[i.0].clone(),
+    let poly = expr.evaluate_with_instance_pool::<Cow<ArcMultilinearExtension<'_, E>>>(
+        &|f| Cow::Borrowed(&fixed[f.0]),
+        &|witness_id| Cow::Borrowed(&witnesses[witness_id as usize]),
+        &|i| Cow::Borrowed(&instance[i.0]),
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> =
                 Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
                     scalar,
                 ]));
-            scalar
+            Cow::Owned(scalar)
         },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
@@ -414,16 +432,21 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                     challenge.pow([pow as u64]) * scalar + offset,
                 ]),
             );
-            challenge
+            Cow::Owned(challenge)
         },
-        &|a, b, pool_e, pool_b| {
-            commutative_op_mle_pair_pool!(
+        &|cow_a, cow_b, pool_e, pool_b| {
+            let (a, b) = (cow_a.as_ref(), cow_b.as_ref());
+            let poly = commutative_op_mle_pair_pool!(
                 |a, b, res| {
                     match (a.len(), b.len()) {
-                        (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            0,
-                            vec![a[0] + b[0]],
-                        )),
+                        (1, 1) => {
+                            let poly: ArcMultilinearExtension<_> = Arc::new(
+                                DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
+                                    a[0] + b[0],
+                                ]),
+                            );
+                            Cow::Owned(poly)
+                        }
                         (1, _) => {
                             let res = SyncUnsafeCell::new(res);
                             (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
@@ -435,7 +458,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                                         *ptr.add(i) = a[0] + b[i];
                                     })
                             });
-                            res.into_inner().into_mle().into()
+                            Cow::Owned(res.into_inner().into_mle().into())
                         }
                         (_, 1) => {
                             let res = SyncUnsafeCell::new(res);
@@ -448,7 +471,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                                         *ptr.add(i) = a[i] + b[0];
                                     })
                             });
-                            res.into_inner().into_mle().into()
+                            Cow::Owned(res.into_inner().into_mle().into())
                         }
                         (_, _) => {
                             let res = SyncUnsafeCell::new(res);
@@ -461,22 +484,27 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                                         *ptr.add(i) = a[i] + b[i];
                                     })
                             });
-                            res.into_inner().into_mle().into()
+                            Cow::Owned(res.into_inner().into_mle().into())
                         }
                     }
                 },
                 pool_e,
                 pool_b
-            )
+            );
+            poly
         },
         &|a, b, pool_e, pool_b| {
             commutative_op_mle_pair_pool!(
                 |a, b, res| {
                     match (a.len(), b.len()) {
-                        (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            0,
-                            vec![a[0] * b[0]],
-                        )),
+                        (1, 1) => {
+                            let poly: ArcMultilinearExtension<_> = Arc::new(
+                                DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
+                                    a[0] * b[0],
+                                ]),
+                            );
+                            Cow::Owned(poly)
+                        }
                         (1, _) => {
                             let res = SyncUnsafeCell::new(res);
                             (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
@@ -488,7 +516,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                                         *ptr.add(i) = a[0] * b[i];
                                     })
                             });
-                            res.into_inner().into_mle().into()
+                            Cow::Owned(res.into_inner().into_mle().into())
                         }
                         (_, 1) => {
                             let res = SyncUnsafeCell::new(res);
@@ -501,7 +529,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                                         *ptr.add(i) = a[i] * b[0];
                                     })
                             });
-                            res.into_inner().into_mle().into()
+                            Cow::Owned(res.into_inner().into_mle().into())
                         }
                         (_, _) => {
                             assert_eq!(a.len(), b.len());
@@ -517,7 +545,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                                         *ptr.add(i) = a[i] * b[i];
                                     })
                             });
-                            res.into_inner().into_mle().into()
+                            Cow::Owned(res.into_inner().into_mle().into())
                         }
                     }
                 },
@@ -526,24 +554,32 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
             )
         },
         &|x, a, b, pool_e, pool_b| {
-            op_mle_xa_b!(|x, a, b| {
-                assert_eq!(a.len(), 1);
-                assert_eq!(b.len(), 1);
-                let (a, b) = (a[0], b[0]);
-                (0..n_threads).into_par_iter().for_each(|thread_id| {
-                    (0..x.len())
-                        .skip(thread_id)
-                        .step_by(n_threads)
-                        .for_each(|i| {
-                            let _ = a * x[i] + b;
-                        })
-                });
-                mutable_res.clone()
-            })
+            op_mle_xa_b_pool!(
+                |x, a, b| {
+                    assert_eq!(a.len(), 1);
+                    assert_eq!(b.len(), 1);
+                    let (a, b) = (a[0], b[0]);
+                    (0..n_threads).into_par_iter().for_each(|thread_id| {
+                        (0..x.len())
+                            .skip(thread_id)
+                            .step_by(n_threads)
+                            .for_each(|i| {
+                                let _ = a * x[i] + b;
+                            })
+                    });
+                    Cow::Owned(mutable_res.clone())
+                },
+                pool_e,
+                pool_b
+            )
         },
         &mut pool_e,
         &mut pool_b,
-    )
+    );
+    match poly {
+        Cow::Borrowed(poly) => poly.clone(),
+        Cow::Owned(_) => poly.into_owned(),
+    }
 }
 
 pub(crate) fn eval_by_expr<E: ExtensionField>(

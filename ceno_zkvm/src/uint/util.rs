@@ -50,25 +50,6 @@ pub(crate) const fn max_carry_word_for_multiplication(n: usize, m: usize, c: usi
     max_carry_value_gt as u64
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::uint::util::{max_carry_word_for_multiplication, max_combinations};
-
-    #[test]
-    fn test_max_combinations_degree() {
-        // degree=1 is pure add, therefore only one term
-        assert_eq!(1, max_combinations(1, 4));
-        // for degree=2 mul, we have u[0]*v[3], u[1]*v[2], u[2]*v[1], u[3]*v[0]
-        // thus 4 terms
-        assert_eq!(4, max_combinations(2, 4));
-    }
-
-    #[test]
-    fn test_max_word_of_limb_degree() {
-        assert_eq!(131070, max_carry_word_for_multiplication(2, 32, 16));
-    }
-}
-
 pub struct SimpleVecPool<T> {
     pool: VecDeque<T>,
 }
@@ -100,5 +81,24 @@ impl<T> SimpleVecPool<T> {
     // Return an item to the pool
     pub fn return_to_pool(&mut self, item: T) {
         self.pool.push_back(item);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::uint::util::{max_carry_word_for_multiplication, max_combinations};
+
+    #[test]
+    fn test_max_combinations_degree() {
+        // degree=1 is pure add, therefore only one term
+        assert_eq!(1, max_combinations(1, 4));
+        // for degree=2 mul, we have u[0]*v[3], u[1]*v[2], u[2]*v[1], u[3]*v[0]
+        // thus 4 terms
+        assert_eq!(4, max_combinations(2, 4));
+    }
+
+    #[test]
+    fn test_max_word_of_limb_degree() {
+        assert_eq!(131070, max_carry_word_for_multiplication(2, 32, 16));
     }
 }
