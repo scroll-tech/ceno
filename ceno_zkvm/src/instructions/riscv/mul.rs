@@ -78,7 +78,7 @@
 //! the high limb uniquely represent the product values for unsigned/unsigned
 //! and signed/unsigned products.
 
-use std::{fmt::Display, marker::PhantomData};
+use std::marker::PhantomData;
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -88,7 +88,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
-    gadgets::{IsEqualConfig, SignedExtendConfig},
+    gadgets::{IsEqualConfig, Signed},
     instructions::{
         Instruction,
         riscv::{
@@ -395,47 +395,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             .assign_limbs(instance, prod_lo_hi_val.as_u16_limbs());
 
         Ok(())
-    }
-}
-
-/// Transform a value represented as a `UInt` into a `WitIn` containing its
-/// corresponding signed value, interpreting the bits as a 2s-complement
-/// encoding.  Gadget allocates 2 `WitIn` values in total.
-struct Signed<E: ExtensionField> {
-    pub is_negative: SignedExtendConfig<E>,
-    val: Expression<E>,
-}
-
-impl<E: ExtensionField> Signed<E> {
-    pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
-        cb: &mut CircuitBuilder<E>,
-        name_fn: N,
-        unsigned_val: &UInt<E>,
-    ) -> Result<Self, ZKVMError> {
-        cb.namespace(name_fn, |cb| {
-            let is_negative = unsigned_val.is_negative(cb)?;
-            let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
-
-            Ok(Self { is_negative, val })
-        })
-    }
-
-    pub fn assign_instance(
-        &self,
-        instance: &mut [E::BaseField],
-        lkm: &mut LkMultiplicity,
-        val: &Value<u32>,
-    ) -> Result<i32, ZKVMError> {
-        self.is_negative.assign_instance(
-            instance,
-            lkm,
-            *val.as_u16_limbs().last().unwrap() as u64,
-        )?;
-        Ok(i32::from(val))
-    }
-
-    pub fn expr(&self) -> Expression<E> {
-        self.val.clone()
     }
 }
 
