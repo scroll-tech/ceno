@@ -4,7 +4,7 @@ use ark_std::test_rng;
 use ceno_emul::{
     CENO_PLATFORM,
     InsnKind::{ADD, ECALL},
-    Platform, Program, StepRecord, VMState, encode_rv32,
+    MOCK_BASE, MOCK_ENTRY_POINT, Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff::Field;
 use ff_ext::ExtensionField;
@@ -206,8 +206,8 @@ fn test_single_add_instance_e2e() {
 
     // set up program
     let program = Program::new(
-        CENO_PLATFORM.pc_base(),
-        CENO_PLATFORM.pc_base(),
+        MOCK_ENTRY_POINT,
+        MOCK_BASE,
         PROGRAM_CODE.to_vec(),
         Default::default(),
     );

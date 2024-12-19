@@ -9,7 +9,6 @@ use crate::addr::{Addr, RegIdx};
 /// - codes of environment calls.
 #[derive(Clone, Debug)]
 pub struct Platform {
-    pub rom: Range<Addr>,
     pub prog_data: BTreeSet<Addr>,
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
@@ -20,7 +19,6 @@ pub struct Platform {
 }
 
 pub const CENO_PLATFORM: Platform = Platform {
-    rom: 0x2000_0000..0x3000_0000,
     prog_data: BTreeSet::new(),
     stack: 0xB0000000..0xC0000000,
     heap: 0x8000_0000..0xFFFF_0000,
@@ -29,13 +27,11 @@ pub const CENO_PLATFORM: Platform = Platform {
     unsafe_ecall_nop: false,
 };
 
+pub const MOCK_ENTRY_POINT: Addr = 0x2000_0000;
+pub const MOCK_BASE: Addr = 0x2000_0000;
+
 impl Platform {
     // Virtual memory layout.
-
-    pub fn is_rom(&self, addr: Addr) -> bool {
-        self.rom.contains(&addr)
-    }
-
     pub fn is_prog_data(&self, addr: Addr) -> bool {
         self.prog_data.contains(&(addr & !0x3))
     }
@@ -63,14 +59,7 @@ impl Platform {
         (vma >> 8) as RegIdx
     }
 
-    // Startup.
-
-    pub const fn pc_base(&self) -> Addr {
-        self.rom.start
-    }
-
     // Permissions.
-
     pub fn can_read(&self, addr: Addr) -> bool {
         self.can_write(addr)
     }
@@ -110,22 +99,16 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{VMState, WORD_SIZE};
+    use crate::VMState;
 
     #[test]
     fn test_no_overlap() {
         let p = CENO_PLATFORM;
-        // ROM and RAM do not overlap.
-        assert!(!p.is_rom(p.heap.start));
-        assert!(!p.is_rom(p.heap.end - WORD_SIZE as Addr));
-        assert!(!p.is_ram(p.rom.start));
-        assert!(!p.is_ram(p.rom.end - WORD_SIZE as Addr));
-        // Registers do not overlap with ROM or RAM.
+        // Registers do not overlap with RAM.
         for reg in [
             Platform::register_vma(0),
             Platform::register_vma(VMState::REG_COUNT - 1),
         ] {
-            assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));
         }
     }
