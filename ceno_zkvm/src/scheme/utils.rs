@@ -406,7 +406,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                                     let res = SyncUnsafeCell::new(res);
                                     (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
                                         let ptr = (*res.get()).as_mut_ptr();
-                                        (0..a.len()).skip(thread_id).step_by(n_threads).for_each(
+                                        (0..b.len()).skip(thread_id).step_by(n_threads).for_each(
                                             |i| {
                                                 *ptr.add(i) = a[0] * b[i];
                                             },
