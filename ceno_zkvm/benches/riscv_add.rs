@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ark_std::test_rng;
 use ceno_zkvm::{
@@ -70,22 +70,22 @@ fn bench_add(c: &mut Criterion) {
         group.bench_function(
             BenchmarkId::new("prove_add", format!("prove_add_log2_{}", instance_num_vars)),
             |b| {
-                b.iter_with_setup(
-                    || {
+                b.iter_custom(|iters| {
+                    let mut time = Duration::new(0, 0);
+                    for _ in 0..iters {
                         // generate mock witness
                         let mut rng = test_rng();
                         let num_instances = 1 << instance_num_vars;
-                        (0..num_witin as usize)
+                        let wits_in = (0..num_witin as usize)
                             .map(|_| {
                                 (0..num_instances)
                                     .map(|_| Goldilocks::random(&mut rng))
                                     .collect::<Vec<Goldilocks>>()
                                     .into_mle()
                             })
-                            .collect_vec()
-                    },
-                    |wits_in| {
-                        let timer = Instant::now();
+                            .collect_vec();
+
+                        let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;
                         let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
@@ -109,13 +109,16 @@ fn bench_add(c: &mut Criterion) {
                                 &challenges,
                             )
                             .expect("create_proof failed");
+                        let elapsed = instant.elapsed();
                         println!(
                             "AddInstruction::create_proof, instance_num_vars = {}, time = {}",
                             instance_num_vars,
-                            timer.elapsed().as_secs_f64()
+                            elapsed.as_secs_f64()
                         );
-                    },
-                );
+                        time += elapsed;
+                    }
+                    time
+                });
             },
         );
 
