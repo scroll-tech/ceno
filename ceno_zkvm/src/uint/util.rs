@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 // calculate the maximum number of combinations for stars and bars formula
 const fn max_combinations(degree: usize, num_cells: usize) -> usize {
     // compute factorial of n using usize
@@ -48,41 +46,6 @@ pub(crate) const fn max_carry_word_for_multiplication(n: usize, m: usize, c: usi
 
     assert!(max_carry_value_gt <= u64::MAX as u128);
     max_carry_value_gt as u64
-}
-
-pub struct SimpleVecPool<T> {
-    pool: VecDeque<T>,
-}
-
-impl<T> SimpleVecPool<T> {
-    // Create a new pool with a factory closure
-    pub fn new<F: Fn() -> T>(cap: usize, init: F) -> Self {
-        let mut pool = SimpleVecPool {
-            pool: VecDeque::new(),
-        };
-        (0..cap).for_each(|_| {
-            pool.add(init());
-        });
-        pool
-    }
-
-    // Add a new item to the pool
-    pub fn add(&mut self, item: T) {
-        self.pool.push_back(item);
-    }
-
-    // Borrow an item from the pool, or create a new one if empty
-    pub fn borrow(&mut self) -> T {
-        self.pool
-            .pop_front()
-            .expect("pool is empty, consider increase cap size")
-    }
-
-    // Return an item to the pool
-    pub fn return_to_pool(&mut self, item: T) {
-        println!("got return!");
-        self.pool.push_back(item);
-    }
 }
 
 #[cfg(test)]

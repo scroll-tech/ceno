@@ -24,8 +24,9 @@ use rayon::{
 };
 
 use crate::{
-    expression::Expression, scheme::constants::MIN_PAR_SIZE, uint::util::SimpleVecPool,
-    utils::next_pow2_instance_padding,
+    expression::Expression,
+    scheme::constants::MIN_PAR_SIZE,
+    utils::{SimpleVecPool, next_pow2_instance_padding},
 };
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector

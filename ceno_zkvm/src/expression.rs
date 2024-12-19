@@ -18,7 +18,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     structs::{ChallengeId, RAMType, WitnessId},
-    uint::util::SimpleVecPool,
+    utils::SimpleVecPool,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
