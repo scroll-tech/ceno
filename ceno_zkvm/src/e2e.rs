@@ -531,7 +531,6 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
             .verify_proof_halt(zkvm_proof, transcript, exit_code.is_some())
             .expect("verify proof return with error"),
     );
-
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
