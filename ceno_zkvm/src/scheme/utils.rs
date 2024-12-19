@@ -6,7 +6,7 @@ use itertools::{Either, Itertools};
 use multilinear_extensions::{
     commutative_op_mle_pair, commutative_op_mle_pair_pool,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
-    op_mle_xa_b, op_mle_xa_b_pool, op_mle3_range,
+    op_mle_xa_b, op_mle_xa_b_pool, op_mle3_range, op_mle3_range_pool,
     util::ceil_log2,
     virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -603,21 +603,24 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                 try_recycle_arcpoly(cow_b, pool_e, pool_b, len);
                 poly
             },
-            &|x, a, b, pool_e, pool_b| {
+            &|cow_x, cow_a, cow_b, pool_e, pool_b| {
+                let (x, a, b) = (cow_x.as_ref(), cow_a.as_ref(), cow_b.as_ref());
                 op_mle_xa_b_pool!(
-                    |x, a, b| {
+                    |x, a, b, res| {
+                        let res = SyncUnsafeCell::new(res);
                         assert_eq!(a.len(), 1);
                         assert_eq!(b.len(), 1);
                         let (a, b) = (a[0], b[0]);
-                        (0..n_threads).into_par_iter().for_each(|thread_id| {
+                        (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                            let ptr = (*res.get()).as_mut_ptr();
                             (0..x.len())
                                 .skip(thread_id)
                                 .step_by(n_threads)
                                 .for_each(|i| {
-                                    let _ = a * x[i] + b;
+                                    *ptr.add(i) = a * x[i] + b;
                                 })
                         });
-                        Cow::Owned(mutable_res.clone())
+                        Cow::Owned(res.into_inner().into_mle().into())
                     },
                     pool_e,
                     pool_b

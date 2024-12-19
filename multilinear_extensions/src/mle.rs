@@ -1091,31 +1091,92 @@ macro_rules! op_mle_xa_b {
     };
 }
 
+#[macro_export]
+macro_rules! op_mle3_range_pool {
+    ($x:ident, $a:ident, $b:ident, $res:ident, $x_vec:ident, $a_vec:ident, $b_vec:ident, $res_vec:ident, $op:expr, |$bb_out:ident| $op_bb_out:expr) => {{
+        let $x = if let Some((start, offset)) = $x.evaluations_range() {
+            &$x_vec[start..][..offset]
+        } else {
+            &$x_vec[..]
+        };
+        let $a = if let Some((start, offset)) = $a.evaluations_range() {
+            &$a_vec[start..][..offset]
+        } else {
+            &$a_vec[..]
+        };
+        let $b = if let Some((start, offset)) = $b.evaluations_range() {
+            &$b_vec[start..][..offset]
+        } else {
+            &$b_vec[..]
+        };
+        let $res = $res_vec;
+        assert_eq!($res.len(), $x.len());
+        let $bb_out = $op;
+        $op_bb_out
+    }};
+}
+
 /// deal with x * a + b
 #[macro_export]
 macro_rules! op_mle_xa_b_pool {
-    (|$x:ident, $a:ident, $b:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
+    (|$x:ident, $a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$x.evaluations(), &$a.evaluations(), &$b.evaluations()) {
             (
                 $crate::mle::FieldType::Base(x_vec),
                 $crate::mle::FieldType::Base(a_vec),
                 $crate::mle::FieldType::Base(b_vec),
             ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+                let res_vec = $pool_b.borrow();
+                op_mle3_range_pool!(
+                    $x,
+                    $a,
+                    $b,
+                    $res,
+                    x_vec,
+                    a_vec,
+                    b_vec,
+                    res_vec,
+                    $op,
+                    |$bb_out| { $op_bb_out }
+                )
             }
             (
                 $crate::mle::FieldType::Base(x_vec),
                 $crate::mle::FieldType::Ext(a_vec),
                 $crate::mle::FieldType::Base(b_vec),
             ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+                let res_vec = $pool_e.borrow();
+                op_mle3_range_pool!(
+                    $x,
+                    $a,
+                    $b,
+                    $res,
+                    x_vec,
+                    a_vec,
+                    b_vec,
+                    res_vec,
+                    $op,
+                    |$bb_out| { $op_bb_out }
+                )
             }
             (
                 $crate::mle::FieldType::Base(x_vec),
                 $crate::mle::FieldType::Ext(a_vec),
                 $crate::mle::FieldType::Ext(b_vec),
             ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+                let res_vec = $pool_e.borrow();
+                op_mle3_range_pool!(
+                    $x,
+                    $a,
+                    $b,
+                    $res,
+                    x_vec,
+                    a_vec,
+                    b_vec,
+                    res_vec,
+                    $op,
+                    |$bb_out| { $op_bb_out }
+                )
             }
             (x, a, b) => unreachable!(
                 "unmatched pattern {:?} {:?} {:?}",
@@ -1125,8 +1186,8 @@ macro_rules! op_mle_xa_b_pool {
             ),
         }
     };
-    (|$x:ident, $a:ident, $b:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
-        op_mle_xa_b_pool!(|$x, $a, $b| $op, $pool_e, $pool_b, |out| out)
+    (|$x:ident, $a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
+        op_mle_xa_b_pool!(|$x, $a, $b, $res| $op, $pool_e, $pool_b, |out| out)
     };
 }
 
