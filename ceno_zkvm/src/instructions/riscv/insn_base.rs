@@ -468,6 +468,9 @@ impl<E: ExtensionField> MemAddr<E> {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
+    use ceno_emul::Program;
     use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
     use itertools::Itertools;
 
@@ -549,7 +552,7 @@ mod test {
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
-            &[],
+            Arc::new(Program::default()),
             if is_ok { &[] } else { &["mid_u14"] },
             None,
             None,

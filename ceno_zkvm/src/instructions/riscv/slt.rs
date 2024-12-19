@@ -133,7 +133,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, StepRecord, Word, encode_rv32};
+    use std::sync::Arc;
+
+    use ceno_emul::{Change, Program, StepRecord, Word, encode_rv32};
     use goldilocks::GoldilocksExt2;
 
     use rand::Rng;
@@ -182,7 +184,13 @@ mod test {
             .require_equal(|| "assert_rd_written", &mut cb, &expected_rd_written)
             .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(
+            &cb,
+            raw_witin,
+            Arc::new(Program::from_insn_code(insn_code)),
+            None,
+            Some(lkm),
+        );
     }
 
     #[test]

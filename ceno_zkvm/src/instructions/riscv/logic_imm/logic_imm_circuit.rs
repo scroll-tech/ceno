@@ -123,7 +123,9 @@ impl<E: ExtensionField> LogicConfig<E> {
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
+    use std::sync::Arc;
+
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, Program, StepRecord, encode_rv32u};
     use goldilocks::GoldilocksExt2;
 
     use crate::{
@@ -210,6 +212,12 @@ mod test {
         cb.require_equal(|| "assert_rd_written", rd_written_expr, expected.value())
             .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(
+            &cb,
+            raw_witin,
+            Arc::new(Program::from_insn_code(insn_code)),
+            None,
+            Some(lkm),
+        );
     }
 }
