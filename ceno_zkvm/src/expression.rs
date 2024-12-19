@@ -143,24 +143,34 @@ impl<E: ExtensionField> Expression<E> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn evaluate_with_instance_pool<T>(
+    pub fn evaluate_with_instance_pool<T, PF1: Fn() -> Vec<E>, PF2: Fn() -> Vec<E::BaseField>>(
         &self,
         fixed_in: &impl Fn(&Fixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
         instance: &impl Fn(Instance) -> T,
         constant: &impl Fn(E::BaseField) -> T,
         challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
-        sum: &impl Fn(T, T, &mut SimpleVecPool<Vec<E>>, &mut SimpleVecPool<Vec<E::BaseField>>) -> T,
-        product: &impl Fn(T, T, &mut SimpleVecPool<Vec<E>>, &mut SimpleVecPool<Vec<E::BaseField>>) -> T,
+        sum: &impl Fn(
+            T,
+            T,
+            &mut SimpleVecPool<Vec<E>, PF1>,
+            &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
+        ) -> T,
+        product: &impl Fn(
+            T,
+            T,
+            &mut SimpleVecPool<Vec<E>, PF1>,
+            &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
+        ) -> T,
         scaled: &impl Fn(
             T,
             T,
             T,
-            &mut SimpleVecPool<Vec<E>>,
-            &mut SimpleVecPool<Vec<E::BaseField>>,
+            &mut SimpleVecPool<Vec<E>, PF1>,
+            &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
         ) -> T,
-        pool_e: &mut SimpleVecPool<Vec<E>>,
-        pool_b: &mut SimpleVecPool<Vec<E::BaseField>>,
+        pool_e: &mut SimpleVecPool<Vec<E>, PF1>,
+        pool_b: &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
     ) -> T {
         match self {
             Expression::Fixed(f) => fixed_in(f),

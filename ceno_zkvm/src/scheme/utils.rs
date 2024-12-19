@@ -7,13 +7,11 @@ use multilinear_extensions::{
     commutative_op_mle_pair_pool,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
     op_mle_xa_b_pool, op_mle3_range_pool,
-    util::ceil_log2,
+    util::{ceil_log2, max_usable_threads},
     virtual_poly_v2::ArcMultilinearExtension,
 };
 
 use ff::Field;
-
-const POOL_CAP: usize = 3;
 
 use rayon::{
     iter::{
@@ -240,10 +238,10 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
-fn try_recycle_arcpoly<E: ExtensionField>(
+fn try_recycle_arcpoly<E: ExtensionField, PF1: Fn() -> Vec<E>, PF2: Fn() -> Vec<E::BaseField>>(
     poly: Cow<ArcMultilinearExtension<'_, E>>,
-    pool_e: &mut SimpleVecPool<Vec<E>>,
-    pool_b: &mut SimpleVecPool<Vec<E::BaseField>>,
+    pool_e: &mut SimpleVecPool<Vec<E>, PF1>,
+    pool_b: &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
     pool_expected_size_vec: usize,
 ) {
     // fn downcast_arc<E: ExtensionField>(
@@ -284,25 +282,49 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     instance: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E; N],
     expr: &Expression<E>,
-    n_threads: usize,
 ) -> ArcMultilinearExtension<'a, E> {
+    let n_threads = max_usable_threads();
     let len = witnesses[0].evaluations().len();
-    let mut pool_e: SimpleVecPool<Vec<_>> = SimpleVecPool::new(POOL_CAP, || {
+    let mut pool_e: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
         (0..len)
             .into_par_iter()
             .with_min_len(MIN_PAR_SIZE)
             .map(|_| E::ZERO)
             .collect::<Vec<E>>()
     });
-    let mut pool_b: SimpleVecPool<Vec<_>> = SimpleVecPool::new(POOL_CAP, || {
+    let mut pool_b: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
         (0..len)
             .into_par_iter()
             .with_min_len(MIN_PAR_SIZE)
             .map(|_| E::BaseField::ZERO)
             .collect::<Vec<E::BaseField>>()
     });
+    wit_infer_by_expr_pool(
+        fixed,
+        witnesses,
+        instance,
+        challenges,
+        expr,
+        n_threads,
+        &mut pool_e,
+        &mut pool_b,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn wit_infer_by_expr_pool<'a, E: ExtensionField, const N: usize>(
+    fixed: &[ArcMultilinearExtension<'a, E>],
+    witnesses: &[ArcMultilinearExtension<'a, E>],
+    instance: &[ArcMultilinearExtension<'a, E>],
+    challenges: &[E; N],
+    expr: &Expression<E>,
+    n_threads: usize,
+    pool_e: &mut SimpleVecPool<Vec<E>, impl Fn() -> Vec<E>>,
+    pool_b: &mut SimpleVecPool<Vec<E::BaseField>, impl Fn() -> Vec<E::BaseField>>,
+) -> ArcMultilinearExtension<'a, E> {
+    let len = witnesses[0].evaluations().len();
     let poly =
-        expr.evaluate_with_instance_pool::<Cow<ArcMultilinearExtension<'_, E>>>(
+        expr.evaluate_with_instance_pool::<Cow<ArcMultilinearExtension<'_, E>>, _, _>(
             &|f| Cow::Borrowed(&fixed[f.0]),
             &|witness_id| Cow::Borrowed(&witnesses[witness_id as usize]),
             &|i| Cow::Borrowed(&instance[i.0]),
@@ -473,8 +495,8 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                 try_recycle_arcpoly(cow_x, pool_e, pool_b, len);
                 poly
             },
-            &mut pool_e,
-            &mut pool_b,
+            pool_e,
+            pool_b,
         );
     match poly {
         Cow::Borrowed(poly) => poly.clone(),
@@ -816,7 +838,6 @@ mod tests {
             &[],
             &[],
             &expr,
-            1,
         );
         res.get_base_field_vec();
     }
@@ -847,7 +868,6 @@ mod tests {
             &[],
             &[E::ONE],
             &expr,
-            1,
         );
         res.get_ext_field_vec();
     }

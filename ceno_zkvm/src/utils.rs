@@ -230,19 +230,19 @@ where
     result
 }
 
-pub struct SimpleVecPool<T> {
+pub struct SimpleVecPool<T, F: Fn() -> T> {
     pool: VecDeque<T>,
+    factory_fn: F,
 }
 
-impl<T> SimpleVecPool<T> {
+impl<T, F: Fn() -> T> SimpleVecPool<T, F> {
     // Create a new pool with a factory closure
-    pub fn new<F: Fn() -> T>(cap: usize, init: F) -> Self {
-        let mut pool = SimpleVecPool {
+    pub fn new(init: F) -> Self {
+        let pool = SimpleVecPool {
             pool: VecDeque::new(),
+            factory_fn: init,
         };
-        (0..cap).for_each(|_| {
-            pool.add(init());
-        });
+
         pool
     }
 
@@ -253,9 +253,7 @@ impl<T> SimpleVecPool<T> {
 
     // Borrow an item from the pool, or create a new one if empty
     pub fn borrow(&mut self) -> T {
-        self.pool
-            .pop_front()
-            .expect("pool is empty, consider increase cap size")
+        self.pool.pop_front().unwrap_or_else(|| (self.factory_fn)())
     }
 
     // Return an item to the pool
