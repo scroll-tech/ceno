@@ -1,7 +1,7 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use std::array;
+use std::{array, time::Duration};
 
 use ark_std::test_rng;
 use criterion::*;
@@ -112,31 +112,23 @@ fn sumcheck_fn(c: &mut Criterion) {
         group.bench_function(
             BenchmarkId::new("prove_sumcheck", format!("sumcheck_nv_{}", nv)),
             |b| {
-                b.iter_with_setup(
-                    || {
-                        let prover_transcript = Transcript::<E>::new(b"test");
-                        let (asserted_sum, virtual_poly, virtual_poly_splitted) =
-                            { prepare_input(nv) };
-                        (
-                            prover_transcript,
-                            asserted_sum,
-                            virtual_poly,
-                            virtual_poly_splitted,
-                        )
-                    },
-                    |(
-                        mut prover_transcript,
-                        _asserted_sum,
-                        virtual_poly,
-                        _virtual_poly_splitted,
-                    )| {
+                b.iter_custom(|iters| {
+                    let mut time = Duration::new(0, 0);
+                    for _ in 0..iters {
+                        let mut prover_transcript = Transcript::<E>::new(b"test");
+                        let (_, virtual_poly, _) = { prepare_input(nv) };
+
+                        let instant = std::time::Instant::now();
                         #[allow(deprecated)]
                         let (_sumcheck_proof_v1, _) = IOPProverState::<E>::prove_parallel(
                             virtual_poly.clone(),
                             &mut prover_transcript,
                         );
-                    },
-                );
+                        let elapsed = instant.elapsed();
+                        time += elapsed;
+                    }
+                    time
+                });
             },
         );
 
@@ -157,31 +149,23 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
         group.bench_function(
             BenchmarkId::new("prove_sumcheck", format!("devirgo_nv_{}", nv)),
             |b| {
-                b.iter_with_setup(
-                    || {
-                        let prover_transcript = Transcript::<E>::new(b"test");
-                        let (asserted_sum, virtual_poly, virtual_poly_splitted) =
-                            { prepare_input(nv) };
-                        (
-                            prover_transcript,
-                            asserted_sum,
-                            virtual_poly,
-                            virtual_poly_splitted,
-                        )
-                    },
-                    |(
-                        mut prover_transcript,
-                        _asserted_sum,
-                        _virtual_poly,
-                        virtual_poly_splitted,
-                    )| {
+                b.iter_custom(|iters| {
+                    let mut time = Duration::new(0, 0);
+                    for _ in 0..iters {
+                        let mut prover_transcript = Transcript::<E>::new(b"test");
+                        let (_, _, virtual_poly_splitted) = { prepare_input(nv) };
+
+                        let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) = IOPProverState::<E>::prove_batch_polys(
                             threads,
                             virtual_poly_splitted,
                             &mut prover_transcript,
                         );
-                    },
-                );
+                        let elapsed = instant.elapsed();
+                        time += elapsed;
+                    }
+                    time
+                });
             },
         );
 
