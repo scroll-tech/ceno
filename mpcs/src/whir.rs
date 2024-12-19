@@ -143,7 +143,7 @@ where
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
-        transcript: &mut impl transcript::Transcript<E>,
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         let io = IOPattern::<DefaultHash>::new("🌪️");
         let mut merlin = io.to_merlin();
@@ -187,16 +187,29 @@ where
 
     fn verify(
         vp: &Self::VerifierParam,
-        comm: &Self::Commitment,
+        _comm: &Self::Commitment,
         point: &[E],
         eval: &E,
         proof: &Self::Proof,
-        transcript: &mut impl transcript::Transcript<E>,
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        Ok(())
+        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let mut arthur = io.to_arthur(&proof.transcript);
+        // TODO: check the consistency between comm and proof.transcript
+        WhirInnerT::<E, Spec>::verify(
+            vp,
+            &point.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
+            &FieldWrapper(*eval),
+            proof,
+            &mut arthur,
+        )
+        .map_err(crate::Error::WhirError)
     }
+
     fn get_pure_commitment(comm: &Self::CommitmentWithWitness) -> Self::Commitment {
-        todo!()
+        Self::Commitment {
+            inner: comm.commitment.clone(),
+        }
     }
 
     fn batch_commit(
@@ -291,6 +304,7 @@ mod tests {
 
         let proof = WhirInner::<F, WhirDefaultSpec>::open(&pp, witness, &point, &eval, &mut merlin)
             .unwrap();
-        WhirInner::<F, WhirDefaultSpec>::verify(&pp, &point, &eval, &proof, &merlin).unwrap();
+        let mut arthur = io.to_arthur(&proof.transcript);
+        WhirInner::<F, WhirDefaultSpec>::verify(&pp, &point, &eval, &proof, &mut arthur).unwrap();
     }
 }
