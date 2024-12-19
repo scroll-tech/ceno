@@ -1,8 +1,8 @@
-use std::{any::TypeId, borrow::Cow, cell::SyncUnsafeCell, ops::Add, ptr, sync::Arc};
+use std::{borrow::Cow, cell::SyncUnsafeCell, ptr, sync::Arc};
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair, commutative_op_mle_pair_pool,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
@@ -348,25 +348,6 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     )
 }
 
-fn mutable_a_plus_c<A, B>(n_threads: usize, a: &A, b: &[B], res: &mut [A])
-where
-    B: Sync + Send + Copy,
-    A: Sync + Send + Copy + Add<B, Output = A> + Default,
-{
-    unsafe {
-        let res = SyncUnsafeCell::new(res);
-        (0..n_threads).into_par_iter().for_each(|thread_id| {
-            let ptr = (*res.get()).as_mut_ptr();
-            (0..b.len())
-                .skip(thread_id)
-                .step_by(n_threads)
-                .for_each(|i| {
-                    *ptr.add(i) = *a + b[i];
-                })
-        });
-    }
-}
-
 use ff::Field;
 
 const POOL_CAP: usize = 12;
@@ -410,38 +391,13 @@ fn try_recycle_arcpoly<E: ExtensionField>(
     }
 }
 
-// fn try_unwrap_and_downcast<E: ExtensionField>(
-//     arc: ArcMultilinearExtension<'_, E>,
-// ) -> DenseMultilinearExtension<E> {
-//     // Attempt to unwrap the Arc
-//     match Arc::try_unwrap(arc) {
-//         Ok(obj) => {
-//             // Check if the type matches
-//             if obj.type_id() == TypeId::of::<T>() {
-//                 // Safe to downcast
-//                 let raw_ptr = &obj as *const dyn MyTrait as *const T;
-//                 unsafe {
-//                     // Take ownership of the concrete type
-//                     let concrete: T = raw_ptr.read();
-//                     Ok(concrete)
-//                 }
-//             } else {
-//                 // Type mismatch
-//                 Err(Arc::new(obj))
-//             }
-//         }
-//         Err(shared_arc) => Err(shared_arc),
-//     }
-// }
-
-pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
+pub(crate) fn wit_infer_by_expr_in_pool<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E; N],
     expr: &Expression<E>,
     n_threads: usize,
-    mutable_res: ArcMultilinearExtension<'a, E>,
 ) -> ArcMultilinearExtension<'a, E> {
     let len = witnesses[0].evaluations().len();
     let mut pool_e: SimpleVecPool<Vec<_>> = SimpleVecPool::new(POOL_CAP, || {
@@ -605,7 +561,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
             },
             &|cow_x, cow_a, cow_b, pool_e, pool_b| {
                 let (x, a, b) = (cow_x.as_ref(), cow_a.as_ref(), cow_b.as_ref());
-                op_mle_xa_b_pool!(
+                let poly = op_mle_xa_b_pool!(
                     |x, a, b, res| {
                         let res = SyncUnsafeCell::new(res);
                         assert_eq!(a.len(), 1);
@@ -624,7 +580,11 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
                     },
                     pool_e,
                     pool_b
-                )
+                );
+                try_recycle_arcpoly(cow_a, pool_e, pool_b, len);
+                try_recycle_arcpoly(cow_b, pool_e, pool_b, len);
+                try_recycle_arcpoly(cow_x, pool_e, pool_b, len);
+                poly
             },
             &mut pool_e,
             &mut pool_b,
