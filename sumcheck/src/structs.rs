@@ -27,7 +27,7 @@ pub struct IOPProverMessage<E: ExtensionField> {
 }
 
 /// Prover State of a PolyIOP.
-#[derive(Default)]
+#[derive(Default, Serialize, Debug)]
 pub struct IOPProverStateV2<'a, E: ExtensionField> {
     /// sampled randomness given by the verifier
     pub challenges: Vec<Challenge<E>>,

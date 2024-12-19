@@ -7,8 +7,9 @@ pub mod basic;
 pub mod syncronized;
 pub use basic::BasicTranscript;
 pub use syncronized::TranscriptSyncronized;
+use serde::Serialize;
 
-#[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Default, Copy, Clone, Eq, PartialEq, Debug, Serialize)]
 pub struct Challenge<F> {
     pub elements: F,
 }

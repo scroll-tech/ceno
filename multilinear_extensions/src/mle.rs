@@ -8,7 +8,7 @@ use ff_ext::ExtensionField;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use std::fmt::Debug;
 
 pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
@@ -67,6 +67,16 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
 impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self.evaluations())
+    }
+}
+
+impl<E: ExtensionField> Serialize for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = serializer.serialize_struct("dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>", 0)?;
+        s.end()
     }
 }
 

@@ -7,7 +7,8 @@ use crate::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
+use std::fmt::Debug;
 
 pub type ArcMultilinearExtension<'a, E> =
     Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a>;
@@ -49,6 +50,22 @@ pub struct VirtualPolynomialV2<'a, E: ExtensionField> {
     pub flattened_ml_extensions: Vec<ArcMultilinearExtension<'a, E>>,
     /// Pointers to the above poly extensions
     raw_pointers_lookup_table: HashMap<usize, usize>,
+}
+
+impl<'a, E: ExtensionField> Debug for VirtualPolynomialV2<'a, E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "VirtualPolynomialV2<'a, E>")
+    }
+}
+
+impl<'a, E: ExtensionField> Serialize for VirtualPolynomialV2<'a, E> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = serializer.serialize_struct("VirtualPolynomialV2<'a, E: ExtensionField>", 0)?;
+        s.end()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
