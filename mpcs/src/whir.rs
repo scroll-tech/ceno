@@ -25,15 +25,7 @@ use ff::ExtensionFieldWrapper as FieldWrapper;
 
 pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
     // TODO: Remove these horrifying where clauses
-    type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default
-    where
-        Merlin: DigestWriter<<Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-        for<'a> Arthur<'a>:
-            DigestReader<<Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-        IOPattern: WhirIOPattern<
-                FieldWrapper<E>,
-                <Self::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
-            >;
+    type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default;
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -50,23 +42,11 @@ where
 type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spec>;
 
 #[derive(Default, Clone, Debug)]
-pub struct WhirDigest<E: ExtensionField, Spec: WhirSpec<E>>
-where
-    // TODO: Remove these horrifying stuffs
-    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-{
+pub struct WhirDigest<E: ExtensionField, Spec: WhirSpec<E>> {
     inner: <<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig as Config>::InnerDigest,
 }
 
-impl<E: ExtensionField, Spec: WhirSpec<E>> Serialize for WhirDigest<E, Spec>
-where
-    // TODO: Remove these horrifying stuffs
-    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-{
+impl<E: ExtensionField, Spec: WhirSpec<E>> Serialize for WhirDigest<E, Spec> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -79,13 +59,7 @@ where
     }
 }
 
-impl<'de, E: ExtensionField, Spec: WhirSpec<E>> Deserialize<'de> for WhirDigest<E, Spec>
-where
-    // TODO: Remove these horrifying stuffs
-    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-{
+impl<'de, E: ExtensionField, Spec: WhirSpec<E>> Deserialize<'de> for WhirDigest<E, Spec> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
