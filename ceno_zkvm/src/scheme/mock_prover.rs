@@ -23,7 +23,9 @@ use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::{Itertools, enumerate, izip};
-use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
+use multilinear_extensions::{
+    mle::IntoMLEs, util::max_usable_threads, virtual_poly_v2::ArcMultilinearExtension,
+};
 use rand::thread_rng;
 use std::{
     collections::{HashMap, HashSet},
@@ -426,6 +428,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
+        let n_threads = max_usable_threads();
         let program = Program::new(
             CENO_PLATFORM.pc_base(),
             CENO_PLATFORM.pc_base(),
@@ -473,10 +476,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let (left, right) = expr.unpack_sum().unwrap();
                 let right = right.neg();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
+                let left_evaluated =
+                    wit_infer_by_expr(&[], wits_in, pi, &challenge, &left, n_threads);
                 let left_evaluated = left_evaluated.get_base_field_vec();
 
-                let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
+                let right_evaluated =
+                    wit_infer_by_expr(&[], wits_in, pi, &challenge, &right, n_threads);
                 let right_evaluated = right_evaluated.get_base_field_vec();
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
@@ -496,7 +501,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+                let expr_evaluated =
+                    wit_infer_by_expr(&[], wits_in, pi, &challenge, expr, n_threads);
                 let expr_evaluated = expr_evaluated.get_base_field_vec();
 
                 for (inst_id, element) in enumerate(expr_evaluated) {
@@ -519,7 +525,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .iter()
             .zip_eq(cb.cs.lk_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+            let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr, n_threads);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
@@ -550,7 +556,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             .map(|expr| {
                                 // TODO generalized to all inst_id
                                 let inst_id = 0;
-                                wit_infer_by_expr(&[], wits_in, pi, &challenge, expr)
+                                wit_infer_by_expr(&[], wits_in, pi, &challenge, expr, n_threads)
                                     .get_base_field_vec()[inst_id]
                                     .to_canonical_u64()
                             })
@@ -742,6 +748,7 @@ Hints:
         witnesses: &ZKVMWitnesses<E>,
         pi: &PublicValues<u32>,
     ) {
+        let n_threads = max_usable_threads();
         let instance = pi
             .to_vec::<E>()
             .concat()
@@ -815,10 +822,16 @@ Hints:
                     .zip(cs.lk_expressions_namespace_map.clone().into_iter())
                     .zip(cs.lk_expressions_items_map.clone().into_iter())
                 {
-                    let lk_input =
-                        (wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, expr)
-                            .get_ext_field_vec())[..num_rows]
-                            .to_vec();
+                    let lk_input = (wit_infer_by_expr(
+                        &fixed,
+                        &witness,
+                        &pi_mles,
+                        &challenges,
+                        expr,
+                        n_threads,
+                    )
+                    .get_ext_field_vec())[..num_rows]
+                        .to_vec();
                     rom_inputs.entry(rom_type).or_default().push((
                         lk_input,
                         circuit_name.clone(),
@@ -838,10 +851,16 @@ Hints:
                     .iter()
                     .zip(cs.lk_expressions_items_map.clone().into_iter())
                 {
-                    let lk_table =
-                        wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, &expr.values)
-                            .get_ext_field_vec()
-                            .to_vec();
+                    let lk_table = wit_infer_by_expr(
+                        &fixed,
+                        &witness,
+                        &pi_mles,
+                        &challenges,
+                        &expr.values,
+                        n_threads,
+                    )
+                    .get_ext_field_vec()
+                    .to_vec();
 
                     let multiplicity = wit_infer_by_expr(
                         &fixed,
@@ -849,6 +868,7 @@ Hints:
                         &pi_mles,
                         &challenges,
                         &expr.multiplicity,
+                        n_threads,
                     )
                     .get_base_field_vec()
                     .to_vec();
@@ -968,10 +988,16 @@ Hints:
                     .zip_eq(cs.w_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
-                        let write_rlc_records =
-                            (wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, w_rlc_expr)
-                                .get_ext_field_vec())[..*num_rows]
-                                .to_vec();
+                        let write_rlc_records = (wit_infer_by_expr(
+                            fixed,
+                            witness,
+                            &pi_mles,
+                            &challenges,
+                            w_rlc_expr,
+                            n_threads,
+                        )
+                        .get_ext_field_vec())[..*num_rows]
+                            .to_vec();
 
                         if $ram_type == RAMType::GlobalState {
                             // w_exprs = [GlobalState, pc, timestamp]
@@ -986,6 +1012,7 @@ Hints:
                                         &pi_mles,
                                         &challenges,
                                         expr,
+                                        n_threads,
                                     );
                                     v.get_base_field_vec()[..*num_rows].to_vec()
                                 })
@@ -1030,10 +1057,16 @@ Hints:
                     .zip_eq(cs.r_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
-                        let read_records =
-                            wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, r_expr)
-                                .get_ext_field_vec()[..*num_rows]
-                                .to_vec();
+                        let read_records = wit_infer_by_expr(
+                            fixed,
+                            witness,
+                            &pi_mles,
+                            &challenges,
+                            r_expr,
+                            n_threads,
+                        )
+                        .get_ext_field_vec()[..*num_rows]
+                            .to_vec();
                         let mut records = vec![];
                         for (row, record) in enumerate(read_records) {
                             // TODO: return error

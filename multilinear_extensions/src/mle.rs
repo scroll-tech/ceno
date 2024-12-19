@@ -1052,45 +1052,6 @@ macro_rules! op_mle3_range {
     }};
 }
 
-/// deal with x * a + b
-#[macro_export]
-macro_rules! op_mle_xa_b {
-    (|$x:ident, $a:ident, $b:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
-        match (&$x.evaluations(), &$a.evaluations(), &$b.evaluations()) {
-            (
-                $crate::mle::FieldType::Base(x_vec),
-                $crate::mle::FieldType::Base(a_vec),
-                $crate::mle::FieldType::Base(b_vec),
-            ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
-            }
-            (
-                $crate::mle::FieldType::Base(x_vec),
-                $crate::mle::FieldType::Ext(a_vec),
-                $crate::mle::FieldType::Base(b_vec),
-            ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
-            }
-            (
-                $crate::mle::FieldType::Base(x_vec),
-                $crate::mle::FieldType::Ext(a_vec),
-                $crate::mle::FieldType::Ext(b_vec),
-            ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
-            }
-            (x, a, b) => unreachable!(
-                "unmatched pattern {:?} {:?} {:?}",
-                x.variant_name(),
-                a.variant_name(),
-                b.variant_name()
-            ),
-        }
-    };
-    (|$x:ident, $a:ident, $b:ident| $op:expr) => {
-        op_mle_xa_b!(|$x, $a, $b| $op, |out| out)
-    };
-}
-
 #[macro_export]
 macro_rules! op_mle3_range_pool {
     ($x:ident, $a:ident, $b:ident, $res:ident, $x_vec:ident, $a_vec:ident, $b_vec:ident, $res_vec:ident, $op:expr, |$bb_out:ident| $op_bb_out:expr) => {{

@@ -4,12 +4,17 @@ use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    commutative_op_mle_pair, commutative_op_mle_pair_pool,
+    commutative_op_mle_pair_pool,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
-    op_mle_xa_b, op_mle_xa_b_pool, op_mle3_range, op_mle3_range_pool,
+    op_mle_xa_b_pool, op_mle3_range_pool,
     util::ceil_log2,
     virtual_poly_v2::ArcMultilinearExtension,
 };
+
+use ff::Field;
+
+const POOL_CAP: usize = 12;
+
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -234,124 +239,6 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
-pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
-    fixed: &[ArcMultilinearExtension<'a, E>],
-    witnesses: &[ArcMultilinearExtension<'a, E>],
-    instance: &[ArcMultilinearExtension<'a, E>],
-    challenges: &[E; N],
-    expr: &Expression<E>,
-) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
-        &|f| fixed[f.0].clone(),
-        &|witness_id| witnesses[witness_id as usize].clone(),
-        &|i| instance[i.0].clone(),
-        &|scalar| {
-            let scalar: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
-                    scalar,
-                ]));
-            scalar
-        },
-        &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be acquired once for each power
-            let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
-                    challenge.pow([pow as u64]) * scalar + offset,
-                ]),
-            );
-            challenge
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] + b[0]],
-                    )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] + *b)
-                            .collect(),
-                    )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a + b[0])
-                            .collect(),
-                    )),
-                    (_, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .zip(b.par_iter())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|(a, b)| *a + b)
-                            .collect(),
-                    )),
-                }
-            })
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] * b[0]],
-                    )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] * *b)
-                            .collect(),
-                    )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a * b[0])
-                            .collect(),
-                    )),
-                    (_, _) => {
-                        assert_eq!(a.len(), b.len());
-                        // we do the pointwise evaluation multiplication here without involving FFT
-                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
-                        Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            ceil_log2(a.len()),
-                            a.par_iter()
-                                .zip(b.par_iter())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .map(|(a, b)| *a * b)
-                                .collect(),
-                        ))
-                    }
-                }
-            })
-        },
-        &|x, a, b| {
-            op_mle_xa_b!(|x, a, b| {
-                assert_eq!(a.len(), 1);
-                assert_eq!(b.len(), 1);
-                let (a, b) = (a[0], b[0]);
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(x.len()),
-                    x.par_iter()
-                        .with_min_len(MIN_PAR_SIZE)
-                        .map(|x| a * x + b)
-                        .collect(),
-                ))
-            })
-        },
-    )
-}
-
-use ff::Field;
-
-const POOL_CAP: usize = 12;
-
 fn try_recycle_arcpoly<E: ExtensionField>(
     poly: Cow<ArcMultilinearExtension<'_, E>>,
     pool_e: &mut SimpleVecPool<Vec<E>>,
@@ -391,7 +278,7 @@ fn try_recycle_arcpoly<E: ExtensionField>(
     }
 }
 
-pub(crate) fn wit_infer_by_expr_in_pool<'a, E: ExtensionField, const N: usize>(
+pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],
@@ -665,10 +552,9 @@ mod tests {
         expression::{Expression, ToExpr},
         scheme::utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+            wit_infer_by_expr,
         },
     };
-
-    use super::wit_infer_by_expr;
 
     #[test]
     fn test_infer_tower_witness() {
@@ -931,6 +817,7 @@ mod tests {
             &[],
             &[],
             &expr,
+            1,
         );
         res.get_base_field_vec();
     }
@@ -961,6 +848,7 @@ mod tests {
             &[],
             &[E::ONE],
             &expr,
+            1,
         );
         res.get_ext_field_vec();
     }

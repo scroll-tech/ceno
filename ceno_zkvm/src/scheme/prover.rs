@@ -28,7 +28,7 @@ use crate::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-            wit_infer_by_expr, wit_infer_by_expr_in_pool,
+            wit_infer_by_expr,
         },
     },
     structs::{
@@ -246,7 +246,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .chain(cs.lk_expressions.iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr_in_pool(&[], &witnesses, pi, challenges, expr, n_threads)
+                wit_infer_by_expr(&[], &witnesses, pi, challenges, expr, n_threads)
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
@@ -526,7 +526,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 // sanity check in debug build and output != instance index for zero check sumcheck poly
                 if cfg!(debug_assertions) {
                     let expected_zero_poly =
-                        wit_infer_by_expr_in_pool(&[], &witnesses, pi, challenges, expr, n_threads);
+                        wit_infer_by_expr(&[], &witnesses, pi, challenges, expr, n_threads);
                     let top_100_errors = expected_zero_poly
                         .get_base_field_vec()
                         .iter()
@@ -716,7 +716,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr_in_pool(&fixed, &witnesses, pi, challenges, expr, n_threads)
+                wit_infer_by_expr(&fixed, &witnesses, pi, challenges, expr, n_threads)
             })
             .collect();
         let max_log2_num_instance = records_wit.iter().map(|mle| mle.num_vars()).max().unwrap();
