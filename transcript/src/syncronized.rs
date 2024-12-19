@@ -2,7 +2,6 @@ use std::array;
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use ff_ext::ExtensionField;
-// use goldilocks::SmallField;
 
 use crate::{Challenge, Transcript};
 
@@ -63,20 +62,6 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         Challenge {
             elements: self.challenge_rx[self.rolling_index].recv().unwrap(),
         }
-        // loop {
-        //     match self.challenge_rx[self.rolling_index].try_recv() {
-        //         Ok(val) => {
-        //             return Challenge { elements: val };
-        //         }
-        //         Err(TryRecvError::Empty) => {
-        //             // keey rayon thread busy and avoid "rayon::yield_now"
-        //             // rayon::yield_now();
-        //         }
-        //         Err(e) => {
-        //             panic!("Error: {}", e);
-        //         }
-        //     }
-        // }
     }
 
     fn read_field_element_exts(&self) -> Vec<E> {

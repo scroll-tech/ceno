@@ -17,6 +17,7 @@ const EXAMPLES: &[&str] = &[
     "hints",
     "sorting",
     "median",
+    "hashing",
 ];
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -44,12 +45,12 @@ fn build_elfs() {
             dest,
             r#"#[allow(non_upper_case_globals)]
             pub const {example}: &[u8] =
-                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-unknown-none-elf/release/examples/{example}");"#
+                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
     println!("cargo:rerun-if-changed=../examples/");
     println!("cargo:rerun-if-changed=../ceno_rt/");
-    let elfs_path = "../examples/target/riscv32im-unknown-none-elf/release/examples/";
+    let elfs_path = "../examples/target/riscv32im-ceno-zkvm-elf/release/examples/";
     println!("cargo:rerun-if-changed={elfs_path}");
 }
 

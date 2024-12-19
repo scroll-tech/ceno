@@ -1,2 +1,5 @@
 [toolchain]
 channel = "nightly-2024-12-06"
+targets = ["riscv32im-unknown-none-elf"]
+# We need the sources for build-std.
+components = ["rust-src"]

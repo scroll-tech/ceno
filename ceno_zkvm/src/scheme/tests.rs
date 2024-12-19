@@ -14,7 +14,7 @@ use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentSche
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
 };
-use transcript::{BasicTranscript, Transcript};
+use transcript::{BasicTranscript, BasicTranscriptWitStat, StatisticRecorder, Transcript};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -155,8 +155,9 @@ fn test_rw_lk_expression_combination() {
             .expect("create_proof failed");
 
         // verify proof
+        let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscript::new(b"test");
+        let mut v_transcript = BasicTranscriptWitStat::new(&stat_recorder, b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -178,6 +179,10 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
+        println!(
+            "hashed fields {}",
+            stat_recorder.into_inner().field_appended_num
+        );
     }
 
     // <lookup count, rw count>
@@ -289,11 +294,21 @@ fn test_single_add_instance_e2e() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let transcript = BasicTranscript::new(b"riscv");
-    assert!(
-        verifier
-            .verify_proof(zkvm_proof, transcript)
-            .expect("verify proof return with error"),
+    let encoded_bin = bincode::serialize(&zkvm_proof).unwrap();
+
+    let stat_recorder = StatisticRecorder::default();
+    {
+        let transcript = BasicTranscriptWitStat::new(&stat_recorder, b"riscv");
+        assert!(
+            verifier
+                .verify_proof(zkvm_proof, transcript)
+                .expect("verify proof return with error"),
+        );
+    }
+    println!(
+        "encoded zkvm proof size: {}, hash_num: {}",
+        encoded_bin.len(),
+        stat_recorder.into_inner().field_appended_num
     );
 }
 

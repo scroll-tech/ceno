@@ -1,0 +1,32 @@
+{
+  "arch": "riscv32",
+  "atomic-cas": true,
+  "cpu": "generic-rv32",
+  "crt-objects-fallback": "false",
+  "data-layout": "e-m:e-p:32:32-i64:64-n32-S128",
+  "disable-redzone": false,
+  "eh-frame-header": false,
+  "emit-debug-gdb-scripts": false,
+  "env": "",
+  "executables": true,
+  "features": "+m,+forced-atomics",
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
+  "llvm-abiname": "ilp32",
+  "llvm-target": "riscv32",
+  "main-needs-argc-argv": false,
+  "metadata": {
+    "description": null,
+    "host_tools": false,
+    "std": true,
+    "tier": 2
+  },
+  "max-atomic-width": 64,
+  "os": "zkvm",
+  "panic-strategy": "abort",
+  "relocation-model": "static",
+  "singlethread": true,
+  "target-c-int-width": "32",
+  "target-endian": "little",
+  "target-pointer-width": "32"
+}
