@@ -85,10 +85,6 @@ fn fibonacci_prove(c: &mut Criterion) {
                 format!("fibonacci_max_steps_{}", max_steps),
             ),
             |b| {
-                // use itertools::Itertools;
-                // let mut iter_verifier = Option::<_>::None;
-                // let mut iter_proof = Option::<_>::None;
-
                 b.iter_with_setup(
                     || {
                         run_e2e_with_checkpoint::<E, Pcs>(
