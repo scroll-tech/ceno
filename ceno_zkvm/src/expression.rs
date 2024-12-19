@@ -18,6 +18,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     structs::{ChallengeId, RAMType, WitnessId},
+    utils::SimpleVecPool,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -134,6 +135,84 @@ impl<E: ExtensionField> Expression<E> {
                     fixed_in, wit_in, instance, constant, challenge, sum, product, scaled,
                 );
                 scaled(x, a, b)
+            }
+            Expression::Challenge(challenge_id, pow, scalar, offset) => {
+                challenge(*challenge_id, *pow, *scalar, *offset)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_instance_pool<T, PF1: Fn() -> Vec<E>, PF2: Fn() -> Vec<E::BaseField>>(
+        &self,
+        fixed_in: &impl Fn(&Fixed) -> T,
+        wit_in: &impl Fn(WitnessId) -> T, // witin id
+        instance: &impl Fn(Instance) -> T,
+        constant: &impl Fn(E::BaseField) -> T,
+        challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
+        sum: &impl Fn(
+            T,
+            T,
+            &mut SimpleVecPool<Vec<E>, PF1>,
+            &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
+        ) -> T,
+        product: &impl Fn(
+            T,
+            T,
+            &mut SimpleVecPool<Vec<E>, PF1>,
+            &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
+        ) -> T,
+        scaled: &impl Fn(
+            T,
+            T,
+            T,
+            &mut SimpleVecPool<Vec<E>, PF1>,
+            &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
+        ) -> T,
+        pool_e: &mut SimpleVecPool<Vec<E>, PF1>,
+        pool_b: &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
+    ) -> T {
+        match self {
+            Expression::Fixed(f) => fixed_in(f),
+            Expression::WitIn(witness_id) => wit_in(*witness_id),
+            Expression::Instance(i) => instance(*i),
+            Expression::Constant(scalar) => constant(*scalar),
+            Expression::Sum(a, b) => {
+                let a = a.evaluate_with_instance_pool(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled, pool_e,
+                    pool_b,
+                );
+                let b = b.evaluate_with_instance_pool(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled, pool_e,
+                    pool_b,
+                );
+                sum(a, b, pool_e, pool_b)
+            }
+            Expression::Product(a, b) => {
+                let a = a.evaluate_with_instance_pool(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled, pool_e,
+                    pool_b,
+                );
+                let b = b.evaluate_with_instance_pool(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled, pool_e,
+                    pool_b,
+                );
+                product(a, b, pool_e, pool_b)
+            }
+            Expression::ScaledSum(x, a, b) => {
+                let x = x.evaluate_with_instance_pool(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled, pool_e,
+                    pool_b,
+                );
+                let a = a.evaluate_with_instance_pool(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled, pool_e,
+                    pool_b,
+                );
+                let b = b.evaluate_with_instance_pool(
+                    fixed_in, wit_in, instance, constant, challenge, sum, product, scaled, pool_e,
+                    pool_b,
+                );
+                scaled(x, a, b, pool_e, pool_b)
             }
             Expression::Challenge(challenge_id, pow, scalar, offset) => {
                 challenge(*challenge_id, *pow, *scalar, *offset)
