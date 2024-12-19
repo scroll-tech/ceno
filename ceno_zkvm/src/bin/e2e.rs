@@ -1,4 +1,5 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     with_panic_hook,
@@ -95,7 +96,8 @@ fn main() {
         .init();
 
     tracing::info!("Loading ELF file: {}", &args.elf);
-    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    // let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let elf_bytes = ceno_examples::sorting;
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = setup_platform(
         args.platform,
@@ -113,6 +115,13 @@ fn main() {
 
     tracing::info!("Loading hints file: {:?}", args.hints);
     let hints = memory_from_file(&args.hints);
+    let mut hints = CenoStdin::default();
+    // let mut rng = rand::thread_rng();
+
+    // Provide some random numbers to sort.
+    _ = hints.write(&(0..10).map(|i| 1000 - i).collect::<Vec<_>>());
+    let hints: Vec<u32> = (&hints).into();
+
     assert!(
         hints.len() <= platform.hints.iter_addresses().len(),
         "hints must fit in {} bytes",
