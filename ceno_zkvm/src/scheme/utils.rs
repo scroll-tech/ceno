@@ -4,9 +4,9 @@ use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    commutative_op_mle_pair_pool,
+    commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
-    op_mle_xa_b_pool, op_mle3_range_pool,
+    op_mle_xa_b, op_mle3_range,
     util::{ceil_log2, max_usable_threads},
     virtual_poly_v2::ArcMultilinearExtension,
 };
@@ -238,28 +238,12 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
-fn try_recycle_arcpoly<E: ExtensionField, PF1: Fn() -> Vec<E>, PF2: Fn() -> Vec<E::BaseField>>(
+fn optional_arcpoly_unwrap_pushback<E: ExtensionField>(
     poly: Cow<ArcMultilinearExtension<'_, E>>,
-    pool_e: &mut SimpleVecPool<Vec<E>, PF1>,
-    pool_b: &mut SimpleVecPool<Vec<E::BaseField>, PF2>,
+    pool_e: &mut SimpleVecPool<Vec<E>, impl Fn() -> Vec<E>>,
+    pool_b: &mut SimpleVecPool<Vec<E::BaseField>, impl Fn() -> Vec<E::BaseField>>,
     pool_expected_size_vec: usize,
 ) {
-    // fn downcast_arc<E: ExtensionField>(
-    //     arc: ArcMultilinearExtension<'_, E>,
-    // ) -> DenseMultilinearExtension<E> {
-    //     unsafe {
-    //         // get the raw pointer from the Arc
-    //         assert_eq!(Arc::strong_count(&arc), 1);
-    //         let raw = Arc::into_raw(arc);
-    //         // cast the raw pointer to the desired concrete type
-    //         let typed_ptr = raw as *const DenseMultilinearExtension<E>;
-    //         // manually drop the Arc without dropping the value
-    //         Arc::decrement_strong_count(raw);
-    //         // reconstruct the Arc with the concrete type
-    //         // Move the value out
-    //         ptr::read(typed_ptr)
-    //     }
-    // }
     let len = poly.evaluations().len();
     if len == pool_expected_size_vec {
         match poly {
@@ -348,7 +332,7 @@ pub(crate) fn wit_infer_by_expr_pool<'a, E: ExtensionField, const N: usize>(
             &|cow_a, cow_b, pool_e, pool_b| {
                 let (a, b) = (cow_a.as_ref(), cow_b.as_ref());
                 let poly =
-                    commutative_op_mle_pair_pool!(
+                    commutative_op_mle_pair!(
                         |a, b, res| {
                             match (a.len(), b.len()) {
                                 (1, 1) => {
@@ -401,14 +385,14 @@ pub(crate) fn wit_infer_by_expr_pool<'a, E: ExtensionField, const N: usize>(
                         pool_e,
                         pool_b
                     );
-                try_recycle_arcpoly(cow_a, pool_e, pool_b, len);
-                try_recycle_arcpoly(cow_b, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_a, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_b, pool_e, pool_b, len);
                 poly
             },
             &|cow_a, cow_b, pool_e, pool_b| {
                 let (a, b) = (cow_a.as_ref(), cow_b.as_ref());
                 let poly =
-                    commutative_op_mle_pair_pool!(
+                    commutative_op_mle_pair!(
                         |a, b, res| {
                             match (a.len(), b.len()) {
                                 (1, 1) => {
@@ -464,13 +448,13 @@ pub(crate) fn wit_infer_by_expr_pool<'a, E: ExtensionField, const N: usize>(
                         pool_e,
                         pool_b
                     );
-                try_recycle_arcpoly(cow_a, pool_e, pool_b, len);
-                try_recycle_arcpoly(cow_b, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_a, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_b, pool_e, pool_b, len);
                 poly
             },
             &|cow_x, cow_a, cow_b, pool_e, pool_b| {
                 let (x, a, b) = (cow_x.as_ref(), cow_a.as_ref(), cow_b.as_ref());
-                let poly = op_mle_xa_b_pool!(
+                let poly = op_mle_xa_b!(
                     |x, a, b, res| {
                         let res = SyncUnsafeCell::new(res);
                         assert_eq!(a.len(), 1);
@@ -490,9 +474,9 @@ pub(crate) fn wit_infer_by_expr_pool<'a, E: ExtensionField, const N: usize>(
                     pool_e,
                     pool_b
                 );
-                try_recycle_arcpoly(cow_a, pool_e, pool_b, len);
-                try_recycle_arcpoly(cow_b, pool_e, pool_b, len);
-                try_recycle_arcpoly(cow_x, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_a, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_b, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_x, pool_e, pool_b, len);
                 poly
             },
             pool_e,

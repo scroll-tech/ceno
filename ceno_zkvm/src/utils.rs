@@ -230,33 +230,28 @@ where
     result
 }
 
+/// a simple vector pool
+/// not support multi-thread access
 pub struct SimpleVecPool<T, F: Fn() -> T> {
     pool: VecDeque<T>,
     factory_fn: F,
 }
 
 impl<T, F: Fn() -> T> SimpleVecPool<T, F> {
-    // Create a new pool with a factory closure
+    //  new pool with a factory closure
     pub fn new(init: F) -> Self {
-        let pool = SimpleVecPool {
+        SimpleVecPool {
             pool: VecDeque::new(),
             factory_fn: init,
-        };
-
-        pool
+        }
     }
 
-    // Add a new item to the pool
-    pub fn add(&mut self, item: T) {
-        self.pool.push_back(item);
-    }
-
-    // Borrow an item from the pool, or create a new one if empty
+    // borrow an item from the pool, or create a new one if empty
     pub fn borrow(&mut self) -> T {
         self.pool.pop_front().unwrap_or_else(|| (self.factory_fn)())
     }
 
-    // Return an item to the pool
+    // push an item to the pool
     pub fn return_to_pool(&mut self, item: T) {
         self.pool.push_back(item);
     }

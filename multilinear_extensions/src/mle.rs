@@ -1062,10 +1062,7 @@ macro_rules! op_mle3_range {
         let $bb_out = $op;
         $op_bb_out
     }};
-}
 
-#[macro_export]
-macro_rules! op_mle3_range_pool {
     ($x:ident, $a:ident, $b:ident, $res:ident, $x_vec:ident, $a_vec:ident, $b_vec:ident, $res_vec:ident, $op:expr, |$bb_out:ident| $op_bb_out:expr) => {{
         let $x = if let Some((start, offset)) = $x.evaluations_range() {
             &$x_vec[start..][..offset]
@@ -1091,7 +1088,7 @@ macro_rules! op_mle3_range_pool {
 
 /// deal with x * a + b
 #[macro_export]
-macro_rules! op_mle_xa_b_pool {
+macro_rules! op_mle_xa_b {
     (|$x:ident, $a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$x.evaluations(), &$a.evaluations(), &$b.evaluations()) {
             (
@@ -1100,7 +1097,7 @@ macro_rules! op_mle_xa_b_pool {
                 $crate::mle::FieldType::Base(b_vec),
             ) => {
                 let res_vec = $pool_b.borrow();
-                op_mle3_range_pool!(
+                op_mle3_range!(
                     $x,
                     $a,
                     $b,
@@ -1119,7 +1116,7 @@ macro_rules! op_mle_xa_b_pool {
                 $crate::mle::FieldType::Base(b_vec),
             ) => {
                 let res_vec = $pool_e.borrow();
-                op_mle3_range_pool!(
+                op_mle3_range!(
                     $x,
                     $a,
                     $b,
@@ -1138,7 +1135,7 @@ macro_rules! op_mle_xa_b_pool {
                 $crate::mle::FieldType::Ext(b_vec),
             ) => {
                 let res_vec = $pool_e.borrow();
-                op_mle3_range_pool!(
+                op_mle3_range!(
                     $x,
                     $a,
                     $b,
@@ -1160,7 +1157,7 @@ macro_rules! op_mle_xa_b_pool {
         }
     };
     (|$x:ident, $a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
-        op_mle_xa_b_pool!(|$x, $a, $b, $res| $op, $pool_e, $pool_b, |out| out)
+        op_mle_xa_b!(|$x, $a, $b, $res| $op, $pool_e, $pool_b, |out| out)
     };
 }
 
@@ -1297,15 +1294,6 @@ macro_rules! commutative_op_mle_pair {
             _ => unreachable!(),
         }
     };
-    (|$a:ident, $b:ident| $op:expr) => {
-        commutative_op_mle_pair!(|$a, $b| $op, |out| out)
-    };
-}
-
-/// macro support op(a, b) and tackles type matching internally.
-/// Please noted that op must satisfy commutative rule w.r.t op(b, a) operand swap.
-#[macro_export]
-macro_rules! commutative_op_mle_pair_pool {
     (|$first:ident, $second:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$first.evaluations(), &$second.evaluations()) {
             ($crate::mle::FieldType::Base(base1), $crate::mle::FieldType::Base(base2)) => {
@@ -1374,6 +1362,9 @@ macro_rules! commutative_op_mle_pair_pool {
         }
     };
     (|$a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
-        commutative_op_mle_pair_pool!(|$a, $b, $res| $op, $pool_e, $pool_b, |out| out)
+        commutative_op_mle_pair!(|$a, $b, $res| $op, $pool_e, $pool_b, |out| out)
+    };
+    (|$a:ident, $b:ident| $op:expr) => {
+        commutative_op_mle_pair!(|$a, $b| $op, |out| out)
     };
 }
