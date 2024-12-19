@@ -260,7 +260,6 @@ impl<T> SimpleVecPool<T> {
 
     // Return an item to the pool
     pub fn return_to_pool(&mut self, item: T) {
-        println!("got return!");
         self.pool.push_back(item);
     }
 }

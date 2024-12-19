@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair_pool,
-    mle::{DenseMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    mle::{DenseMultilinearExtension, FieldType, IntoMLE},
     op_mle_xa_b_pool, op_mle3_range_pool,
     util::ceil_log2,
     virtual_poly_v2::ArcMultilinearExtension,
@@ -13,7 +13,7 @@ use multilinear_extensions::{
 
 use ff::Field;
 
-const POOL_CAP: usize = 12;
+const POOL_CAP: usize = 3;
 
 use rayon::{
     iter::{
@@ -268,15 +268,11 @@ fn try_recycle_arcpoly<E: ExtensionField>(
             Cow::Borrowed(_) => (),
             Cow::Owned(_) => {
                 let poly = poly.into_owned();
-                let poly = poly.dyn_try_unwrap().unwrap();
-
-                // let poly = Box::downcast::<MultilinearExtension<E>>(poly).unwrap();
-
-                // match poly.evaluations {
-                //     FieldType::Base(vec) => pool_b.return_to_pool(vec),
-                //     FieldType::Ext(vec) => pool_e.return_to_pool(vec),
-                //     _ => unreachable!(),
-                // };
+                match poly.arc_try_unwrap().unwrap() {
+                    FieldType::Base(vec) => pool_b.return_to_pool(vec),
+                    FieldType::Ext(vec) => pool_e.return_to_pool(vec),
+                    _ => unreachable!(),
+                };
             }
         };
     }
