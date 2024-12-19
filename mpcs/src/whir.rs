@@ -9,8 +9,8 @@ use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use whir::{
     ceno_binding::{
-        Config, DefaultHash, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
-        WhirSpec as WhirSpecInner,
+        Config, DefaultHash, FieldChallenges, FieldWriter, PolynomialCommitmentScheme as WhirPCS,
+        Whir as WhirInner, WhirSpec as WhirSpecInner,
     },
     whir::{
         fs_utils::{DigestReader, DigestWriter},
@@ -165,13 +165,50 @@ where
 
     fn open(
         pp: &Self::ProverParam,
-        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+        _poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        todo!()
+        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let mut merlin = io.to_merlin();
+        // In WHIR, the prover writes the commitment to the transcript, then
+        // the commitment is read from the transcript by the verifier, after
+        // the transcript is transformed into a arthur transcript.
+        // Here we repeat whatever the prover does.
+        // TODO: This is a hack. There should be a better design that does not
+        // require non-black-box knowledge of the inner working of WHIR.
+        merlin
+            .add_digest(comm.commitment.clone())
+            .map_err(|err| crate::Error::WhirError(whir::ceno_binding::Error::ProofError(err)))?;
+        let ood_answers = comm.ood_answers();
+        if ood_answers.len() > 0 {
+            let mut ood_points =
+                vec![<FieldWrapper::<E> as ark_ff::AdditiveGroup>::ZERO; ood_answers.len()];
+            merlin
+                .fill_challenge_scalars(&mut ood_points)
+                .map_err(|err| {
+                    crate::Error::WhirError(whir::ceno_binding::Error::ProofError(err))
+                })?;
+            merlin.add_scalars(&ood_answers).map_err(|err| {
+                crate::Error::WhirError(whir::ceno_binding::Error::ProofError(err))
+            })?;
+        }
+        // Now the Merlin transcript is ready to pass to the verifier.
+
+        WhirInnerT::<E, Spec>::open(
+            &pp,
+            comm.clone(), // TODO: Remove clone
+            point
+                .iter()
+                .map(|x| FieldWrapper(*x))
+                .collect::<Vec<_>>()
+                .as_slice(),
+            &FieldWrapper(*eval),
+            &mut merlin,
+        )
+        .map_err(crate::Error::WhirError)
     }
 
     fn verify(
