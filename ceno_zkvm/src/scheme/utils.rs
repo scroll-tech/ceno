@@ -382,6 +382,7 @@ fn try_recycle_arcpoly<E: ExtensionField>(
     ) -> DenseMultilinearExtension<E> {
         unsafe {
             // get the raw pointer from the Arc
+            assert_eq!(Arc::strong_count(&arc), 1);
             let raw = Arc::into_raw(arc);
             // cast the raw pointer to the desired concrete type
             let typed_ptr = raw as *const DenseMultilinearExtension<E>;
@@ -625,6 +626,7 @@ pub(crate) fn wit_infer_by_expr_in_place<'a, E: ExtensionField, const N: usize>(
             &mut pool_e,
             &mut pool_b,
         );
+    println!("??");
     match poly {
         Cow::Borrowed(poly) => poly.clone(),
         Cow::Owned(_) => poly.into_owned(),
