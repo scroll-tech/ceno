@@ -13,6 +13,7 @@ use crate::{
     expression::{Expression, ToExpr, WitIn},
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     set_val,
+    utils::i64_to_base,
     witness::LkMultiplicity,
 };
 
@@ -57,7 +58,7 @@ impl AssertLtConfig {
         lhs: u64,
         rhs: u64,
     ) -> Result<(), ZKVMError> {
-        self.0.assign_instance(instance, lkm, lhs, rhs)?;
+        self.0.assign_instance_u64(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 }
@@ -112,7 +113,7 @@ impl IsLtConfig {
         rhs: u64,
     ) -> Result<(), ZKVMError> {
         set_val!(instance, self.is_lt, (lhs < rhs) as u64);
-        self.config.assign_instance(instance, lkm, lhs, rhs)?;
+        self.config.assign_instance_u64(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 
@@ -120,12 +121,25 @@ impl IsLtConfig {
         &self,
         instance: &mut [F],
         lkm: &mut LkMultiplicity,
-        lhs: SWord,
-        rhs: SWord,
+        lhs: i64,
+        rhs: i64,
     ) -> Result<(), ZKVMError> {
         set_val!(instance, self.is_lt, (lhs < rhs) as u64);
+        self.config.assign_instance_i64(instance, lkm, lhs, rhs)?;
+        Ok(())
+    }
+
+    pub fn assign_instance_field<F: SmallField>(
+        &self,
+        instance: &mut [F],
+        lkm: &mut LkMultiplicity,
+        lhs: F,
+        rhs: F,
+        is_lt: bool,
+    ) -> Result<(), ZKVMError> {
+        set_val!(instance, self.is_lt, is_lt as u64);
         self.config
-            .assign_instance_signed(instance, lkm, lhs, rhs)?;
+            .assign_instance_field(instance, lkm, lhs, rhs, is_lt)?;
         Ok(())
     }
 }
@@ -141,6 +155,32 @@ impl InnerLtConfig {
         1u64 << (u16::BITS as usize * max_num_u16_limbs)
     }
 
+    /// Construct an `InnerLtConfig` circuit which constrains two input
+    /// expressions `lhs` and `rhs` to satisfy the relation
+    ///
+    /// - `rhs - lhs \in {1, ..., 2^(16*max_num_u16_limbs)}` when `is_lt_expr = 1`; and
+    /// - `lhs - rhs \in {0, ..., 2^(16*max_num_u16_limbs) - 1}` when `is_lt_expr = 0`
+    ///
+    /// In the above, values are to be interpreted as finite field elements.
+    ///
+    /// This is accomplished by witnessing as a `16*max_num_u16_limbs`-bit value
+    /// using 16-bit unsigned limbs either `lhs - rhs` when `lhs` is required to
+    /// be at least as large as `rhs`, or `lhs - rhs + 2^ (16*max_num_u16_limbs)`
+    /// when `lhs` is required to be smaller than `lhs`.
+    ///
+    /// Note that the specific values of `lhs` and `rhs` are not relevant to the
+    /// above conditions -- this means that the value of `max_num_u16_limbs`
+    /// only needs to depend on the size of the *difference* between values,
+    /// not on their absolute magnitude.  That is, one limb is sufficient to
+    /// express that 2^48 - 12 is less than 2^48 + 71, since their difference
+    /// of 83 is within the magnitudes representable by a single 16-bit limb.
+    ///
+    /// Since there is ambiguity in ordering of values when they are interpreted
+    /// as elements in a finite field, several functions are available for
+    /// witness assignment which take unsigned or signed inputs (which have a
+    /// standard ordering interpretation which is used for the witness
+    /// assignment), or field elements with an additional explicit boolean
+    /// input indicating directly whether `is_lt_expr` is 0 or 1.
     pub fn construct_circuit<E: ExtensionField, NR: Into<String> + Display + Clone>(
         cb: &mut CircuitBuilder<E>,
         name: NR,
@@ -182,36 +222,49 @@ impl InnerLtConfig {
         })
     }
 
-    pub fn assign_instance<F: SmallField>(
+    /// Assign instance values to this configuration where the ordering is
+    /// determined by u64 value ordering.
+    pub fn assign_instance_u64<F: SmallField>(
         &self,
         instance: &mut [F],
         lkm: &mut LkMultiplicity,
         lhs: u64,
         rhs: u64,
     ) -> Result<(), ZKVMError> {
-        let diff = cal_lt_diff(lhs < rhs, self.max_num_u16_limbs, lhs, rhs);
-        self.diff.iter().enumerate().for_each(|(i, wit)| {
-            // extract the 16 bit limb from diff and assign to instance
-            let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
-            lkm.assert_ux::<16>(val);
-            set_val!(instance, wit, val);
-        });
-        Ok(())
+        self.assign_instance_field(instance, lkm, lhs.into(), rhs.into(), lhs < rhs)
     }
 
-    // TODO: refactor with the above function
-    pub fn assign_instance_signed<F: SmallField>(
+    /// Assign instance values to this configuration where the ordering is
+    /// determined by i64 value ordering.
+    pub fn assign_instance_i64<F: SmallField>(
         &self,
         instance: &mut [F],
         lkm: &mut LkMultiplicity,
-        lhs: SWord,
-        rhs: SWord,
+        lhs: i64,
+        rhs: i64,
     ) -> Result<(), ZKVMError> {
-        let diff = if lhs < rhs {
-            Self::range(self.diff.len()) - lhs.abs_diff(rhs) as u64
+        let lhs_f = i64_to_base::<F>(lhs);
+        let rhs_f = i64_to_base::<F>(rhs);
+        self.assign_instance_field(instance, lkm, lhs_f, rhs_f, lhs < rhs)
+    }
+
+    /// Assign values to this instance using field inputs, where the intended
+    /// ordering of the field values is specified by the `is_lt` boolean input,
+    /// indicating whether `lhs` is meant to be less than `rhs`.
+    pub fn assign_instance_field<F: SmallField>(
+        &self,
+        instance: &mut [F],
+        lkm: &mut LkMultiplicity,
+        lhs: F,
+        rhs: F,
+        is_lt: bool,
+    ) -> Result<(), ZKVMError> {
+        let range_offset: F = if is_lt {
+            Self::range(self.max_num_u16_limbs).into()
         } else {
-            lhs.abs_diff(rhs) as u64
+            F::ZERO
         };
+        let diff = (lhs - rhs + range_offset).to_canonical_u64();
         self.diff.iter().enumerate().for_each(|(i, wit)| {
             // extract the 16 bit limb from diff and assign to instance
             let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
@@ -224,7 +277,7 @@ impl InnerLtConfig {
 
 pub fn cal_lt_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
     (if is_lt {
-        1u64 << (u16::BITS as usize * max_num_u16_limbs)
+        InnerLtConfig::range(max_num_u16_limbs)
     } else {
         0
     } + lhs
@@ -370,7 +423,7 @@ impl<E: ExtensionField> InnerSignedLtConfig<E> {
         )?;
 
         self.config
-            .assign_instance_signed(instance, lkm, lhs, rhs)?;
+            .assign_instance_i64(instance, lkm, lhs as i64, rhs as i64)?;
         Ok(())
     }
 }
