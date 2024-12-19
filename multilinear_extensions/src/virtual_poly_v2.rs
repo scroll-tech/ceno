@@ -12,8 +12,6 @@ use serde::{Deserialize, Serialize};
 pub type ArcMultilinearExtension<'a, E> =
     Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a>;
 
-pub type DynMultilinearExtension<'a, E> =
-    dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a;
 #[rustfmt::skip]
 /// A virtual polynomial is a sum of products of multilinear polynomials;
 /// where the multilinear polynomials are stored via their multilinear

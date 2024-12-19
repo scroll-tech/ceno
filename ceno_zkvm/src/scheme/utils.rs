@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cell::SyncUnsafeCell, ptr, sync::Arc};
+use std::{borrow::Cow, cell::SyncUnsafeCell, sync::Arc};
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
@@ -8,7 +8,7 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     op_mle_xa_b_pool, op_mle3_range_pool,
     util::ceil_log2,
-    virtual_poly_v2::{ArcMultilinearExtension, DynMultilinearExtension},
+    virtual_poly_v2::ArcMultilinearExtension,
 };
 
 use ff::Field;
@@ -246,37 +246,37 @@ fn try_recycle_arcpoly<E: ExtensionField>(
     pool_b: &mut SimpleVecPool<Vec<E::BaseField>>,
     pool_expected_size_vec: usize,
 ) {
-    fn downcast_arc<E: ExtensionField>(
-        arc: ArcMultilinearExtension<'_, E>,
-    ) -> DenseMultilinearExtension<E> {
-        unsafe {
-            // get the raw pointer from the Arc
-            assert_eq!(Arc::strong_count(&arc), 1);
-            let raw = Arc::into_raw(arc);
-            // cast the raw pointer to the desired concrete type
-            let typed_ptr = raw as *const DenseMultilinearExtension<E>;
-            // manually drop the Arc without dropping the value
-            Arc::decrement_strong_count(raw);
-            // reconstruct the Arc with the concrete type
-            // Move the value out
-            ptr::read(typed_ptr)
-        }
-    }
+    // fn downcast_arc<E: ExtensionField>(
+    //     arc: ArcMultilinearExtension<'_, E>,
+    // ) -> DenseMultilinearExtension<E> {
+    //     unsafe {
+    //         // get the raw pointer from the Arc
+    //         assert_eq!(Arc::strong_count(&arc), 1);
+    //         let raw = Arc::into_raw(arc);
+    //         // cast the raw pointer to the desired concrete type
+    //         let typed_ptr = raw as *const DenseMultilinearExtension<E>;
+    //         // manually drop the Arc without dropping the value
+    //         Arc::decrement_strong_count(raw);
+    //         // reconstruct the Arc with the concrete type
+    //         // Move the value out
+    //         ptr::read(typed_ptr)
+    //     }
+    // }
     let len = poly.evaluations().len();
     if len == pool_expected_size_vec {
         match poly {
             Cow::Borrowed(_) => (),
             Cow::Owned(_) => {
                 let poly = poly.into_owned();
-                let poly: Box<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>> =
-                    poly.dyn_try_unwrap().unwrap();
-                let poly = Box::downcast::<DenseMultilinearExtension<E>>(poly).unwrap();
+                let poly = poly.dyn_try_unwrap().unwrap();
 
-                match poly.evaluations {
-                    FieldType::Base(vec) => pool_b.return_to_pool(vec),
-                    FieldType::Ext(vec) => pool_e.return_to_pool(vec),
-                    _ => unreachable!(),
-                };
+                // let poly = Box::downcast::<MultilinearExtension<E>>(poly).unwrap();
+
+                // match poly.evaluations {
+                //     FieldType::Base(vec) => pool_b.return_to_pool(vec),
+                //     FieldType::Ext(vec) => pool_e.return_to_pool(vec),
+                //     _ => unreachable!(),
+                // };
             }
         };
     }
@@ -480,7 +480,6 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             &mut pool_e,
             &mut pool_b,
         );
-    println!("??");
     match poly {
         Cow::Borrowed(poly) => poly.clone(),
         Cow::Owned(_) => poly.into_owned(),

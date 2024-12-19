@@ -65,7 +65,7 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
 
     fn dyn_try_unwrap(
         self: Arc<Self>,
-    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output>>>;
+    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output> + Send + Sync>>;
 }
 
 impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
@@ -828,7 +828,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
 
     fn dyn_try_unwrap(
         self: Arc<Self>,
-    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output>>> {
+    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output> + Send + Sync>> {
         Arc::try_unwrap(self).ok().map(|it| Box::new(it) as _)
     }
 }
@@ -1005,7 +1005,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<E> for RangedMultilinearExtensi
 
     fn dyn_try_unwrap(
         self: Arc<Self>,
-    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output>>> {
+    ) -> Option<Box<dyn MultilinearExtension<E, Output = Self::Output> + Send + Sync>> {
         unimplemented!()
     }
 }
