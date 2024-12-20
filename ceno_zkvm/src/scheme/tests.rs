@@ -14,7 +14,7 @@ use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentSche
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
 };
-use transcript::{BasicTranscript, BasicTranscriptWitStat, StatisticRecorder, Transcript};
+use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -157,7 +157,7 @@ fn test_rw_lk_expression_combination() {
         // verify proof
         let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWitStat::new(&stat_recorder, b"test");
+        let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -298,7 +298,7 @@ fn test_single_add_instance_e2e() {
 
     let stat_recorder = StatisticRecorder::default();
     {
-        let transcript = BasicTranscriptWitStat::new(&stat_recorder, b"riscv");
+        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
         assert!(
             verifier
                 .verify_proof(zkvm_proof, transcript)

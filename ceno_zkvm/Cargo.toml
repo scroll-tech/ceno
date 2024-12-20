@@ -42,9 +42,9 @@ generic_static = "0.2"
 rand.workspace = true
 tempfile = "3.14"
 thread_local = "1.1"
+bincode = "1"
 
 [dev-dependencies]
-bincode = "1"
 cfg-if.workspace = true
 criterion.workspace = true
 pprof2.workspace = true

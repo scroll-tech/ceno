@@ -7,7 +7,7 @@ pub mod basic;
 mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
-pub use statistics::{BasicTranscriptWitStat, StatisticRecorder};
+pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
