@@ -62,6 +62,8 @@ pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
             _ => panic!("evaluation not in base field"),
         }
     }
+
+    fn arc_try_unwrap(self: Arc<Self>) -> Option<FieldType<E>>;
 }
 
 impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
@@ -821,6 +823,12 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
             FieldType::Unreachable => unreachable!(),
         }
     }
+
+    fn arc_try_unwrap(self: Arc<Self>) -> Option<FieldType<E>> {
+        Arc::try_unwrap(self)
+            .ok()
+            .map(|it| it.evaluations_to_owned())
+    }
 }
 
 pub struct RangedMultilinearExtension<'a, E: ExtensionField> {
@@ -992,6 +1000,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<E> for RangedMultilinearExtensi
     fn dup(&self, _num_instances: usize, _num_dups: usize) -> DenseMultilinearExtension<E> {
         unimplemented!()
     }
+
+    fn arc_try_unwrap(self: Arc<Self>) -> Option<FieldType<E>> {
+        unimplemented!()
+    }
 }
 
 #[macro_export]
@@ -1050,33 +1062,91 @@ macro_rules! op_mle3_range {
         let $bb_out = $op;
         $op_bb_out
     }};
+
+    ($x:ident, $a:ident, $b:ident, $res:ident, $x_vec:ident, $a_vec:ident, $b_vec:ident, $res_vec:ident, $op:expr, |$bb_out:ident| $op_bb_out:expr) => {{
+        let $x = if let Some((start, offset)) = $x.evaluations_range() {
+            &$x_vec[start..][..offset]
+        } else {
+            &$x_vec[..]
+        };
+        let $a = if let Some((start, offset)) = $a.evaluations_range() {
+            &$a_vec[start..][..offset]
+        } else {
+            &$a_vec[..]
+        };
+        let $b = if let Some((start, offset)) = $b.evaluations_range() {
+            &$b_vec[start..][..offset]
+        } else {
+            &$b_vec[..]
+        };
+        let $res = $res_vec;
+        assert_eq!($res.len(), $x.len());
+        let $bb_out = $op;
+        $op_bb_out
+    }};
 }
 
 /// deal with x * a + b
 #[macro_export]
 macro_rules! op_mle_xa_b {
-    (|$x:ident, $a:ident, $b:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
+    (|$x:ident, $a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$x.evaluations(), &$a.evaluations(), &$b.evaluations()) {
             (
                 $crate::mle::FieldType::Base(x_vec),
                 $crate::mle::FieldType::Base(a_vec),
                 $crate::mle::FieldType::Base(b_vec),
             ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+                let res_vec = $pool_b.borrow();
+                op_mle3_range!(
+                    $x,
+                    $a,
+                    $b,
+                    $res,
+                    x_vec,
+                    a_vec,
+                    b_vec,
+                    res_vec,
+                    $op,
+                    |$bb_out| { $op_bb_out }
+                )
             }
             (
                 $crate::mle::FieldType::Base(x_vec),
                 $crate::mle::FieldType::Ext(a_vec),
                 $crate::mle::FieldType::Base(b_vec),
             ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+                let res_vec = $pool_e.borrow();
+                op_mle3_range!(
+                    $x,
+                    $a,
+                    $b,
+                    $res,
+                    x_vec,
+                    a_vec,
+                    b_vec,
+                    res_vec,
+                    $op,
+                    |$bb_out| { $op_bb_out }
+                )
             }
             (
                 $crate::mle::FieldType::Base(x_vec),
                 $crate::mle::FieldType::Ext(a_vec),
                 $crate::mle::FieldType::Ext(b_vec),
             ) => {
-                op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+                let res_vec = $pool_e.borrow();
+                op_mle3_range!(
+                    $x,
+                    $a,
+                    $b,
+                    $res,
+                    x_vec,
+                    a_vec,
+                    b_vec,
+                    res_vec,
+                    $op,
+                    |$bb_out| { $op_bb_out }
+                )
             }
             (x, a, b) => unreachable!(
                 "unmatched pattern {:?} {:?} {:?}",
@@ -1086,8 +1156,8 @@ macro_rules! op_mle_xa_b {
             ),
         }
     };
-    (|$x:ident, $a:ident, $b:ident| $op:expr) => {
-        op_mle_xa_b!(|$x, $a, $b| $op, |out| out)
+    (|$x:ident, $a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
+        op_mle_xa_b!(|$x, $a, $b, $res| $op, $pool_e, $pool_b, |out| out)
     };
 }
 
@@ -1223,6 +1293,76 @@ macro_rules! commutative_op_mle_pair {
             }
             _ => unreachable!(),
         }
+    };
+    (|$first:ident, $second:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident, |$bb_out:ident| $op_bb_out:expr) => {
+        match (&$first.evaluations(), &$second.evaluations()) {
+            ($crate::mle::FieldType::Base(base1), $crate::mle::FieldType::Base(base2)) => {
+                let $first = if let Some((start, offset)) = $first.evaluations_range() {
+                    &base1[start..][..offset]
+                } else {
+                    &base1[..]
+                };
+                let $second = if let Some((start, offset)) = $second.evaluations_range() {
+                    &base2[start..][..offset]
+                } else {
+                    &base2[..]
+                };
+                let $res = $pool_b.borrow();
+                let $bb_out = $op;
+                $op_bb_out
+            }
+            ($crate::mle::FieldType::Ext(ext), $crate::mle::FieldType::Base(base)) => {
+                let $first = if let Some((start, offset)) = $first.evaluations_range() {
+                    &ext[start..][..offset]
+                } else {
+                    &ext[..]
+                };
+                let $second = if let Some((start, offset)) = $second.evaluations_range() {
+                    &base[start..][..offset]
+                } else {
+                    &base[..]
+                };
+                let $res = $pool_e.borrow();
+                $op
+            }
+            ($crate::mle::FieldType::Base(base), $crate::mle::FieldType::Ext(ext)) => {
+                let base = if let Some((start, offset)) = $first.evaluations_range() {
+                    &base[start..][..offset]
+                } else {
+                    &base[..]
+                };
+                let ext = if let Some((start, offset)) = $second.evaluations_range() {
+                    &ext[start..][..offset]
+                } else {
+                    &ext[..]
+                };
+                // swap first and second to make ext field come first before base field.
+                // so the same coding template can apply.
+                // that's why first and second operand must be commutative
+                let $first = ext;
+                let $second = base;
+                let $res = $pool_e.borrow();
+                $op
+            }
+            ($crate::mle::FieldType::Ext(ext), $crate::mle::FieldType::Ext(base)) => {
+                let $first = if let Some((start, offset)) = $first.evaluations_range() {
+                    &ext[start..][..offset]
+                } else {
+                    &ext[..]
+                };
+                let $second = if let Some((start, offset)) = $second.evaluations_range() {
+                    &base[start..][..offset]
+                } else {
+                    &base[..]
+                };
+                let $res = $pool_e.borrow();
+                $op
+            }
+            _ => unreachable!(),
+        }
+    };
+    (|$a:ident, $b:ident, $res:ident| $op:expr, $pool_e:ident, $pool_b:ident) => {
+        commutative_op_mle_pair!(|$a, $b, $res| $op, $pool_e, $pool_b, |out| out)
     };
     (|$a:ident, $b:ident| $op:expr) => {
         commutative_op_mle_pair!(|$a, $b| $op, |out| out)

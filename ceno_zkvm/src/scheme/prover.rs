@@ -9,11 +9,13 @@ use itertools::{Itertools, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
-    util::ceil_log2,
+    util::{ceil_log2, max_usable_threads},
     virtual_poly::build_eq_x_r_vec,
     virtual_poly_v2::ArcMultilinearExtension,
 };
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverStateV2},
@@ -25,16 +27,18 @@ use crate::{
     error::ZKVMError,
     expression::Instance,
     scheme::{
-        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
+        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, MIN_PAR_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-            wit_infer_by_expr,
+            wit_infer_by_expr, wit_infer_by_expr_pool,
         },
     },
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{get_challenge_pows, next_pow2_instance_padding, optimal_sumcheck_threads},
+    utils::{
+        SimpleVecPool, get_challenge_pows, next_pow2_instance_padding, optimal_sumcheck_threads,
+    },
     virtual_polys::VirtualPolynomials,
 };
 
@@ -238,14 +242,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let wit_inference_span = entered_span!("wit_inference", profiling_3 = true);
         // main constraint: read/write record witness inference
         let record_span = entered_span!("record");
+        let len = witnesses[0].evaluations().len();
+        let mut pool_e: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
+            (0..len)
+                .into_par_iter()
+                .with_min_len(MIN_PAR_SIZE)
+                .map(|_| E::ZERO)
+                .collect::<Vec<E>>()
+        });
+        let mut pool_b: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
+            (0..len)
+                .into_par_iter()
+                .with_min_len(MIN_PAR_SIZE)
+                .map(|_| E::BaseField::ZERO)
+                .collect::<Vec<E::BaseField>>()
+        });
+        let n_threads = max_usable_threads();
         let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_expressions
-            .par_iter()
-            .chain(cs.w_expressions.par_iter())
-            .chain(cs.lk_expressions.par_iter())
+            .iter()
+            .chain(cs.w_expressions.iter())
+            .chain(cs.lk_expressions.iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&[], &witnesses, pi, challenges, expr)
+                wit_infer_by_expr_pool(
+                    &[],
+                    &witnesses,
+                    pi,
+                    challenges,
+                    expr,
+                    n_threads,
+                    &mut pool_e,
+                    &mut pool_b,
+                )
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
@@ -701,20 +730,41 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let wit_inference_span = entered_span!("wit_inference");
         // main constraint: lookup denominator and numerator record witness inference
         let record_span = entered_span!("record");
+        let len = witnesses[0].evaluations().len();
+        let mut pool_e: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
+            (0..len)
+                .into_par_iter()
+                .with_min_len(MIN_PAR_SIZE)
+                .map(|_| E::ZERO)
+                .collect::<Vec<E>>()
+        });
+        let mut pool_b: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
+            (0..len)
+                .into_par_iter()
+                .with_min_len(MIN_PAR_SIZE)
+                .map(|_| E::BaseField::ZERO)
+                .collect::<Vec<E::BaseField>>()
+        });
+        let n_threads = max_usable_threads();
         let mut records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_table_expressions
-            .par_iter()
+            .iter()
             .map(|r| &r.expr)
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
-            .chain(
-                cs.lk_table_expressions
-                    .par_iter()
-                    .map(|lk| &lk.multiplicity),
-            )
-            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
+            .chain(cs.w_table_expressions.iter().map(|w| &w.expr))
+            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.multiplicity))
+            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.values))
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&fixed, &witnesses, pi, challenges, expr)
+                wit_infer_by_expr_pool(
+                    &fixed,
+                    &witnesses,
+                    pi,
+                    challenges,
+                    expr,
+                    n_threads,
+                    &mut pool_e,
+                    &mut pool_b,
+                )
             })
             .collect();
         let max_log2_num_instance = records_wit.iter().map(|mle| mle.num_vars()).max().unwrap();

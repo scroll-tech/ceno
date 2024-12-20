@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::Display,
     hash::Hash,
     panic::{self, PanicHookInfo},
@@ -228,4 +228,31 @@ where
     panic::set_hook(original_hook);
 
     result
+}
+
+/// a simple vector pool
+/// not support multi-thread access
+pub struct SimpleVecPool<T, F: Fn() -> T> {
+    pool: VecDeque<T>,
+    factory_fn: F,
+}
+
+impl<T, F: Fn() -> T> SimpleVecPool<T, F> {
+    //  new pool with a factory closure
+    pub fn new(init: F) -> Self {
+        SimpleVecPool {
+            pool: VecDeque::new(),
+            factory_fn: init,
+        }
+    }
+
+    // borrow an item from the pool, or create a new one if empty
+    pub fn borrow(&mut self) -> T {
+        self.pool.pop_front().unwrap_or_else(|| (self.factory_fn)())
+    }
+
+    // push an item to the pool
+    pub fn return_to_pool(&mut self, item: T) {
+        self.pool.push_back(item);
+    }
 }

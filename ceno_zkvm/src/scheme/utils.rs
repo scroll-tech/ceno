@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, cell::SyncUnsafeCell, sync::Arc};
 
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
@@ -7,9 +7,12 @@ use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
     op_mle_xa_b, op_mle3_range,
-    util::ceil_log2,
+    util::{ceil_log2, max_usable_threads},
     virtual_poly_v2::ArcMultilinearExtension,
 };
+
+use ff::Field;
+
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -19,7 +22,9 @@ use rayon::{
 };
 
 use crate::{
-    expression::Expression, scheme::constants::MIN_PAR_SIZE, utils::next_pow2_instance_padding,
+    expression::Expression,
+    scheme::constants::MIN_PAR_SIZE,
+    utils::{SimpleVecPool, next_pow2_instance_padding},
 };
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
@@ -233,6 +238,28 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
+fn optional_arcpoly_unwrap_pushback<E: ExtensionField>(
+    poly: Cow<ArcMultilinearExtension<'_, E>>,
+    pool_e: &mut SimpleVecPool<Vec<E>, impl Fn() -> Vec<E>>,
+    pool_b: &mut SimpleVecPool<Vec<E::BaseField>, impl Fn() -> Vec<E::BaseField>>,
+    pool_expected_size_vec: usize,
+) {
+    let len = poly.evaluations().len();
+    if len == pool_expected_size_vec {
+        match poly {
+            Cow::Borrowed(_) => (),
+            Cow::Owned(_) => {
+                let poly = poly.into_owned();
+                match poly.arc_try_unwrap().unwrap() {
+                    FieldType::Base(vec) => pool_b.return_to_pool(vec),
+                    FieldType::Ext(vec) => pool_e.return_to_pool(vec),
+                    _ => unreachable!(),
+                };
+            }
+        };
+    }
+}
+
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
@@ -240,111 +267,225 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     challenges: &[E; N],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
-        &|f| fixed[f.0].clone(),
-        &|witness_id| witnesses[witness_id as usize].clone(),
-        &|i| instance[i.0].clone(),
-        &|scalar| {
-            let scalar: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
-                    scalar,
-                ]));
-            scalar
-        },
-        &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be acquired once for each power
-            let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
-                    challenge.pow([pow as u64]) * scalar + offset,
-                ]),
-            );
-            challenge
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] + b[0]],
-                    )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] + *b)
-                            .collect(),
-                    )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a + b[0])
-                            .collect(),
-                    )),
-                    (_, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .zip(b.par_iter())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|(a, b)| *a + b)
-                            .collect(),
-                    )),
-                }
-            })
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] * b[0]],
-                    )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] * *b)
-                            .collect(),
-                    )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a * b[0])
-                            .collect(),
-                    )),
-                    (_, _) => {
-                        assert_eq!(a.len(), b.len());
-                        // we do the pointwise evaluation multiplication here without involving FFT
-                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
-                        Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            ceil_log2(a.len()),
-                            a.par_iter()
-                                .zip(b.par_iter())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .map(|(a, b)| *a * b)
-                                .collect(),
-                        ))
-                    }
-                }
-            })
-        },
-        &|x, a, b| {
-            op_mle_xa_b!(|x, a, b| {
-                assert_eq!(a.len(), 1);
-                assert_eq!(b.len(), 1);
-                let (a, b) = (a[0], b[0]);
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(x.len()),
-                    x.par_iter()
-                        .with_min_len(MIN_PAR_SIZE)
-                        .map(|x| a * x + b)
-                        .collect(),
-                ))
-            })
-        },
+    let n_threads = max_usable_threads();
+    let len = witnesses[0].evaluations().len();
+    let mut pool_e: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
+        (0..len)
+            .into_par_iter()
+            .with_min_len(MIN_PAR_SIZE)
+            .map(|_| E::ZERO)
+            .collect::<Vec<E>>()
+    });
+    let mut pool_b: SimpleVecPool<Vec<_>, _> = SimpleVecPool::new(|| {
+        (0..len)
+            .into_par_iter()
+            .with_min_len(MIN_PAR_SIZE)
+            .map(|_| E::BaseField::ZERO)
+            .collect::<Vec<E::BaseField>>()
+    });
+    wit_infer_by_expr_pool(
+        fixed,
+        witnesses,
+        instance,
+        challenges,
+        expr,
+        n_threads,
+        &mut pool_e,
+        &mut pool_b,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn wit_infer_by_expr_pool<'a, E: ExtensionField, const N: usize>(
+    fixed: &[ArcMultilinearExtension<'a, E>],
+    witnesses: &[ArcMultilinearExtension<'a, E>],
+    instance: &[ArcMultilinearExtension<'a, E>],
+    challenges: &[E; N],
+    expr: &Expression<E>,
+    n_threads: usize,
+    pool_e: &mut SimpleVecPool<Vec<E>, impl Fn() -> Vec<E>>,
+    pool_b: &mut SimpleVecPool<Vec<E::BaseField>, impl Fn() -> Vec<E::BaseField>>,
+) -> ArcMultilinearExtension<'a, E> {
+    let len = witnesses[0].evaluations().len();
+    let poly =
+        expr.evaluate_with_instance_pool::<Cow<ArcMultilinearExtension<'_, E>>, _, _>(
+            &|f| Cow::Borrowed(&fixed[f.0]),
+            &|witness_id| Cow::Borrowed(&witnesses[witness_id as usize]),
+            &|i| Cow::Borrowed(&instance[i.0]),
+            &|scalar| {
+                let scalar: ArcMultilinearExtension<E> =
+                    Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
+                        scalar,
+                    ]));
+                Cow::Owned(scalar)
+            },
+            &|challenge_id, pow, scalar, offset| {
+                // TODO cache challenge power to be acquired once for each power
+                let challenge = challenges[challenge_id as usize];
+                let challenge: ArcMultilinearExtension<E> = Arc::new(
+                    DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
+                        challenge.pow([pow as u64]) * scalar + offset,
+                    ]),
+                );
+                Cow::Owned(challenge)
+            },
+            &|cow_a, cow_b, pool_e, pool_b| {
+                let (a, b) = (cow_a.as_ref(), cow_b.as_ref());
+                let poly =
+                    commutative_op_mle_pair!(
+                        |a, b, res| {
+                            match (a.len(), b.len()) {
+                                (1, 1) => {
+                                    let poly: ArcMultilinearExtension<_> = Arc::new(
+                                        DenseMultilinearExtension::from_evaluation_vec_smart(
+                                            0,
+                                            vec![a[0] + b[0]],
+                                        ),
+                                    );
+                                    Cow::Owned(poly)
+                                }
+                                (1, _) => {
+                                    let res = SyncUnsafeCell::new(res);
+                                    (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                        let ptr = (*res.get()).as_mut_ptr();
+                                        (0..b.len()).skip(thread_id).step_by(n_threads).for_each(
+                                            |i| {
+                                                *ptr.add(i) = a[0] + b[i];
+                                            },
+                                        )
+                                    });
+                                    Cow::Owned(res.into_inner().into_mle().into())
+                                }
+                                (_, 1) => {
+                                    let res = SyncUnsafeCell::new(res);
+                                    (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                        let ptr = (*res.get()).as_mut_ptr();
+                                        (0..a.len()).skip(thread_id).step_by(n_threads).for_each(
+                                            |i| {
+                                                *ptr.add(i) = a[i] + b[0];
+                                            },
+                                        )
+                                    });
+                                    Cow::Owned(res.into_inner().into_mle().into())
+                                }
+                                (_, _) => {
+                                    let res = SyncUnsafeCell::new(res);
+                                    (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                        let ptr = (*res.get()).as_mut_ptr();
+                                        (0..a.len()).skip(thread_id).step_by(n_threads).for_each(
+                                            |i| {
+                                                *ptr.add(i) = a[i] + b[i];
+                                            },
+                                        )
+                                    });
+                                    Cow::Owned(res.into_inner().into_mle().into())
+                                }
+                            }
+                        },
+                        pool_e,
+                        pool_b
+                    );
+                optional_arcpoly_unwrap_pushback(cow_a, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_b, pool_e, pool_b, len);
+                poly
+            },
+            &|cow_a, cow_b, pool_e, pool_b| {
+                let (a, b) = (cow_a.as_ref(), cow_b.as_ref());
+                let poly =
+                    commutative_op_mle_pair!(
+                        |a, b, res| {
+                            match (a.len(), b.len()) {
+                                (1, 1) => {
+                                    let poly: ArcMultilinearExtension<_> = Arc::new(
+                                        DenseMultilinearExtension::from_evaluation_vec_smart(
+                                            0,
+                                            vec![a[0] * b[0]],
+                                        ),
+                                    );
+                                    Cow::Owned(poly)
+                                }
+                                (1, _) => {
+                                    let res = SyncUnsafeCell::new(res);
+                                    (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                        let ptr = (*res.get()).as_mut_ptr();
+                                        (0..b.len()).skip(thread_id).step_by(n_threads).for_each(
+                                            |i| {
+                                                *ptr.add(i) = a[0] * b[i];
+                                            },
+                                        )
+                                    });
+                                    Cow::Owned(res.into_inner().into_mle().into())
+                                }
+                                (_, 1) => {
+                                    let res = SyncUnsafeCell::new(res);
+                                    (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                        let ptr = (*res.get()).as_mut_ptr();
+                                        (0..a.len()).skip(thread_id).step_by(n_threads).for_each(
+                                            |i| {
+                                                *ptr.add(i) = a[i] * b[0];
+                                            },
+                                        )
+                                    });
+                                    Cow::Owned(res.into_inner().into_mle().into())
+                                }
+                                (_, _) => {
+                                    assert_eq!(a.len(), b.len());
+                                    // we do the pointwise evaluation multiplication here without involving FFT
+                                    // the evaluations outside of range will be checked via sumcheck + identity polynomial
+                                    let res = SyncUnsafeCell::new(res);
+                                    (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                                        let ptr = (*res.get()).as_mut_ptr();
+                                        (0..a.len()).skip(thread_id).step_by(n_threads).for_each(
+                                            |i| {
+                                                *ptr.add(i) = a[i] * b[i];
+                                            },
+                                        )
+                                    });
+                                    Cow::Owned(res.into_inner().into_mle().into())
+                                }
+                            }
+                        },
+                        pool_e,
+                        pool_b
+                    );
+                optional_arcpoly_unwrap_pushback(cow_a, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_b, pool_e, pool_b, len);
+                poly
+            },
+            &|cow_x, cow_a, cow_b, pool_e, pool_b| {
+                let (x, a, b) = (cow_x.as_ref(), cow_a.as_ref(), cow_b.as_ref());
+                let poly = op_mle_xa_b!(
+                    |x, a, b, res| {
+                        let res = SyncUnsafeCell::new(res);
+                        assert_eq!(a.len(), 1);
+                        assert_eq!(b.len(), 1);
+                        let (a, b) = (a[0], b[0]);
+                        (0..n_threads).into_par_iter().for_each(|thread_id| unsafe {
+                            let ptr = (*res.get()).as_mut_ptr();
+                            (0..x.len())
+                                .skip(thread_id)
+                                .step_by(n_threads)
+                                .for_each(|i| {
+                                    *ptr.add(i) = a * x[i] + b;
+                                })
+                        });
+                        Cow::Owned(res.into_inner().into_mle().into())
+                    },
+                    pool_e,
+                    pool_b
+                );
+                optional_arcpoly_unwrap_pushback(cow_a, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_b, pool_e, pool_b, len);
+                optional_arcpoly_unwrap_pushback(cow_x, pool_e, pool_b, len);
+                poly
+            },
+            pool_e,
+            pool_b,
+        );
+    match poly {
+        Cow::Borrowed(poly) => poly.clone(),
+        Cow::Owned(_) => poly.into_owned(),
+    }
 }
 
 pub(crate) fn eval_by_expr<E: ExtensionField>(
@@ -416,10 +557,9 @@ mod tests {
         expression::{Expression, ToExpr},
         scheme::utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+            wit_infer_by_expr,
         },
     };
-
-    use super::wit_infer_by_expr;
 
     #[test]
     fn test_infer_tower_witness() {
