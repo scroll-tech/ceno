@@ -104,6 +104,33 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix
             .chain(padding_iter)
             .collect::<Vec<_>>()
     }
+
+    pub fn shard_by_rows(&self, shard_rows: usize) -> Vec<Self> {
+        let padded_row_num = self.num_instances() + self.num_padding_instances();
+        if padded_row_num <= shard_rows {
+            return vec![self.clone()];
+        }
+        // padded_row_num and chunk_rows should both be pow of 2.
+        assert_eq!(padded_row_num % shard_rows, 0);
+        let shard_num = self.num_instances().div_ceil(shard_rows);
+        let mut shards = Vec::new();
+        for i in 0..shard_num {
+            let start = i * shard_rows * self.num_col;
+            let end = ((i + 1) * shard_rows * self.num_col).min(self.values.len());
+            let values: Vec<_> = self.values[start..end].to_vec();
+
+            shards.push(Self {
+                num_col: self.num_col,
+                values,
+                padding_strategy: self.padding_strategy.clone(),
+            });
+        }
+        assert_eq!(
+            self.num_instances(),
+            shards.iter().map(|c| { c.num_instances() }).sum::<usize>()
+        );
+        shards
+    }
 }
 
 impl<F: Field + From<u64>> RowMajorMatrix<F> {
