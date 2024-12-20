@@ -675,6 +675,8 @@ mod tests {
     }
 
     mod mul_add {
+        use std::sync::Arc;
+
         use crate::{
             Value,
             circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -683,6 +685,7 @@ mod tests {
             uint::UIntLimbs,
             witness::LkMultiplicity,
         };
+        use ceno_emul::Program;
         use ff_ext::ExtensionField;
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
@@ -763,7 +766,13 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(
+                &cb,
+                &witness_values,
+                Arc::new(Program::default()),
+                None,
+                None,
+            );
         }
 
         #[test]
@@ -813,7 +822,13 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_g)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(
+                &cb,
+                &witness_values,
+                Arc::new(Program::default()),
+                None,
+                None,
+            );
         }
 
         #[test]
@@ -852,7 +867,13 @@ mod tests {
                 .require_equal(|| "assert_e", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(
+                &cb,
+                &witness_values,
+                Arc::new(Program::default()),
+                None,
+                None,
+            );
         }
 
         #[test]
@@ -891,7 +912,13 @@ mod tests {
                 .require_equal(|| "assert_e", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(
+                &cb,
+                &witness_values,
+                Arc::new(Program::default()),
+                None,
+                None,
+            );
         }
 
         #[test]
@@ -928,7 +955,13 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_c)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(
+                &cb,
+                &witness_values,
+                Arc::new(Program::default()),
+                None,
+                None,
+            );
         }
     }
 }

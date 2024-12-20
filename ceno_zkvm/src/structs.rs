@@ -254,6 +254,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses_tables.get(name).cloned()
     }
 
+    pub fn get_lk_mlt(&self, name: &String) -> Option<LkMultiplicity> {
+        self.lk_mlts.get(name).cloned()
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,

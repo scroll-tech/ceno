@@ -1,4 +1,6 @@
-use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
+use std::sync::Arc;
+
+use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, Program, StepRecord, Word, encode_rv32};
 use goldilocks::GoldilocksExt2;
 
 use crate::{
@@ -40,7 +42,13 @@ fn test_opcode_jal() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(
+        &cb,
+        raw_witin,
+        Arc::new(Program::from_insn_code(insn_code)),
+        None,
+        Some(lkm),
+    );
 }
 
 #[test]
@@ -76,5 +84,11 @@ fn test_opcode_jalr() {
         )],
     )
     .unwrap();
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(
+        &cb,
+        raw_witin,
+        Arc::new(Program::from_insn_code(insn_code)),
+        None,
+        Some(lkm),
+    );
 }

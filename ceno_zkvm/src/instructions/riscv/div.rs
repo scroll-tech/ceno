@@ -169,7 +169,9 @@ mod test {
 
     mod divu {
 
-        use ceno_emul::{Change, InsnKind, StepRecord, Word, encode_rv32};
+        use std::sync::Arc;
+
+        use ceno_emul::{Change, InsnKind, Program, StepRecord, Word, encode_rv32};
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use rand::Rng;
@@ -240,7 +242,7 @@ mod test {
                     .into_iter()
                     .map(|v| v.into())
                     .collect_vec(),
-                &[insn_code],
+                Arc::new(Program::from_insn_code(insn_code)),
                 expected_errors,
                 None,
                 Some(lkm),
