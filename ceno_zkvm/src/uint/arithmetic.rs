@@ -274,9 +274,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 .into_iter()
                 .unzip();
 
-        let sum_expr = is_equal_per_limb
-            .iter()
-            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
+        let sum_expr = is_equal_per_limb.iter().map(ToExpr::expr).sum();
 
         let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
         let (is_equal, diff_inv) =

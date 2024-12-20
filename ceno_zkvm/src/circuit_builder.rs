@@ -247,7 +247,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
-        self.witin_namespace_map.push(path);
+        self.structural_witin_namespace_map.push(path);
 
         wit_in
     }

@@ -5,8 +5,8 @@ use super::ops_impl::OpTableConfig;
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ROMType, tables::TableCircuit,
-    witness::RowMajorMatrix,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::InstancePaddingStrategy,
+    structs::ROMType, tables::TableCircuit, witness::RowMajorMatrix,
 };
 use ff_ext::ExtensionField;
 
@@ -51,9 +51,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         num_fixed: usize,
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
-        let mut table = config.generate_fixed_traces(num_fixed, OP::content());
-        Self::padding_zero(&mut table, num_fixed).expect("padding error");
-        table
+        config.generate_fixed_traces(num_fixed, OP::content())
     }
 
     fn assign_instances(
@@ -63,9 +61,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
-        let mut table = config.assign_instances(num_witin, multiplicity, OP::len())?;
-        Self::padding_zero(&mut table, num_witin)?;
-        Ok(table)
+        config.assign_instances(num_witin, multiplicity, OP::len())
     }
 
     fn assign_structural_instances(
@@ -74,6 +70,6 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         _multiplicity: &[HashMap<u64, usize>],
         _final_v: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        Ok(RowMajorMatrix::new(0, 0))
+        Ok(RowMajorMatrix::new(0, 0, InstancePaddingStrategy::Default))
     }
 }

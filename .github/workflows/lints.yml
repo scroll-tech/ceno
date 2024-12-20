@@ -8,39 +8,18 @@ on:
     branches:
       - master
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
-  skip_check:
-    runs-on: [self-hosted, Linux, X64]
-    outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}
-    steps:
-      - id: skip_check
-        uses: fkirc/skip-duplicate-actions@v5
-        with:
-          cancel_others: 'true'
-          concurrent_skipping: 'same_content_newer'
-          paths_ignore: '["**/README.md"]'
-          do_not_skip: '["pull_request", "workflow_dispatch", "schedule", "merge_group"]'
-
   lints:
-    needs: [skip_check]
-    if: |
-      github.event.pull_request.draft == false &&
-      (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
-
     name: Various lints
     timeout-minutes: 30
-    runs-on: [self-hosted, Linux, X64]
-
-    strategy:
-      matrix:
-        target: [x86_64-unknown-linux-gnu, riscv32im-unknown-none-elf]
-        # Exclude the riscv32im-unknown-none-elf target
-        exclude:
-          - target: riscv32im-unknown-none-elf
+    runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           components: rustfmt, clippy
@@ -48,7 +27,7 @@ jobs:
           # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
           toolchain: nightly-2024-12-06
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -56,8 +35,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-            examples/target/
+            ceno_rt/target/
+            example/target/
           key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: lint-${{ runner.os }}-cargo-
 
       - name: Install cargo make
         run: |
@@ -67,16 +48,15 @@ jobs:
 
       - name: Run clippy
         env:
-          TARGET: ${{ matrix.target }}
           RUSTFLAGS: "-Dwarnings"
         run: |
-          cargo check --workspace --all-targets --exclude ceno_rt
+          cargo check --workspace --all-targets
           # We have a lot of code under #[cfg(not(debug_assertions))] and similar,
           # so we need to run cargo check in release mode, too:
-          cargo check --workspace --all-targets --exclude ceno_rt --release
+          cargo check --workspace --all-targets --release
           cargo make clippy
           # Same for clippy:
-          cargo clippy --workspace --all-targets --exclude ceno_rt --release
+          cargo clippy --workspace --all-targets --release
 
       - name: Install taplo
         run: taplo --version || cargo install taplo-cli

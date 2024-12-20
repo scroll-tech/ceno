@@ -15,7 +15,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 
 pub struct ShiftImmConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
@@ -125,7 +125,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            &imm.expr(),
+            imm.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
@@ -144,7 +144,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
     fn assign_instance(
         config: &Self::InstructionConfig,
-        instance: &mut [MaybeUninit<E::BaseField>],
+        instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -188,7 +188,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
     use goldilocks::GoldilocksExt2;
 
     use super::{ShiftImmInstruction, SlliOp, SraiOp, SrliOp};
@@ -255,17 +255,17 @@ mod test {
         let (prefix, insn_code, rd_written) = match I::INST_KIND {
             InsnKind::SLLI => (
                 "SLLI",
-                encode_rv32(InsnKind::SLLI, 2, 0, 4, imm),
+                encode_rv32u(InsnKind::SLLI, 2, 0, 4, imm),
                 rs1_read << imm,
             ),
             InsnKind::SRAI => (
                 "SRAI",
-                encode_rv32(InsnKind::SRAI, 2, 0, 4, imm),
+                encode_rv32u(InsnKind::SRAI, 2, 0, 4, imm),
                 (rs1_read as i32 >> imm as i32) as u32,
             ),
             InsnKind::SRLI => (
                 "SRLI",
-                encode_rv32(InsnKind::SRLI, 2, 0, 4, imm),
+                encode_rv32u(InsnKind::SRLI, 2, 0, 4, imm),
                 rs1_read >> imm,
             ),
             _ => unreachable!(),
