@@ -14,7 +14,7 @@ use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-use transcript::{StatisticRecorder, BasicTranscriptWithStat as Transcript};
+use transcript::{BasicTranscriptWithStat as Transcript, StatisticRecorder};
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
@@ -155,14 +155,14 @@ fn main() {
                 "e2e proof stat: proof size = {}, hashes count = {}",
                 serialize_size,
                 stat_recorder.into_inner().field_appended_num
-            );             
-            res.expect_err("verify proof should return with error");           
+            );
+            res.expect_err("verify proof should return with error");
         }
         Err(err) => {
             println!(
                 "e2e proof stat: proof size = {}, hashes count unknown for panic execution",
                 serialize_size,
-            );            
+            );
             let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
                 message.to_string()
             } else if let Some(message) = err.downcast_ref::<String>() {
