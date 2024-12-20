@@ -5,8 +5,8 @@ use super::ops_impl::OpTableConfig;
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ROMType, tables::TableCircuit,
-    witness::RowMajorMatrix,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::InstancePaddingStrategy,
+    structs::ROMType, tables::TableCircuit, witness::RowMajorMatrix,
 };
 use ff_ext::ExtensionField;
 
@@ -62,5 +62,14 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
         config.assign_instances(num_witin, multiplicity, OP::len())
+    }
+
+    fn assign_structural_instances(
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        _final_v: &Self::WitnessInput,
+    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        Ok(RowMajorMatrix::new(0, 0, InstancePaddingStrategy::Default))
     }
 }

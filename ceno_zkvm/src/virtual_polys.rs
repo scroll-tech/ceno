@@ -96,6 +96,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         let monomial_terms = expr.evaluate(
             &|_| unreachable!(),
             &|witness_id| vec![(E::ONE, { vec![witness_id] })],
+            &|structural_witness_id, _, _, _| vec![(E::ONE, { vec![structural_witness_id] })],
             &|scalar| vec![(E::from(scalar), { vec![] })],
             &|challenge_id, pow, scalar, offset| {
                 let challenge = challenges[challenge_id as usize];
