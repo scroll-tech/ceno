@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{File, read_dir},
     io::{self, Write},
     path::Path,
     process::Command,
@@ -21,6 +21,15 @@ const EXAMPLES: &[&str] = &[
     "hashing",
 ];
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+fn rerun_all_but_target(dir: &Path) {
+    for entry in read_dir(dir).unwrap().filter_map(Result::ok) {
+        if "target" == entry.file_name() {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", entry.path().to_string_lossy());
+    }
+}
 
 fn build_elfs() {
     let out_dir = std::env::var_os("OUT_DIR").unwrap();
@@ -49,10 +58,8 @@ fn build_elfs() {
                 include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
-    println!("cargo:rerun-if-changed=../examples/");
-    println!("cargo:rerun-if-changed=../ceno_rt/");
-    let elfs_path = "../examples/target/riscv32im-ceno-zkvm-elf/release/examples/";
-    println!("cargo:rerun-if-changed={elfs_path}");
+    rerun_all_but_target(Path::new("../examples"));
+    rerun_all_but_target(Path::new("../ceno_rt"));
 }
 
 fn main() {
