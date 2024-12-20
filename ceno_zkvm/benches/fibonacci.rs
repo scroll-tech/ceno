@@ -45,34 +45,31 @@ fn fibonacci_prove(c: &mut Criterion) {
     let (program, platform) = setup();
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
         // estimate proof size data first
-        let (sanity_check_state, _) = run_e2e_with_checkpoint::<E, Pcs>(
+        let (proof, verifier) = run_e2e_with_checkpoint::<E, Pcs>(
             program.clone(),
             platform.clone(),
             vec![],
             max_steps,
             Checkpoint::PrepSanityCheck,
-        );
+        )
+        .0
+        .expect("PrepSanityCheck do not provide proof and verifier");
+
+        let serialize_size = bincode::serialize(&proof).unwrap().len();
+        let stat_recorder = StatisticRecorder::default();
+        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
         assert!(
-            sanity_check_state.is_some(),
-            "PrepSanityCheck do not provide proof and verifier"
+            verifier
+                .verify_proof_halt(proof, transcript, false)
+                .expect("verify proof return with error"),
         );
-        if let Some((proof, verifier)) = sanity_check_state {
-            let serialize_size = bincode::serialize(&proof).unwrap().len();
-            let stat_recorder = StatisticRecorder::default();
-            let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
-            assert!(
-                verifier
-                    .verify_proof_halt(proof, transcript, false)
-                    .expect("verify proof return with error"),
-            );
-            println!();
-            println!(
-                "max_steps = {}, proof size = {}, hashes count = {}",
-                max_steps,
-                serialize_size,
-                stat_recorder.into_inner().field_appended_num
-            );
-        }
+        println!();
+        println!(
+            "max_steps = {}, proof size = {}, hashes count = {}",
+            max_steps,
+            serialize_size,
+            stat_recorder.into_inner().field_appended_num
+        );
 
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("fibonacci_max_steps_{}", max_steps));

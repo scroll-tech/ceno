@@ -14,7 +14,9 @@ use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-use transcript::{BasicTranscriptWithStat as Transcript, StatisticRecorder};
+use transcript::{
+    BasicTranscript as Transcript, BasicTranscriptWithStat as TranscriptWithStat, StatisticRecorder,
+};
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
@@ -135,34 +137,32 @@ fn main() {
 
     let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
-    // do sanity check
+    // do statistics
     let serialize_size = bincode::serialize(&zkvm_proof).unwrap().len();
+    let stat_recorder = StatisticRecorder::default();
+    let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
+    verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
+    println!(
+        "e2e proof stat: proof size = {}, hashes count = {}",
+        serialize_size,
+        stat_recorder.into_inner().field_appended_num
+    );
+
+    // do sanity check
+    let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
     zkvm_proof.raw_pi[0] = vec![B::ONE];
     zkvm_proof.raw_pi[1] = vec![B::ONE];
 
     // capture panic message, if have
     let result = with_panic_hook(Box::new(|_info| ()), || {
-        panic::catch_unwind(|| {
-            let stat_recorder = StatisticRecorder::default();
-            let transcript = Transcript::new(&stat_recorder, b"riscv");
-            (verifier.verify_proof(zkvm_proof, transcript), stat_recorder)
-        })
+        panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
     });
     match result {
-        Ok((res, stat_recorder)) => {
-            println!(
-                "e2e proof stat: proof size = {}, hashes count = {}",
-                serialize_size,
-                stat_recorder.into_inner().field_appended_num
-            );
+        Ok(res) => {
             res.expect_err("verify proof should return with error");
         }
         Err(err) => {
-            println!(
-                "e2e proof stat: proof size = {}, hashes count unknown for panic execution",
-                serialize_size,
-            );
             let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
                 message.to_string()
             } else if let Some(message) = err.downcast_ref::<String>() {
