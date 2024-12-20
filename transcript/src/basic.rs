@@ -5,7 +5,7 @@ use poseidon::poseidon_permutation::PoseidonPermutation;
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct BasicTranscript<E: ExtensionField> {
     permutation: PoseidonPermutation<E::BaseField>,
 }
@@ -13,11 +13,11 @@ pub struct BasicTranscript<E: ExtensionField> {
 impl<E: ExtensionField> BasicTranscript<E> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
-        let mut perm = PoseidonPermutation::new(core::iter::repeat(E::BaseField::ZERO));
+        let mut permutation = PoseidonPermutation::new(core::iter::repeat(E::BaseField::ZERO));
         let label_f = E::BaseField::bytes_to_field_elements(label);
-        perm.set_from_slice(label_f.as_slice(), 0);
-        perm.permute();
-        Self { permutation: perm }
+        permutation.set_from_slice(label_f.as_slice(), 0);
+        permutation.permute();
+        Self { permutation }
     }
 }
 
@@ -32,15 +32,15 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 
     fn read_challenge(&mut self) -> Challenge<E> {
-        // notice `from_bases` and `from_limbs` has the same behavior but
+        // Notice `from_bases` and `from_limbs` have the same behavior but
         // `from_bases` has a sanity check for length of input slices
-        // while `from_limbs` use the first two fields silently
-        // we select `from_base` here to make it being more clear that
+        // while `from_limbs` use the first two elements silently.
+        // We select `from_base` here to make it more clear that
         // we only use the first 2 fields here to construct the
-        // extension field (i.e. the challenge)
-        let r = E::from_bases(&self.permutation.squeeze()[..2]);
+        // challenge as an extension field element.
+        let elements = E::from_bases(&self.permutation.squeeze()[..2]);
 
-        Challenge { elements: r }
+        Challenge { elements }
     }
 
     fn read_field_element_exts(&self) -> Vec<E> {
