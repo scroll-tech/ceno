@@ -19,7 +19,6 @@ use crate::{
 
 use super::SignedExtendConfig;
 
-// TODO rename to AssertLtConfig (LT -> Lt) to fit naming conventions
 #[derive(Debug, Clone)]
 pub struct AssertLtConfig(InnerLtConfig);
 
@@ -67,10 +66,10 @@ impl AssertLtConfig {
         &self,
         instance: &mut [F],
         lkm: &mut LkMultiplicity,
-        lhs: i32,
-        rhs: i32,
+        lhs: i64,
+        rhs: i64,
     ) -> Result<(), ZKVMError> {
-        self.0.assign_instance_signed(instance, lkm, lhs, rhs)?;
+        self.0.assign_instance_i64(instance, lkm, lhs, rhs)?;
         Ok(())
     }
 }
