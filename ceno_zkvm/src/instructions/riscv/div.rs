@@ -16,13 +16,16 @@
 //!
 //! This means that in either the unsigned or the signed setting, equation
 //! (1) can be checked directly using native field expressions without
-//! ambiguity due to modular field arithmetic.
+//! ambiguity due to modular field arithmetic -- more specifically, `dividend`
+//! and `divisor` are taken from RISC-V registers, so are constrained to 32-bit
+//! unsigned or signed values, and `quotient` and `remainder` values are
+//! explicitly constrained to 32 bits by the checked UInt construction.
 //!
 //! The remainder of the complexity of this circuit comes about because of two
 //! edge cases in the opcodes: division by zero, and signed division overflow.
 //! For division by zero, equation (1) still holds, but an extra constraint is
 //! imposed on the value of `quotient` to be `u32::MAX` in the unsigned case,
-//! or `-1` in the unsigned case (the 32-bit vector with all 1s for both).
+//! or `-1` in the signed case (the 32-bit vector with all 1s for both).
 //!
 //! Signed division overflow occurs when `dividend` is set to `i32::MIN
 //! = -2^31`, and `divisor` is set to `-1`.  In this case, the natural value of
@@ -41,25 +44,23 @@
 //!
 //! `0 <= remainder < divisor` (3)
 //!
-//! when `dividend` is negative, `quotient` and `remainder` are negative, we
-//! need
-//! TODO: finish this part of the docs
-//! `-|divisor| < remainder <= 0` (5)
+//! For signed inputs the situation is slightly more complicated, as `remainder`
+//! and `divisor` may be either positive or negative.  To handle sign
+//! variations for the remainder inequality in a uniform manner, we derive
+//! expressions representing the "positively oriented" values with signs set so
+//! that the inequalities are always of the form (3).  The correct sign
+//! normalization is to take the absolute value of `divisor`, and to multiply
+//! `remainder` by the sign of `dividend` since these two values are required
+//! to have matching signs.
 //!
-//! To handle these variations of the remainder inequalities in a uniform
-//! manner, we derive expressions representing the "positively oriented" values
-//! with signs set so that the inequalities are always of the form (3).  Note
-//! that it is not enough to just take absolute values, as this would allow
-//! values with an incorrect sign, e.g. for 10 divided by -6, one could witness
-//! `10 = -6 * 2 + 2` instead of the correct expression `10 = -6 * 1 - 4`.
-//!
-//! The inequality condition (5) is properly satisfied by `divisor` and the
-//! appropriate value of `remainder` in the case of signed division overflow,
-//! so no special treatment is needed in this case.  On the other hand, these
-//! inequalities cannot be satisfied when `divisor` is `0`, so we require that
-//! exactly one of `remainder < divisor` and `divisor = 0` holds.
-//! Specifically, since these conditions are expressed as 0/1-valued booleans,
-//! we require just that the sum of these booleans is equal to 1.
+//! For the special case of signed division overflow, the inequality condition
+//! (3) still holds for the remainder and divisor after normalizing signs in
+//! this way (specifically: `0 <= 0 < 1`), so no special treatment is needed.
+//! In the division by 0 case, since `divisor` is `0`, the inequality cannot be
+//! satisfied.  To address this case, we require that exactly one of `remainder
+//! < divisor` and `divisor = 0` holds. Specifically, since these conditions
+//! are expressed as 0/1-valued booleans, we require just that the sum of these
+//! booleans is equal to 1.
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -204,10 +205,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 // For signed division overflow, dividend = -2^31 and divisor
                 // = -1, so that quotient = 2^31 would be required for proper
-                // arithmetic, which is too large for signed 32-bit values.  In
-                // this case, quotient and remainder are required to be set to
-                // -2^31 and 0 respectively.  These values are assured by the
-                // constraints
+                // arithmetic, which is too large to represent in a 32-bit
+                // register.  This case is therefore handled specially in the
+                // spec, setting quotient and remainder to -2^31 and 0
+                // respectively.  These values are assured by the constraints
                 //
                 //   2^31 = divisor * quotient + remainder
                 //   0 <= |remainder| < |divisor|
@@ -229,9 +230,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     dividend_signed.expr(),
                 )?;
 
-                // Check required inequalities for remainder value; change sign
-                // for remainder and divisor so that checked inequality is the
-                // usual unsigned one, 0 <= remainder < divisor
+                // Check the required inequalities for the signed remainder.
+                // Change the signs of `remainder_signed` and `divisor_signed`
+                // so that the inequality matches the usual unsigned one: `0 <=
+                // remainder < divisor`
                 let remainder_pos_orientation: Expression<E> =
                     (1 - 2 * dividend_signed.is_negative.expr()) * remainder_signed.expr();
                 let divisor_pos_orientation =
@@ -277,10 +279,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             quotient.value(),
         )?;
 
-        // Check whether the (suitably oriented) remainder is less than the
-        // (suitably oriented) divisor, where "suitably oriented" is subtle for
-        // the signed case, involving both signs and the constraints used for
-        // signed division overflow.
+        // Check whether the remainder is less than the divisor, where both
+        // values have sign normalized to be nonnegative (for correct values)
+        // in the signed case
         let is_remainder_lt_divisor = IsLtConfig::construct_circuit(
             cb,
             || "is_remainder_lt_divisor",
