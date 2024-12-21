@@ -125,6 +125,21 @@ fn test_hints() -> Result<()> {
 }
 
 #[test]
+fn test_bubble_sorting() -> Result<()> {
+    use rand::Rng;
+    let mut hints = CenoStdin::default();
+    let mut rng = rand::thread_rng();
+
+    // Provide some random numbers to sort.
+    hints.write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
+
+    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::bubble_sorting, &hints);
+    for msg in &all_messages {
+        print!("{msg}");
+    }
+    Ok(())
+}
+#[test]
 fn test_sorting() -> Result<()> {
     use rand::Rng;
     let mut hints = CenoStdin::default();

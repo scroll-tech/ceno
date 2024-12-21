@@ -49,20 +49,23 @@ fn fibonacci_witness(c: &mut Criterion) {
             format!("fib_wit_max_steps_{}", max_steps),
         ),
         |b| {
-            b.iter_with_setup(
-                || {
-                    run_e2e_with_checkpoint::<E, Pcs>(
+            b.iter_custom(|iters| {
+                let mut time = Duration::new(0, 0);
+                for _ in 0..iters {
+                    let (_, generate_witness) = run_e2e_with_checkpoint::<E, Pcs>(
                         program.clone(),
                         platform.clone(),
                         vec![],
                         max_steps,
                         Checkpoint::PrepWitnessGen,
-                    )
-                },
-                |(_, generate_witness)| {
+                    );
+                    let instant = std::time::Instant::now();
                     generate_witness();
-                },
-            );
+                    let elapsed = instant.elapsed();
+                    time += elapsed;
+                }
+                time
+            });
         },
     );
 
