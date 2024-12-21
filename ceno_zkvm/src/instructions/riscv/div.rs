@@ -104,8 +104,8 @@ enum InternalDivRem<E: ExtensionField> {
         divisor_signed: Signed<E>,
         quotient_signed: Signed<E>,
         remainder_signed: Signed<E>,
-        is_dividend_max_negative: IsEqualConfig,
-        is_divisor_minus_one: IsEqualConfig,
+        is_dividend_signed_min: IsEqualConfig,
+        is_divisor_neg_one: IsEqualConfig,
         is_signed_overflow: WitIn,
         remainder_nonnegative: AssertLtConfig,
     },
@@ -186,21 +186,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     Signed::construct_circuit(cb, || "remainder_signed", &remainder)?;
 
                 // Check for signed division overflow: i32::MIN / -1
-                let is_dividend_max_negative = IsEqualConfig::construct_circuit(
+                let is_dividend_signed_min = IsEqualConfig::construct_circuit(
                     cb,
-                    || "is_dividend_max_negative",
+                    || "is_dividend_signed_min",
                     dividend.value(),
                     (i32::MIN as u32).into(),
                 )?;
-                let is_divisor_minus_one = IsEqualConfig::construct_circuit(
+                let is_divisor_neg_one = IsEqualConfig::construct_circuit(
                     cb,
-                    || "is_divisor_minus_one",
+                    || "is_divisor_neg_one",
                     divisor.value(),
                     (-1i32 as u32).into(),
                 )?;
                 let is_signed_overflow = cb.flatten_expr(
                     || "signed_division_overflow",
-                    is_dividend_max_negative.expr() * is_divisor_minus_one.expr(),
+                    is_dividend_signed_min.expr() * is_divisor_neg_one.expr(),
                 )?;
 
                 // For signed division overflow, dividend = -2^31 and divisor
@@ -253,8 +253,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         divisor_signed,
                         quotient_signed,
                         remainder_signed,
-                        is_dividend_max_negative,
-                        is_divisor_minus_one,
+                        is_dividend_signed_min,
+                        is_divisor_neg_one,
                         is_signed_overflow,
                         remainder_nonnegative,
                     },
@@ -372,8 +372,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             InternalDivRem::Signed {
                 dividend_signed,
                 divisor_signed,
-                is_dividend_max_negative,
-                is_divisor_minus_one,
+                is_dividend_signed_min,
+                is_divisor_neg_one,
                 is_signed_overflow,
                 quotient_signed,
                 remainder_signed,
@@ -386,12 +386,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 dividend_signed.assign_instance(instance, lkm, &dividend_v)?;
                 divisor_signed.assign_instance(instance, lkm, &divisor_v)?;
 
-                is_dividend_max_negative.assign_instance(
+                is_dividend_signed_min.assign_instance(
                     instance,
                     (dividend as u32 as u64).into(),
                     (i32::MIN as u32 as u64).into(),
                 )?;
-                is_divisor_minus_one.assign_instance(
+                is_divisor_neg_one.assign_instance(
                     instance,
                     (divisor as u32 as u64).into(),
                     (-1i32 as u32 as u64).into(),
