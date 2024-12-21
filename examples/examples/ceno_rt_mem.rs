@@ -1,13 +1,9 @@
-#![no_main]
-#![no_std]
-
 // Use volatile functions to prevent compiler optimizations.
 use core::ptr::{read_volatile, write_volatile};
 
 extern crate ceno_rt;
 const OUTPUT_ADDRESS: u32 = 0x8000_0000;
 
-ceno_rt::entry!(main);
 #[inline(never)]
 fn main() {
     test_data_section();

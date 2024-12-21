@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{fs, path::PathBuf, time::Duration};
 
 use ceno_emul::{Platform, Program};
 use ceno_zkvm::{
@@ -10,6 +6,7 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 use criterion::*;
+use transcript::{BasicTranscriptWithStat, StatisticRecorder};
 
 use goldilocks::GoldilocksExt2;
 use mpcs::BasefoldDefault;
@@ -43,6 +40,33 @@ fn setup() -> (Program, Platform) {
 fn fibonacci_prove(c: &mut Criterion) {
     let (program, platform) = setup();
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
+        // estimate proof size data first
+        let (proof, verifier) = run_e2e_with_checkpoint::<E, Pcs>(
+            program.clone(),
+            platform.clone(),
+            vec![],
+            max_steps,
+            Checkpoint::PrepSanityCheck,
+        )
+        .0
+        .expect("PrepSanityCheck do not provide proof and verifier");
+
+        let serialize_size = bincode::serialize(&proof).unwrap().len();
+        let stat_recorder = StatisticRecorder::default();
+        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        assert!(
+            verifier
+                .verify_proof_halt(proof, transcript, false)
+                .expect("verify proof return with error"),
+        );
+        println!();
+        println!(
+            "max_steps = {}, proof size = {}, hashes count = {}",
+            max_steps,
+            serialize_size,
+            stat_recorder.into_inner().field_appended_num
+        );
+
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("fibonacci_max_steps_{}", max_steps));
         group.sample_size(NUM_SAMPLES);
@@ -54,27 +78,28 @@ fn fibonacci_prove(c: &mut Criterion) {
                 format!("fibonacci_max_steps_{}", max_steps),
             ),
             |b| {
-                b.iter_with_setup(
-                    || {
-                        run_e2e_with_checkpoint::<E, Pcs>(
+                b.iter_custom(|iters| {
+                    let mut time = Duration::new(0, 0);
+                    for _ in 0..iters {
+                        let (_, run_e2e_proof) = run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             vec![],
                             max_steps,
                             Checkpoint::PrepE2EProving,
-                        )
-                    },
-                    |(_, run_e2e_proof)| {
-                        let timer = Instant::now();
-
+                        );
+                        let instant = std::time::Instant::now();
                         run_e2e_proof();
+                        let elapsed = instant.elapsed();
                         println!(
                             "Fibonacci::create_proof, max_steps = {}, time = {}",
                             max_steps,
-                            timer.elapsed().as_secs_f64()
+                            elapsed.as_secs_f64()
                         );
-                    },
-                );
+                        time += elapsed;
+                    }
+                    time
+                });
             },
         );
 

@@ -1,4 +1,5 @@
 #![deny(clippy::cargo)]
+#![feature(step_trait)]
 mod addr;
 pub use addr::*;
 
@@ -20,3 +21,4 @@ mod elf;
 pub use elf::Program;
 
 pub mod disassemble;
+pub mod host_utils;
