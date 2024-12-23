@@ -1,6 +1,7 @@
 use core::todo;
 
 use super::PolynomialCommitmentScheme;
+use ark_ff::Field;
 use utils::poly2whir;
 pub use whir::ceno_binding::Error;
 
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use whir::{
     ceno_binding::{
         Config, DefaultHash, FieldChallenges, FieldWriter, PolynomialCommitmentScheme as WhirPCS,
-        Whir as WhirInner, WhirSpec as WhirSpecInner,
+        Whir as WhirInner, WhirDefaultSpec as WhirDefaultSpecInner, WhirSpec as WhirSpecInner,
     },
     whir::{
         fs_utils::{DigestReader, DigestWriter},
@@ -24,8 +25,14 @@ mod utils;
 use ff::ExtensionFieldWrapper as FieldWrapper;
 
 pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
-    // TODO: Remove these horrifying where clauses
     type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WhirDefaultSpec;
+
+impl<E: ExtensionField> WhirSpec<E> for WhirDefaultSpec {
+    type Spec = WhirDefaultSpecInner;
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -270,12 +277,16 @@ mod tests {
     use goldilocks::GoldilocksExt2;
     use rand::Rng;
 
+    use crate::test_util::{gen_rand_poly_base, gen_rand_poly_ext, run_commit_open_verify};
+
     use super::*;
 
     type F = ff::ExtensionFieldWrapper<GoldilocksExt2>;
 
     use whir::{
-        ceno_binding::{DefaultHash, PolynomialCommitmentScheme, WhirDefaultSpec},
+        ceno_binding::{
+            DefaultHash, PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner,
+        },
         poly_utils::{MultilinearPoint, coeffs::CoefficientList},
         whir::iopattern::IOPattern,
     };
@@ -284,7 +295,7 @@ mod tests {
     fn single_point_verify() {
         let poly_size = 10;
         let num_coeffs = 1 << poly_size;
-        let pp = WhirInner::<F, WhirDefaultSpec>::setup(poly_size);
+        let pp = WhirInner::<F, WhirDefaultSpecInner>::setup(poly_size);
 
         let poly = CoefficientList::new(
             (0..num_coeffs)
@@ -296,15 +307,30 @@ mod tests {
         let mut merlin = io.to_merlin();
 
         let witness =
-            WhirInner::<F, WhirDefaultSpec>::commit_and_write(&pp, &poly, &mut merlin).unwrap();
+            WhirInner::<F, WhirDefaultSpecInner>::commit_and_write(&pp, &poly, &mut merlin)
+                .unwrap();
 
         let mut rng = rand::thread_rng();
         let point: Vec<F> = (0..poly_size).map(|_| F::from(rng.gen::<u64>())).collect();
         let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
 
-        let proof = WhirInner::<F, WhirDefaultSpec>::open(&pp, witness, &point, &eval, &mut merlin)
-            .unwrap();
+        let proof =
+            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, witness, &point, &eval, &mut merlin)
+                .unwrap();
         let mut arthur = io.to_arthur(&proof.transcript);
-        WhirInner::<F, WhirDefaultSpec>::verify(&pp, &point, &eval, &proof, &mut arthur).unwrap();
+        WhirInner::<F, WhirDefaultSpecInner>::verify(&pp, &point, &eval, &proof, &mut arthur)
+            .unwrap();
+    }
+
+    type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
+
+    #[test]
+    fn commit_open_verify_goldilocks() {
+        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
+            // Challenge is over extension field, poly over the base field
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 10, 11);
+            // Test trivial proof with small num vars
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 4, 6);
+        }
     }
 }
