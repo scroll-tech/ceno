@@ -32,7 +32,7 @@ use std::{
     io::{BufReader, ErrorKind},
     marker::PhantomData,
     ops::Neg,
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
 };
 use strum::IntoEnumIterator;
 
@@ -406,33 +406,33 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: [E; 2],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], &[], Some(challenge), lkm)
+        Self::run_maybe_challenge(
+            cb,
+            wits_in,
+            Arc::new(Program::default()),
+            &[],
+            Some(challenge),
+            lkm,
+        )
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[ceno_emul::Instruction],
+        program: Arc<Program>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        Self::run_maybe_challenge(cb, wits_in, programs, &[], None, lkm)
+        Self::run_maybe_challenge(cb, wits_in, program, &[], None, lkm)
     }
 
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        input_programs: &[ceno_emul::Instruction],
+        program: Arc<Program>,
         pi: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E>>> {
-        let program = Program::new(
-            CENO_PLATFORM.pc_base(),
-            CENO_PLATFORM.pc_base(),
-            input_programs.to_vec(),
-            Default::default(),
-        );
-
         // load tables
         let (challenge, mut table) = if let Some(challenge) = challenge {
             (challenge, load_tables(cb, challenge))
@@ -440,7 +440,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             load_once_tables(cb)
         };
         let mut prog_table = vec![];
-        Self::load_program_table(&mut prog_table, &program, challenge);
+        Self::load_program_table(&mut prog_table, program, challenge);
         for prog in prog_table {
             table.insert(prog);
         }
@@ -636,15 +636,16 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
     }
 
-    fn load_program_table(t_vec: &mut Vec<Vec<u64>>, program: &Program, challenge: [E; 2]) {
+    fn load_program_table(t_vec: &mut Vec<Vec<u64>>, program: Arc<Program>, challenge: [E; 2]) {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new_with_params(&mut cs, ProgramParams {
             platform: CENO_PLATFORM,
-            program_size: MOCK_PROGRAM_SIZE,
+            program_size: std::cmp::max(program.instructions.len(), MOCK_PROGRAM_SIZE),
             ..ProgramParams::default()
         });
         let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
-        let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
+        let fixed =
+            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, &program);
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
@@ -662,7 +663,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[ceno_emul::Instruction],
+        program: Arc<Program>,
         constraint_names: &[&str],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
@@ -670,7 +671,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let error_groups = if let Some(challenge) = challenge {
             Self::run_with_challenge(cb, wits_in, challenge, lkm)
         } else {
-            Self::run(cb, wits_in, programs, lkm)
+            Self::run(cb, wits_in, program, lkm)
         }
         .err()
         .into_iter()
@@ -714,7 +715,7 @@ Hints:
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
         raw_witin: RowMajorMatrix<E::BaseField>,
-        programs: &[ceno_emul::Instruction],
+        program: Arc<Program>,
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
@@ -723,24 +724,25 @@ Hints:
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
-        Self::assert_satisfied(cb, &wits_in, programs, challenge, lkm);
+        Self::assert_satisfied(cb, &wits_in, program, challenge, lkm);
     }
 
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
-        programs: &[ceno_emul::Instruction],
+        program: Arc<Program>,
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) {
-        Self::assert_with_expected_errors(cb, wits_in, programs, &[], challenge, lkm);
+        Self::assert_with_expected_errors(cb, wits_in, program, &[], challenge, lkm);
     }
 
     pub fn assert_satisfied_full(
-        cs: &ZKVMConstraintSystem<E>,
+        cs: &mut ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
         pi: &PublicValues<u32>,
+        program: Arc<Program>,
     ) {
         let instance = pi
             .to_vec::<E>()
@@ -873,70 +875,26 @@ Hints:
             num_instances.insert(circuit_name.clone(), num_rows);
         }
 
-        for (rom_type, inputs) in rom_inputs {
-            let table = rom_tables.get_mut(&rom_type).unwrap();
-            for (lk_input_values, circuit_name, lk_input_annotation, input_value_exprs) in inputs {
-                // counting multiplicity in rom_input
-                let mut lk_input_values_multiplicity = HashMap::new();
-                for (row, input_value) in enumerate(&lk_input_values) {
-                    // we only keep first row to restore debug information
-                    lk_input_values_multiplicity
-                        .entry(input_value)
-                        .or_insert([0u64, row as u64])[0] += 1;
-                }
-
-                for (k, [input_multiplicity, row]) in lk_input_values_multiplicity {
-                    let table_multiplicity = if let Some(table_multiplicity) = table.get_mut(k) {
-                        if input_multiplicity <= table_multiplicity.to_canonical_u64() {
-                            *table_multiplicity -= E::BaseField::from(input_multiplicity);
-                            continue;
-                        }
-                        table_multiplicity.to_canonical_u64()
-                    } else {
-                        0
-                    };
-                    // log mismatch error
-                    let witness = wit_mles
-                        .get(&circuit_name)
-                        .map(|mles| {
-                            mles.iter()
-                                .map(|mle| E::from(mle.get_base_field_vec()[row as usize]))
-                                .collect_vec()
-                        })
-                        .unwrap();
-                    let values = input_value_exprs
-                        .iter()
-                        .map(|expr| {
-                            eval_by_expr_with_instance(
-                                &[],
-                                &witness,
-                                &instance,
-                                challenges.as_slice(),
-                                expr,
-                            )
-                            .as_bases()[0]
-                        })
-                        .collect_vec();
-                    tracing::error!(
-                        "{}: value {:x?} mismatch lk_multiplicity: real {:x} > remaining {:x} in {:?} table",
-                        lk_input_annotation,
-                        values,
-                        input_multiplicity,
-                        table_multiplicity,
-                        rom_type,
-                    );
-                }
+        // assert all opcodes and check lk multiplicity
+        for (name, op_cs) in (cs.circuit_css).iter_mut() {
+            let is_opcode = op_cs.lk_table_expressions.is_empty()
+                && op_cs.r_table_expressions.is_empty()
+                && op_cs.w_table_expressions.is_empty();
+            if !is_opcode {
+                continue;
             }
-            // each table entry's multiplicity should equal to 0
-            for (k, multiplicity) in table {
-                if !multiplicity.is_zero_vartime() {
-                    tracing::error!(
-                        "table {:?}: {:x?} multiplicity = {:x}",
-                        rom_type,
-                        k,
-                        multiplicity.to_canonical_u64()
-                    );
-                }
+
+            if let Some(witness) = witnesses.get_table_witness(name) {
+                Self::assert_satisfied_raw(
+                    &CircuitBuilder {
+                        cs: op_cs,
+                        params: cs.params.clone(),
+                    },
+                    witness,
+                    program.clone(),
+                    None,
+                    Some(witnesses.get_lk_mlt(name).unwrap()),
+                );
             }
         }
 
@@ -1267,7 +1225,7 @@ mod tests {
                 .into(),
         ];
 
-        MockProver::assert_satisfied(&builder, &wits_in, &[], None, None);
+        MockProver::assert_satisfied(&builder, &wits_in, Arc::new(Program::default()), None, None);
     }
 
     #[derive(Debug)]
@@ -1300,7 +1258,13 @@ mod tests {
         ];
 
         let challenge = [1.into(), 1000.into()];
-        MockProver::assert_satisfied(&builder, &wits_in, &[], Some(challenge), None);
+        MockProver::assert_satisfied(
+            &builder,
+            &wits_in,
+            Arc::new(Program::default()),
+            Some(challenge),
+            None,
+        );
     }
 
     #[test]
@@ -1423,7 +1387,7 @@ mod tests {
         MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
-            &[],
+            Arc::new(Program::default()),
             Some([1.into(), 1000.into()]),
             None,
         );
@@ -1456,7 +1420,7 @@ mod tests {
         MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
-            &[],
+            Arc::new(Program::default()),
             Some([1.into(), 1000.into()]),
             None,
         );
@@ -1541,7 +1505,7 @@ mod tests {
         MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
-            &[],
+            Arc::new(Program::default()),
             Some([1.into(), 1000.into()]),
             None,
         );
@@ -1575,7 +1539,7 @@ mod tests {
         MockProver::assert_satisfied_raw(
             &builder,
             raw_witin,
-            &[],
+            Arc::new(Program::default()),
             Some([1.into(), 1000.into()]),
             None,
         );

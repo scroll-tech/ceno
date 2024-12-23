@@ -388,7 +388,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
     };
 
     let program = Arc::new(program);
-    let system_config = construct_configs::<E>(program_params);
+    let mut system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
 
     // IO is not used in this program, but it must have a particular size at the moment.
@@ -424,7 +424,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     init_full_mem,
                     platform,
                     hints,
-                    &system_config,
+                    &mut system_config,
                     pk,
                     zkvm_fixed_traces,
                 )
@@ -454,10 +454,11 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(
-            &system_config.zkvm_cs,
+            &mut system_config.zkvm_cs,
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            program,
         );
         tracing::info!("Mock proving passed");
     }
@@ -487,7 +488,7 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     init_full_mem: InitMemState,
     platform: Platform,
     hints: Vec<u32>,
-    system_config: &ConstraintSystemConfig<E>,
+    system_config: &mut ConstraintSystemConfig<E>,
     pk: ZKVMProvingKey<E, PCS>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
 ) -> ZKVMProof<E, PCS> {
@@ -505,10 +506,11 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     if std::env::var("MOCK_PROVING").is_ok() {
         MockProver::assert_satisfied_full(
-            &system_config.zkvm_cs,
+            &mut system_config.zkvm_cs,
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            program,
         );
         tracing::info!("Mock proving passed");
     }

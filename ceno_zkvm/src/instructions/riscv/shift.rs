@@ -231,7 +231,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
 #[cfg(test)]
 mod tests {
-    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
+    use std::sync::Arc;
+
+    use ceno_emul::{Change, InsnKind, Program, StepRecord, encode_rv32};
     use goldilocks::GoldilocksExt2;
 
     use crate::{
@@ -351,6 +353,12 @@ mod tests {
         )
         .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(
+            &cb,
+            raw_witin,
+            Arc::new(Program::from_insn_code(insn_code)),
+            None,
+            Some(lkm),
+        );
     }
 }
