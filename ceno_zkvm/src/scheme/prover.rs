@@ -103,14 +103,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 circuit_name = circuit_name,
                 profiling_2 = true
             );
+            let cs = self.pk.circuit_pks[&circuit_name].get_cs();
+            let is_opcode_circuit = cs.lk_table_expressions.is_empty()
+                && cs.r_table_expressions.is_empty()
+                && cs.w_table_expressions.is_empty();
             let witness = match num_instances {
                 0 => vec![],
                 _ => {
                     let witness = witness.into_mles();
                     commitments.insert(
                         circuit_name.clone(),
-                        PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
-                            .map_err(ZKVMError::PCSError)?,
+                        PCS::batch_commit_and_write(
+                            &self.pk.pp,
+                            if is_opcode_circuit && witness.len() > 1 {
+                                &witness[0..witness.len() / 2]
+                            } else {
+                                &witness
+                            },
+                            &mut transcript,
+                        )
+                        .map_err(ZKVMError::PCSError)?,
                     );
                     witness
                 }
@@ -614,12 +626,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             name,
             witnesses.len()
         );
+        let (witnesses, wits_in_evals) = if witnesses.len() > 1 {
+            (
+                &witnesses[0..witnesses.len() / 2],
+                &wits_in_evals[0..wits_in_evals.len() / 2],
+            )
+        } else {
+            (witnesses.as_slice(), wits_in_evals.as_slice())
+        };
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
-            &witnesses,
+            witnesses,
             &wits_commit,
             &input_open_point,
-            wits_in_evals.as_slice(),
+            wits_in_evals,
             transcript,
         )
         .map_err(ZKVMError::PCSError)?;
@@ -646,7 +666,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             lk_records_in_evals,
             wits_commit,
             wits_opening_proof,
-            wits_in_evals,
+            wits_in_evals: wits_in_evals.to_vec(),
         })
     }
 

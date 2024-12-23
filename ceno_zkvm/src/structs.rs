@@ -175,6 +175,17 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
+        println!(
+            "before lk expression {} lk len {}",
+            OC::name(),
+            cs.lk_expressions.len()
+        );
+        cs.lk_expressions = cs.lk_expressions.split_off(cs.lk_expressions.len() / 2);
+        println!(
+            "after lk expression {} lk len {}",
+            OC::name(),
+            cs.lk_expressions.len()
+        );
         assert!(self.circuit_css.insert(OC::name(), cs).is_none());
 
         config
