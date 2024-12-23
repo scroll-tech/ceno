@@ -1,12 +1,8 @@
-#![no_main]
-#![no_std]
-
 extern crate ceno_rt;
 use ceno_rt::println;
 use core::fmt::Write;
 use rkyv::{Archived, string::ArchivedString};
 
-ceno_rt::entry!(main);
 fn main() {
     let condition: &bool = ceno_rt::read();
     assert!(*condition);

@@ -13,7 +13,7 @@ version.workspace = true
 anyhow.workspace = true
 ceno_emul = { path = "../ceno_emul" }
 itertools.workspace = true
-rkyv = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }
+rkyv = { version = "0.8", features = ["pointer_width_32"] }
 
 [dev-dependencies]
 ceno-examples = { path = "../examples-builder" }
