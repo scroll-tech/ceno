@@ -93,20 +93,12 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        config.assign_instances(num_witin, final_v)
-    }
-
-    fn assign_structural_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        config.assign_structural_instances(num_witin, final_v)
+        config.assign_instances(num_witin, num_structural_witin, final_v)
     }
 }
 
@@ -149,20 +141,12 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed including padding
-        config.assign_instances(num_witin, final_cycles)
-    }
-
-    fn assign_structural_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
-        final_cycles: &[Cycle],
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        config.assign_structural_instances(num_witin, final_cycles)
+        config.assign_instances(num_witin, num_structural_witin, final_cycles)
     }
 }
 
@@ -229,19 +213,11 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        config.assign_instances(num_witin, final_v)
-    }
-
-    fn assign_structural_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        config.assign_structural_instances(num_witin, final_v)
+        config.assign_instances(num_witin, num_structural_witin, final_v)
     }
 }

@@ -33,14 +33,8 @@ pub trait TableCircuit<E: ExtensionField> {
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         input: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
-
-    fn assign_structural_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
 }

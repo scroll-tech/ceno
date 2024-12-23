@@ -151,11 +151,12 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
     pub fn assign_instances<F: SmallField>(
         &self,
         num_witness: usize,
+        num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
-            num_witness,
+            num_witness + num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
@@ -180,18 +181,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             });
 
         Ok(final_table)
-    }
-
-    pub fn assign_structural_instances<F: SmallField>(
-        &self,
-        _num_witness: usize,
-        _final_mem: &[MemFinalRecord],
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        Ok(RowMajorMatrix::<F>::new(
-            0,
-            0,
-            InstancePaddingStrategy::Default,
-        ))
     }
 }
 
@@ -290,11 +279,12 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     pub fn assign_instances<F: SmallField>(
         &self,
         num_witness: usize,
+        num_structural_witin: usize,
         final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
-            num_witness,
+            num_witness + num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
@@ -307,18 +297,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             });
 
         Ok(final_table)
-    }
-
-    pub fn assign_structural_instances<F: SmallField>(
-        &self,
-        _num_witness: usize,
-        _final_cycles: &[Cycle],
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        Ok(RowMajorMatrix::<F>::new(
-            0,
-            0,
-            InstancePaddingStrategy::Default,
-        ))
     }
 }
 
@@ -408,6 +386,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     pub fn assign_instances<F: SmallField>(
         &self,
         num_witness: usize,
+        num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
@@ -425,7 +404,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
         let mut final_table = RowMajorMatrix::<F>::new(
             final_mem.len(),
-            num_witness,
+            num_witness + num_structural_witin,
             InstancePaddingStrategy::Custom(Arc::new(padding_fn)),
         );
 
@@ -436,7 +415,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .enumerate()
             .for_each(|(i, (row, rec))| {
                 assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
-                // set_val!(row, self.addr, rec.addr as u64);
 
                 if self.final_v.len() == 1 {
                     // Assign value directly.
@@ -449,43 +427,14 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     });
                 }
                 set_val!(row, self.final_cycle, rec.cycle);
-            });
 
-        Ok(final_table)
-    }
-
-    pub fn assign_structural_instances<F: SmallField>(
-        &self,
-        num_structural_witness: usize,
-        final_mem: &[MemFinalRecord],
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
-        assert!(DVRAM::max_len(&self.params).is_power_of_two());
-
-        let params = self.params.clone();
-        let addr_column = self.addr.id as u64;
-        let padding_fn = move |row: u64, col: u64| {
-            if col == addr_column {
-                DVRAM::addr(&params, row as usize) as u64
-            } else {
-                0u64
-            }
-        };
-
-        let mut final_table = RowMajorMatrix::<F>::new(
-            final_mem.len(),
-            num_structural_witness,
-            InstancePaddingStrategy::Custom(Arc::new(padding_fn)),
-        );
-        // todo()
-        final_table
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .zip(final_mem.into_par_iter())
-            .enumerate()
-            .for_each(|(i, (row, rec))| {
-                assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
-                set_val!(row, self.addr, rec.addr as u64);
+                let offset_addr = StructuralWitIn {
+                    id: self.addr.id + (num_witness as u16),
+                    max_len: self.addr.max_len,
+                    offset: self.addr.offset,
+                    multi_factor: self.addr.multi_factor,
+                };
+                set_val!(row, offset_addr, rec.addr as u64);
             });
 
         Ok(final_table)
@@ -518,7 +467,7 @@ mod tests {
         let lkm = LkMultiplicity::default().into_finalize_result();
 
         // ensure non-empty padding is required
-        let some_non_2_pow = 26;
+        let some_non_2_pow = 32;
         let input = (0..some_non_2_pow)
             .map(|i| MemFinalRecord {
                 addr: HintsTable::addr(&def_params, i),
@@ -526,10 +475,10 @@ mod tests {
                 value: 0,
             })
             .collect_vec();
-
-        let struct_wit = HintsCircuit::<E>::assign_structural_instances(
+        let wit = HintsCircuit::<E>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
             &lkm,
             &input,
         )
@@ -542,12 +491,12 @@ mod tests {
             .position(|name| name == "riscv/RAM_Memory_HintsTable/addr")
             .unwrap();
 
-        let addr_padded_view = struct_wit.column_padded(addr_column);
+        let addr_padded_view = wit.column_padded(addr_column + cb.cs.num_witin as usize);
         // Expect addresses to proceed consecutively inside the padding as well
         let expected = successors(Some(addr_padded_view[0]), |idx| {
             Some(*idx + F::from(WORD_SIZE as u64))
         })
-        .take(next_pow2_instance_padding(struct_wit.num_instances()))
+        .take(next_pow2_instance_padding(wit.num_instances()))
         .collect::<Vec<_>>();
 
         assert_eq!(addr_padded_view, expected)

@@ -241,7 +241,6 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
-    pub structural_witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
@@ -253,13 +252,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     pub fn get_table_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
         self.witnesses_tables.get(name).cloned()
-    }
-
-    pub fn get_table_structural_witness(
-        &self,
-        name: &String,
-    ) -> Option<RowMajorMatrix<E::BaseField>> {
-        self.structural_witnesses_tables.get(name).cloned()
     }
 
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
@@ -317,27 +309,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         input: &TC::WitnessInput,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
-
         let cs = cs.get_cs(&TC::name()).unwrap();
         let witness = TC::assign_instances(
             config,
             cs.num_witin as usize,
-            self.combined_lk_mlt.as_ref().unwrap(),
-            input,
-        )?;
-        assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
-
-        let structural_witness = TC::assign_structural_instances(
-            config,
             cs.num_structural_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        assert!(
-            self.structural_witnesses_tables
-                .insert(TC::name(), structural_witness)
-                .is_none()
-        );
+        assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
 
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 

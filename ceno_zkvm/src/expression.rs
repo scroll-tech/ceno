@@ -7,7 +7,7 @@ use std::{
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
-use ceno_emul::{Addr, InsnKind};
+use ceno_emul::InsnKind;
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
@@ -26,7 +26,7 @@ pub enum Expression<E: ExtensionField> {
     WitIn(WitnessId),
     /// same as witin, but it's structual witness and be evaluated by verifier succinctly.
     /// WitnessId, max_len, offset, multi_factor
-    StructuralWitIn(WitnessId, usize, Addr, usize),
+    StructuralWitIn(WitnessId, usize, u32, usize),
     /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
     /// Public Values

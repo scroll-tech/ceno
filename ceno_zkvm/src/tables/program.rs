@@ -164,6 +164,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         program: &Program,
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
@@ -177,7 +178,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         let mut witness = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
-            num_witin,
+            num_witin + num_structural_witin,
             InstancePaddingStrategy::Default,
         );
         witness
@@ -189,15 +190,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             });
 
         Ok(witness)
-    }
-
-    fn assign_structural_instances(
-        _config: &Self::TableConfig,
-        _num_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
-        _final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        Ok(RowMajorMatrix::new(0, 0, InstancePaddingStrategy::Default))
     }
 }
 
@@ -241,6 +233,7 @@ mod tests {
         let witness = ProgramTableCircuit::<E>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
             &lkm,
             &program,
         )

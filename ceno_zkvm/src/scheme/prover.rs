@@ -89,23 +89,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
         exit_span!(span);
 
-        let mut structural_wits = BTreeMap::new();
-        for (circuit_name, structural_witness) in witnesses.structural_witnesses_tables.clone() {
-            let commit_dur = std::time::Instant::now();
-            let num_instances = structural_witness.num_instances();
-            let structural_witness = structural_witness.into_mles();
-
-            tracing::info!(
-                "commit to {} traces took {:?}",
-                circuit_name,
-                commit_dur.elapsed()
-            );
-            structural_wits.insert(circuit_name, (structural_witness, num_instances));
-        }
-
         // commit to main traces
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
+        let mut structural_wits = BTreeMap::new();
 
         let commit_to_traces_span = entered_span!("commit_to_traces", profiling_1 = true);
         // commit to opcode circuits first and then commit to table circuits, sorted by name
@@ -116,8 +103,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 circuit_name = circuit_name,
                 profiling_2 = true
             );
-            let witness = match num_instances {
-                0 => vec![],
+            let num_witin = self
+                .pk
+                .circuit_pks
+                .get(&circuit_name)
+                .unwrap()
+                .get_cs()
+                .num_witin;
+            let (witness, structural_witness) = witness.split_at(num_witin as usize);
+
+            let (witness, structural_witness) = match num_instances {
+                0 => (vec![], vec![]),
                 _ => {
                     let witness = witness.into_mles();
                     commitments.insert(
@@ -125,11 +121,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                         PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
                             .map_err(ZKVMError::PCSError)?,
                     );
-                    witness
+                    let structural_witness = structural_witness.into_mles();
+
+                    (witness, structural_witness)
                 }
             };
             exit_span!(span);
-            wits.insert(circuit_name, (witness, num_instances));
+            wits.insert(
+                circuit_name.clone(),
+                (
+                    witness.into_iter().map(|w| w.into()).collect_vec(),
+                    num_instances,
+                ),
+            );
+            structural_wits.insert(
+                circuit_name,
+                (
+                    structural_witness
+                        .into_iter()
+                        .map(|v| v.into())
+                        .collect_vec(),
+                    num_instances,
+                ),
+            );
         }
         exit_span!(commit_to_traces_span);
 
@@ -155,14 +169,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 continue;
             }
             let wits_commit = commitments.remove(circuit_name).unwrap();
-            let (structural_witness, structural_num_instances) =
-                if structural_wits.contains_key(circuit_name) {
-                    structural_wits
-                        .remove(circuit_name)
-                        .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?
-                } else {
-                    (vec![], 0)
-                };
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
             let is_opcode_circuit = cs.lk_table_expressions.is_empty()
@@ -182,7 +188,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     circuit_name,
                     &self.pk.pp,
                     pk,
-                    witness.into_iter().map(|w| w.into()).collect_vec(),
+                    witness,
                     wits_commit,
                     &pi,
                     num_instances,
@@ -198,16 +204,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .opcode_proofs
                     .insert(circuit_name.clone(), (i, opcode_proof));
             } else {
+                let (structural_witness, structural_num_instances) = structural_wits
+                    .remove(circuit_name)
+                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
                 let (table_proof, pi_in_evals) = self.create_table_proof(
                     circuit_name,
                     &self.pk.pp,
                     pk,
-                    witness.into_iter().map(|v| v.into()).collect_vec(),
+                    witness,
                     wits_commit,
-                    structural_witness
-                        .into_iter()
-                        .map(|v| v.into())
-                        .collect_vec(),
+                    structural_witness,
                     &pi,
                     transcript,
                     &challenges,
