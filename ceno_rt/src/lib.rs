@@ -1,6 +1,7 @@
 #![deny(clippy::cargo)]
 #![feature(strict_overflow_ops)]
 #![feature(linkage)]
+use getrandom::{Error, register_custom_getrandom};
 
 #[cfg(target_arch = "riscv32")]
 use core::arch::{asm, global_asm};
@@ -16,6 +17,18 @@ pub use io::info_out;
 
 mod params;
 pub use params::*;
+
+/// Custom random number generator for getrandom
+///
+/// One of sproll's dependencies uses the getrandom crate,
+/// and it will only build, if we provide a custom random number generator.
+///
+/// Otherwise, it'll complain about an unsupported target.
+pub fn my_get_random(buf: &mut [u8]) -> Result<(), Error> {
+    unsafe { sys_rand(buf.as_mut_ptr(), buf.len()) };
+    Ok(())
+}
+register_custom_getrandom!(my_get_random);
 
 #[no_mangle]
 #[linkage = "weak"]
