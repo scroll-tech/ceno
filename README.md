@@ -1,4 +1,4 @@
-# Ceno: Non-uniform, Segment and Parallel Risc-V Zero-knowledge Virtual Machine
+# Ceno: Non-uniform, Segment and Parallel RISC-V Zero-knowledge Virtual Machine
 
 Please see [the slightly outdated paper](https://eprint.iacr.org/2024/387) for an introduction to Ceno.
 
@@ -14,7 +14,7 @@ Ceno is built in Rust, so [installing the Rust toolchain](https://www.rust-lang.
 cargo install cargo-make
 ```
 
-You will also need to install the Risc-V target for Rust. You can do this with the following command:
+You will also need to install the RISC-V target for Rust. You can do this with the following command:
 
 ```sh
 rustup target add riscv32im-unknown-none-elf
