@@ -23,6 +23,19 @@ pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
     unimplemented!();
 }
 
+#[deprecated]
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn sys_alloc_words(_nwords: usize) -> *mut u32 {
+    unimplemented!();
+}
+
+#[no_mangle]
+#[linkage = "weak"]
+pub extern "C" fn sys_getenv(_name: *const u8) -> *const u8 {
+    unimplemented!();
+}
+
 /// Generates random bytes.
 ///
 /// # Safety
