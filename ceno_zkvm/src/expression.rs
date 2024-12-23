@@ -24,8 +24,9 @@ use crate::{
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
-    /// same as witin, but it's structual witness and be evaluated by verifier succinctly.
-    /// WitnessId, max_len, offset, multi_factor
+    /// StructuralWitIn is similar with WitIn, but it is structured.
+    /// These witnesses in StructuralWitIn allow succinct verification directly during the verification processing, rather than requiring a commitment.
+    /// StructuralWitIn(Id, max_len, offset, multi_factor)
     StructuralWitIn(WitnessId, usize, u32, usize),
     /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
