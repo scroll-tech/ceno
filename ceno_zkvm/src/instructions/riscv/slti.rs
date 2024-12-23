@@ -122,9 +122,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                     lkm,
                     *rs1_value.as_u16_limbs().last().unwrap() as u64,
                 )?;
+                let (rs1, imm) = (rs1 as SWord, imm as SWord);
                 config
                     .lt
-                    .assign_instance_signed(instance, lkm, rs1 as SWord, imm as SWord)?;
+                    .assign_instance_signed(instance, lkm, rs1 as i64, imm as i64)?;
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }
