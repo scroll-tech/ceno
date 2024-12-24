@@ -7,7 +7,7 @@ use crate::{
             branch::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
-            div::DivuInstruction,
+            div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -27,7 +27,6 @@ use ceno_emul::{
     InsnKind::{self, *},
     Platform, StepRecord,
 };
-use div::{DivDummy, RemDummy, RemuDummy};
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -62,6 +61,9 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub mulhsu_config: <MulhsuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub mulhu_config: <MulhuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub divu_config: <DivuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub remu_config: <RemuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub div_config: <DivInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub rem_config: <RemInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // ALU with imm
     pub addi_config: <AddiInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -129,6 +131,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mulhsu_config = cs.register_opcode_circuit::<MulhsuInstruction<E>>();
         let mulhu_config = cs.register_opcode_circuit::<MulhuInstruction<E>>();
         let divu_config = cs.register_opcode_circuit::<DivuInstruction<E>>();
+        let remu_config = cs.register_opcode_circuit::<RemuInstruction<E>>();
+        let div_config = cs.register_opcode_circuit::<DivInstruction<E>>();
+        let rem_config = cs.register_opcode_circuit::<RemInstruction<E>>();
 
         // alu with imm opcodes
         let addi_config = cs.register_opcode_circuit::<AddiInstruction<E>>();
@@ -193,6 +198,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             mulhsu_config,
             mulhu_config,
             divu_config,
+            remu_config,
+            div_config,
+            rem_config,
             // alu with imm
             addi_config,
             andi_config,
@@ -258,6 +266,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs);
         fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs);
         fixed.register_opcode_circuit::<DivuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<RemuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<DivInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<RemInstruction<E>>(cs);
         // alu with imm
         fixed.register_opcode_circuit::<AddiInstruction<E>>(cs);
         fixed.register_opcode_circuit::<AndiInstruction<E>>(cs);
@@ -361,6 +372,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
         assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
         assign_opcode!(DIVU, DivuInstruction<E>, divu_config);
+        assign_opcode!(REMU, RemuInstruction<E>, remu_config);
+        assign_opcode!(DIV, DivInstruction<E>, div_config);
+        assign_opcode!(REM, RemInstruction<E>, rem_config);
         // alu with imm
         assign_opcode!(ADDI, AddiInstruction<E>, addi_config);
         assign_opcode!(ANDI, AndiInstruction<E>, andi_config);
@@ -397,9 +411,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [INVALID, DIV, REM, REMU, ECALL]
-                .into_iter()
-                .collect::<BTreeSet<_>>(),
+            [INVALID, ECALL].into_iter().collect::<BTreeSet<_>>(),
         );
         Ok(GroupedSteps(all_records))
     }
@@ -429,23 +441,12 @@ pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
     ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
-    div_config: <DivDummy<E> as Instruction<E>>::InstructionConfig,
-    rem_config: <RemDummy<E> as Instruction<E>>::InstructionConfig,
-    remu_config: <RemuDummy<E> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
-        let div_config = cs.register_opcode_circuit::<DivDummy<E>>();
-        let rem_config = cs.register_opcode_circuit::<RemDummy<E>>();
-        let remu_config = cs.register_opcode_circuit::<RemuDummy<E>>();
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        Self {
-            div_config,
-            rem_config,
-            remu_config,
-            ecall_config,
-        }
+        Self { ecall_config }
     }
 
     pub fn generate_fixed_traces(
@@ -453,9 +454,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
-        fixed.register_opcode_circuit::<DivDummy<E>>(cs);
-        fixed.register_opcode_circuit::<RemDummy<E>>(cs);
-        fixed.register_opcode_circuit::<RemuDummy<E>>(cs);
         fixed.register_opcode_circuit::<EcallDummy<E>>(cs);
     }
 
@@ -477,9 +475,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             };
         }
 
-        assign_opcode!(DIV, DivDummy<E>, div_config);
-        assign_opcode!(REM, RemDummy<E>, rem_config);
-        assign_opcode!(REMU, RemuDummy<E>, remu_config);
         assign_opcode!(ECALL, EcallDummy<E>, ecall_config);
 
         let _ = steps.remove(&INVALID);
