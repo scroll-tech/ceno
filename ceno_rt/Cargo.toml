@@ -10,4 +10,5 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
+getrandom = { version = "*", features = ["custom"], default-features = false }
 rkyv = { version = "0.8", features = ["pointer_width_32"] }
