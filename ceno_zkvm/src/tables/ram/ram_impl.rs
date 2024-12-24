@@ -398,9 +398,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         };
 
         let params = self.params.clone();
-        let addr_column = offset_addr.id as u64;
         let padding_fn = move |row: u64, col: u64| {
-            if col == addr_column {
+            if col == offset_addr.id as u64 {
                 DVRAM::addr(&params, row as usize) as u64
             } else {
                 0u64
