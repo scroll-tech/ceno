@@ -32,12 +32,14 @@ pub fn poly2whir<E: ExtensionField>(
 mod tests {
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use multilinear_extensions::mle::{FieldType, MultilinearExtension};
+    use rand::rngs::OsRng;
 
     use crate::whir::ff::ExtensionFieldWrapper;
 
     use super::*;
 
     type E = GoldilocksExt2;
+    use ff::Field;
 
     #[test]
     fn test_evaluation_after_conversion() {
@@ -72,6 +74,36 @@ mod tests {
 
         let whir_poly = poly2whir(&poly);
         let point = [E::from(1), E::from(2), E::from(3)];
+        let whir_point = point
+            .iter()
+            .map(|x| ExtensionFieldWrapper(*x))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ExtensionFieldWrapper(poly.evaluate(&point)),
+            whir_poly
+                .evaluate_at_extension(&whir::poly_utils::MultilinearPoint(whir_point.clone()))
+        );
+    }
+
+    #[test]
+    fn test_evaluation_for_random_polynomial() {
+        let poly: DenseMultilinearExtension<E> = DenseMultilinearExtension::random(10, &mut OsRng);
+        let mut coeffs = poly.clone();
+        interpolate_field_type_over_boolean_hypercube(&mut coeffs.evaluations);
+
+        let whir_poly = poly2whir(&poly);
+        let point = [
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+            E::random(&mut OsRng),
+        ];
         let whir_point = point
             .iter()
             .map(|x| ExtensionFieldWrapper(*x))
