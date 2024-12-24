@@ -214,7 +214,7 @@ where
 
     fn verify(
         vp: &Self::VerifierParam,
-        _comm: &Self::Commitment,
+        comm: &Self::Commitment,
         point: &[E],
         eval: &E,
         proof: &Self::Proof,
@@ -231,9 +231,9 @@ where
             .commit_statement(&params)
             .add_whir_proof(&params);
         let mut arthur = io.to_arthur(&proof.transcript);
-        // TODO: check the consistency between comm and proof.transcript
         WhirInnerT::<E, Spec>::verify(
             vp,
+            &comm.inner,
             &point.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
             &FieldWrapper(*eval),
             proof,
@@ -348,6 +348,7 @@ mod tests {
         let witness =
             WhirInner::<F, WhirDefaultSpecInner>::commit_and_write(&pp, &poly, &mut merlin)
                 .unwrap();
+        let comm = witness.commitment;
 
         let mut rng = rand::thread_rng();
         let point: Vec<F> = (0..poly_size).map(|_| F::from(rng.gen::<u64>())).collect();
@@ -357,8 +358,15 @@ mod tests {
             WhirInner::<F, WhirDefaultSpecInner>::open(&pp, witness, &point, &eval, &mut merlin)
                 .unwrap();
         let mut arthur = io.to_arthur(&proof.transcript);
-        WhirInner::<F, WhirDefaultSpecInner>::verify(&pp, &point, &eval, &proof, &mut arthur)
-            .unwrap();
+        WhirInner::<F, WhirDefaultSpecInner>::verify(
+            &pp,
+            &comm,
+            &point,
+            &eval,
+            &proof,
+            &mut arthur,
+        )
+        .unwrap();
     }
 
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
