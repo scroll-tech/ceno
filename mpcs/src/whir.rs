@@ -11,11 +11,14 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use whir::{
     ceno_binding::{
         Config, DefaultHash, FieldChallenges, FieldWriter, PolynomialCommitmentScheme as WhirPCS,
-        Whir as WhirInner, WhirDefaultSpec as WhirDefaultSpecInner, WhirSpec as WhirSpecInner,
+        PowStrategy, Whir as WhirInner, WhirDefaultSpec as WhirDefaultSpecInner,
+        WhirSpec as WhirSpecInner,
     },
+    parameters::MultivariateParameters,
     whir::{
         fs_utils::{DigestReader, DigestWriter},
         iopattern::{Arthur, IOPattern, Merlin, WhirIOPattern},
+        parameters::WhirConfig,
     },
 };
 
@@ -122,8 +125,17 @@ where
         // WhirInner only provides commit_and_write, which directly writes the
         // commitment to the transcript. We provide it with a temporary merlin
         // transcript.
+        let whir_params = Spec::Spec::get_parameters(pp.num_variables);
+        let mv_params = MultivariateParameters::new(pp.num_variables);
+        let params = WhirConfig::<
+            FieldWrapper<E>,
+            <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
+            PowStrategy,
+        >::new(mv_params, whir_params);
 
-        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let io = IOPattern::<DefaultHash>::new("🌪️")
+            .commit_statement(&params)
+            .add_whir_proof(&params);
         let mut merlin = io.to_merlin();
 
         let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly2whir(&poly), &mut merlin)
@@ -288,14 +300,14 @@ mod tests {
             DefaultHash, PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner,
         },
         poly_utils::{MultilinearPoint, coeffs::CoefficientList},
-        whir::iopattern::IOPattern,
+        whir::iopattern::{DigestIOPattern, IOPattern},
     };
 
     #[test]
     fn single_point_verify() {
         let poly_size = 10;
         let num_coeffs = 1 << poly_size;
-        let pp = WhirInner::<F, WhirDefaultSpecInner>::setup(poly_size);
+        let pp = WhirInner::<F, WhirDefaultSpecInner>::setup(num_coeffs as usize);
 
         let poly = CoefficientList::new(
             (0..num_coeffs)
@@ -303,7 +315,17 @@ mod tests {
                 .collect(),
         );
 
-        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let whir_params = WhirDefaultSpecInner::get_parameters(pp.num_variables);
+        let mv_params = MultivariateParameters::new(pp.num_variables);
+        let params = WhirConfig::<
+            F,
+            <WhirDefaultSpecInner as WhirSpecInner<F>>::MerkleConfig,
+            PowStrategy,
+        >::new(mv_params, whir_params);
+
+        let io = IOPattern::<DefaultHash>::new("🌪️")
+            .commit_statement(&params)
+            .add_whir_proof(&params);
         let mut merlin = io.to_merlin();
 
         let witness =

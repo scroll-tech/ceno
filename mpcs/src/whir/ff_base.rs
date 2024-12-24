@@ -322,6 +322,10 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
         if F::BIT_SIZE > 8 {
             None
         } else {
+            let mut bytes_filled = [0u8; 8];
+            bytes_filled[0..8.min(bytes.len())].copy_from_slice(&bytes[0..8.min(bytes.len())]);
+            let bytes = bytes_filled;
+
             let shave_bits = 0;
             // This mask retains everything in the last limb
             // that is below `P::MODULUS_BIT_SIZE`.
@@ -331,7 +335,7 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
             last_bytes_mask[..8].copy_from_slice(&last_limb_mask);
 
             let mut bytes_with_flag = [0u8; 9];
-            bytes_with_flag[0..8].copy_from_slice(bytes);
+            bytes_with_flag[0..8].copy_from_slice(&bytes);
 
             // Length of the buffer containing the field element and the flag.
             let output_byte_size = ark_serialize::buffer_byte_size(64 + F::BIT_SIZE);
@@ -357,7 +361,7 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
                 }
                 *b &= m;
             }
-            Self::deserialize_compressed(&bytes[..8])
+            Self::deserialize_compressed(&bytes[..8.min(bytes.len())])
                 .ok()
                 .and_then(|f| F::from_u8(flags).map(|flag| (f, flag)))
         }
@@ -600,7 +604,8 @@ impl<E: FfExtField> CanonicalDeserialize for BaseFieldWrapper<E> {
         validate: ark_serialize::Validate,
     ) -> Result<Self, ark_serialize::SerializationError> {
         Ok(Self(E::BaseField::from(
-            CanonicalDeserialize::deserialize_with_mode(reader, compress, validate)?,
+            <u64 as CanonicalDeserialize>::deserialize_with_mode(reader, compress, validate)
+                .unwrap(),
         )))
     }
 }
