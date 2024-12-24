@@ -310,7 +310,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
         for i in RANGE::content() {
             let rlc_record =
                 cb.rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
-            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
         }
     }
@@ -327,7 +327,7 @@ fn load_tables<E: ExtensionField>(cb: &CircuitBuilder<E>, challenge: [E; 2]) -> 
                 (b as usize).into(),
                 (c as usize).into(),
             ]);
-            let rlc_record = eval_by_expr(&[], &challenge, &rlc_record);
+            let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
         }
     }
@@ -473,10 +473,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let (left, right) = expr.unpack_sum().unwrap();
                 let right = right.neg();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
+                let left_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, &left);
                 let left_evaluated = left_evaluated.get_base_field_vec();
 
-                let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
+                let right_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, &right);
                 let right_evaluated = right_evaluated.get_base_field_vec();
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
@@ -496,7 +496,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+                let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
                 let expr_evaluated = expr_evaluated.get_base_field_vec();
 
                 for (inst_id, element) in enumerate(expr_evaluated) {
@@ -519,7 +519,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .iter()
             .zip_eq(cb.cs.lk_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, expr);
+            let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
@@ -550,7 +550,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             .map(|expr| {
                                 // TODO generalized to all inst_id
                                 let inst_id = 0;
-                                wit_infer_by_expr(&[], wits_in, pi, &challenge, expr)
+                                wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr)
                                     .get_base_field_vec()[inst_id]
                                     .to_canonical_u64()
                             })
@@ -649,7 +649,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
                 let row = row.iter().map(|v| (*v).into()).collect::<Vec<E>>();
-                let rlc_record = eval_by_expr_with_fixed(&row, &[], &challenge, &table_expr.values);
+                let rlc_record =
+                    eval_by_expr_with_fixed(&row, &[], &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
         }
@@ -816,7 +817,7 @@ Hints:
                     .zip(cs.lk_expressions_items_map.clone().into_iter())
                 {
                     let lk_input =
-                        (wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, expr)
+                        (wit_infer_by_expr(&fixed, &witness, &[], &pi_mles, &challenges, expr)
                             .get_ext_field_vec())[..num_rows]
                             .to_vec();
                     rom_inputs.entry(rom_type).or_default().push((
@@ -838,14 +839,21 @@ Hints:
                     .iter()
                     .zip(cs.lk_expressions_items_map.clone().into_iter())
                 {
-                    let lk_table =
-                        wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, &expr.values)
-                            .get_ext_field_vec()
-                            .to_vec();
+                    let lk_table = wit_infer_by_expr(
+                        &fixed,
+                        &witness,
+                        &[],
+                        &pi_mles,
+                        &challenges,
+                        &expr.values,
+                    )
+                    .get_ext_field_vec()
+                    .to_vec();
 
                     let multiplicity = wit_infer_by_expr(
                         &fixed,
                         &witness,
+                        &[],
                         &pi_mles,
                         &challenges,
                         &expr.multiplicity,
@@ -910,6 +918,7 @@ Hints:
                             eval_by_expr_with_instance(
                                 &[],
                                 &witness,
+                                &[],
                                 &instance,
                                 challenges.as_slice(),
                                 expr,
@@ -968,10 +977,16 @@ Hints:
                     .zip_eq(cs.w_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
-                        let write_rlc_records =
-                            (wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, w_rlc_expr)
-                                .get_ext_field_vec())[..*num_rows]
-                                .to_vec();
+                        let write_rlc_records = (wit_infer_by_expr(
+                            fixed,
+                            witness,
+                            &[],
+                            &pi_mles,
+                            &challenges,
+                            w_rlc_expr,
+                        )
+                        .get_ext_field_vec())[..*num_rows]
+                            .to_vec();
 
                         if $ram_type == RAMType::GlobalState {
                             // w_exprs = [GlobalState, pc, timestamp]
@@ -983,6 +998,7 @@ Hints:
                                     let v = wit_infer_by_expr(
                                         fixed,
                                         witness,
+                                        &[],
                                         &pi_mles,
                                         &challenges,
                                         expr,
@@ -1031,7 +1047,7 @@ Hints:
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
                         let read_records =
-                            wit_infer_by_expr(fixed, witness, &pi_mles, &challenges, r_expr)
+                            wit_infer_by_expr(fixed, witness, &[], &pi_mles, &challenges, r_expr)
                                 .get_ext_field_vec()[..*num_rows]
                                 .to_vec();
                         let mut records = vec![];
@@ -1142,11 +1158,13 @@ Hints:
         gs_rs.insert(eval_by_expr_with_instance(
             &[],
             &[],
+            &[],
             &instance,
             &challenges,
             &gs_final,
         ));
         gs_ws.insert(eval_by_expr_with_instance(
+            &[],
             &[],
             &[],
             &instance,

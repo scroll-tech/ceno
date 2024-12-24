@@ -50,10 +50,11 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
-        config.assign_instances(num_witin, multiplicity, RANGE::len())
+        config.assign_instances(num_witin, num_structural_witin, multiplicity, RANGE::len())
     }
 }

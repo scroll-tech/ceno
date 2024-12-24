@@ -309,15 +309,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         input: &TC::WitnessInput,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
-
         let cs = cs.get_cs(&TC::name()).unwrap();
         let witness = TC::assign_instances(
             config,
             cs.num_witin as usize,
+            cs.num_structural_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
+
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
         Ok(())
