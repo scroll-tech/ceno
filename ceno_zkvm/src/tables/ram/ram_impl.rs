@@ -150,13 +150,13 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     pub fn assign_instances<F: SmallField>(
         &self,
-        num_witness: usize,
+        num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
-            num_witness + num_structural_witin,
+            num_witin + num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
@@ -278,13 +278,13 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     pub fn assign_instances<F: SmallField>(
         &self,
-        num_witness: usize,
+        num_witin: usize,
         num_structural_witin: usize,
         final_cycles: &[Cycle],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
-            num_witness + num_structural_witin,
+            num_witin + num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
@@ -385,15 +385,20 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     pub fn assign_instances<F: SmallField>(
         &self,
-        num_witness: usize,
+        num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
 
+        let offset_addr = StructuralWitIn {
+            id: self.addr.id + (num_witin as u16),
+            ..self.addr
+        };
+
         let params = self.params.clone();
-        let addr_column = self.addr.id as u64;
+        let addr_column = offset_addr.id as u64;
         let padding_fn = move |row: u64, col: u64| {
             if col == addr_column {
                 DVRAM::addr(&params, row as usize) as u64
@@ -404,7 +409,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
         let mut final_table = RowMajorMatrix::<F>::new(
             final_mem.len(),
-            num_witness + num_structural_witin,
+            num_witin + num_structural_witin,
             InstancePaddingStrategy::Custom(Arc::new(padding_fn)),
         );
 
@@ -428,12 +433,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                 }
                 set_val!(row, self.final_cycle, rec.cycle);
 
-                let offset_addr = StructuralWitIn {
-                    id: self.addr.id + (num_witness as u16),
-                    max_len: self.addr.max_len,
-                    offset: self.addr.offset,
-                    multi_factor: self.addr.multi_factor,
-                };
                 set_val!(row, offset_addr, rec.addr as u64);
             });
 
@@ -467,7 +466,7 @@ mod tests {
         let lkm = LkMultiplicity::default().into_finalize_result();
 
         // ensure non-empty padding is required
-        let some_non_2_pow = 32;
+        let some_non_2_pow = 26;
         let input = (0..some_non_2_pow)
             .map(|i| MemFinalRecord {
                 addr: HintsTable::addr(&def_params, i),

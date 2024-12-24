@@ -535,12 +535,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .structural_witins
                         .iter()
                         .map(|structural_witin| {
-                            let Expression::StructuralWitIn(addr_witin_id, max_len, _, _) =
+                            let Expression::StructuralWitIn(witin_id, max_len, _, _) =
                                 structural_witin
                             else {
                                 panic!("illegal expression type")
                             };
-                            let hint_num_vars = proof.rw_hints_num_vars[*addr_witin_id as usize];
+                            let hint_num_vars = proof.rw_hints_num_vars[*witin_id as usize];
                             assert!((1 << hint_num_vars) <= *max_len);
                             hint_num_vars
                         })

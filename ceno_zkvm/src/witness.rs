@@ -104,29 +104,6 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix
             .chain(padding_iter)
             .collect::<Vec<_>>()
     }
-
-    pub fn split_at(&self, mid: usize) -> (RowMajorMatrix<T>, RowMajorMatrix<T>) {
-        assert!(mid <= self.num_col);
-        let mut first_values = vec![];
-        let mut second_values = vec![];
-        for values in self.iter_rows() {
-            let (first, second) = values.split_at(mid);
-            first_values.push(first.to_vec());
-            second_values.push(second.to_vec());
-        }
-
-        let first = RowMajorMatrix {
-            values: first_values.concat(),
-            num_col: mid,
-            padding_strategy: self.padding_strategy.clone(),
-        };
-        let second = RowMajorMatrix {
-            values: second_values.concat(),
-            num_col: self.num_col - mid,
-            padding_strategy: self.padding_strategy.clone(),
-        };
-        (first, second)
-    }
 }
 
 impl<F: Field + From<u64>> RowMajorMatrix<F> {
