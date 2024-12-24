@@ -133,9 +133,7 @@ where
             PowStrategy,
         >::new(mv_params, whir_params);
 
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_statement(&params)
-            .add_whir_proof(&params);
+        let io = IOPattern::<DefaultHash>::new("🌪️").commit_statement(&params);
         let mut merlin = io.to_merlin();
 
         let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly2whir(&poly), &mut merlin)
@@ -164,7 +162,17 @@ where
         eval: &E,
         _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let whir_params = Spec::Spec::get_parameters(pp.num_variables);
+        let mv_params = MultivariateParameters::new(pp.num_variables);
+        let params = WhirConfig::<
+            FieldWrapper<E>,
+            <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
+            PowStrategy,
+        >::new(mv_params, whir_params);
+        let io = IOPattern::<DefaultHash>::new("🌪️")
+            .commit_statement(&params)
+            .add_whir_proof(&params);
+
         let mut merlin = io.to_merlin();
         // In WHIR, the prover writes the commitment to the transcript, then
         // the commitment is read from the transcript by the verifier, after
@@ -212,7 +220,16 @@ where
         proof: &Self::Proof,
         _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let whir_params = Spec::Spec::get_parameters(vp.num_variables);
+        let mv_params = MultivariateParameters::new(vp.num_variables);
+        let params = WhirConfig::<
+            FieldWrapper<E>,
+            <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
+            PowStrategy,
+        >::new(mv_params, whir_params);
+        let io = IOPattern::<DefaultHash>::new("🌪️")
+            .commit_statement(&params)
+            .add_whir_proof(&params);
         let mut arthur = io.to_arthur(&proof.transcript);
         // TODO: check the consistency between comm and proof.transcript
         WhirInnerT::<E, Spec>::verify(
