@@ -14,7 +14,6 @@ use whir::{
         WhirSpec as WhirSpecInner,
     },
     parameters::MultivariateParameters,
-    poly_utils::MultilinearPoint,
     whir::{
         fs_utils::{DigestReader, DigestWriter},
         iopattern::{Arthur, IOPattern, Merlin, WhirIOPattern},
@@ -304,11 +303,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ark_ff::{Field, Fp2, MontBackend, MontConfig};
+    use ark_ff::Field;
     use goldilocks::GoldilocksExt2;
     use rand::Rng;
 
-    use crate::test_util::{gen_rand_poly_base, gen_rand_poly_ext, run_commit_open_verify};
+    use crate::test_util::{gen_rand_poly_base, run_commit_open_verify};
 
     use super::*;
 
@@ -319,7 +318,7 @@ mod tests {
             DefaultHash, PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner,
         },
         poly_utils::{MultilinearPoint, coeffs::CoefficientList},
-        whir::iopattern::{DigestIOPattern, IOPattern},
+        whir::iopattern::IOPattern,
     };
 
     #[test]
