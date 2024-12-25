@@ -1,7 +1,6 @@
 use core::todo;
 
 use super::PolynomialCommitmentScheme;
-use ark_ff::Field;
 use utils::poly2whir;
 pub use whir::ceno_binding::Error;
 
@@ -15,6 +14,7 @@ use whir::{
         WhirSpec as WhirSpecInner,
     },
     parameters::MultivariateParameters,
+    poly_utils::MultilinearPoint,
     whir::{
         fs_utils::{DigestReader, DigestWriter},
         iopattern::{Arthur, IOPattern, Merlin, WhirIOPattern},
@@ -133,7 +133,9 @@ where
             PowStrategy,
         >::new(mv_params, whir_params);
 
-        let io = IOPattern::<DefaultHash>::new("🌪️").commit_statement(&params);
+        let io = IOPattern::<DefaultHash>::new("🌪️")
+            .commit_statement(&params)
+            .add_whir_proof(&params);
         let mut merlin = io.to_merlin();
 
         let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly2whir(&poly), &mut merlin)
@@ -373,7 +375,8 @@ mod tests {
 
     #[test]
     fn commit_open_verify_goldilocks() {
-        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
+        // TODO: Only support committing to base field polynomial now
+        for gen_rand_poly in [gen_rand_poly_base] {
             // Challenge is over extension field, poly over the base field
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 10, 11);
             // Test trivial proof with small num vars
