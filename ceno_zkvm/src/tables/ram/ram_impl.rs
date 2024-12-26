@@ -359,7 +359,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             DVRAM::RAM_TYPE,
             SetTableSpec {
                 len: None,
-                structural_witins: vec![addr.expr()],
+                structural_witins: vec![addr],
             },
             init_table,
         )?;
@@ -368,7 +368,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             DVRAM::RAM_TYPE,
             SetTableSpec {
                 len: None,
-                structural_witins: vec![addr.expr()],
+                structural_witins: vec![addr],
             },
             final_table,
         )?;

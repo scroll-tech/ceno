@@ -66,9 +66,9 @@ pub struct DynamicAddr {
 }
 
 #[derive(Clone, Debug)]
-pub struct SetTableSpec<E: ExtensionField> {
+pub struct SetTableSpec {
     pub len: Option<usize>,
-    pub structural_witins: Vec<Expression<E>>,
+    pub structural_witins: Vec<StructuralWitIn>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,7 +78,7 @@ pub struct SetTableExpression<E: ExtensionField> {
 
     // TODO make decision to have enum/struct
     // for which option is more friendly to be processed by ConstrainSystem + recursive verifier
-    pub table_spec: SetTableSpec<E>,
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
@@ -338,7 +338,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         ram_type: RAMType,
-        table_spec: SetTableSpec<E>,
+        table_spec: SetTableSpec,
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where
@@ -367,7 +367,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         ram_type: RAMType,
-        table_spec: SetTableSpec<E>,
+        table_spec: SetTableSpec,
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError>
     where

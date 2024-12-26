@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 
-use itertools::{Itertools, interleave, izip};
+use itertools::{Itertools, chain, interleave, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -15,7 +15,7 @@ use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, Instance},
+    expression::{Instance, StructuralWitIn},
     instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
@@ -450,22 +450,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
         // verify records (degree = 1) statement, thus no sumcheck
-        if cs
-            .r_expressions
-            .iter()
-            .chain(cs.w_expressions.iter())
-            .chain(cs.lk_expressions.iter())
-            .zip_eq(
-                proof.r_records_in_evals[..r_counts_per_instance]
-                    .iter()
-                    .chain(proof.w_records_in_evals[..w_counts_per_instance].iter())
-                    .chain(proof.lk_records_in_evals[..lk_counts_per_instance].iter()),
+        if izip!(
+            chain!(&cs.r_expressions, &cs.w_expressions, &cs.lk_expressions),
+            chain!(
+                &proof.r_records_in_evals[..r_counts_per_instance],
+                &proof.w_records_in_evals[..w_counts_per_instance],
+                &proof.lk_records_in_evals[..lk_counts_per_instance]
             )
-            .any(|(expr, expected_evals)| {
-                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
-                    != *expected_evals
-            })
-        {
+        )
+        .any(|(expr, expected_evals)| {
+            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                != *expected_evals
+        }) {
             return Err(ZKVMError::VerifyError(
                 "record evaluate != expected_evals".into(),
             ));
@@ -534,13 +530,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     r.table_spec
                         .structural_witins
                         .iter()
-                        .map(|structural_witin| {
-                            let Expression::StructuralWitIn(witin_id, max_len, _, _) =
-                                structural_witin
-                            else {
-                                panic!("illegal expression type")
-                            };
-                            let hint_num_vars = proof.rw_hints_num_vars[*witin_id as usize];
+                        .map(|StructuralWitIn { id, max_len, .. }| {
+                            let hint_num_vars = proof.rw_hints_num_vars[*id as usize];
                             assert!((1 << hint_num_vars) <= *max_len);
                             hint_num_vars
                         })
@@ -708,16 +699,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .table_spec
                     .structural_witins
                     .iter()
-                    .map(|expr| {
-                        let Expression::StructuralWitIn(_, _, offset, scaled) = expr else {
-                            panic!("illegal expression type")
-                        };
-                        eval_wellform_address_vec(
-                            *offset as u64,
-                            *scaled as u64,
-                            &input_opening_point,
-                        )
-                    })
+                    .map(
+                        |StructuralWitIn {
+                             offset,
+                             multi_factor,
+                             ..
+                         }| {
+                            eval_wellform_address_vec(
+                                *offset as u64,
+                                *multi_factor as u64,
+                                &input_opening_point,
+                            )
+                        },
+                    )
                     .collect_vec()
             })
             .collect_vec();
