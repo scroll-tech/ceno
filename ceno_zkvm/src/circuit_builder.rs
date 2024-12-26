@@ -73,7 +73,7 @@ pub struct SetTableSpec {
 
 #[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
-    // table expression
+    /// table expression
     pub expr: Expression<E>,
 
     // TODO make decision to have enum/struct
