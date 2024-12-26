@@ -526,7 +526,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .iter()
             .flat_map(|r| {
                 // iterate through structural witins and collect max round.
-                let Some(num_vars) = r.table_spec.len.map(ceil_log2).or_else(|| {
+                let num_vars = r.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
                     r.table_spec
                         .structural_witins
                         .iter()
@@ -536,9 +536,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             hint_num_vars
                         })
                         .max()
-                }) else {
-                    unreachable!()
-                };
+                        .unwrap()
+                });
                 [num_vars, num_vars]
             })
             .chain(
