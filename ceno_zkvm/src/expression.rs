@@ -149,13 +149,6 @@ impl<E: ExtensionField> Expression<E> {
         self.to_monomial_form_inner()
     }
 
-    pub fn unpack_sum(&self) -> Option<(Expression<E>, Expression<E>)> {
-        match self {
-            Expression::Sum(a, b) => Some((a.deref().clone(), b.deref().clone())),
-            _ => None,
-        }
-    }
-
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
@@ -209,26 +202,39 @@ impl<E: ExtensionField> Neg for Expression<E> {
             Expression::Fixed(_) | Expression::WitIn(_) | Expression::Instance(_) => {
                 Expression::ScaledSum(
                     Box::new(self),
-                    Box::new(Expression::Constant(E::BaseField::ONE.neg())),
+                    Box::new(Expression::Constant(-E::BaseField::ONE)),
                     Box::new(Expression::Constant(E::BaseField::ZERO)),
                 )
             }
-            Expression::Constant(c1) => Expression::Constant(c1.neg()),
-            Expression::Sum(a, b) => {
-                Expression::Sum(Box::new(-a.deref().clone()), Box::new(-b.deref().clone()))
-            }
-            Expression::Product(a, b) => {
-                Expression::Product(Box::new(-a.deref().clone()), Box::new(b.deref().clone()))
-            }
-            Expression::ScaledSum(x, a, b) => Expression::ScaledSum(
-                x,
-                Box::new(-a.deref().clone()),
-                Box::new(-b.deref().clone()),
-            ),
+            Expression::Constant(c1) => Expression::Constant(-c1),
+            Expression::Sum(a, b) => Expression::Sum(-a, -b),
+            Expression::Product(a, b) => Expression::Product(-a, b.clone()),
+            Expression::ScaledSum(x, a, b) => Expression::ScaledSum(x, -a, -b),
             Expression::Challenge(challenge_id, pow, scalar, offset) => {
                 Expression::Challenge(challenge_id, pow, scalar.neg(), offset.neg())
             }
         }
+    }
+}
+
+impl<E: ExtensionField> Neg for &Expression<E> {
+    type Output = Expression<E>;
+    fn neg(self) -> Self::Output {
+        self.clone().neg()
+    }
+}
+
+impl<E: ExtensionField> Neg for Box<Expression<E>> {
+    type Output = Box<Expression<E>>;
+    fn neg(self) -> Self::Output {
+        self.deref().clone().neg().into()
+    }
+}
+
+impl<E: ExtensionField> Neg for &Box<Expression<E>> {
+    type Output = Box<Expression<E>>;
+    fn neg(self) -> Self::Output {
+        self.clone().neg()
     }
 }
 
@@ -303,11 +309,7 @@ impl<E: ExtensionField> Add for Expression<E> {
             // constant + scaled sum
             (c1 @ Expression::Constant(_), Expression::ScaledSum(x, a, b))
             | (Expression::ScaledSum(x, a, b), c1 @ Expression::Constant(_)) => {
-                Expression::ScaledSum(
-                    x.clone(),
-                    a.clone(),
-                    Box::new(b.deref().clone() + c1.clone()),
-                )
+                Expression::ScaledSum(x.clone(), a.clone(), Box::new(b.deref() + c1))
             }
 
             _ => Expression::Sum(Box::new(self), Box::new(rhs)),
@@ -454,38 +456,22 @@ impl<E: ExtensionField> Sub for Expression<E> {
 
             // constant - scalesum
             (c1 @ Expression::Constant(_), Expression::ScaledSum(x, a, b)) => {
-                Expression::ScaledSum(
-                    x.clone(),
-                    Box::new(-a.deref().clone()),
-                    Box::new(c1.clone() - b.deref().clone()),
-                )
+                Expression::ScaledSum(x.clone(), -a, Box::new(c1 - b.deref()))
             }
 
             // scalesum - constant
             (Expression::ScaledSum(x, a, b), c1 @ Expression::Constant(_)) => {
-                Expression::ScaledSum(
-                    x.clone(),
-                    a.clone(),
-                    Box::new(b.deref().clone() - c1.clone()),
-                )
+                Expression::ScaledSum(x.clone(), a.clone(), Box::new(b.deref() - c1))
             }
 
             // challenge - scalesum
             (c1 @ Expression::Challenge(..), Expression::ScaledSum(x, a, b)) => {
-                Expression::ScaledSum(
-                    x.clone(),
-                    Box::new(-a.deref().clone()),
-                    Box::new(c1.clone() - b.deref().clone()),
-                )
+                Expression::ScaledSum(x.clone(), -a, Box::new(c1 - b.deref()))
             }
 
             // scalesum - challenge
             (Expression::ScaledSum(x, a, b), c1 @ Expression::Challenge(..)) => {
-                Expression::ScaledSum(
-                    x.clone(),
-                    a.clone(),
-                    Box::new(b.deref().clone() - c1.clone()),
-                )
+                Expression::ScaledSum(x.clone(), a.clone(), Box::new(b.deref() - c1))
             }
 
             _ => Expression::Sum(Box::new(self), Box::new(-rhs)),
@@ -702,8 +688,8 @@ impl<E: ExtensionField> Mul for Expression<E> {
             | (c2 @ Expression::Constant(_), Expression::ScaledSum(x, a, b)) => {
                 Expression::ScaledSum(
                     x.clone(),
-                    Box::new(a.deref().clone() * c2.clone()),
-                    Box::new(b.deref().clone() * c2.clone()),
+                    Box::new(a.deref() * c2),
+                    Box::new(b.deref() * c2),
                 )
             }
             // scaled * challenge => scaled
@@ -711,8 +697,8 @@ impl<E: ExtensionField> Mul for Expression<E> {
             | (c2 @ Expression::Challenge(..), Expression::ScaledSum(x, a, b)) => {
                 Expression::ScaledSum(
                     x.clone(),
-                    Box::new(a.deref().clone() * c2.clone()),
-                    Box::new(b.deref().clone() * c2.clone()),
+                    Box::new(a.deref() * c2),
+                    Box::new(b.deref() * c2),
                 )
             }
             _ => Expression::Product(Box::new(self), Box::new(rhs)),

@@ -31,7 +31,6 @@ use std::{
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
-    ops::Neg,
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
@@ -361,7 +360,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
         let base64_encoded =
             STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
         let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
-        let table = match File::open(file_path.clone()) {
+        let table = match File::open(&file_path) {
             Ok(file) => {
                 let reader = BufReader::new(file);
                 serde_json::from_reader(reader).unwrap()
@@ -469,11 +468,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
             // require_equal does not always have the form of Expr::Sum as
             // the sum of witness and constant is expressed as scaled sum
-            if name.contains("require_equal") && expr.unpack_sum().is_some() {
-                let (left, right) = expr.unpack_sum().unwrap();
-                let right = right.neg();
+            if let Expression::Sum(left, right) = expr
+                && name.contains("require_equal")
+            {
+                let right = -right.as_ref();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &left);
+                let left_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, left);
                 let left_evaluated = left_evaluated.get_base_field_vec();
 
                 let right_evaluated = wit_infer_by_expr(&[], wits_in, pi, &challenge, &right);
@@ -485,7 +485,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 {
                     if left_element != right_element {
                         errors.push(MockProverError::AssertEqualError {
-                            left_expression: left.clone(),
+                            left_expression: *left.clone(),
                             right_expression: right.clone(),
                             left: *left_element,
                             right: *right_element,
@@ -809,21 +809,20 @@ Hints:
                     num_rows
                 );
                 // gather lookup inputs
-                for ((expr, annotation), (rom_type, values)) in cs
-                    .lk_expressions
-                    .iter()
-                    .zip(cs.lk_expressions_namespace_map.clone().into_iter())
-                    .zip(cs.lk_expressions_items_map.clone().into_iter())
-                {
+                for (expr, annotation, (rom_type, values)) in izip!(
+                    &cs.lk_expressions,
+                    &cs.lk_expressions_namespace_map,
+                    &cs.lk_expressions_items_map
+                ) {
                     let lk_input =
                         (wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, expr)
                             .get_ext_field_vec())[..num_rows]
                             .to_vec();
-                    rom_inputs.entry(rom_type).or_default().push((
+                    rom_inputs.entry(*rom_type).or_default().push((
                         lk_input,
                         circuit_name.clone(),
-                        annotation,
-                        values,
+                        annotation.clone(),
+                        values.clone(),
                     ));
                 }
             } else {
@@ -833,10 +832,8 @@ Hints:
                     num_rows
                 );
                 // gather lookup tables
-                for (expr, (rom_type, _)) in cs
-                    .lk_table_expressions
-                    .iter()
-                    .zip(cs.lk_expressions_items_map.clone().into_iter())
+                for (expr, (rom_type, _)) in
+                    izip!(&cs.lk_table_expressions, &cs.lk_expressions_items_map)
                 {
                     let lk_table =
                         wit_infer_by_expr(&fixed, &witness, &pi_mles, &challenges, &expr.values)
@@ -856,11 +853,8 @@ Hints:
                     assert!(
                         rom_tables
                             .insert(
-                                rom_type,
-                                lk_table
-                                    .into_iter()
-                                    .zip(multiplicity.into_iter())
-                                    .collect::<HashMap<_, _>>(),
+                                *rom_type,
+                                izip!(lk_table, multiplicity).collect::<HashMap<_, _>>(),
                             )
                             .is_none(),
                         "cannot assign to rom table {:?} twice",
@@ -1155,27 +1149,25 @@ Hints:
         ));
 
         // gs stores { (pc, timestamp) }
-        let gs_clone = gs.clone();
         find_rw_mismatch!(
             gs_rs,
             rs_grp_by_anno,
             gs_ws,
             ws_grp_by_anno,
             RAMType::GlobalState,
-            gs_clone
+            gs
         );
 
         // part2 registers
         let (reg_rs, rs_grp_by_anno, reg_ws, ws_grp_by_anno, _) =
             derive_ram_rws!(RAMType::Register);
-        let gs_clone = gs.clone();
         find_rw_mismatch!(
             reg_rs,
             rs_grp_by_anno,
             reg_ws,
             ws_grp_by_anno,
             RAMType::Register,
-            gs_clone
+            gs
         );
 
         // part3 memory
