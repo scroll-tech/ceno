@@ -1,18 +1,19 @@
 use ff::Field;
-use std::{
-    array,
-    cell::RefCell,
-    collections::HashMap,
-    mem::{self},
-    ops::Index,
-    slice::{Chunks, ChunksMut},
-    sync::Arc,
-};
-
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
+};
+use std::{
+    array,
+    cell::RefCell,
+    collections::HashMap,
+    fmt::Debug,
+    hash::Hash,
+    mem::{self},
+    ops::Index,
+    slice::{Chunks, ChunksMut},
+    sync::Arc,
 };
 use thread_local::ThreadLocal;
 
@@ -130,9 +131,58 @@ impl<F: Sync + Send + Copy> Index<usize> for RowMajorMatrix<F> {
 /// struct is cloneable, for internallly it use Arc so the clone will be low cost
 #[derive(Clone, Default, Debug)]
 #[allow(clippy::type_complexity)]
-pub struct LkMultiplicity {
-    multiplicity: Arc<ThreadLocal<RefCell<[HashMap<u64, usize>; mem::variant_count::<ROMType>()]>>>,
+pub struct LkMultiplicityRaw<K: Copy + Clone + Debug + Eq + Hash + Send> {
+    multiplicity: Arc<ThreadLocal<RefCell<[HashMap<K, usize>; mem::variant_count::<ROMType>()]>>>,
 }
+
+impl<K: Copy + Clone + Debug + Eq + Hash + Send> LkMultiplicityRaw<K> {
+    /// Merge result from multiple thread local to single result.
+    pub fn into_finalize_result(self) -> [HashMap<K, usize>; mem::variant_count::<ROMType>()] {
+        Arc::try_unwrap(self.multiplicity)
+            .unwrap()
+            .into_iter()
+            .fold(array::from_fn(|_| HashMap::new()), |mut x, y| {
+                x.iter_mut().zip(y.borrow().iter()).for_each(|(m1, m2)| {
+                    for (key, value) in m2 {
+                        *m1.entry(*key).or_insert(0) += value;
+                    }
+                });
+                x
+            })
+    }
+
+    pub fn increment(&mut self, rom_type: ROMType, key: K) {
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        (*multiplicity.borrow_mut()[rom_type as usize]
+            .entry(key)
+            .or_default()) += 1;
+    }
+
+    pub fn set_count(&mut self, rom_type: ROMType, key: K, count: usize) {
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        multiplicity.borrow_mut()[rom_type as usize].insert(key, count);
+    }
+
+    /// Clone inner, expensive operation.
+    pub fn deep_clone(&self) -> Self {
+        let multiplicity = self
+            .multiplicity
+            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
+        let deep_cloned = multiplicity.borrow().clone();
+        let thread_local = ThreadLocal::new();
+        thread_local.get_or(|| RefCell::new(deep_cloned));
+        LkMultiplicityRaw {
+            multiplicity: Arc::new(thread_local),
+        }
+    }
+}
+
+/// Default LkMultiplicity with u64 key.
+pub type LkMultiplicity = LkMultiplicityRaw<u64>;
 
 impl LkMultiplicity {
     /// assert within range
@@ -179,30 +229,6 @@ impl LkMultiplicity {
     /// Fetch instruction at pc
     pub fn fetch(&mut self, pc: u32) {
         self.increment(ROMType::Instruction, pc as u64);
-    }
-
-    /// merge result from multiple thread local to single result
-    pub fn into_finalize_result(self) -> [HashMap<u64, usize>; mem::variant_count::<ROMType>()] {
-        Arc::try_unwrap(self.multiplicity)
-            .unwrap()
-            .into_iter()
-            .fold(array::from_fn(|_| HashMap::new()), |mut x, y| {
-                x.iter_mut().zip(y.borrow().iter()).for_each(|(m1, m2)| {
-                    for (key, value) in m2 {
-                        *m1.entry(*key).or_insert(0) += value;
-                    }
-                });
-                x
-            })
-    }
-
-    fn increment(&mut self, rom_type: ROMType, key: u64) {
-        let multiplicity = self
-            .multiplicity
-            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[rom_type as usize]
-            .entry(key)
-            .or_default()) += 1;
     }
 }
 

@@ -1,8 +1,11 @@
 use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
-        PublicValues, ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::MockProver,
-        prover::ZKVMProver, verifier::ZKVMVerifier,
+        PublicValues, ZKVMProof,
+        constants::MAX_NUM_VARIABLES,
+        mock_prover::{LkMultiplicityKey, MockProver},
+        prover::ZKVMProver,
+        verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{
@@ -370,7 +373,10 @@ pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 // state external to this pipeline (e.g, sanity check in bin/e2e.rs)
 
 #[allow(clippy::type_complexity)]
-pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
+pub fn run_e2e_with_checkpoint<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+>(
     program: Program,
     platform: Platform,
     hints: Vec<u32>,
@@ -458,6 +464,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            program,
         );
         tracing::info!("Mock proving passed");
     }
@@ -481,7 +488,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
 
 // Runs program emulation + witness generation + proving
 #[allow(clippy::too_many_arguments)]
-pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommitmentScheme<E>>(
     program: Arc<Program>,
     max_steps: usize,
     init_full_mem: InitMemState,
@@ -509,6 +516,7 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            program,
         );
         tracing::info!("Mock proving passed");
     }

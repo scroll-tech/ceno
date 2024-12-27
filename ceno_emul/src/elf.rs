@@ -18,7 +18,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 
-use crate::{addr::WORD_SIZE, disassemble::transpile, rv32im::Instruction};
+use crate::{CENO_PLATFORM, addr::WORD_SIZE, disassemble::transpile, rv32im::Instruction};
 use anyhow::{Context, Result, anyhow, bail};
 use elf::{
     ElfBytes,
@@ -55,6 +55,16 @@ impl Program {
             image,
         }
     }
+
+    pub fn from_insn_codes(insn_codes: &[Instruction]) -> Program {
+        Self::new(
+            CENO_PLATFORM.pc_base(),
+            CENO_PLATFORM.pc_base(),
+            insn_codes.to_vec(),
+            Default::default(),
+        )
+    }
+
     /// Initialize a RISC Zero Program from an appropriate ELF file
     pub fn load_elf(input: &[u8], max_mem: u32) -> Result<Program> {
         let mut instructions: Vec<u32> = Vec::new();

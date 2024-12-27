@@ -216,6 +216,10 @@ impl<E: ExtensionField> Expression<E> {
         self.to_monomial_form_inner()
     }
 
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Expression::Constant(_))
+    }
+
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
