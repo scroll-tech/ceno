@@ -14,7 +14,7 @@ use std::marker::PhantomData;
 ///
 /// Uses 1 `WitIn` value to store the bit, one `assert_bit` constraint, and one
 /// `u8` or `u16` table lookup.
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct SignedExtendConfig<E> {
     /// Most significant bit
     msb: WitIn,

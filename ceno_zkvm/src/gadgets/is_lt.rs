@@ -330,7 +330,7 @@ impl<E: ExtensionField> AssertSignedLtConfig<E> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct SignedLtConfig<E> {
     is_lt: WitIn,
     config: InnerSignedLtConfig<E>,
@@ -375,7 +375,7 @@ impl<E: ExtensionField> SignedLtConfig<E> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 struct InnerSignedLtConfig<E> {
     is_lhs_neg: SignedExtendConfig<E>,
     is_rhs_neg: SignedExtendConfig<E>,

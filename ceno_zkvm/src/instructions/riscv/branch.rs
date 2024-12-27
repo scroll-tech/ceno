@@ -1,8 +1,10 @@
 mod beq_circuit;
-mod blt;
-mod bltu;
+// mod blt;
+// mod bltu;
+mod b_circuit;
 
 use super::RIVInstruction;
+use b_circuit::BranchCircuit;
 use beq_circuit::BeqCircuit;
 use ceno_emul::InsnKind;
 
@@ -25,22 +27,22 @@ pub struct BltuOp;
 impl RIVInstruction for BltuOp {
     const INST_KIND: InsnKind = InsnKind::BLTU;
 }
-pub type BltuInstruction<E> = bltu::BltuCircuit<E, BltuOp>;
+pub type BltuInstruction<E> = BranchCircuit<E, BltuOp>;
 
 pub struct BgeuOp;
 impl RIVInstruction for BgeuOp {
     const INST_KIND: InsnKind = InsnKind::BGEU;
 }
-pub type BgeuInstruction<E> = bltu::BltuCircuit<E, BgeuOp>;
+pub type BgeuInstruction<E> = BranchCircuit<E, BgeuOp>;
 
 pub struct BltOp;
 impl RIVInstruction for BltOp {
     const INST_KIND: InsnKind = InsnKind::BLT;
 }
-pub type BltInstruction<E> = blt::BltCircuit<E, BltOp>;
+pub type BltInstruction<E> = BranchCircuit<E, BltOp>;
 
 pub struct BgeOp;
 impl RIVInstruction for BgeOp {
     const INST_KIND: InsnKind = InsnKind::BGE;
 }
-pub type BgeInstruction<E> = blt::BltCircuit<E, BgeOp>;
+pub type BgeInstruction<E> = BranchCircuit<E, BgeOp>;
