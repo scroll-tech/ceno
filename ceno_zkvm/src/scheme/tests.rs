@@ -12,7 +12,7 @@ use goldilocks::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
+    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
 use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 

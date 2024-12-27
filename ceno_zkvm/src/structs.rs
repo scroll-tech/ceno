@@ -12,7 +12,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+    mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};

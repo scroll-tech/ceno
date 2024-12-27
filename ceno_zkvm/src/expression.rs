@@ -12,7 +12,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 use crate::{
     circuit_builder::CircuitBuilder,

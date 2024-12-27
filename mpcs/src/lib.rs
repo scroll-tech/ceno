@@ -320,7 +320,7 @@ pub use basefold::{
     EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
     one_level_interp_hc,
 };
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 fn validate_input<E: ExtensionField>(
     function: &str,
@@ -377,7 +377,7 @@ pub mod test_util {
     use multilinear_extensions::mle::DenseMultilinearExtension;
     #[cfg(test)]
     use multilinear_extensions::{
-        mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+        mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
     #[cfg(test)]

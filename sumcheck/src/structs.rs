@@ -1,7 +1,5 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::{
-    virtual_poly::VirtualPolynomial, virtual_poly_v2::VirtualPolynomialV2,
-};
+use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use serde::{Deserialize, Serialize};
 use transcript::Challenge;
 
@@ -28,27 +26,13 @@ pub struct IOPProverMessage<E: ExtensionField> {
 
 /// Prover State of a PolyIOP.
 #[derive(Default)]
-pub struct IOPProverStateV2<'a, E: ExtensionField> {
+pub struct IOPProverState<'a, E: ExtensionField> {
     /// sampled randomness given by the verifier
     pub challenges: Vec<Challenge<E>>,
     /// the current round number
     pub(crate) round: usize,
     /// pointer to the virtual polynomial
-    pub(crate) poly: VirtualPolynomialV2<'a, E>,
-    /// points with precomputed barycentric weights for extrapolating smaller
-    /// degree uni-polys to `max_degree + 1` evaluations.
-    pub(crate) extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
-}
-
-/// Prover State of a PolyIOP.
-#[derive(Default)]
-pub struct IOPProverState<E: ExtensionField> {
-    /// sampled randomness given by the verifier
-    pub challenges: Vec<Challenge<E>>,
-    /// the current round number
-    pub(crate) round: usize,
-    /// pointer to the virtual polynomial
-    pub(crate) poly: VirtualPolynomial<E>,
+    pub(crate) poly: VirtualPolynomial<'a, E>,
     /// points with precomputed barycentric weights for extrapolating smaller
     /// degree uni-polys to `max_degree + 1` evaluations.
     pub(crate) extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,

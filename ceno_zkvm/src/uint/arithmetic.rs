@@ -687,7 +687,7 @@ mod tests {
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::{
-            mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+            mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
         };
 
         type E = GoldilocksExt2; // 18446744069414584321

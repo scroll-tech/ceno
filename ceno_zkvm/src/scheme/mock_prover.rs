@@ -23,7 +23,7 @@ use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::SmallField;
 use itertools::{Itertools, enumerate, izip};
-use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
+use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
 use rand::thread_rng;
 use std::{
     collections::{HashMap, HashSet},
