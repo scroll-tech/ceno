@@ -435,6 +435,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                             |f| {
                                 let res = (0..largest_even_below(f.len()))
                                     .step_by(2)
+                                    .rev()
                                     .fold(AdditiveArray::<_, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
                                             acc.0[0] += f[b];
                                             acc.0[1] += f[b+1];
@@ -463,7 +464,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         );
                         commutative_op_mle_pair!(
                             |f, g| {
-                                let res = (0..largest_even_below(f.len())).step_by(2).fold(
+                                let res = (0..largest_even_below(f.len())).step_by(2).rev().fold(
                                     AdditiveArray::<_, 3>(array::from_fn(|_| 0.into())),
                                     |mut acc, b| {
                                         acc.0[0] += f[b] * g[b];
@@ -498,6 +499,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                             |f1, f2, f3| {
                                 let res = (0..largest_even_below(f1.len()))
                                     .step_by(2)
+                                    .rev()
                                     .map(|b| {
                                         // f = c x + d
                                         let c1 = f1[b + 1] - f1[b];
