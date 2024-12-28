@@ -573,8 +573,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in enumerate(expr_evaluated) {
-                let vec = element.to_canonical_u64_vec();
-                if !table.contains(&vec) {
+                if !table.contains(&element.to_canonical_u64_vec()) {
                     errors.push(MockProverError::LookupError {
                         rom_type: *rom_type,
                         expression: expr.clone(),
