@@ -882,7 +882,7 @@ Hints:
                 );
                 // gather lookup tables
                 for (expr, (rom_type, _)) in
-                    izip!(&cs.lk_table_expressions, &cs.lk_table_expressions_items_map)
+                    izip!(&cs.lk_table_expressions, &cs.lk_expressions_items_map)
                 {
                     let lk_table = wit_infer_by_expr(
                         &fixed,
