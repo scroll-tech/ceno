@@ -569,10 +569,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .zip_eq(cs.lk_expressions_items_map.iter())
         {
             let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
-            let expr_evaluated = expr_evaluated.get_ext_field_vec()[..num_instances].to_vec();
+            let expr_evaluated = &expr_evaluated.get_ext_field_vec()[..num_instances];
 
             // Check each lookup expr exists in t vec
-            for (inst_id, element) in enumerate(&expr_evaluated) {
+            for (inst_id, element) in enumerate(expr_evaluated) {
                 let vec = element.to_canonical_u64_vec();
                 if !table.contains(&vec) {
                     errors.push(MockProverError::LookupError {
@@ -588,7 +588,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             // Increment shared LK Multiplicity
             if let Some(shared_lkm) = shared_lkm.as_mut() {
                 for element in expr_evaluated {
-                    shared_lkm.increment(*rom_type, element);
+                    shared_lkm.increment(*rom_type, *element);
                 }
             }
         }
