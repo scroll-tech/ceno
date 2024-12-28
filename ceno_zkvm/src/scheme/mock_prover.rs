@@ -480,11 +480,11 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let program = Arc::new(Program::from_insn_codes(program));
         let (table, challenge) = Self::load_tables_with_program(cb.cs, program, challenge);
 
-        Self::run_with_challenge_plain(cb.cs, &table, wits_in, pi, 1, challenge, lkm, None)
+        Self::run_maybe_challenge_with_table(cb.cs, &table, wits_in, pi, 1, challenge, lkm, None)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn run_with_challenge_plain(
+    fn run_maybe_challenge_with_table(
         cs: &ConstraintSystem<E>,
         table: &HashSet<Vec<u64>>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
@@ -850,7 +850,7 @@ Hints:
                 let lkm_from_assignments = witnesses
                     .get_lk_mlt(circuit_name)
                     .map(|lkm| lkm.deep_clone());
-                let errors = Self::run_with_challenge_plain(
+                let errors = Self::run_maybe_challenge_with_table(
                     cs,
                     &lookup_table,
                     &witness,
