@@ -598,27 +598,21 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             let mut lkm_from_cs = LkMultiplicity::default();
             for (rom_type, args) in &cs.lk_expressions_items_map {
                 let mut args_eval = vec![];
-                let mut max_len = 0;
-                for args_expr in args {
-                    let args_expr_evaluated =
-                        wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, args_expr);
-                    let args_expr_evaluated = args_expr_evaluated.get_base_field_vec();
-                    max_len = std::cmp::max(max_len, args_expr_evaluated.len());
-                    args_eval.push(
-                        args_expr_evaluated
-                            .iter()
-                            .map(|f| f.to_canonical_u64())
-                            .collect_vec(),
-                    );
-                }
-                // Constant terms will have single element in `args_expr_evaluated`, so let's fix that.
-                for (args_expr, arg_eval) in args.iter().zip(args_eval.iter_mut()) {
-                    if args_expr.is_constant() {
+                for arg_expr in args {
+                    let arg_eval = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, arg_expr);
+                    let mut arg_eval = arg_eval
+                        .get_base_field_vec()
+                        .iter()
+                        .map(|f| f.to_canonical_u64())
+                        .take(num_instances)
+                        .collect_vec();
+
+                    // Constant terms will have single element in `args_expr_evaluated`, so let's fix that.
+                    if arg_expr.is_constant() {
                         assert_eq!(arg_eval.len(), 1);
-                        for _ in 1..max_len {
-                            arg_eval.push(arg_eval[0]);
-                        }
+                        arg_eval.resize(num_instances, arg_eval[0])
                     }
+                    args_eval.push(arg_eval);
                 }
 
                 // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
