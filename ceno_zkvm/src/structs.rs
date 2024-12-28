@@ -254,8 +254,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses_tables.get(name).cloned()
     }
 
-    pub fn get_lk_mlt(&self, name: &String) -> Option<LkMultiplicity> {
-        self.lk_mlts.get(name).map(|lkm| lkm.deep_clone())
+    pub fn get_lk_mlt(&self, name: &String) -> Option<&LkMultiplicity> {
+        self.lk_mlts.get(name)
     }
 
     pub fn assign_opcode_circuit<OC: Instruction<E>>(

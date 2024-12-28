@@ -491,7 +491,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         pi: &[ArcMultilinearExtension<'a, E>],
         num_instances: usize,
         challenge: [E; 2],
-        lkm: Option<LkMultiplicity>,
+        expected_lkm: Option<LkMultiplicity>,
         mut shared_lkm: Option<&mut LkMultiplicityRaw<E>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
         let mut errors = vec![];
@@ -594,7 +594,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
 
         // LK Multiplicity check
-        if let Some(lkm_from_assignment) = lkm {
+        if let Some(lkm_from_assignment) = expected_lkm {
             // Infer LK Multiplicity from constraint system.
             let mut lkm_from_cs = LkMultiplicity::default();
             for (rom_type, args) in &cs.lk_expressions_items_map {
@@ -854,7 +854,9 @@ Hints:
                 );
                 // Assert opcode and check single opcode lk multiplicity
                 // Also combine multiplicity in lkm_opcodes
-                let lkm = witnesses.get_lk_mlt(circuit_name);
+                let lkm_from_assignments = witnesses
+                    .get_lk_mlt(circuit_name)
+                    .map(|lkm| lkm.deep_clone());
                 let errors = Self::run_with_challenge_plain(
                     cs,
                     &lookup_table,
@@ -862,7 +864,7 @@ Hints:
                     &[],
                     num_rows,
                     challenges,
-                    lkm,
+                    lkm_from_assignments,
                     Some(&mut lkm_opcodes),
                 );
                 match errors {
