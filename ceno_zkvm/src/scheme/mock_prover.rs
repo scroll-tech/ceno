@@ -841,7 +841,7 @@ Hints:
                 });
             if is_opcode {
                 tracing::info!(
-                    "mock proving opcode {} with {} entries",
+                    "Mock proving opcode {} with {} entries",
                     circuit_name,
                     num_rows
                 );
@@ -861,17 +861,15 @@ Hints:
                     Some(&mut lkm_opcodes),
                 );
                 match errors {
-                    Ok(_) => {
-                        tracing::info!("mock proving successful for opcode {}", circuit_name);
-                    }
+                    Ok(_) => {}
                     Err(errors) => {
-                        tracing::error!("mock proving failed for opcode {}", circuit_name);
+                        tracing::error!("Mock proving failed for opcode {}", circuit_name);
                         print_errors(&errors, &witness, &cs.witin_namespace_map, true);
                     }
                 }
             } else {
                 tracing::info!(
-                    "processing table {} with {} entries",
+                    "Mock proving table {} with {} entries",
                     circuit_name,
                     num_rows
                 );
@@ -919,12 +917,9 @@ Hints:
         compare_lkm(lkm_tables, lkm_opcodes, &mut errors);
 
         if errors.is_empty() {
-            tracing::info!("mock proving successful for combined lkm");
+            tracing::info!("Mock proving successful for tables");
         } else {
-            tracing::error!(
-                "mock proving failed for combined lkm - {} errors",
-                errors.len()
-            );
+            tracing::error!("Mock proving failed for tables - {} errors", errors.len());
             print_errors(&errors, &[], &[], true);
         }
 
