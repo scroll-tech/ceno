@@ -139,19 +139,14 @@ pub struct LkMultiplicityRaw<K: Copy + Clone + Debug + Eq + Hash + Send> {
 impl<K: Copy + Clone + Debug + Eq + Hash + Send> LkMultiplicityRaw<K> {
     /// Merge result from multiple thread local to single result.
     pub fn into_finalize_result(self) -> [HashMap<K, usize>; mem::variant_count::<ROMType>()] {
-        let mut results: [HashMap<K, usize>; mem::variant_count::<ROMType>()] =
-            array::from_fn(|_| HashMap::new());
-
-        Arc::try_unwrap(self.multiplicity)
-            .unwrap()
-            .into_iter()
-            .for_each(|y| {
-                izip!(&mut results, y.into_inner()).for_each(|(m1, m2)| {
-                    for (key, value) in m2 {
-                        *m1.entry(key).or_insert(0) += value;
-                    }
-                })
-            });
+        let mut results = array::from_fn(|_| HashMap::new());
+        for y in Arc::try_unwrap(self.multiplicity).unwrap() {
+            for (result, addition) in izip!(&mut results, y.into_inner()) {
+                for (key, value) in addition {
+                    *result.entry(key).or_insert(0) += value;
+                }
+            }
+        }
         results
     }
 
