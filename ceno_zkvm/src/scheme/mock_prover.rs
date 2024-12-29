@@ -22,11 +22,12 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use generic_static::StaticTypeMap;
 use goldilocks::{GoldilocksExt2, SmallField};
-use itertools::{Itertools, enumerate, izip};
+use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly_v2::ArcMultilinearExtension};
 use rand::thread_rng;
 use std::{
-    collections::{HashMap, HashSet},
+    cmp::max,
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Debug,
     fs::File,
     hash::Hash,
@@ -184,11 +185,7 @@ impl<E: ExtensionField, K: LkMultiplicityKey> PartialEq for MockProverError<E, K
                     key: right_key,
                     count: right_count,
                 },
-            ) => {
-                left_rom_type == right_rom_type
-                    && left_key == right_key
-                    && left_count == right_count
-            }
+            ) => (left_rom_type, left_key, left_count) == (right_rom_type, right_key, right_count),
             _ => false,
         }
     }
@@ -290,7 +287,7 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                         }
                         ROMType::And => {
                             let (a, b) = AndTable::unpack(key);
-                            format!("Element: {a} < {b}")
+                            format!("Element: {a} && {b}")
                         }
                         ROMType::Or => {
                             let (a, b) = OrTable::unpack(key);
@@ -336,7 +333,7 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
             Self::AssertZeroError { inst_id, .. }
             | Self::AssertEqualError { inst_id, .. }
             | Self::LookupError { inst_id, .. } => *inst_id,
-            _ => unreachable!(),
+            Self::DegreeTooHigh { .. } | Self::LkMultiplicityError { .. } => unreachable!(),
         }
     }
 
@@ -597,23 +594,26 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             // Infer LK Multiplicity from constraint system.
             let mut lkm_from_cs = LkMultiplicity::default();
             for (rom_type, args) in &cs.lk_expressions_items_map {
-                let mut args_eval = vec![];
-                for arg_expr in args {
-                    let arg_eval = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, arg_expr);
-                    let mut arg_eval = arg_eval
-                        .get_base_field_vec()
-                        .iter()
-                        .map(|f| f.to_canonical_u64())
-                        .take(num_instances)
-                        .collect_vec();
+                let args_eval: Vec<_> = args
+                    .iter()
+                    .map(|arg_expr| {
+                        let arg_eval =
+                            wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, arg_expr);
+                        let mut arg_eval = arg_eval
+                            .get_base_field_vec()
+                            .iter()
+                            .map(SmallField::to_canonical_u64)
+                            .take(num_instances)
+                            .collect_vec();
 
-                    // Constant terms will have single element in `args_expr_evaluated`, so let's fix that.
-                    if arg_expr.is_constant() {
-                        assert_eq!(arg_eval.len(), 1);
-                        arg_eval.resize(num_instances, arg_eval[0])
-                    }
-                    args_eval.push(arg_eval);
-                }
+                        // Constant terms will have single element in `args_expr_evaluated`, so let's fix that.
+                        if arg_expr.is_constant() {
+                            assert_eq!(arg_eval.len(), 1);
+                            arg_eval.resize(num_instances, arg_eval[0])
+                        }
+                        arg_eval
+                    })
+                    .collect();
 
                 // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
                 for inst_id in 0..num_instances {
@@ -640,7 +640,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             }
 
-            compare_lkm(lkm_from_cs, lkm_from_assignment, &mut errors);
+            errors.extend(compare_lkm(lkm_from_cs, lkm_from_assignment));
         }
 
         if errors.is_empty() {
@@ -661,19 +661,16 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         } else {
             load_once_tables(cs)
         };
-        let mut prog_table = vec![];
-        Self::load_program_table(&mut prog_table, program, challenge);
-        for prog in prog_table {
-            table.insert(prog);
-        }
+        table.extend(Self::load_program_table(program, challenge));
         (table, challenge)
     }
 
-    fn load_program_table(t_vec: &mut Vec<Vec<u64>>, program: Arc<Program>, challenge: [E; 2]) {
+    fn load_program_table(program: Arc<Program>, challenge: [E; 2]) -> Vec<Vec<u64>> {
+        let mut t_vec = vec![];
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new_with_params(&mut cs, ProgramParams {
             platform: CENO_PLATFORM,
-            program_size: std::cmp::max(program.instructions.len(), MOCK_PROGRAM_SIZE),
+            program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
             ..ProgramParams::default()
         });
         let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
@@ -682,12 +679,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
-                let row = row.iter().map(|v| (*v).into()).collect::<Vec<E>>();
+                let row: Vec<E> = row.iter().map(|v| (*v).into()).collect();
                 let rlc_record =
                     eval_by_expr_with_fixed(&row, &[], &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
         }
+        t_vec
     }
 
     /// Run and check errors
@@ -849,7 +847,7 @@ Hints:
                 // Also combine multiplicity in lkm_opcodes
                 let lkm_from_assignments = witnesses
                     .get_lk_mlt(circuit_name)
-                    .map(|lkm| lkm.deep_clone());
+                    .map(LkMultiplicityRaw::deep_clone);
                 let errors = Self::run_maybe_challenge_with_table(
                     cs,
                     &lookup_table,
@@ -899,10 +897,10 @@ Hints:
                     .get_base_field_vec()
                     .to_vec();
 
-                    for (key, multiplicity) in lk_table.iter().zip(multiplicity.iter()) {
+                    for (key, multiplicity) in izip!(lk_table, multiplicity) {
                         let multiplicity = multiplicity.to_canonical_u64();
                         if multiplicity > 0 {
-                            lkm_tables.set_count(*rom_type, *key, multiplicity as usize);
+                            lkm_tables.set_count(*rom_type, key, multiplicity as usize);
                         }
                     }
                 }
@@ -913,8 +911,7 @@ Hints:
         }
 
         // Assert lkm between all tables and combined opcode circuits
-        let mut errors: Vec<MockProverError<E, E>> = vec![];
-        compare_lkm(lkm_tables, lkm_opcodes, &mut errors);
+        let errors: Vec<MockProverError<E, E>> = compare_lkm(lkm_tables, lkm_opcodes);
 
         if errors.is_empty() {
             tracing::info!("Mock proving successful for tables");
@@ -1188,59 +1185,31 @@ Hints:
 fn compare_lkm<E, K>(
     lkm_a: LkMultiplicityRaw<K>,
     lkm_b: LkMultiplicityRaw<K>,
-    errors: &mut Vec<MockProverError<E, K>>,
-) where
+) -> Vec<MockProverError<E, K>>
+where
     E: ExtensionField,
-    K: LkMultiplicityKey,
+    K: LkMultiplicityKey + Ord,
 {
     let lkm_a = lkm_a.into_finalize_result();
     let lkm_b = lkm_b.into_finalize_result();
 
     // Compare each LK Multiplicity.
-    for (rom_type, a_map, b_map) in izip!(ROMType::iter(), &lkm_a, &lkm_b) {
-        if *a_map != *b_map {
-            let a_keys: HashSet<_> = a_map.keys().collect();
-            let b_keys: HashSet<_> = b_map.keys().collect();
+    izip!(ROMType::iter(), &lkm_a, &lkm_b)
+        .flat_map(|(rom_type, a_map, b_map)| {
+            // We use a BTreeSet, instead of a HashSet, to ensure deterministic order.
+            let keys: BTreeSet<_> = chain!(a_map.keys(), b_map.keys()).collect();
+            keys.into_iter().filter_map(move |key| {
+                let count =
+                    *a_map.get(key).unwrap_or(&0) as isize - *b_map.get(key).unwrap_or(&0) as isize;
 
-            // Lookup missing in lkm_a.
-            b_keys.difference(&a_keys).for_each(|k| {
-                let b_count = b_map.get(k).unwrap();
-                if *b_count != 0 {
-                    errors.push(MockProverError::LkMultiplicityError {
-                        rom_type,
-                        key: **k,
-                        count: *b_count as isize,
-                    })
-                }
-            });
-
-            // Lookup missing in lkm_b.
-            a_keys.difference(&b_keys).for_each(|k| {
-                let a_count = a_map.get(k).unwrap();
-                if *a_count != 0 {
-                    errors.push(MockProverError::LkMultiplicityError {
-                        rom_type,
-                        key: **k,
-                        count: -(*a_count as isize),
-                    })
-                }
-            });
-
-            // Count of specific lookup differ lkm_b and lkm_a.
-            a_keys.intersection(&b_keys).for_each(|k| {
-                let a_count = a_map.get(k).unwrap();
-                let b_count = b_map.get(k).unwrap();
-
-                if a_count != b_count {
-                    errors.push(MockProverError::LkMultiplicityError {
-                        rom_type,
-                        key: **k,
-                        count: (*b_count as isize) - (*a_count as isize),
-                    })
-                }
-            });
-        }
-    }
+                (count != 0).then_some(MockProverError::LkMultiplicityError {
+                    rom_type,
+                    key: *key,
+                    count,
+                })
+            })
+        })
+        .collect()
 }
 
 fn print_errors<E: ExtensionField, K: LkMultiplicityKey>(
