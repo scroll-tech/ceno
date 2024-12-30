@@ -95,6 +95,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         assert!(expr.is_monomial_form());
         let monomial_terms = expr.evaluate(
             &|_| unreachable!(),
+            &|_| unreachable!(),
             &|witness_id| vec![(E::ONE, { vec![witness_id] })],
             &|structural_witness_id, _, _, _| vec![(E::ONE, { vec![structural_witness_id] })],
             &|scalar| vec![(E::from(scalar), { vec![] })],

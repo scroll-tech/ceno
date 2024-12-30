@@ -473,10 +473,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             {
                 let right = -right.as_ref();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, left);
+                let left_evaluated =
+                    wit_infer_by_expr(&[], &[], wits_in, &[], pi, &challenge, left);
                 let left_evaluated = left_evaluated.get_base_field_vec();
 
-                let right_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, &right);
+                let right_evaluated =
+                    wit_infer_by_expr(&[], &[], wits_in, &[], pi, &challenge, &right);
                 let right_evaluated = right_evaluated.get_base_field_vec();
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
@@ -496,7 +498,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
+                let expr_evaluated =
+                    wit_infer_by_expr(&[], &[], wits_in, &[], pi, &challenge, expr);
                 let expr_evaluated = expr_evaluated.get_base_field_vec();
 
                 for (inst_id, element) in enumerate(expr_evaluated) {
@@ -519,7 +522,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .iter()
             .zip_eq(cb.cs.lk_expressions_namespace_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
+            let expr_evaluated = wit_infer_by_expr(&[], &[], wits_in, &[], pi, &challenge, expr);
             let expr_evaluated = expr_evaluated.get_ext_field_vec();
 
             // Check each lookup expr exists in t vec
@@ -550,7 +553,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             .map(|expr| {
                                 // TODO generalized to all inst_id
                                 let inst_id = 0;
-                                wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr)
+                                wit_infer_by_expr(&[], &[], wits_in, &[], pi, &challenge, expr)
                                     .get_base_field_vec()[inst_id]
                                     .to_canonical_u64()
                             })
@@ -644,13 +647,18 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             ..ProgramParams::default()
         });
         let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
-        let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
+        let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(
+            &config,
+            cs.num_fixed,
+            cs.num_structural_fixed,
+            program,
+        );
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
                 let row = row.iter().map(|v| (*v).into()).collect::<Vec<E>>();
                 let rlc_record =
-                    eval_by_expr_with_fixed(&row, &[], &[], &challenge, &table_expr.values);
+                    eval_by_expr_with_fixed(&row, &[], &[], &[], &challenge, &table_expr.values);
                 t_vec.push(rlc_record.to_canonical_u64_vec());
             }
         }
@@ -791,7 +799,7 @@ Hints:
                 .into_iter()
                 .map(|w| w.into())
                 .collect_vec();
-            let fixed: Vec<_> = fixed_trace
+            let mut fixed: Vec<_> = fixed_trace
                 .circuit_fixed_traces
                 .remove(circuit_name)
                 .and_then(|fixed| fixed)
@@ -803,6 +811,7 @@ Hints:
                         .map(|f| f.into())
                         .collect_vec()
                 });
+            let structural_fixed = fixed.split_off(cs.num_fixed);
             if is_opcode {
                 tracing::info!(
                     "preprocessing opcode {} with {} entries",
@@ -815,10 +824,17 @@ Hints:
                     &cs.lk_expressions_namespace_map,
                     &cs.lk_expressions_items_map
                 ) {
-                    let lk_input =
-                        (wit_infer_by_expr(&fixed, &witness, &[], &pi_mles, &challenges, expr)
-                            .get_ext_field_vec())[..num_rows]
-                            .to_vec();
+                    let lk_input = (wit_infer_by_expr(
+                        &fixed,
+                        &structural_fixed,
+                        &witness,
+                        &[],
+                        &pi_mles,
+                        &challenges,
+                        expr,
+                    )
+                    .get_ext_field_vec())[..num_rows]
+                        .to_vec();
                     rom_inputs.entry(*rom_type).or_default().push((
                         lk_input,
                         circuit_name.clone(),
@@ -838,6 +854,7 @@ Hints:
                 {
                     let lk_table = wit_infer_by_expr(
                         &fixed,
+                        &structural_fixed,
                         &witness,
                         &[],
                         &pi_mles,
@@ -849,6 +866,7 @@ Hints:
 
                     let multiplicity = wit_infer_by_expr(
                         &fixed,
+                        &structural_fixed,
                         &witness,
                         &[],
                         &pi_mles,
@@ -910,6 +928,7 @@ Hints:
                         .iter()
                         .map(|expr| {
                             eval_by_expr_with_instance(
+                                &[],
                                 &[],
                                 &witness,
                                 &[],
@@ -973,6 +992,7 @@ Hints:
                     {
                         let write_rlc_records = (wit_infer_by_expr(
                             fixed,
+                            &[],
                             witness,
                             &[],
                             &pi_mles,
@@ -991,6 +1011,7 @@ Hints:
                                 .map(|expr| {
                                     let v = wit_infer_by_expr(
                                         fixed,
+                                        &[],
                                         witness,
                                         &[],
                                         &pi_mles,
@@ -1040,10 +1061,17 @@ Hints:
                     .zip_eq(cs.r_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
-                        let read_records =
-                            wit_infer_by_expr(fixed, witness, &[], &pi_mles, &challenges, r_expr)
-                                .get_ext_field_vec()[..*num_rows]
-                                .to_vec();
+                        let read_records = wit_infer_by_expr(
+                            fixed,
+                            &[],
+                            witness,
+                            &[],
+                            &pi_mles,
+                            &challenges,
+                            r_expr,
+                        )
+                        .get_ext_field_vec()[..*num_rows]
+                            .to_vec();
                         let mut records = vec![];
                         for (row, record) in enumerate(read_records) {
                             // TODO: return error
@@ -1153,11 +1181,13 @@ Hints:
             &[],
             &[],
             &[],
+            &[],
             &instance,
             &challenges,
             &gs_final,
         ));
         gs_ws.insert(eval_by_expr_with_instance(
+            &[],
             &[],
             &[],
             &[],

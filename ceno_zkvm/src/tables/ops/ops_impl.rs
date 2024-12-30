@@ -46,10 +46,14 @@ impl OpTableConfig {
     pub fn generate_fixed_traces<F: SmallField>(
         &self,
         num_fixed: usize,
+        num_structural_fixed: usize,
         content: Vec<[u64; 3]>,
     ) -> RowMajorMatrix<F> {
-        let mut fixed =
-            RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Default);
+        let mut fixed = RowMajorMatrix::<F>::new(
+            content.len(),
+            num_fixed + num_structural_fixed,
+            InstancePaddingStrategy::Default,
+        );
 
         fixed
             .par_iter_mut()

@@ -131,6 +131,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     fn generate_fixed_traces(
         config: &ProgramTableConfig,
         num_fixed: usize,
+        num_structural_fixed: usize,
         program: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         let num_instructions = program.instructions.len();
@@ -139,7 +140,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
-            num_fixed,
+            num_fixed + num_structural_fixed,
             InstancePaddingStrategy::Default,
         );
 
@@ -224,8 +225,12 @@ mod tests {
             }
         };
 
-        let fixed =
-            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cb.cs.num_fixed, &program);
+        let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(
+            &config,
+            cb.cs.num_fixed,
+            cb.cs.num_structural_fixed,
+            &program,
+        );
         check(&fixed);
 
         let lkm = LkMultiplicity::default().into_finalize_result();

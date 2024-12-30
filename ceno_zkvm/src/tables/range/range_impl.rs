@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, Fixed, ToExpr, WitIn},
+    expression::{Expression, StructuralFixed, ToExpr, WitIn},
     instructions::InstancePaddingStrategy,
     scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
@@ -18,7 +18,7 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct RangeTableConfig {
-    fixed: Fixed,
+    fixed: StructuralFixed,
     mlt: WitIn,
 }
 
@@ -28,10 +28,10 @@ impl RangeTableConfig {
         rom_type: ROMType,
         table_len: usize,
     ) -> Result<Self, ZKVMError> {
-        let fixed = cb.create_fixed(|| "fixed")?;
+        let fixed = cb.create_structural_fixed(|| "structural fixed", table_len)?;
         let mlt = cb.create_witin(|| "mlt");
 
-        let record_exprs = vec![Expression::Fixed(fixed)];
+        let record_exprs = vec![Expression::StructuralFixed(fixed)];
 
         cb.lk_table_record(|| "record", table_len, rom_type, record_exprs, mlt.expr())?;
 
@@ -41,10 +41,14 @@ impl RangeTableConfig {
     pub fn generate_fixed_traces<F: SmallField>(
         &self,
         num_fixed: usize,
+        num_structural_fixed: usize,
         content: Vec<u64>,
     ) -> RowMajorMatrix<F> {
-        let mut fixed =
-            RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Default);
+        let mut fixed = RowMajorMatrix::<F>::new(
+            content.len(),
+            num_fixed + num_structural_fixed,
+            InstancePaddingStrategy::Default,
+        );
 
         fixed
             .par_iter_mut()

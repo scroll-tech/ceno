@@ -235,6 +235,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
+    structural_fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     structual_witnesses: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],
@@ -243,6 +244,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
 ) -> ArcMultilinearExtension<'a, E> {
     expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
         &|f| fixed[f.0].clone(),
+        &|f| structural_fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
@@ -355,11 +357,12 @@ pub(crate) fn eval_by_expr<E: ExtensionField>(
     challenges: &[E],
     expr: &Expression<E>,
 ) -> E {
-    eval_by_expr_with_fixed(&[], witnesses, structural_witnesses, challenges, expr)
+    eval_by_expr_with_fixed(&[], &[], witnesses, structural_witnesses, challenges, expr)
 }
 
 pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
+    structural_fixed: &[E],
     witnesses: &[E],
     structural_witnesses: &[E],
     challenges: &[E],
@@ -367,6 +370,7 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
 ) -> E {
     expr.evaluate::<E>(
         &|f| fixed[f.0],
+        &|f| structural_fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
         &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
         &|scalar| scalar.into(),
@@ -383,6 +387,7 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
 
 pub fn eval_by_expr_with_instance<E: ExtensionField>(
     fixed: &[E],
+    strucutral_fixed: &[E],
     witnesses: &[E],
     structural_witnesses: &[E],
     instance: &[E],
@@ -391,6 +396,7 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
 ) -> E {
     expr.evaluate_with_instance::<E>(
         &|f| fixed[f.0],
+        &|f| strucutral_fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
         &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
         &|i| instance[i.0],
@@ -681,6 +687,7 @@ mod tests {
 
         let res = wit_infer_by_expr(
             &[],
+            &[],
             &[
                 vec![B::from(1)].into_mle().into(),
                 vec![B::from(2)].into_mle().into(),
@@ -711,6 +718,7 @@ mod tests {
             + Expression::Challenge(0, 1, E::ONE, E::ONE);
 
         let res = wit_infer_by_expr(
+            &[],
             &[],
             &[
                 vec![B::from(1)].into_mle().into(),
