@@ -95,7 +95,7 @@ pub struct DummyConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> DummyConfig<E> {
     #[allow(clippy::too_many_arguments)]
-    fn construct_circuit(
+    pub(super) fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         kind: InsnKind,
         with_rs1: bool,
@@ -213,7 +213,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         })
     }
 
-    fn assign_instance(
+    pub(super) fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
@@ -263,5 +263,9 @@ impl<E: ExtensionField> DummyConfig<E> {
         set_val!(instance, self.imm, imm);
 
         Ok(())
+    }
+
+    pub(super) fn ts(&self) -> WitIn {
+        self.vm_state.ts
     }
 }

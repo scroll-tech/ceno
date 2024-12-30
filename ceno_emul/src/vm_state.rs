@@ -6,6 +6,7 @@ use crate::{
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     platform::Platform,
     rv32im::{Instruction, TrapCause},
+    syscalls::{SyscallEffects, handle_syscall},
     tracer::{Change, StepRecord, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -52,6 +53,10 @@ impl VMState {
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
+        let platform = Platform {
+            prog_data: program.image.keys().copied().collect(),
+            ..platform
+        };
         Ok(Self::new(platform, program))
     }
 
@@ -104,30 +109,57 @@ impl VMState {
         self.set_pc(0.into());
         self.halted = true;
     }
+
+    fn apply_syscall(&mut self, effects: SyscallEffects) -> Result<()> {
+        for (addr, value) in effects.iter_mem_values() {
+            self.memory.insert(addr, value);
+        }
+
+        for (idx, value) in effects.iter_reg_values() {
+            self.registers[idx] = value;
+        }
+
+        let next_pc = effects.next_pc.unwrap_or(self.pc + PC_STEP_SIZE as u32);
+        self.set_pc(next_pc.into());
+
+        self.tracer.track_syscall(effects);
+        Ok(())
+    }
 }
 
 impl EmuContext for VMState {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(Platform::reg_ecall())?;
-        let arg0 = self.load_register(Platform::reg_arg0())?;
         if function == Platform::ecall_halt() {
-            tracing::debug!("halt with exit_code={}", arg0);
-
+            let exit_code = self.load_register(Platform::reg_arg0())?;
+            tracing::debug!("halt with exit_code={}", exit_code);
             self.halt();
             Ok(true)
-        } else if self.platform.unsafe_ecall_nop {
-            // Treat unknown ecalls as all powerful instructions:
-            // Read two registers, write one register, write one memory word, and branch.
-            tracing::warn!("ecall ignored: syscall_id={}", function);
-            self.store_register(Instruction::RD_NULL as RegIdx, 0)?;
-            // Example ecall effect - any writable address will do.
-            let addr = (self.platform.stack.end - WORD_SIZE as u32).into();
-            self.store_memory(addr, self.peek_memory(addr))?;
-            self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
-            Ok(true)
         } else {
-            self.trap(TrapCause::EcallError)
+            match handle_syscall(self, function) {
+                Ok(effects) => {
+                    self.apply_syscall(effects)?;
+                    Ok(true)
+                }
+                Err(err) if self.platform.unsafe_ecall_nop => {
+                    tracing::warn!("ecall ignored with unsafe_ecall_nop: {:?}", err);
+                    // TODO: remove this example.
+                    // Treat unknown ecalls as all powerful instructions:
+                    // Read two registers, write one register, write one memory word, and branch.
+                    let _arg0 = self.load_register(Platform::reg_arg0())?;
+                    self.store_register(Instruction::RD_NULL as RegIdx, 0)?;
+                    // Example ecall effect - any writable address will do.
+                    let addr = (self.platform.stack.end - WORD_SIZE as u32).into();
+                    self.store_memory(addr, self.peek_memory(addr))?;
+                    self.set_pc(ByteAddr(self.pc) + PC_STEP_SIZE);
+                    Ok(true)
+                }
+                Err(err) => {
+                    tracing::error!("ecall error: {:?}", err);
+                    self.trap(TrapCause::EcallError)
+                }
+            }
         }
     }
 

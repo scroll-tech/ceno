@@ -18,6 +18,11 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
+#[cfg(target_arch = "riscv32")]
+mod syscalls;
+#[cfg(target_arch = "riscv32")]
+pub use syscalls::*;
+
 #[no_mangle]
 #[linkage = "weak"]
 pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
