@@ -52,7 +52,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                     read_rs2.value(),
                     read_rs1.value(),
                 )?;
-                (equal.expr(), Some(equal.clone()), None, None)
+                (equal.expr(), Some(equal), None, None)
             }
             InsnKind::BNE => {
                 let equal = IsEqualConfig::construct_circuit(
@@ -63,7 +63,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                 )?;
                 (
                     Expression::ONE - equal.expr(),
-                    Some(equal.clone()),
+                    Some(equal),
                     None,
                     None,
                 )
@@ -75,7 +75,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                     &read_rs1,
                     &read_rs2,
                 )?;
-                (signed_lt.expr(), None, Some(signed_lt.clone()), None)
+                (signed_lt.expr(), None, Some(signed_lt), None)
             }
             InsnKind::BGE => {
                 let signed_lt = SignedLtConfig::construct_circuit(
@@ -87,7 +87,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                 (
                     Expression::ONE - signed_lt.expr(),
                     None,
-                    Some(signed_lt.clone()),
+                    Some(signed_lt),
                     None,
                 )
             }
@@ -99,7 +99,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                     read_rs2.value(),
                     UINT_LIMBS,
                 )?;
-                (unsigned_lt.expr(), None, None, Some(unsigned_lt.clone()))
+                (unsigned_lt.expr(), None, None, Some(unsigned_lt))
             }
             InsnKind::BGEU => {
                 let unsigned_lt = IsLtConfig::construct_circuit(
@@ -113,7 +113,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                     Expression::ONE - unsigned_lt.expr(),
                     None,
                     None,
-                    Some(unsigned_lt.clone()),
+                    Some(unsigned_lt),
                 )
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),

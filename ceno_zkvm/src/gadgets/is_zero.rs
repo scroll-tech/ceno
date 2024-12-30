@@ -8,7 +8,6 @@ use crate::{
     set_val,
 };
 
-#[derive(Debug, Clone)]
 pub struct IsZeroConfig {
     is_zero: Option<WitIn>,
     inverse: WitIn,
@@ -81,7 +80,6 @@ impl IsZeroConfig {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct IsEqualConfig(IsZeroConfig);
 
 impl IsEqualConfig {
