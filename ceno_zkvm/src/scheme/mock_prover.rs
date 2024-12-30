@@ -33,7 +33,7 @@ use std::{
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
-    sync::{Arc, OnceLock},
+    sync::OnceLock,
 };
 use strum::IntoEnumIterator;
 
@@ -474,8 +474,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        let program = Arc::new(Program::from(program));
-        let (table, challenge) = Self::load_tables_with_program(cb.cs, program, challenge);
+        let program = Program::from(program);
+        let (table, challenge) = Self::load_tables_with_program(cb.cs, &program, challenge);
 
         Self::run_maybe_challenge_with_table(cb.cs, &table, wits_in, pi, 1, challenge, lkm)
             .map(|_| ())
@@ -651,7 +651,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
     fn load_tables_with_program(
         cs: &ConstraintSystem<E>,
-        program: Arc<Program>,
+        program: &Program,
         challenge: Option<[E; 2]>,
     ) -> (HashSet<Vec<u64>>, [E; 2]) {
         // load tables
@@ -664,7 +664,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         (table, challenge)
     }
 
-    fn load_program_table(program: Arc<Program>, challenge: [E; 2]) -> Vec<Vec<u64>> {
+    fn load_program_table(program: &Program, challenge: [E; 2]) -> Vec<Vec<u64>> {
         let mut t_vec = vec![];
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let mut cb = CircuitBuilder::new_with_params(&mut cs, ProgramParams {
@@ -673,8 +673,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             ..ProgramParams::default()
         });
         let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
-        let fixed =
-            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, &program);
+        let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
@@ -765,7 +764,7 @@ Hints:
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
         pi: &PublicValues<u32>,
-        program: Arc<Program>,
+        program: &Program,
     ) where
         E: LkMultiplicityKey,
     {
