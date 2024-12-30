@@ -897,10 +897,11 @@ Hints:
                     .to_vec();
 
                     for (key, multiplicity) in izip!(lk_table, multiplicity) {
-                        let multiplicity = multiplicity.to_canonical_u64();
-                        if multiplicity > 0 {
-                            lkm_tables.set_count(*rom_type, key, multiplicity as usize);
-                        }
+                        lkm_tables.set_count(
+                            *rom_type,
+                            key,
+                            multiplicity.to_canonical_u64() as usize,
+                        );
                     }
                 }
             }

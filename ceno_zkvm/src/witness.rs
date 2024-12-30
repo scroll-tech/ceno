@@ -156,7 +156,7 @@ where
     fn add_assign(&mut self, rhs: Self) {
         for (lhs, rhs) in izip!(&mut self.0, rhs.0) {
             for (key, value) in rhs {
-                *lhs.entry(key).or_insert(0) += value;
+                *lhs.entry(key).or_default() += value;
             }
         }
     }
@@ -168,10 +168,9 @@ where
 {
     fn add_assign(&mut self, rhs: Multiplicity<K>) {
         let multiplicity = self.multiplicity.get_or_default();
-        // TODO(Matthias): use izip.
-        for (lhs, rhs) in multiplicity.borrow_mut().0.iter_mut().zip(rhs.0.iter()) {
+        for (lhs, rhs) in izip!(&mut multiplicity.borrow_mut().0, rhs.0) {
             for (key, value) in rhs {
-                *lhs.entry(*key).or_insert(0) += value;
+                *lhs.entry(key).or_default() += value;
             }
         }
     }
@@ -189,6 +188,18 @@ where
     }
 }
 
+impl<K> AddAssign<(ROMType, K)> for LkMultiplicityRaw<K>
+where
+    K: Copy + Clone + Debug + Default + Eq + Hash + Send,
+{
+    fn add_assign(&mut self, (rom_type, key): (ROMType, K)) {
+        let multiplicity = self.multiplicity.get_or_default();
+        (*multiplicity.borrow_mut().0[rom_type as usize]
+            .entry(key)
+            .or_default()) += 1;
+    }
+}
+
 impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> {
     /// Merge result from multiple thread local to single result.
     pub fn into_finalize_result(self) -> MultiplicityRaw<K> {
@@ -200,12 +211,20 @@ impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> 
     }
 
     pub fn increment(&mut self, rom_type: ROMType, key: K) {
-        *self += ((rom_type, key), 1);
+        *self += (rom_type, key);
     }
 
     pub fn set_count(&mut self, rom_type: ROMType, key: K, count: usize) {
+        if count == 0 {
+            return;
+        }
         let multiplicity = self.multiplicity.get_or_default();
-        multiplicity.borrow_mut().0[rom_type as usize].insert(key, count);
+        let table = &mut multiplicity.borrow_mut().0[rom_type as usize];
+        if count == 0 {
+            table.remove(&key);
+        } else {
+            table.insert(key, count);
+        }
     }
 
     /// Clone inner, expensive operation.
@@ -227,13 +246,17 @@ impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
-        match C {
-            16 => self.increment(ROMType::U16, v),
-            14 => self.increment(ROMType::U14, v),
-            8 => self.increment(ROMType::U8, v),
-            5 => self.increment(ROMType::U5, v),
-            _ => panic!("Unsupported bit range"),
-        }
+        use ROMType::*;
+        self.increment(
+            match C {
+                16 => U16,
+                14 => U14,
+                8 => U8,
+                5 => U5,
+                _ => panic!("Unsupported bit range"),
+            },
+            v,
+        );
     }
 
     /// Track a lookup into a logic table (AndTable, etc).
