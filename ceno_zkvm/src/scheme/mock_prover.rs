@@ -474,7 +474,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        let program = Arc::new(Program::from_insn_codes(program));
+        let program = Arc::new(Program::from(program));
         let (table, challenge) = Self::load_tables_with_program(cb.cs, program, challenge);
 
         Self::run_maybe_challenge_with_table(cb.cs, &table, wits_in, pi, 1, challenge, lkm, None)

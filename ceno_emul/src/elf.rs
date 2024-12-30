@@ -40,6 +40,17 @@ pub struct Program {
     pub image: BTreeMap<u32, u32>,
 }
 
+impl From<&[Instruction]> for Program {
+    fn from(insn_codes: &[Instruction]) -> Program {
+        Self {
+            entry: CENO_PLATFORM.pc_base(),
+            base_address: CENO_PLATFORM.pc_base(),
+            instructions: insn_codes.to_vec(),
+            image: Default::default(),
+        }
+    }
+}
+
 impl Program {
     /// Create program
     pub fn new(
@@ -54,15 +65,6 @@ impl Program {
             instructions,
             image,
         }
-    }
-
-    pub fn from_insn_codes(insn_codes: &[Instruction]) -> Program {
-        Self::new(
-            CENO_PLATFORM.pc_base(),
-            CENO_PLATFORM.pc_base(),
-            insn_codes.to_vec(),
-            Default::default(),
-        )
     }
 
     /// Initialize a RISC Zero Program from an appropriate ELF file
