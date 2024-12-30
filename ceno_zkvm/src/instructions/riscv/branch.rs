@@ -1,10 +1,6 @@
-mod beq_circuit;
-// mod blt;
-// mod bltu;
 mod branch_circuit;
 
 use super::RIVInstruction;
-use beq_circuit::BeqCircuit;
 use branch_circuit::BranchCircuit;
 use ceno_emul::InsnKind;
 
