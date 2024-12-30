@@ -6,7 +6,6 @@ use rayon::{
     slice::ParallelSliceMut,
 };
 use std::{
-    array,
     cell::RefCell,
     collections::HashMap,
     fmt::Debug,
@@ -193,15 +192,11 @@ where
 impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> {
     /// Merge result from multiple thread local to single result.
     pub fn into_finalize_result(self) -> MultiplicityRaw<K> {
-        let mut results = array::from_fn(|_| HashMap::new());
+        let mut results = Multiplicity::default();
         for y in Arc::try_unwrap(self.multiplicity).unwrap() {
-            for (result, addition) in izip!(&mut results, y.into_inner().0) {
-                for (key, value) in addition {
-                    *result.entry(key).or_insert(0) += value;
-                }
-            }
+            results += y.into_inner();
         }
-        results
+        results.0
     }
 
     pub fn increment(&mut self, rom_type: ROMType, key: K) {

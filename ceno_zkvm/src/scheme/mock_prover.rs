@@ -1187,7 +1187,7 @@ fn compare_lkm<E, K>(
 ) -> Vec<MockProverError<E, K>>
 where
     E: ExtensionField,
-    K: LkMultiplicityKey + Ord,
+    K: LkMultiplicityKey + Default + Ord,
 {
     let lkm_a = lkm_a.into_finalize_result();
     let lkm_b = lkm_b.into_finalize_result();
