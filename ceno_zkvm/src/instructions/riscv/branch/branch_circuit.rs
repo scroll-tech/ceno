@@ -48,7 +48,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             InsnKind::BEQ => {
                 let equal = IsEqualConfig::construct_circuit(
                     circuit_builder,
-                    || "rs1==rs2",
+                    || "rs1!=rs2",
                     read_rs2.value(),
                     read_rs1.value(),
                 )?;
@@ -75,7 +75,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             InsnKind::BGE => {
                 let signed_lt = SignedLtConfig::construct_circuit(
                     circuit_builder,
-                    || "rs1<rs2",
+                    || "rs1>=rs2",
                     &read_rs1,
                     &read_rs2,
                 )?;
@@ -99,7 +99,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             InsnKind::BGEU => {
                 let unsigned_lt = IsLtConfig::construct_circuit(
                     circuit_builder,
-                    || "rs1<rs2",
+                    || "rs1 >= rs2",
                     read_rs1.value(),
                     read_rs2.value(),
                     UINT_LIMBS,
