@@ -9,7 +9,7 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, WitIn},
+    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -41,24 +41,10 @@ impl NameSpace {
     }
 
     pub(crate) fn compute_path(&self, this: String) -> String {
-        let ns = self.get_namespaces();
-        if this.chars().any(|a| a == '/') {
+        if this.chars().contains(&'/') {
             panic!("'/' is not allowed in names");
         }
-
-        let mut name = String::new();
-
-        let mut needs_separation = false;
-        for ns in chain!(ns, once(&this)) {
-            if needs_separation {
-                name += "/";
-            }
-
-            name += ns;
-            needs_separation = true;
-        }
-
-        name
+        chain!(self.get_namespaces(), once(&this)).join("/")
     }
 
     pub fn get_namespaces(&self) -> &[String] {
@@ -73,14 +59,6 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub table_len: usize,
 }
 
-// TODO encapsulate few information of table spec to SetTableAddrType value
-// once confirm syntax is friendly and parsed by recursive verifier
-#[derive(Clone, Debug)]
-pub enum SetTableAddrType {
-    FixedAddr,
-    DynamicAddr(DynamicAddr),
-}
-
 #[derive(Clone, Debug)]
 pub struct DynamicAddr {
     pub addr_witin_id: usize,
@@ -89,12 +67,13 @@ pub struct DynamicAddr {
 
 #[derive(Clone, Debug)]
 pub struct SetTableSpec {
-    pub addr_type: SetTableAddrType,
-    pub len: usize,
+    pub len: Option<usize>,
+    pub structural_witins: Vec<StructuralWitIn>,
 }
 
 #[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
+    /// table expression
     pub expr: Expression<E>,
 
     // TODO make decision to have enum/struct
@@ -106,9 +85,11 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
-    // pub platform: Platform,
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
+
+    pub num_structural_witin: WitnessId,
+    pub structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
@@ -166,6 +147,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_witin: 0,
             // platform,
             witin_namespace_map: vec![],
+            num_structural_witin: 0,
+            structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
@@ -205,14 +188,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
     ) -> ProvingKey<E, PCS> {
         // transpose from row-major to column-major
-        let fixed_traces = fixed_traces.map(|t| t.into_mles().into_iter().collect_vec());
+        let fixed_traces = fixed_traces.map(RowMajorMatrix::into_mles);
 
         let fixed_commit_wd = fixed_traces
             .as_ref()
             .map(|traces| PCS::batch_commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd
-            .as_ref()
-            .map(|commit_wd| PCS::get_pure_commitment(commit_wd));
+        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
 
         ProvingKey {
             fixed_traces,
@@ -225,16 +206,32 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     }
 
     pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> WitIn {
-        let wit_in = WitIn {
-            id: {
-                let id = self.num_witin;
-                self.num_witin = self.num_witin.strict_add(1);
-                id
-            },
-        };
+        let wit_in = WitIn { id: self.num_witin };
+        self.num_witin = self.num_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);
+
+        wit_in
+    }
+
+    pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+        max_len: usize,
+        offset: u32,
+        multi_factor: usize,
+    ) -> StructuralWitIn {
+        let wit_in = StructuralWitIn {
+            id: self.num_structural_witin,
+            max_len,
+            offset,
+            multi_factor,
+        };
+        self.num_structural_witin = self.num_structural_witin.strict_add(1);
+
+        let path = self.ns.compute_path(n().into());
+        self.structural_witin_namespace_map.push(path);
 
         wit_in
     }

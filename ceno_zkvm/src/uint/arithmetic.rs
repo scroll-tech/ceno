@@ -485,13 +485,13 @@ mod tests {
             // verify
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from(ret));
             });
 
             // overflow
             if overflow {
                 let carries = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &carries), E::ONE);
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, &carries), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
@@ -660,13 +660,13 @@ mod tests {
             // verify
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from(ret));
             });
 
             // overflow
             if overflow {
                 let overflow = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &overflow), E::ONE);
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, &overflow), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)

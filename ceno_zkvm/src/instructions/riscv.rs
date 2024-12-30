@@ -36,6 +36,8 @@ mod memory;
 mod s_insn;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_utils;
 
 pub trait RIVInstruction {
     const INST_KIND: InsnKind;

@@ -1,10 +1,9 @@
 use std::marker::PhantomData;
 
 use ark_std::iterable::Iterable;
-use ceno_emul::WORD_SIZE;
 use ff_ext::ExtensionField;
 
-use itertools::{Itertools, interleave, izip};
+use itertools::{Itertools, chain, interleave, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -15,9 +14,8 @@ use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
-    circuit_builder::SetTableAddrType,
     error::ZKVMError,
-    expression::Instance,
+    expression::{Instance, StructuralWitIn},
     instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
@@ -225,12 +223,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let initial_global_state = eval_by_expr_with_instance(
             &[],
             &[],
+            &[],
             pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
         );
         prod_w *= initial_global_state;
         let finalize_global_state = eval_by_expr_with_instance(
+            &[],
             &[],
             &[],
             pi_evals,
@@ -433,6 +433,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                                 * eval_by_expr_with_instance(
                                     &[],
                                     &proof.wits_in_evals,
+                                    &[],
                                     pi,
                                     challenges,
                                     expr,
@@ -449,22 +450,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
         // verify records (degree = 1) statement, thus no sumcheck
-        if cs
-            .r_expressions
-            .iter()
-            .chain(cs.w_expressions.iter())
-            .chain(cs.lk_expressions.iter())
-            .zip_eq(
-                proof.r_records_in_evals[..r_counts_per_instance]
-                    .iter()
-                    .chain(proof.w_records_in_evals[..w_counts_per_instance].iter())
-                    .chain(proof.lk_records_in_evals[..lk_counts_per_instance].iter()),
+        if izip!(
+            chain!(&cs.r_expressions, &cs.w_expressions, &cs.lk_expressions),
+            chain!(
+                &proof.r_records_in_evals[..r_counts_per_instance],
+                &proof.w_records_in_evals[..w_counts_per_instance],
+                &proof.lk_records_in_evals[..lk_counts_per_instance]
             )
-            .any(|(expr, expected_evals)| {
-                eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr)
-                    != *expected_evals
-            })
-        {
+        )
+        .any(|(expr, expected_evals)| {
+            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                != *expected_evals
+        }) {
             return Err(ZKVMError::VerifyError(
                 "record evaluate != expected_evals".into(),
             ));
@@ -472,7 +469,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
         if cs.assert_zero_expressions.iter().any(|expr| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, pi, challenges, expr) != E::ZERO
+            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                != E::ZERO
         }) {
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
@@ -516,42 +514,43 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .zip_eq(cs.w_table_expressions.iter())
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
-        let is_skip_same_point_sumcheck = cs
-            .r_table_expressions
-            .iter()
-            .chain(cs.w_table_expressions.iter())
-            .map(|rw| rw.table_spec.len)
-            .chain(cs.lk_table_expressions.iter().map(|lk| lk.table_len))
-            .all_equal();
+        // in table proof, we always skip same point sumcheck for now
+        // as tower sumcheck batch product argument/logup in same length
+        let is_skip_same_point_sumcheck = true;
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        let expected_rounds = izip!(
-            // w_table_expression round match with r_table_expression so it fine to check either of them
-            &cs.r_table_expressions,
-            &proof.rw_hints_num_vars
-        )
-        .flat_map(|(r, hint_num_vars)| match r.table_spec.addr_type {
-            // fixed address: get number of round from vk
-            SetTableAddrType::FixedAddr => {
-                let num_vars = ceil_log2(r.table_spec.len);
+        let expected_rounds = cs
+            .r_table_expressions
+            .iter()
+            .flat_map(|r| {
+                // iterate through structural witins and collect max round.
+                let num_vars = r.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
+                    r.table_spec
+                        .structural_witins
+                        .iter()
+                        .map(|StructuralWitIn { id, max_len, .. }| {
+                            let hint_num_vars = proof.rw_hints_num_vars[*id as usize];
+                            assert!((1 << hint_num_vars) <= *max_len);
+                            hint_num_vars
+                        })
+                        .max()
+                        .unwrap()
+                });
                 [num_vars, num_vars]
-            }
-            // dynamic: respect prover hint
-            SetTableAddrType::DynamicAddr(_) => {
-                // check number of vars doesn't exceed max len defined in vk
-                // this is important to prevent address overlapping
-                assert!((1 << hint_num_vars) <= r.table_spec.len);
-                [*hint_num_vars, *hint_num_vars]
-            }
-        })
-        .chain(
-            cs.lk_table_expressions
-                .iter()
-                .map(|l| ceil_log2(l.table_len)),
-        )
-        .collect_vec();
+            })
+            .chain(
+                cs.lk_table_expressions
+                    .iter()
+                    .map(|l| ceil_log2(l.table_len)),
+            )
+            .collect_vec();
+
+        for var in proof.rw_hints_num_vars.iter() {
+            transcript.append_message(&var.to_le_bytes());
+        }
+
         let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
         let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
             TowerVerify::verify(
@@ -689,6 +688,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 [proof.rw_in_evals.to_vec(), proof.lk_in_evals.to_vec()].concat(),
             )
         };
+
+        // evaluate structural witness from verifier succinctly
+        let structural_witnesses = cs
+            .r_table_expressions
+            .iter()
+            .flat_map(|set_table_expression| {
+                set_table_expression
+                    .table_spec
+                    .structural_witins
+                    .iter()
+                    .map(
+                        |StructuralWitIn {
+                             offset,
+                             multi_factor,
+                             ..
+                         }| {
+                            eval_wellform_address_vec(
+                                *offset as u64,
+                                *multi_factor as u64,
+                                &input_opening_point,
+                            )
+                        },
+                    )
+                    .collect_vec()
+            })
+            .collect_vec();
+
         // verify records (degree = 1) statement, thus no sumcheck
         if interleave(
             &cs.r_table_expressions, // r
@@ -705,6 +731,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             eval_by_expr_with_instance(
                 &proof.fixed_in_evals,
                 &proof.wits_in_evals,
+                &structural_witnesses,
                 pi,
                 challenges,
                 expr,
@@ -713,26 +740,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             return Err(ZKVMError::VerifyError(
                 "record evaluate != expected_evals".into(),
             ));
-        }
-
-        // verify dynamic address evaluation succinctly
-        // TODO we can also skip their mpcs proof
-        for r_table in cs.r_table_expressions.iter() {
-            match &r_table.table_spec.addr_type {
-                SetTableAddrType::FixedAddr => (),
-                SetTableAddrType::DynamicAddr(spec) => {
-                    let expected_eval = eval_wellform_address_vec(
-                        spec.offset as u64,
-                        WORD_SIZE as u64,
-                        &input_opening_point,
-                    );
-                    if expected_eval != proof.wits_in_evals[spec.addr_witin_id] {
-                        return Err(ZKVMError::VerifyError(
-                            "dynamic addr evaluate != expected_evals".into(),
-                        ));
-                    }
-                }
-            }
         }
 
         // assume public io is tiny vector, so we evaluate it directly without PCS

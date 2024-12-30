@@ -2,18 +2,23 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::{Expression, ToExpr, WitIn},
-    instructions::riscv::constants::UInt,
+    instructions::riscv::constants::{LIMB_BITS, UInt},
     set_val,
     witness::LkMultiplicity,
 };
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
 
+/// Extract the most significant bit from an expression previously constrained
+/// to an 8 or 16-bit length.
+///
+/// Uses 1 `WitIn` value to store the bit, one `assert_bit` constraint, and one
+/// `u8` or `u16` table lookup.
 #[derive(Debug)]
 pub struct SignedExtendConfig<E> {
-    /// most significant bit
+    /// Most significant bit
     msb: WitIn,
-    /// number of bits contained in the value
+    /// Number of bits of the represented value
     n_bits: usize,
 
     _marker: PhantomData<E>,
@@ -24,7 +29,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         cb: &mut CircuitBuilder<E>,
         val: Expression<E>,
     ) -> Result<Self, ZKVMError> {
-        Self::construct_circuit(cb, 16, val)
+        Self::construct_circuit(cb, LIMB_BITS, val)
     }
 
     pub fn construct_byte(

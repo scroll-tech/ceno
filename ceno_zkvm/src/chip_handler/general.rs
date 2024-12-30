@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, ToExpr, WitIn},
+    expression::{Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn},
     instructions::riscv::constants::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
         UINT_LIMBS,
@@ -26,6 +26,21 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_witin(name_fn)
+    }
+
+    pub fn create_structural_witin<NR, N>(
+        &mut self,
+        name_fn: N,
+        max_len: usize,
+        offset: u32,
+        multi_factor: usize,
+    ) -> StructuralWitIn
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .create_structural_witin(name_fn, max_len, offset, multi_factor)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, ZKVMError>
