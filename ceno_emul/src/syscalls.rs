@@ -12,6 +12,7 @@ pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
 pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects> {
     match function_code {
         KECCAK_PERMUTE => Ok(keccak_permute::keccak_permute(vm)),
+        // TODO: introduce error types.
         _ => Err(anyhow::anyhow!("Unknown syscall: {}", function_code)),
     }
 }
