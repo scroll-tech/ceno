@@ -167,7 +167,7 @@ where
     K: Copy + Clone + Debug + Default + Eq + Hash + Send,
 {
     fn add_assign(&mut self, rhs: Multiplicity<K>) {
-        let multiplicity = self.multiplicity.get_or(RefCell::default);
+        let multiplicity = self.multiplicity.get_or_default();
         // TODO(Matthias): use izip.
         for (lhs, rhs) in multiplicity.borrow_mut().0.iter_mut().zip(rhs.0.iter()) {
             for (key, value) in rhs {
@@ -182,7 +182,7 @@ where
     K: Copy + Clone + Debug + Default + Eq + Hash + Send,
 {
     fn add_assign(&mut self, ((rom_type, key), value): ((ROMType, K), usize)) {
-        let multiplicity = self.multiplicity.get_or(RefCell::default);
+        let multiplicity = self.multiplicity.get_or_default();
         (*multiplicity.borrow_mut().0[rom_type as usize]
             .entry(key)
             .or_default()) += value;
@@ -204,13 +204,13 @@ impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> 
     }
 
     pub fn set_count(&mut self, rom_type: ROMType, key: K, count: usize) {
-        let multiplicity = self.multiplicity.get_or(RefCell::default);
+        let multiplicity = self.multiplicity.get_or_default();
         multiplicity.borrow_mut().0[rom_type as usize].insert(key, count);
     }
 
     /// Clone inner, expensive operation.
     pub fn deep_clone(&self) -> Self {
-        let multiplicity = self.multiplicity.get_or(RefCell::default);
+        let multiplicity = self.multiplicity.get_or_default();
         let deep_cloned = multiplicity.borrow().clone();
         let thread_local = ThreadLocal::new();
         thread_local.get_or(|| RefCell::new(deep_cloned));
