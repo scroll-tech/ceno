@@ -5,7 +5,7 @@ use whir::poly_utils::coeffs::CoefficientList;
 
 use crate::util::arithmetic::interpolate_field_type_over_boolean_hypercube;
 
-use super::ff_base::BaseFieldWrapper;
+use super::field_wrapper::BaseFieldWrapper;
 
 pub fn poly2whir<E: ExtensionField>(
     poly: &DenseMultilinearExtension<E>,
@@ -34,7 +34,7 @@ mod tests {
     use multilinear_extensions::mle::{FieldType, MultilinearExtension};
     use rand::rngs::OsRng;
 
-    use crate::whir::ff::ExtensionFieldWrapper;
+    use crate::whir::field_wrapper::ExtensionFieldWrapper;
 
     use super::*;
 

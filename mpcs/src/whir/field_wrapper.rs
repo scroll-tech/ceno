@@ -17,7 +17,8 @@ use std::{
 };
 use zeroize::Zeroize;
 
-use super::ff_base::BaseFieldWrapper;
+mod base;
+pub use base::BaseFieldWrapper;
 
 #[derive(
     PartialEq, PartialOrd, Eq, Ord, Default, Copy, Clone, Debug, Hash, Serialize, Deserialize,

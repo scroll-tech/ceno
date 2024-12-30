@@ -21,10 +21,9 @@ use whir::{
     },
 };
 
-mod ff;
-mod ff_base;
+mod field_wrapper;
 mod utils;
-use ff::ExtensionFieldWrapper as FieldWrapper;
+use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 
 pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
     type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default;
@@ -311,7 +310,7 @@ mod tests {
 
     use super::*;
 
-    type F = ff::ExtensionFieldWrapper<GoldilocksExt2>;
+    type F = field_wrapper::ExtensionFieldWrapper<GoldilocksExt2>;
 
     use whir::{
         ceno_binding::{
