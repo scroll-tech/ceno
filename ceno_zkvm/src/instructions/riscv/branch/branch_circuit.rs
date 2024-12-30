@@ -61,12 +61,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                     read_rs2.value(),
                     read_rs1.value(),
                 )?;
-                (
-                    Expression::ONE - equal.expr(),
-                    Some(equal),
-                    None,
-                    None,
-                )
+                (Expression::ONE - equal.expr(), Some(equal), None, None)
             }
             InsnKind::BLT => {
                 let signed_lt = SignedLtConfig::construct_circuit(
