@@ -110,6 +110,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
     pub fn gen_init_state<F: SmallField>(
         &self,
         num_fixed: usize,
+        num_structural_fixed: usize,
         init_mem: &[MemInitRecord],
     ) -> RowMajorMatrix<F> {
         assert!(
@@ -121,7 +122,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
 
         let mut init_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
-            num_fixed,
+            num_fixed + num_structural_fixed,
             InstancePaddingStrategy::Default,
         );
         assert_eq!(init_table.num_padding_instances(), 0);
@@ -254,13 +255,14 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     pub fn gen_init_state<F: SmallField>(
         &self,
         num_fixed: usize,
+        num_structural_fixed: usize,
         io_addrs: &[Addr],
     ) -> RowMajorMatrix<F> {
         assert!(NVRAM::len(&self.params).is_power_of_two());
 
         let mut init_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
-            num_fixed,
+            num_fixed + num_structural_fixed,
             InstancePaddingStrategy::Default,
         );
         assert_eq!(init_table.num_padding_instances(), 0);

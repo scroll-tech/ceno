@@ -9,7 +9,7 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
+    expression::{Expression, Fixed, Instance, StructuralFixed, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -94,6 +94,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
+    pub num_structural_fixed: usize,
+    pub structural_fixed_namespace_map: Vec<String>,
+
     pub instance_name_map: HashMap<Instance, String>,
 
     pub r_expressions: Vec<Expression<E>>,
@@ -151,6 +154,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
+            num_structural_fixed: 0,
+            structural_fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_name_map: HashMap::new(),
             r_expressions: vec![],
@@ -190,10 +195,24 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         // transpose from row-major to column-major
         let fixed_traces = fixed_traces.map(RowMajorMatrix::into_mles);
 
-        let fixed_commit_wd = fixed_traces
-            .as_ref()
-            .map(|traces| PCS::batch_commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
+        let (fixed_commit, fixed_commit_wd) = if self.num_fixed != 0 {
+            let fixed_traces_no_structural = match fixed_traces.clone() {
+                None => None,
+                Some(fixed_traces) => {
+                    let mut fixed_traces = fixed_traces;
+                    Some(fixed_traces.split_off(self.num_fixed))
+                }
+            };
+    
+            let fixed_commit_wd = fixed_traces_no_structural
+                .as_ref()
+                .map(|traces| PCS::batch_commit(pp, traces).unwrap());
+            let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
+            (fixed_commit, fixed_commit_wd)
+        } else {
+            (None, None)
+        };
+
 
         ProvingKey {
             fixed_traces,
@@ -245,6 +264,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
         let path = self.ns.compute_path(n().into());
         self.fixed_namespace_map.push(path);
+
+        Ok(f)
+    }
+
+    pub fn create_structural_fixed<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+        table_len: usize,
+    ) -> Result<StructuralFixed, ZKVMError> {
+        let f = StructuralFixed(self.num_fixed, table_len);
+        self.num_structural_fixed += 1;
+
+        let path = self.ns.compute_path(n().into());
+        self.structural_fixed_namespace_map.push(path);
 
         Ok(f)
     }

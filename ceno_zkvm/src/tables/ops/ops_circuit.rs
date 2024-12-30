@@ -49,9 +49,10 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     fn generate_fixed_traces(
         config: &OpTableConfig,
         num_fixed: usize,
+        num_structural_fixed: usize,
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
-        config.generate_fixed_traces(num_fixed, OP::content())
+        config.generate_fixed_traces(num_fixed, num_structural_fixed, OP::content())
     }
 
     fn assign_instances(

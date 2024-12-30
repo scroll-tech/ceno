@@ -15,7 +15,7 @@ use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
     error::ZKVMError,
-    expression::{Instance, StructuralWitIn},
+    expression::{Expression, Instance, StructuralWitIn},
     instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
@@ -224,12 +224,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &[],
             &[],
             &[],
+            &[],
             pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
         );
         prod_w *= initial_global_state;
         let finalize_global_state = eval_by_expr_with_instance(
+            &[],
             &[],
             &[],
             &[],
@@ -432,6 +434,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             *alpha
                                 * eval_by_expr_with_instance(
                                     &[],
+                                    &[],
                                     &proof.wits_in_evals,
                                     &[],
                                     pi,
@@ -459,7 +462,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             )
         )
         .any(|(expr, expected_evals)| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+            eval_by_expr_with_instance(&[], &[], &proof.wits_in_evals, &[], pi, challenges, expr)
                 != *expected_evals
         }) {
             return Err(ZKVMError::VerifyError(
@@ -469,7 +472,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
         if cs.assert_zero_expressions.iter().any(|expr| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+            eval_by_expr_with_instance(&[], &[], &proof.wits_in_evals, &[], pi, challenges, expr)
                 != E::ZERO
         }) {
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
@@ -715,6 +718,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             })
             .collect_vec();
 
+        let mut structural_fixed = Vec::new();
+        for lk_table_expressions in cs.lk_table_expressions.iter() {
+            if let Expression::StructuralFixed(fixed) = lk_table_expressions.values {
+                structural_fixed.push(eval_wellform_address_vec(
+                    0,
+                    1,
+                    &input_opening_point[0..fixed.1],
+                ))
+            };
+        }
+
         // verify records (degree = 1) statement, thus no sumcheck
         if interleave(
             &cs.r_table_expressions, // r
@@ -730,6 +744,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .any(|(expr, expected_evals)| {
             eval_by_expr_with_instance(
                 &proof.fixed_in_evals,
+                &structural_fixed,
                 &proof.wits_in_evals,
                 &structural_witnesses,
                 pi,

@@ -30,6 +30,8 @@ pub enum Expression<E: ExtensionField> {
     StructuralWitIn(WitnessId, usize, u32, usize),
     /// This multi-linear polynomial is known at the setup/keygen phase.
     Fixed(Fixed),
+    /// StructuralFixed is similar with Fixed, but it is structured.
+    StructuralFixed(StructuralFixed),
     /// Public Values
     Instance(Instance),
     /// Constant poly
@@ -59,6 +61,7 @@ impl<E: ExtensionField> Expression<E> {
     pub fn degree(&self) -> usize {
         match self {
             Expression::Fixed(_) => 1,
+            Expression::StructuralFixed(..) => 1,
             Expression::WitIn(_) => 1,
             Expression::StructuralWitIn(..) => 1,
             Expression::Instance(_) => 0,
@@ -74,6 +77,7 @@ impl<E: ExtensionField> Expression<E> {
     pub fn evaluate<T>(
         &self,
         fixed_in: &impl Fn(&Fixed) -> T,
+        structural_fixed_in: &impl Fn(&StructuralFixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
         structural_wit_in: &impl Fn(WitnessId, usize, u32, usize) -> T,
         constant: &impl Fn(E::BaseField) -> T,
@@ -84,6 +88,7 @@ impl<E: ExtensionField> Expression<E> {
     ) -> T {
         self.evaluate_with_instance(
             fixed_in,
+            structural_fixed_in,
             wit_in,
             structural_wit_in,
             &|_| unreachable!(),
@@ -99,6 +104,7 @@ impl<E: ExtensionField> Expression<E> {
     pub fn evaluate_with_instance<T>(
         &self,
         fixed_in: &impl Fn(&Fixed) -> T,
+        structural_fixed_in: &impl Fn(&StructuralFixed) -> T,
         wit_in: &impl Fn(WitnessId) -> T, // witin id
         structural_wit_in: &impl Fn(WitnessId, usize, u32, usize) -> T,
         instance: &impl Fn(Instance) -> T,
@@ -110,6 +116,7 @@ impl<E: ExtensionField> Expression<E> {
     ) -> T {
         match self {
             Expression::Fixed(f) => fixed_in(f),
+            Expression::StructuralFixed(f) => structural_fixed_in(f),
             Expression::WitIn(witness_id) => wit_in(*witness_id),
             Expression::StructuralWitIn(witness_id, max_len, offset, multi_factor) => {
                 structural_wit_in(*witness_id, *max_len, *offset, *multi_factor)
@@ -119,6 +126,7 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Sum(a, b) => {
                 let a = a.evaluate_with_instance(
                     fixed_in,
+                    structural_fixed_in,
                     wit_in,
                     structural_wit_in,
                     instance,
@@ -130,6 +138,7 @@ impl<E: ExtensionField> Expression<E> {
                 );
                 let b = b.evaluate_with_instance(
                     fixed_in,
+                    structural_fixed_in,
                     wit_in,
                     structural_wit_in,
                     instance,
@@ -144,6 +153,7 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Product(a, b) => {
                 let a = a.evaluate_with_instance(
                     fixed_in,
+                    structural_fixed_in,
                     wit_in,
                     structural_wit_in,
                     instance,
@@ -155,6 +165,7 @@ impl<E: ExtensionField> Expression<E> {
                 );
                 let b = b.evaluate_with_instance(
                     fixed_in,
+                    structural_fixed_in,
                     wit_in,
                     structural_wit_in,
                     instance,
@@ -169,6 +180,7 @@ impl<E: ExtensionField> Expression<E> {
             Expression::ScaledSum(x, a, b) => {
                 let x = x.evaluate_with_instance(
                     fixed_in,
+                    structural_fixed_in,
                     wit_in,
                     structural_wit_in,
                     instance,
@@ -180,6 +192,7 @@ impl<E: ExtensionField> Expression<E> {
                 );
                 let a = a.evaluate_with_instance(
                     fixed_in,
+                    structural_fixed_in,
                     wit_in,
                     structural_wit_in,
                     instance,
@@ -191,6 +204,7 @@ impl<E: ExtensionField> Expression<E> {
                 );
                 let b = b.evaluate_with_instance(
                     fixed_in,
+                    structural_fixed_in,
                     wit_in,
                     structural_wit_in,
                     instance,
@@ -219,6 +233,7 @@ impl<E: ExtensionField> Expression<E> {
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
+            Expression::StructuralFixed(..) => false,
             Expression::WitIn(_) => false,
             Expression::StructuralWitIn(..) => false,
             Expression::Instance(_) => false,
@@ -236,6 +251,7 @@ impl<E: ExtensionField> Expression<E> {
         match (expr, s) {
             (
                 Expression::Fixed(_)
+                | Expression::StructuralFixed(..)
                 | Expression::WitIn(_)
                 | Expression::StructuralWitIn(..)
                 | Expression::Challenge(..)
@@ -269,6 +285,7 @@ impl<E: ExtensionField> Neg for Expression<E> {
     fn neg(self) -> Self::Output {
         match self {
             Expression::Fixed(_)
+            | Expression::StructuralFixed(..)
             | Expression::WitIn(_)
             | Expression::StructuralWitIn(..)
             | Expression::Instance(_) => Expression::ScaledSum(
@@ -792,6 +809,9 @@ pub struct StructuralWitIn {
 pub struct Fixed(pub usize);
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct StructuralFixed(pub usize, pub usize);
+
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Instance(pub usize);
 
 impl WitIn {
@@ -984,6 +1004,7 @@ pub mod fmt {
                 base_field::<E::BaseField>(constant, true).to_string()
             }
             Expression::Fixed(fixed) => format!("{:?}", fixed),
+            Expression::StructuralFixed(fixed) => format!("{:?}", fixed),
             Expression::Instance(i) => format!("{:?}", i),
             Expression::Sum(left, right) => {
                 let s = format!("{} + {}", expr(left, wtns, false), expr(right, wtns, false));
