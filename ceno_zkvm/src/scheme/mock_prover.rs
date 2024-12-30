@@ -474,10 +474,11 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        let program = Arc::new(Program::from_insn_codes(program));
+        let program = Arc::new(Program::from(program));
         let (table, challenge) = Self::load_tables_with_program(cb.cs, program, challenge);
 
-        Self::run_maybe_challenge_with_table(cb.cs, &table, wits_in, pi, 1, challenge, lkm, None)
+        Self::run_maybe_challenge_with_table(cb.cs, &table, wits_in, pi, 1, challenge, lkm)
+            .map(|_| ())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -489,8 +490,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         num_instances: usize,
         challenge: [E; 2],
         expected_lkm: Option<LkMultiplicity>,
-        mut shared_lkm: Option<&mut LkMultiplicityRaw<E>>,
-    ) -> Result<(), Vec<MockProverError<E, u64>>> {
+    ) -> Result<LkMultiplicityRaw<E>, Vec<MockProverError<E, u64>>> {
+        let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
 
         // Assert zero expressions
@@ -582,10 +583,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             }
 
             // Increment shared LK Multiplicity
-            if let Some(shared_lkm) = shared_lkm.as_mut() {
-                for element in expr_evaluated {
-                    shared_lkm.increment(*rom_type, *element);
-                }
+            for element in expr_evaluated {
+                shared_lkm.increment(*rom_type, *element);
             }
         }
 
@@ -644,7 +643,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         }
 
         if errors.is_empty() {
-            Ok(())
+            Ok(shared_lkm)
         } else {
             Err(errors)
         }
@@ -848,7 +847,7 @@ Hints:
                 let lkm_from_assignments = witnesses
                     .get_lk_mlt(circuit_name)
                     .map(LkMultiplicityRaw::deep_clone);
-                let errors = Self::run_maybe_challenge_with_table(
+                match Self::run_maybe_challenge_with_table(
                     cs,
                     &lookup_table,
                     &witness,
@@ -856,10 +855,10 @@ Hints:
                     num_rows,
                     challenges,
                     lkm_from_assignments,
-                    Some(&mut lkm_opcodes),
-                );
-                match errors {
-                    Ok(_) => {}
+                ) {
+                    Ok(multiplicities) => {
+                        lkm_opcodes += multiplicities;
+                    }
                     Err(errors) => {
                         tracing::error!("Mock proving failed for opcode {}", circuit_name);
                         print_errors(&errors, &witness, &cs.witin_namespace_map, true);
@@ -898,10 +897,11 @@ Hints:
                     .to_vec();
 
                     for (key, multiplicity) in izip!(lk_table, multiplicity) {
-                        let multiplicity = multiplicity.to_canonical_u64();
-                        if multiplicity > 0 {
-                            lkm_tables.set_count(*rom_type, key, multiplicity as usize);
-                        }
+                        lkm_tables.set_count(
+                            *rom_type,
+                            key,
+                            multiplicity.to_canonical_u64() as usize,
+                        );
                     }
                 }
             }
@@ -1188,7 +1188,7 @@ fn compare_lkm<E, K>(
 ) -> Vec<MockProverError<E, K>>
 where
     E: ExtensionField,
-    K: LkMultiplicityKey + Ord,
+    K: LkMultiplicityKey + Default + Ord,
 {
     let lkm_a = lkm_a.into_finalize_result();
     let lkm_b = lkm_b.into_finalize_result();
