@@ -7,7 +7,6 @@ use ceno_emul::{
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
-use std::{collections::HashSet, sync::Arc};
 use tiny_keccak::keccakf;
 
 #[test]
@@ -136,7 +135,11 @@ fn test_bubble_sorting() -> Result<()> {
     // Provide some random numbers to sort.
     hints.write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
 
-    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::bubble_sorting, &hints);
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::bubble_sorting,
+        &hints,
+    ));
     for msg in &all_messages {
         print!("{msg}");
     }
@@ -151,7 +154,11 @@ fn test_sorting() -> Result<()> {
     // Provide some random numbers to sort.
     hints.write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
 
-    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::sorting, &hints);
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::sorting,
+        &hints,
+    ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
     }
@@ -170,7 +177,11 @@ fn test_median() -> Result<()> {
     nums.sort();
     hints.write(&nums[nums.len() / 2])?;
 
-    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::median, &hints);
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::median,
+        &hints,
+    ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -209,7 +220,11 @@ fn test_hashing() -> Result<()> {
     };
 
     hints.write(&uniques)?;
-    let all_messages = ceno_host::run(CENO_PLATFORM, ceno_examples::hashing, &hints);
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::hashing,
+        &hints,
+    ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");

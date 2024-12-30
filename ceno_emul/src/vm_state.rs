@@ -53,6 +53,10 @@ impl VMState {
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
+        let platform = Platform {
+            prog_data: program.image.keys().copied().collect(),
+            ..platform
+        };
         Ok(Self::new(platform, program))
     }
 

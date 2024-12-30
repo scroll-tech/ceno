@@ -2,15 +2,12 @@
 //!
 //! Iterate multiple times and log the state after each iteration.
 
-#![no_main]
-#![no_std]
 extern crate ceno_rt;
 use ceno_rt::{info_out, syscall_keccak_permute};
 use core::slice;
 
 const ITERATIONS: usize = 3;
 
-ceno_rt::entry!(main);
 fn main() {
     let mut state = [0_u64; 25];
 
