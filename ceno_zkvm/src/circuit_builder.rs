@@ -96,6 +96,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub num_structural_fixed: usize,
     pub structural_fixed_namespace_map: Vec<String>,
+    pub structural_fixed_len: Vec<usize>,
 
     pub instance_name_map: HashMap<Instance, String>,
 
@@ -156,6 +157,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             fixed_namespace_map: vec![],
             num_structural_fixed: 0,
             structural_fixed_namespace_map: vec![],
+            structural_fixed_len: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_name_map: HashMap::new(),
             r_expressions: vec![],
@@ -200,10 +202,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 None => None,
                 Some(fixed_traces) => {
                     let mut fixed_traces = fixed_traces;
-                    Some(fixed_traces.split_off(self.num_fixed))
+                    let _ = fixed_traces.split_off(self.num_fixed);
+                    Some(fixed_traces)
                 }
             };
-    
+
             let fixed_commit_wd = fixed_traces_no_structural
                 .as_ref()
                 .map(|traces| PCS::batch_commit(pp, traces).unwrap());
@@ -212,7 +215,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         } else {
             (None, None)
         };
-
 
         ProvingKey {
             fixed_traces,
@@ -278,6 +280,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
         let path = self.ns.compute_path(n().into());
         self.structural_fixed_namespace_map.push(path);
+        self.structural_fixed_len.push(table_len);
 
         Ok(f)
     }

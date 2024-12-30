@@ -15,7 +15,7 @@ use transcript::{ForkableTranscript, Transcript};
 
 use crate::{
     error::ZKVMError,
-    expression::{Expression, Instance, StructuralWitIn},
+    expression::{Instance, StructuralWitIn},
     instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
@@ -718,16 +718,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             })
             .collect_vec();
 
-        let mut structural_fixed = Vec::new();
-        for lk_table_expressions in cs.lk_table_expressions.iter() {
-            if let Expression::StructuralFixed(fixed) = lk_table_expressions.values {
-                structural_fixed.push(eval_wellform_address_vec(
-                    0,
-                    1,
-                    &input_opening_point[0..fixed.1],
-                ))
-            };
-        }
+        let structural_fixed = cs
+            .structural_fixed_len
+            .iter()
+            .map(|&table_len| {
+                eval_wellform_address_vec(0, 1, &input_opening_point[0..ceil_log2(table_len)])
+            })
+            .collect_vec();
 
         // verify records (degree = 1) statement, thus no sumcheck
         if interleave(
