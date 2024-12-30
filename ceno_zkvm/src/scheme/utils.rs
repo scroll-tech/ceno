@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -203,6 +202,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     num_product_fanin: usize,
 ) -> Vec<Vec<ArcMultilinearExtension<'_, E>>> {
     assert!(last_layer.len() == num_product_fanin);
+    assert_eq!(num_product_fanin % 2, 0);
     let log2_num_product_fanin = ceil_log2(num_product_fanin);
     let mut wit_layers =
         (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
@@ -211,17 +211,21 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
             let cur_layer: Vec<ArcMultilinearExtension<E>> = (0..num_product_fanin)
                 .map(|index| {
                     let mut evaluations = vec![E::ONE; cur_len];
-                    next_layer.iter().for_each(|f| match f.evaluations() {
-                        FieldType::Ext(f) => {
-                            let start: usize = index * cur_len;
-                            f[start..][..cur_len]
-                                .par_iter()
-                                .zip(evaluations.par_iter_mut())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .map(|(v, evaluations)| *evaluations *= *v)
-                                .collect()
+                    next_layer.chunks_exact(2).for_each(|f| {
+                        match (f[0].evaluations(), f[1].evaluations()) {
+                            (FieldType::Ext(f1), FieldType::Ext(f2)) => {
+                                let start: usize = index * cur_len;
+                                (start..(start + cur_len))
+                                    .into_par_iter()
+                                    .zip(evaluations.par_iter_mut())
+                                    .with_min_len(MIN_PAR_SIZE)
+                                    .map(|(index, evaluations)| {
+                                        *evaluations *= f1[index] * f2[index]
+                                    })
+                                    .collect()
+                            }
+                            _ => unreachable!("must be extension field"),
                         }
-                        _ => unreachable!("must be extension field"),
                     });
                     evaluations.into_mle().into()
                 })
