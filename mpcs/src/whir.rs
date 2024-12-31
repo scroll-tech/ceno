@@ -7,14 +7,9 @@ pub use whir::ceno_binding::Error;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use whir::{
-    ceno_binding::{
-        FieldChallenges, FieldWriter, InnerDigestOf as InnerDigestOfInner,
-        PolynomialCommitmentScheme as WhirPCS, ProofResult, Whir as WhirInner,
-        WhirDefaultSpec as WhirDefaultSpecInner, WhirSpec as WhirSpecInner,
-        add_digest_to_merlin as add_digest_to_merlin_inner,
-    },
-    whir::iopattern::Merlin,
+use whir::ceno_binding::{
+    InnerDigestOf as InnerDigestOfInner, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
+    WhirDefaultSpec as WhirDefaultSpecInner, WhirSpec as WhirSpecInner,
 };
 
 mod field_wrapper;
@@ -26,13 +21,6 @@ pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
 }
 
 type InnerDigestOf<Spec, E> = InnerDigestOfInner<<Spec as WhirSpec<E>>::Spec, FieldWrapper<E>>;
-
-fn add_digest_to_merlin<Spec: WhirSpec<E>, E: ExtensionField>(
-    merlin: &mut Merlin,
-    digest: InnerDigestOf<Spec, E>,
-) -> ProofResult<()> {
-    add_digest_to_merlin_inner::<FieldWrapper<E>, Spec::Spec>(merlin, digest)
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct WhirDefaultSpec;
@@ -116,13 +104,7 @@ where
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        // WhirInner only provides commit_and_write, which directly writes the
-        // commitment to the transcript. We provide it with a temporary merlin
-        // transcript.
-        let io = Spec::Spec::prepare_io_pattern(pp.num_variables);
-        let mut merlin = io.to_merlin();
-
-        let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly2whir(&poly), &mut merlin)
+        let witness = WhirInnerT::<E, Spec>::commit(&pp, &poly2whir(&poly))
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness)
@@ -148,31 +130,6 @@ where
         eval: &E,
         _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        let io = Spec::Spec::prepare_io_pattern(pp.num_variables);
-        let mut merlin = io.to_merlin();
-        // In WHIR, the prover writes the commitment to the transcript, then
-        // the commitment is read from the transcript by the verifier, after
-        // the transcript is transformed into a arthur transcript.
-        // Here we repeat whatever the prover does.
-        // TODO: This is a hack. There should be a better design that does not
-        // require non-black-box knowledge of the inner working of WHIR.
-        add_digest_to_merlin::<Spec, E>(&mut merlin, comm.commitment.clone())
-            .map_err(|err| crate::Error::WhirError(whir::ceno_binding::Error::ProofError(err)))?;
-        let ood_answers = comm.ood_answers();
-        if ood_answers.len() > 0 {
-            let mut ood_points =
-                vec![<FieldWrapper::<E> as ark_ff::AdditiveGroup>::ZERO; ood_answers.len()];
-            merlin
-                .fill_challenge_scalars(&mut ood_points)
-                .map_err(|err| {
-                    crate::Error::WhirError(whir::ceno_binding::Error::ProofError(err))
-                })?;
-            merlin.add_scalars(&ood_answers).map_err(|err| {
-                crate::Error::WhirError(whir::ceno_binding::Error::ProofError(err))
-            })?;
-        }
-        // Now the Merlin transcript is ready to pass to the verifier.
-
         WhirInnerT::<E, Spec>::open(
             &pp,
             comm.clone(), // TODO: Remove clone
@@ -182,7 +139,6 @@ where
                 .collect::<Vec<_>>()
                 .as_slice(),
             &FieldWrapper(*eval),
-            &mut merlin,
         )
         .map_err(crate::Error::WhirError)
     }
@@ -195,15 +151,12 @@ where
         proof: &Self::Proof,
         _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        let io = Spec::Spec::prepare_io_pattern(vp.num_variables);
-        let mut arthur = io.to_arthur(&proof.transcript);
         WhirInnerT::<E, Spec>::verify(
             vp,
             &comm.inner,
             &point.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
             &FieldWrapper(*eval),
             proof,
-            &mut arthur,
         )
         .map_err(crate::Error::WhirError)
     }
@@ -295,12 +248,7 @@ mod tests {
                 .collect(),
         );
 
-        let io = <WhirDefaultSpecInner as WhirSpecInner<F>>::prepare_io_pattern(poly_size);
-        let mut merlin = io.to_merlin();
-
-        let witness =
-            WhirInner::<F, WhirDefaultSpecInner>::commit_and_write(&pp, &poly, &mut merlin)
-                .unwrap();
+        let witness = WhirInner::<F, WhirDefaultSpecInner>::commit(&pp, &poly).unwrap();
         let comm = witness.commitment;
 
         let mut rng = rand::thread_rng();
@@ -308,18 +256,8 @@ mod tests {
         let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
 
         let proof =
-            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, witness, &point, &eval, &mut merlin)
-                .unwrap();
-        let mut arthur = io.to_arthur(&proof.transcript);
-        WhirInner::<F, WhirDefaultSpecInner>::verify(
-            &pp,
-            &comm,
-            &point,
-            &eval,
-            &proof,
-            &mut arthur,
-        )
-        .unwrap();
+            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, witness, &point, &eval).unwrap();
+        WhirInner::<F, WhirDefaultSpecInner>::verify(&pp, &comm, &point, &eval, &proof).unwrap();
     }
 
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
