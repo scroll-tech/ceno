@@ -1,37 +1,29 @@
 [package]
 categories.workspace = true
-description = "Sumcheck protocol implementation"
+description = "Subprotocols"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "sumcheck"
+name = "subprotocols"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
-crossbeam-channel.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
-multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
-p3 = { path = "../p3" }
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+p3-field.workspace = true
+rand.workspace = true
 rayon.workspace = true
-serde.workspace = true
-sumcheck_macro = { path = "../sumcheck_macro" }
-tracing.workspace = true
+thiserror = "1"
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
 criterion.workspace = true
 p3-goldilocks.workspace = true
-poseidon.workspace = true
 
 [[bench]]
 harness = false
-name = "devirgo_sumcheck"
-
-
-[[bench]]
-harness = false
-name = "devirgo_sumcheck_logup"
+name = "expr_based_logup"

@@ -1,0 +1,23 @@
+[package]
+categories.workspace = true
+description = "GKR IOP protocol implementation"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "gkr_iop"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+ark-std.workspace = true
+ff_ext = { path = "../ff_ext" }
+itertools.workspace = true
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+p3-field.workspace = true
+p3-goldilocks.workspace = true
+rand.workspace = true
+rayon.workspace = true
+subprotocols = { path = "../subprotocols" }
+thiserror = "1"
+transcript = { path = "../transcript" }
