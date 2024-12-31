@@ -144,13 +144,7 @@ where
         // WhirInner only provides commit_and_write, which directly writes the
         // commitment to the transcript. We provide it with a temporary merlin
         // transcript.
-        let whir_params = Spec::Spec::get_parameters(pp.num_variables);
-        let mv_params = MultivariateParameters::new(pp.num_variables);
-        let params = ConfigOf::<Spec, E>::new(mv_params, whir_params);
-
-        let io = IOPattern::<DefaultHash>::new("🌪️");
-        let io = commit_statement_to_io_pattern::<Spec, E>(io, &params);
-        let io = add_whir_proof_to_io_pattern::<Spec, E>(io, &params);
+        let io = Spec::Spec::prepare_io_pattern(pp.num_variables);
         let mut merlin = io.to_merlin();
 
         let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly2whir(&poly), &mut merlin)
