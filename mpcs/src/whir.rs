@@ -315,11 +315,8 @@ mod tests {
     type F = field_wrapper::ExtensionFieldWrapper<GoldilocksExt2>;
 
     use whir::{
-        ceno_binding::{
-            DefaultHash, PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner,
-        },
+        ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner},
         poly_utils::{MultilinearPoint, coeffs::CoefficientList},
-        whir::iopattern::{IOPattern, WhirIOPattern},
     };
 
     #[test]
@@ -334,13 +331,7 @@ mod tests {
                 .collect(),
         );
 
-        let whir_params = WhirDefaultSpecInner::get_parameters(pp.num_variables);
-        let mv_params = MultivariateParameters::new(pp.num_variables);
-        let params = ConfigOf::<WhirDefaultSpec, GoldilocksExt2>::new(mv_params, whir_params);
-
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_statement(&params)
-            .add_whir_proof(&params);
+        let io = <WhirDefaultSpecInner as WhirSpecInner<F>>::prepare_io_pattern(poly_size);
         let mut merlin = io.to_merlin();
 
         let witness =
