@@ -15,7 +15,7 @@ ark-std.workspace = true
 bitvec = "1.0"
 ctr = "0.9"
 ff.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff_ext.workspace = true
 # TODO: move to version 1, once our dependencies are updated
 generic-array = { version = "0.14", features = ["serde"] }
 goldilocks.workspace = true
@@ -29,7 +29,7 @@ rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
-transcript = { path = "../transcript" }
+transcript.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

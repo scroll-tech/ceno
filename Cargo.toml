@@ -9,6 +9,8 @@ members = [
   "mpcs",
   "multilinear_extensions",
   "poseidon",
+  "protocol",
+  "subprotocols",
   "sumcheck",
   "transcript",
 ]
@@ -30,6 +32,7 @@ cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 ff = "0.13"
+ff_ext = { path = "./ff_ext" }
 goldilocks = { git = "https://github.com/scroll-tech/ceno-Goldilocks" }
 itertools = "0.13"
 num-derive = "0.4"
@@ -49,12 +52,15 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"
+subprotocols = { path = "./subprotocols" }
+thiserror = "2.0.3"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing = { version = "0.1", features = [
   "attributes",
 ] }
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+transcript = { path = "./transcript" }
 
 [profile.dev]
 lto = "thin"

@@ -1,18 +1,22 @@
 [package]
 categories.workspace = true
-description = "Transcript generation for Ceno"
+description = "Subprotocols"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "transcript"
+name = "subprotocols"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
-crossbeam-channel.workspace = true
+ark-std.workspace = true
 ff.workspace = true
 ff_ext.workspace = true
+itertools.workspace = true
+rand.workspace = true
+thiserror.workspace = true
+transcript.workspace = true
+
+[dev-dependencies]
 goldilocks.workspace = true
-poseidon.workspace = true
-serde.workspace = true
