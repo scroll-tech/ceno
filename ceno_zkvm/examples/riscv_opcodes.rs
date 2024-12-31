@@ -202,7 +202,7 @@ fn main() {
         config
             .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
             .unwrap();
-        zkvm_witness.finalize_lk_multiplicities();
+        zkvm_witness.finalize_lk_multiplicities(false);
 
         // Find the final register values and cycles.
         let reg_final = reg_init
@@ -281,7 +281,7 @@ fn main() {
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
-            program.clone(),
+            &program,
         );
 
         let timer = Instant::now();
