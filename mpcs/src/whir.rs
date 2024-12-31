@@ -9,14 +9,17 @@ use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use whir::{
     ceno_binding::{
-        Config, DefaultHash, FieldChallenges, FieldWriter, PolynomialCommitmentScheme as WhirPCS,
-        PowStrategy, Whir as WhirInner, WhirDefaultSpec as WhirDefaultSpecInner,
-        WhirSpec as WhirSpecInner,
+        DefaultHash, FieldChallenges, FieldWriter, InnerDigestOf as InnerDigestOfInner,
+        MerkleConfigOf as MerkleConfigOfInner, PolynomialCommitmentScheme as WhirPCS,
+        PowOf as PowOfInner, ProofResult, Whir as WhirInner,
+        WhirDefaultSpec as WhirDefaultSpecInner, WhirSpec as WhirSpecInner,
+        add_digest_to_merlin as add_digest_to_merlin_inner,
+        add_whir_proof_to_io_pattern as add_whir_proof_to_io_pattern_inner,
+        commit_statement_to_io_pattern as commit_statement_to_io_pattern_inner,
     },
     parameters::MultivariateParameters,
     whir::{
-        fs_utils::{DigestReader, DigestWriter},
-        iopattern::{Arthur, IOPattern, Merlin, WhirIOPattern},
+        iopattern::{IOPattern, Merlin},
         parameters::WhirConfig,
     },
 };
@@ -29,6 +32,33 @@ pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
     type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default;
 }
 
+type InnerDigestOf<Spec, E> = InnerDigestOfInner<<Spec as WhirSpec<E>>::Spec, FieldWrapper<E>>;
+
+type MerkleConfigOf<Spec, E> = MerkleConfigOfInner<<Spec as WhirSpec<E>>::Spec, FieldWrapper<E>>;
+
+type ConfigOf<Spec, E> = WhirConfig<FieldWrapper<E>, MerkleConfigOf<Spec, E>, PowOf<Spec, E>>;
+
+type PowOf<Spec, E> = PowOfInner<<Spec as WhirSpec<E>>::Spec, FieldWrapper<E>>;
+
+fn commit_statement_to_io_pattern<Spec: WhirSpec<E>, E: ExtensionField>(
+    iopattern: IOPattern,
+    params: &ConfigOf<Spec, E>,
+) -> IOPattern {
+    commit_statement_to_io_pattern_inner::<FieldWrapper<E>, Spec::Spec>(iopattern, params)
+}
+fn add_whir_proof_to_io_pattern<Spec: WhirSpec<E>, E: ExtensionField>(
+    iopattern: IOPattern,
+    params: &ConfigOf<Spec, E>,
+) -> IOPattern {
+    add_whir_proof_to_io_pattern_inner::<FieldWrapper<E>, Spec::Spec>(iopattern, params)
+}
+fn add_digest_to_merlin<Spec: WhirSpec<E>, E: ExtensionField>(
+    merlin: &mut Merlin,
+    digest: InnerDigestOf<Spec, E>,
+) -> ProofResult<()> {
+    add_digest_to_merlin_inner::<FieldWrapper<E>, Spec::Spec>(merlin, digest)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WhirDefaultSpec;
 
@@ -37,13 +67,7 @@ impl<E: ExtensionField> WhirSpec<E> for WhirDefaultSpec {
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>>
-// TODO: Remove these horrifying where clauses
-where
-    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-{
+pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
     inner: WhirInner<FieldWrapper<E>, Spec::Spec>,
 }
 
@@ -51,7 +75,7 @@ type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spe
 
 #[derive(Default, Clone, Debug)]
 pub struct WhirDigest<E: ExtensionField, Spec: WhirSpec<E>> {
-    inner: <<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig as Config>::InnerDigest,
+    inner: InnerDigestOf<Spec, E>,
 }
 
 impl<E: ExtensionField, Spec: WhirSpec<E>> Serialize for WhirDigest<E, Spec> {
@@ -75,7 +99,8 @@ impl<'de, E: ExtensionField, Spec: WhirSpec<E>> Deserialize<'de> for WhirDigest<
         // Deserialize the bytes into a buffer
         let buffer: Vec<u8> = Deserialize::deserialize(deserializer)?;
         // Deserialize the buffer into a proof
-        let inner = <<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig as Config>::InnerDigest::deserialize_compressed(&buffer[..]).map_err(serde::de::Error::custom)?;
+        let inner = InnerDigestOf::<Spec, E>::deserialize_compressed(&buffer[..])
+            .map_err(serde::de::Error::custom)?;
         Ok(WhirDigest { inner })
     }
 }
@@ -84,10 +109,6 @@ impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whi
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
-    // TODO: Remove these horrifying stuffs
-    Merlin: DigestWriter<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<<Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
-    IOPattern: WhirIOPattern<FieldWrapper<E>, <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig>,
 {
     type Param = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
     type ProverParam = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
@@ -125,15 +146,11 @@ where
         // transcript.
         let whir_params = Spec::Spec::get_parameters(pp.num_variables);
         let mv_params = MultivariateParameters::new(pp.num_variables);
-        let params = WhirConfig::<
-            FieldWrapper<E>,
-            <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
-            PowStrategy,
-        >::new(mv_params, whir_params);
+        let params = ConfigOf::<Spec, E>::new(mv_params, whir_params);
 
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_statement(&params)
-            .add_whir_proof(&params);
+        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let io = commit_statement_to_io_pattern::<Spec, E>(io, &params);
+        let io = add_whir_proof_to_io_pattern::<Spec, E>(io, &params);
         let mut merlin = io.to_merlin();
 
         let witness = WhirInnerT::<E, Spec>::commit_and_write(&pp, &poly2whir(&poly), &mut merlin)
@@ -164,14 +181,10 @@ where
     ) -> Result<Self::Proof, crate::Error> {
         let whir_params = Spec::Spec::get_parameters(pp.num_variables);
         let mv_params = MultivariateParameters::new(pp.num_variables);
-        let params = WhirConfig::<
-            FieldWrapper<E>,
-            <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
-            PowStrategy,
-        >::new(mv_params, whir_params);
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_statement(&params)
-            .add_whir_proof(&params);
+        let params = ConfigOf::<Spec, E>::new(mv_params, whir_params);
+        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let io = commit_statement_to_io_pattern::<Spec, E>(io, &params);
+        let io = add_whir_proof_to_io_pattern::<Spec, E>(io, &params);
 
         let mut merlin = io.to_merlin();
         // In WHIR, the prover writes the commitment to the transcript, then
@@ -180,8 +193,7 @@ where
         // Here we repeat whatever the prover does.
         // TODO: This is a hack. There should be a better design that does not
         // require non-black-box knowledge of the inner working of WHIR.
-        merlin
-            .add_digest(comm.commitment.clone())
+        add_digest_to_merlin::<Spec, E>(&mut merlin, comm.commitment.clone())
             .map_err(|err| crate::Error::WhirError(whir::ceno_binding::Error::ProofError(err)))?;
         let ood_answers = comm.ood_answers();
         if ood_answers.len() > 0 {
@@ -222,14 +234,10 @@ where
     ) -> Result<(), crate::Error> {
         let whir_params = Spec::Spec::get_parameters(vp.num_variables);
         let mv_params = MultivariateParameters::new(vp.num_variables);
-        let params = WhirConfig::<
-            FieldWrapper<E>,
-            <Spec::Spec as WhirSpecInner<FieldWrapper<E>>>::MerkleConfig,
-            PowStrategy,
-        >::new(mv_params, whir_params);
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_statement(&params)
-            .add_whir_proof(&params);
+        let params = ConfigOf::<Spec, E>::new(mv_params, whir_params);
+        let io = IOPattern::<DefaultHash>::new("🌪️");
+        let io = commit_statement_to_io_pattern::<Spec, E>(io, &params);
+        let io = add_whir_proof_to_io_pattern::<Spec, E>(io, &params);
         let mut arthur = io.to_arthur(&proof.transcript);
         WhirInnerT::<E, Spec>::verify(
             vp,
@@ -317,7 +325,7 @@ mod tests {
             DefaultHash, PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner,
         },
         poly_utils::{MultilinearPoint, coeffs::CoefficientList},
-        whir::iopattern::IOPattern,
+        whir::iopattern::{IOPattern, WhirIOPattern},
     };
 
     #[test]
@@ -334,11 +342,7 @@ mod tests {
 
         let whir_params = WhirDefaultSpecInner::get_parameters(pp.num_variables);
         let mv_params = MultivariateParameters::new(pp.num_variables);
-        let params = WhirConfig::<
-            F,
-            <WhirDefaultSpecInner as WhirSpecInner<F>>::MerkleConfig,
-            PowStrategy,
-        >::new(mv_params, whir_params);
+        let params = ConfigOf::<WhirDefaultSpec, GoldilocksExt2>::new(mv_params, whir_params);
 
         let io = IOPattern::<DefaultHash>::new("🌪️")
             .commit_statement(&params)
