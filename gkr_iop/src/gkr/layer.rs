@@ -31,10 +31,21 @@ pub enum LayerType {
 pub struct Layer {
     pub name: String,
     pub ty: LayerType,
+    /// Challenges generated at the beginning of the layer protocol.
     pub challenges: Vec<Constant>,
+    /// Expressions to prove in this layer. For zerocheck and linear layers, each
+    /// expression corresponds to an output. While in sumcheck, there is only 1
+    /// expression, which corresponds to the sum of all outputs. This design is
+    /// for the convenience when building the following expression:
+    ///     `e_0 + beta * e_1 = sum_x (eq(p_0, x) + beta * eq(p_1, x)) expr(x)`.
+    /// where `vec![e_0, beta * e_1]` will be the output evaluation expressions.
     pub exprs: Vec<Expression>,
+    /// Positions to place the evaluations of the base inputs of this layer.
     pub in_bases: Vec<EvalExpression>,
+    /// Positions to place the evaluations of the ext inputs of this layer.
     pub in_exts: Vec<EvalExpression>,
+    /// The expressions of the evaluations from the succeeding layers, which are
+    /// connected to the outputs of this layer.
     pub outs: Vec<EvalExpression>,
 }
 
@@ -128,17 +139,14 @@ impl Layer {
             base_mle_evals,
             ext_mle_evals,
         } = match self.ty {
-            LayerType::Sumcheck => {
-                assert_eq!(sigmas.len(), 1);
-                <Layer as SumcheckLayer<E>>::verify(
-                    self,
-                    proof,
-                    &sigmas.iter().sum(),
-                    points.slice_vector(),
-                    challenges,
-                    transcript,
-                )?
-            }
+            LayerType::Sumcheck => <Layer as SumcheckLayer<E>>::verify(
+                self,
+                proof,
+                &sigmas.iter().sum(),
+                points.slice_vector(),
+                challenges,
+                transcript,
+            )?,
             LayerType::Zerocheck => <Layer as ZerocheckLayer<E>>::verify(
                 self,
                 proof,

@@ -1,9 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
-use itertools::{Itertools, izip};
-use protocol::{
+use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     evaluation::{EvalExpression, PointAndEval},
@@ -13,6 +11,8 @@ use protocol::{
         mock::MockProver,
     },
 };
+use goldilocks::GoldilocksExt2;
+use itertools::{Itertools, izip};
 use rand::{Rng, rngs::OsRng};
 use subprotocols::expression::{Constant, Expression, VectorType};
 use transcript::{BasicTranscript, Transcript};

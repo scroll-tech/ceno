@@ -41,7 +41,7 @@ impl<E: ExtensionField> MockProver<E> {
         mut challenges: Vec<E>,
     ) -> Result<(), MockProverError<E>> {
         evaluations.resize(circuit.n_evaluations, VectorType::Base(vec![]));
-        challenges.resize(circuit.n_challenges, E::ONE + E::ONE);
+        challenges.resize_with(circuit.n_challenges, || E::random(OsRng));
         for (layer, layer_wit) in izip!(circuit.layers, &circuit_wit.layers) {
             let num_vars = layer_wit.num_vars;
             let points = (0..layer.outs.len())

@@ -3,6 +3,7 @@ use crate::gkr::GKRCircuit;
 use super::Chip;
 
 impl Chip {
+    /// Extract information for the GKR protocol.
     pub fn gkr_circuit(&'_ self) -> GKRCircuit<'_> {
         GKRCircuit {
             layers: &self.layers,

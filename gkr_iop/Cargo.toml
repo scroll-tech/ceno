@@ -1,10 +1,10 @@
 [package]
 categories.workspace = true
-description = "Protocol"
+description = "GKR IOP protocol implementation"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "protocol"
+name = "gkr_iop"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true

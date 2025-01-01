@@ -9,7 +9,7 @@ members = [
   "mpcs",
   "multilinear_extensions",
   "poseidon",
-  "protocol",
+  "gkr_iop",
   "subprotocols",
   "sumcheck",
   "transcript",

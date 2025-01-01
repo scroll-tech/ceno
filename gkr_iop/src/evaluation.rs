@@ -5,10 +5,18 @@ use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec_sequential;
 use subprotocols::expression::{Constant, Point};
 
+/// Evaluation expression for the gkr layer reduction and PCS opening preparation.
 #[derive(Clone, Debug)]
 pub enum EvalExpression {
+    /// Single entry in the evaluation vector.
     Single(usize),
+    /// Linear expression of an entry with the scalar and offset.
     Linear(usize, Constant, Constant),
+    /// Merging multiple evaluations which denotes a partition of the original
+    /// polynomial. `(usize, Constant)` denote the modification of the point.
+    /// For example, when it receive a point `(p0, p1, p2, p3)` from a succeeding
+    /// layer, `vec![(2, c0), (4, c1)]` will modify the point to `(p0, p1, c0, p2, c1, p3)`.
+    /// where the indices specify how the partition applied to the original polynomial.
     Partition(Vec<Box<EvalExpression>>, Vec<(usize, Constant)>),
 }
 
