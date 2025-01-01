@@ -1,4 +1,6 @@
-use std::{cmp::max, collections::HashMap, marker::PhantomData, mem::MaybeUninit, sync::Arc};
+use std::{
+    cmp::max, collections::HashMap, marker::PhantomData, mem::MaybeUninit, ops::Mul, sync::Arc,
+};
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
@@ -470,6 +472,52 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
             });
         unsafe { std::mem::transmute::<Vec<MaybeUninit<E>>, Vec<E>>(ret) }
     }
+}
+
+#[tracing::instrument(skip_all, name = "multilinear_extensions::build_eq_x_r_vec")]
+pub fn build_eq_x_r_vec_with_scalar<E: ExtensionField + Mul<F, Output = E> + From<F>, F>(
+    r: &[E],
+    scalar: F,
+) -> Vec<E> {
+    // avoid unnecessary allocation
+    if r.is_empty() {
+        return vec![E::from(scalar)];
+    }
+    // we build eq(x,r) from its evaluations
+    // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
+    // for example, with num_vars = 4, x is a binary vector of 4, then
+    //  0 0 0 0 -> (1-r0)   * (1-r1)    * (1-r2)    * (1-r3)
+    //  1 0 0 0 -> r0       * (1-r1)    * (1-r2)    * (1-r3)
+    //  0 1 0 0 -> (1-r0)   * r1        * (1-r2)    * (1-r3)
+    //  1 1 0 0 -> r0       * r1        * (1-r2)    * (1-r3)
+    //  ....
+    //  1 1 1 1 -> r0       * r1        * r2        * r3
+    // we will need 2^num_var evaluations
+    let nthreads = max_usable_threads();
+    let nbits = nthreads.trailing_zeros() as usize;
+    assert_eq!(1 << nbits, nthreads);
+
+    let mut evals = create_uninit_vec(1 << r.len());
+    if r.len() < nbits {
+        build_eq_x_r_helper_sequential(r, &mut evals, E::from(scalar));
+    } else {
+        let eq_ts = build_eq_x_r_vec_sequential(&r[(r.len() - nbits)..]);
+
+        // eq(x, r) = eq(x_lo, r_lo) * eq(x_hi, r_hi)
+        // where rlen = r.len(), x_lo = x[0..rlen-nbits], x_hi = x[rlen-nbits..]
+        //  r_lo = r[0..rlen-nbits] and r_hi = r[rlen-nbits..]
+        // each thread is associated with x_hi, and it will computes the subset
+        // { eq(x_lo, r_lo) * eq(x_hi, r_hi) } whose cardinality equals to 2^{rlen-nbits}
+        evals
+            .par_chunks_mut(1 << (r.len() - nbits))
+            .zip((0..nthreads).into_par_iter())
+            .for_each(|(chunks, tid)| {
+                let eq_t = eq_ts[tid];
+
+                build_eq_x_r_helper_sequential(&r[..(r.len() - nbits)], chunks, eq_t);
+            });
+    }
+    unsafe { std::mem::transmute::<Vec<MaybeUninit<E>>, Vec<E>>(evals) }
 }
 
 #[cfg(test)]

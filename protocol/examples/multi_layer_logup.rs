@@ -28,6 +28,7 @@ struct TowerParams {
 struct TowerChipLayout<E> {
     params: TowerParams,
 
+    // Commit poly indices.
     committed_table: usize,
     committed_count: usize,
 

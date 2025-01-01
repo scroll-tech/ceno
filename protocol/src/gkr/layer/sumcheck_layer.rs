@@ -19,9 +19,6 @@ pub trait SumcheckLayer<E: ExtensionField> {
         out_points: &[&[E]],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        eqs: &mut [Vec<E>],
-        eq_evals_first_part: &mut [E],
-        eq_evals_second_part: &mut [E],
     ) -> SumcheckProverOutput<E>;
 
     fn verify(
@@ -41,9 +38,6 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer {
         out_points: &[&[E]],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        eqs: &mut [Vec<E>],
-        eq_evals_first_part: &mut [E],
-        eq_evals_second_part: &mut [E],
     ) -> SumcheckProverOutput<E> {
         let prover_state = SumcheckProverState::new(
             self.exprs[0].clone(),
@@ -52,9 +46,6 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer {
             wit.bases.slice_vector(),
             challenges,
             transcript,
-            eqs,
-            eq_evals_first_part,
-            eq_evals_second_part,
         );
 
         prover_state.prove()

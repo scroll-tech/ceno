@@ -1,6 +1,3 @@
-use std::cmp::max;
-
-use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use layer::{Layer, LayerWitness};
@@ -59,19 +56,9 @@ impl GKRCircuit<'_> {
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
-        let (mut eq, mut eq_buffer_1, mut eq_buffer_2) = self.eq_buffers(&circuit_wit);
         let sumcheck_proofs = izip!(self.layers, circuit_wit.layers)
             .map(|(layer, layer_wit)| {
-                let proof = layer.prove(
-                    layer_wit,
-                    &mut evaluations,
-                    &mut challenges,
-                    transcript,
-                    eq.as_mut_slice(),
-                    eq_buffer_1.as_mut_slice(),
-                    eq_buffer_2.as_mut_slice(),
-                );
-                proof
+                layer.prove(layer_wit, &mut evaluations, &mut challenges, transcript)
             })
             .collect_vec();
 
@@ -81,31 +68,6 @@ impl GKRCircuit<'_> {
             gkr_proof: GKRProof(sumcheck_proofs),
             opening_evaluations,
         })
-    }
-
-    fn eq_buffers<E: ExtensionField>(
-        &self,
-        circuit_wit: &GKRCircuitWitness<E>,
-    ) -> (Vec<Vec<E>>, Vec<E>, Vec<E>) {
-        let n_eqs = self
-            .layers
-            .iter()
-            .map(|layer| layer.exprs.len())
-            .max()
-            .unwrap();
-        let size = circuit_wit
-            .layers
-            .iter()
-            .map(|layer_wit| max(layer_wit.bases.len(), layer_wit.exts.len()))
-            .max()
-            .unwrap();
-        let log_size = log2(size);
-        let sqrt_size = 1 << (log_size >> 1);
-        (
-            vec![vec![E::ZERO; size]; n_eqs],
-            vec![E::ZERO; sqrt_size],
-            vec![E::ZERO; size / sqrt_size],
-        )
     }
 
     pub fn verify<E>(

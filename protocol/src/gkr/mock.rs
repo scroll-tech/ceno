@@ -6,11 +6,11 @@ use rand::rngs::OsRng;
 use subprotocols::{
     expression::{Expression, VectorType},
     test_utils::random_point,
-    utils::eq_vecs_no_buffer,
+    utils::eq_vecs,
 };
 use thiserror::Error;
 
-use crate::evaluation::EvalExpression;
+use crate::{evaluation::EvalExpression, utils::SliceIterator};
 
 use super::{GKRCircuit, GKRCircuitWitness, layer::LayerType};
 
@@ -47,7 +47,7 @@ impl<E: ExtensionField> MockProver<E> {
             let points = (0..layer.outs.len())
                 .map(|_| random_point::<E>(OsRng, num_vars))
                 .collect_vec();
-            let eqs = eq_vecs_no_buffer(&points);
+            let eqs = eq_vecs(points.slice_iter(), &vec![E::ONE; points.len()]);
             let gots = layer
                 .exprs
                 .iter()

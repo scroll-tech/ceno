@@ -20,9 +20,6 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         out_points: &[&[E]],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        eqs: &mut [Vec<E>],
-        eq_evals_first_part: &mut [E],
-        eq_evals_second_part: &mut [E],
     ) -> SumcheckProverOutput<E>;
 
     fn verify(
@@ -42,9 +39,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer {
         out_points: &[&[E]],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        eqs: &mut [Vec<E>],
-        eq_evals_first_part: &mut [E],
-        eq_evals_second_part: &mut [E],
     ) -> SumcheckProverOutput<E> {
         let prover_state = ZerocheckProverState::new(
             self.exprs.clone(),
@@ -53,9 +47,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer {
             wit.bases.slice_vector(),
             challenges,
             transcript,
-            eqs,
-            eq_evals_first_part,
-            eq_evals_second_part,
         );
 
         prover_state.prove()

@@ -19,9 +19,6 @@ fn run_prover<E: ExtensionField>(
     ext_mles: &mut [Vec<E>],
     expr: Expression,
     challenges: Vec<E>,
-    eqs: &mut [Vec<E>],
-    eq_evals_first_part: &mut [E],
-    eq_evals_second_part: &mut [E],
 ) -> SumcheckProof<E> {
     let timer = std::time::Instant::now();
     let ext_mle_refs = ext_mles.iter_mut().map(|v| v.as_mut_slice()).collect_vec();
@@ -34,9 +31,6 @@ fn run_prover<E: ExtensionField>(
         vec![],
         &challenges,
         &mut prover_transcript,
-        eqs,
-        eq_evals_first_part,
-        eq_evals_second_part,
     );
 
     let SumcheckProverOutput { proof, .. } = prover.prove();
@@ -84,27 +78,9 @@ fn main() {
 
     let challenges = vec![E::random(&mut rng)];
 
-    let mut eq_evals_first_part = vec![E::ZERO; 1 << (num_vars >> 1)];
-    let mut eq_evals_second_part = vec![E::ZERO; 1 << (num_vars - (num_vars >> 1))];
-    let mut eqs = [vec![E::ZERO; 1 << num_vars]];
+    let proof = run_prover(&point, &mut ext_mles, expr.clone(), challenges.clone());
 
-    let proof = run_prover(
-        &point,
-        &mut ext_mles,
-        expr.clone(),
-        challenges.clone(),
-        &mut eqs,
-        &mut eq_evals_first_part,
-        &mut eq_evals_second_part,
-    );
-
-    eq_vecs(
-        [point.as_slice()].into_iter(),
-        &[E::ONE],
-        &mut eqs,
-        &mut eq_evals_first_part,
-        &mut eq_evals_second_part,
-    );
+    let eqs = eq_vecs([point.as_slice()].into_iter(), &[E::ONE]);
 
     let ans: E = izip!(&eqs[0], &d0, &d1, &n0, &n1)
         .map(|(eq, d0, d1, n0, n1)| *eq * (*d0 * *d1 + challenges[0] * (*d0 * *n1 + *d1 * *n0)))

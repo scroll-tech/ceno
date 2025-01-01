@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
-use subprotocols::{
-    expression::{Constant, Point},
-    utils::eq_simple,
-};
+use multilinear_extensions::virtual_poly::build_eq_x_r_vec_sequential;
+use subprotocols::expression::{Constant, Point};
 
 #[derive(Clone, Debug)]
 pub enum EvalExpression {
@@ -57,7 +55,7 @@ impl EvalExpression {
                     new_point.insert(*index_in_point, c.evaluate(challenges));
                 }
 
-                let eq = eq_simple(&vars);
+                let eq = build_eq_x_r_vec_sequential(&vars);
                 let eval = izip!(parts, &eq).fold(E::ZERO, |acc, (part, eq)| acc + part.eval * eq);
 
                 PointAndEval {

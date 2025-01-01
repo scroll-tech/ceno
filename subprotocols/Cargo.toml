@@ -14,9 +14,16 @@ ark-std.workspace = true
 ff.workspace = true
 ff_ext.workspace = true
 itertools.workspace = true
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
 rand.workspace = true
+rayon.workspace = true
 thiserror.workspace = true
 transcript.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 goldilocks.workspace = true
+
+[[bench]]
+harness = false
+name = "expr_based_logup"

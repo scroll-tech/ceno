@@ -1,11 +1,9 @@
 use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, zip_eq};
+use multilinear_extensions::virtual_poly::eq_eval;
 
-use crate::{
-    op_by_type,
-    utils::{eq_eval, i64_to_field},
-};
+use crate::{op_by_type, utils::i64_to_field};
 
 use super::{Constant, Expression, FieldType, UniPolyVectorType, VectorType, Witness};
 

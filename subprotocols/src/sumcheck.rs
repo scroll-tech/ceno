@@ -14,7 +14,7 @@ use crate::{
 use super::utils::{fix_variables_ext, fix_variables_inplace, interpolate_uni_poly};
 
 /// This is an randomly combined sumcheck protocol for the following equation:
-/// \sigma = \sum_x (r^0 expr_0(x) + r^1 expr_1(x) + ...)
+/// \sigma = \sum_x expr(x)
 pub struct SumcheckProverState<'a, E, Trans>
 where
     E: ExtensionField,
@@ -30,7 +30,7 @@ where
     /// Base field mles.
     base_mles: Vec<&'a [E::BaseField]>,
     /// Eq polys
-    eqs: &'a mut [Vec<E>],
+    eqs: Vec<Vec<E>>,
     /// Challenges occurred in expressions
     challenges: &'a [E],
 
@@ -65,9 +65,6 @@ where
         base_mles: Vec<&'a [E::BaseField]>,
         challenges: &'a [E],
         transcript: &'a mut Trans,
-        eqs: &'a mut [Vec<E>],
-        eq_evals_first_part: &mut [E],
-        eq_evals_second_part: &mut [E],
     ) -> Self {
         assert!(!(ext_mles.is_empty() && base_mles.is_empty()));
 
@@ -83,14 +80,7 @@ where
 
         let degree = expr.degree();
 
-        assert!(eqs.len() >= points.len());
-        eq_vecs(
-            points.iter().copied(),
-            &vec![E::ONE; points.len()],
-            eqs,
-            eq_evals_first_part,
-            eq_evals_second_part,
-        );
+        let eqs = eq_vecs(points.iter().copied(), &vec![E::ONE; points.len()]);
 
         Self {
             expr,
@@ -151,7 +141,7 @@ where
             &self.ext_mles,
             &self.base_mles_after,
             &self.base_mles,
-            self.eqs,
+            &self.eqs,
             self.challenges,
             1 << (self.num_vars - round),
             self.degree,
@@ -310,10 +300,6 @@ mod test {
         base_mle_refs: Vec<&[E::BaseField]>,
         challenges: Vec<E>,
 
-        eqs: &mut [Vec<E>],
-        eq_evals_first_part: &mut [E],
-        eq_evals_second_part: &mut [E],
-
         sigma: E,
     ) {
         let mut prover_transcript = BasicTranscript::new(b"test");
@@ -324,9 +310,6 @@ mod test {
             base_mle_refs,
             &challenges,
             &mut prover_transcript,
-            eqs,
-            eq_evals_first_part,
-            eq_evals_second_part,
         );
 
         let SumcheckProverOutput { proof, .. } = prover.prove();
@@ -350,10 +333,6 @@ mod test {
         let g = field_vec![F, 3];
         let out_point = vec![];
 
-        let mut eq_evals_first_part = [];
-        let mut eq_evals_second_part = [];
-        let mut eqs = [vec![]];
-
         let base_mle_refs = vec![f.as_slice(), g.as_slice()];
         let f = Expression::Wit(Witness::BasePoly(0));
         let g = Expression::Wit(Witness::BasePoly(1));
@@ -365,9 +344,6 @@ mod test {
             vec![],
             base_mle_refs,
             vec![],
-            &mut eqs,
-            &mut eq_evals_first_part,
-            &mut eq_evals_second_part,
             E::from(6),
         );
     }
@@ -379,39 +355,14 @@ mod test {
         let base_mle_refs = vec![f.as_slice()];
         let expr = Expression::Wit(Witness::BasePoly(0));
 
-        let mut eq_evals_first_part = vec![];
-        let mut eq_evals_second_part = vec![];
-        let mut eqs = [];
-
-        run(
-            vec![],
-            expr,
-            vec![],
-            base_mle_refs,
-            vec![],
-            &mut eqs,
-            &mut eq_evals_first_part,
-            &mut eq_evals_second_part,
-            ans,
-        );
+        run(vec![], expr, vec![], base_mle_refs, vec![], ans);
     }
 
     #[test]
     fn test_sumcheck_logup() {
-        let num_vars = 2;
         let point = field_vec![E, 2, 3];
 
-        let mut eq_evals_first_part = vec![E::ZERO; 1 << (num_vars >> 1)];
-        let mut eq_evals_second_part = vec![E::ZERO; 1 << (num_vars - (num_vars >> 1))];
-        let mut eqs = [vec![E::ZERO; 1 << num_vars]];
-
-        eq_vecs(
-            [point.as_slice()].into_iter(),
-            &[E::ONE],
-            &mut eqs,
-            &mut eq_evals_first_part,
-            &mut eq_evals_second_part,
-        );
+        let eqs = eq_vecs([point.as_slice()].into_iter(), &[E::ONE]);
 
         let d0 = field_vec![E, 1, 2, 3, 4];
         let d1 = field_vec![E, 5, 6, 7, 8];
@@ -437,18 +388,12 @@ mod test {
             ext_mle_refs,
             vec![],
             challenges,
-            &mut eqs,
-            &mut eq_evals_first_part,
-            &mut eq_evals_second_part,
             ans,
         );
     }
 
     #[test]
     fn test_sumcheck_multi_points() {
-        let num_vars = 2;
-        let num_exprs = 3;
-
         let challenges = vec![E::from(2)];
 
         let points = [field_vec![E, 2, 3], field_vec![E, 5, 7], field_vec![
@@ -456,16 +401,7 @@ mod test {
         ]];
         let point_refs = points.iter().map(|v| v.as_slice()).collect_vec();
 
-        let mut eq_evals_first_part = vec![E::ZERO; 1 << (num_vars >> 1)];
-        let mut eq_evals_second_part = vec![E::ZERO; 1 << (num_vars - (num_vars >> 1))];
-        let mut eqs = vec![vec![E::ZERO; 1 << num_vars]; num_exprs];
-        eq_vecs(
-            point_refs.clone().into_iter(),
-            &vec![E::ONE; points.len()],
-            &mut eqs,
-            &mut eq_evals_first_part,
-            &mut eq_evals_second_part,
-        );
+        let eqs = eq_vecs(point_refs.clone().into_iter(), &vec![E::ONE; points.len()]);
 
         let d0 = field_vec![F, 1, 2, 3, 4];
         let d1 = field_vec![F, 5, 6, 7, 8];
@@ -493,16 +429,6 @@ mod test {
             + eq2 * d1 * n0;
 
         let base_mle_refs = base_mles.iter().map(|v| v.as_slice()).collect_vec();
-        run(
-            point_refs,
-            expr,
-            vec![],
-            base_mle_refs,
-            challenges,
-            &mut eqs,
-            &mut eq_evals_first_part,
-            &mut eq_evals_second_part,
-            ans,
-        );
+        run(point_refs, expr, vec![], base_mle_refs, challenges, ans);
     }
 }

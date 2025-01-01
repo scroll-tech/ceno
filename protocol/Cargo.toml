@@ -15,6 +15,7 @@ ff.workspace = true
 ff_ext.workspace = true
 goldilocks.workspace = true
 itertools.workspace = true
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
 rand.workspace = true
 rayon.workspace = true
 subprotocols.workspace = true

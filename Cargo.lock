@@ -1583,6 +1583,7 @@ dependencies = [
  "ff_ext",
  "goldilocks",
  "itertools 0.13.0",
+ "multilinear_extensions",
  "rand",
  "rayon",
  "subprotocols",
@@ -2003,11 +2004,14 @@ name = "subprotocols"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "criterion",
  "ff",
  "ff_ext",
  "goldilocks",
  "itertools 0.13.0",
+ "multilinear_extensions",
  "rand",
+ "rayon",
  "thiserror 2.0.8",
  "transcript",
 ]

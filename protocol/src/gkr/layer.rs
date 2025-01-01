@@ -74,9 +74,6 @@ impl Layer {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
-        eqs: &mut [Vec<E>],
-        eq_evals_first_part: &mut [E],
-        eq_evals_second_part: &mut [E],
     ) -> SumcheckProof<E> {
         self.update_challenges(challenges, transcript);
         #[allow(unused)]
@@ -92,9 +89,6 @@ impl Layer {
                 &out_points.slice_vector(),
                 challenges,
                 transcript,
-                eqs,
-                eq_evals_first_part,
-                eq_evals_second_part,
             ),
             LayerType::Zerocheck => <Layer as ZerocheckLayer<E>>::prove(
                 self,
@@ -102,9 +96,6 @@ impl Layer {
                 &out_points.slice_vector(),
                 challenges,
                 transcript,
-                eqs,
-                eq_evals_first_part,
-                eq_evals_second_part,
             ),
             LayerType::Linear => {
                 assert!(out_points.iter().all(|point| point == &out_points[0]));
