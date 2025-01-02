@@ -189,8 +189,8 @@ where
                 last_num.chunks(2).map(|chunk| (chunk[0], chunk[1])).unzip();
 
             (last_den, last_num) = izip!(&den_0, &den_1, &num_0, &num_1)
-                .map(|(den_0, den_1, num_0, num_1)| {
-                    (*den_0 * den_1, *den_0 * num_1 + *den_1 * num_0)
+                .map(|(&den_0, &den_1, &num_0, &num_1)| {
+                    (den_0 * den_1, den_0 * num_1 + den_1 * num_0)
                 })
                 .unzip();
 
