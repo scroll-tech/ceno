@@ -20,11 +20,11 @@ serde_json.workspace = true
 
 base64 = "0.22"
 ceno_emul = { path = "../ceno_emul" }
-ff_ext = { path = "../ff_ext" }
+ff_ext.workspace = true
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 sumcheck = { version = "0", path = "../sumcheck" }
-transcript = { path = "../transcript" }
+transcript.workspace = true
 
 itertools.workspace = true
 num-traits.workspace = true
