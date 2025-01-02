@@ -44,7 +44,7 @@ where
     type Trace;
 
     /// The vectors to be committed in the phase1.
-    fn phase1_witness(&self, phase1: &Self::Trace) -> Vec<Vec<E::BaseField>>;
+    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>>;
 
     /// GKR witness.
     fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>
