@@ -5,6 +5,10 @@ use getrandom::{Error, register_custom_getrandom};
 
 #[cfg(target_arch = "riscv32")]
 use core::arch::{asm, global_asm};
+use std::{
+    alloc::{Layout, alloc_zeroed},
+    ptr::null,
+};
 
 #[cfg(target_arch = "riscv32")]
 mod allocator;
@@ -26,19 +30,19 @@ pub use syscalls::*;
 #[no_mangle]
 #[linkage = "weak"]
 pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
-    unimplemented!();
+    0
 }
 
 #[no_mangle]
 #[linkage = "weak"]
-pub extern "C" fn sys_alloc_words(_nwords: usize) -> *mut u32 {
-    unimplemented!();
+pub extern "C" fn sys_alloc_words(nwords: usize) -> *mut u32 {
+    unsafe { alloc_zeroed(Layout::from_size_align(4 * nwords, 4).unwrap()) as *mut u32 }
 }
 
 #[no_mangle]
 #[linkage = "weak"]
 pub extern "C" fn sys_getenv(_name: *const u8) -> *const u8 {
-    unimplemented!();
+    null()
 }
 
 /// Generates random bytes.
