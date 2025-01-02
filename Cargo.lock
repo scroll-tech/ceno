@@ -293,6 +293,7 @@ dependencies = [
  "rrs-succinct",
  "strum",
  "strum_macros",
+ "tiny-keccak",
  "tracing",
 ]
 
@@ -306,12 +307,14 @@ dependencies = [
  "itertools 0.13.0",
  "rand",
  "rkyv",
+ "tiny-keccak",
 ]
 
 [[package]]
 name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "rkyv",
 ]
 

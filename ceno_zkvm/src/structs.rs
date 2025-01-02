@@ -254,6 +254,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses_tables.get(name).cloned()
     }
 
+    pub fn get_lk_mlt(&self, name: &String) -> Option<&LkMultiplicity> {
+        self.lk_mlts.get(name)
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
@@ -277,14 +281,24 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 
     // merge the multiplicities in each opcode circuit into one
-    pub fn finalize_lk_multiplicities(&mut self) {
+    pub fn finalize_lk_multiplicities(&mut self, is_keep_raw_lk_mlts: bool) {
         assert!(self.combined_lk_mlt.is_none());
         assert!(!self.lk_mlts.is_empty());
 
         let mut combined_lk_mlt = vec![];
         let keys = self.lk_mlts.keys().cloned().collect_vec();
         for name in keys {
-            let lk_mlt = self.lk_mlts.remove(&name).unwrap().into_finalize_result();
+            let lk_mlt = if is_keep_raw_lk_mlts {
+                // mock prover needs the lk_mlt for processing, so we do not remove it
+                self.lk_mlts
+                    .get(&name)
+                    .unwrap()
+                    .deep_clone()
+                    .into_finalize_result()
+            } else {
+                self.lk_mlts.remove(&name).unwrap().into_finalize_result()
+            };
+
             if combined_lk_mlt.is_empty() {
                 combined_lk_mlt = lk_mlt.to_vec();
             } else {

@@ -280,7 +280,7 @@ fn test_single_add_instance_e2e() {
     zkvm_witness
         .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
         .unwrap();
-    zkvm_witness.finalize_lk_multiplicities();
+    zkvm_witness.finalize_lk_multiplicities(false);
     zkvm_witness
         .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
         .unwrap();

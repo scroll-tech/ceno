@@ -14,6 +14,7 @@ const EXAMPLES: &[&str] = &[
     "ceno_rt_mem",
     "ceno_rt_mini",
     "ceno_rt_panic",
+    "ceno_rt_keccak",
     "hints",
     "sorting",
     "median",
