@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use gdbstub::{
-    arch::{Arch, BreakpointKind},
+    arch::Arch,
     common::Signal,
     target::{
         Target,
@@ -16,21 +16,19 @@ use gdbstub::{
                     SingleThreadSingleStep, SingleThreadSingleStepOps,
                 },
             },
-            breakpoints::{
-                Breakpoints, BreakpointsOps, HwBreakpointOps, SwBreakpoint, SwBreakpointOps,
-            },
+            breakpoints::{Breakpoints, BreakpointsOps, SwBreakpoint, SwBreakpointOps},
         },
     },
 };
 use gdbstub_arch::riscv::{Riscv32, reg::id::RiscvRegId};
-use itertools::{Itertools, enumerate};
+use itertools::enumerate;
 
 use crate::{ByteAddr, EmuContext, RegIdx, VMState, WordAddr};
 
 // This should probably reference / or be VMState?
 pub struct MyTarget {
     state: VMState,
-    break_points: BTreeSet<(u32, <Riscv32 as Arch>::BreakpointKind)>,
+    break_points: BTreeSet<u32>,
 }
 
 impl Target for MyTarget {
@@ -49,7 +47,6 @@ impl Target for MyTarget {
     }
 }
 
-// TODO: add SingleRegisterAccess
 impl SingleRegisterAccess<()> for MyTarget {
     fn read_register(
         &mut self,
@@ -167,9 +164,18 @@ impl SingleThreadBase for MyTarget {
 
 // TODO(Matthias): also support reverse stepping.
 impl SingleThreadResume for MyTarget {
-    fn resume(&mut self, signal: Option<Signal>) -> Result<(), Self::Error> {
-        // We need to step until the next breakpoint?
-        todo!()
+    fn resume(&mut self, _signal: Option<Signal>) -> Result<(), Self::Error> {
+        // TODO: iterate until either halt or breakpoint.
+        loop {
+            if self.state.halted() {
+                return Ok(());
+            }
+            // TOOD: encountering an illegal instruction should NOT be a fatal error.
+            crate::rv32im::step(&mut self.state)?;
+            if self.break_points.contains(&u32::from(self.state.get_pc())) {
+                return Ok(());
+            }
+        }
     }
 
     // ...and if the target supports resumption, it'll likely want to support
@@ -202,16 +208,24 @@ impl SwBreakpoint for MyTarget {
     fn add_sw_breakpoint(
         &mut self,
         addr: u32,
-        kind: <Riscv32 as Arch>::BreakpointKind,
+        _kind: <Riscv32 as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        todo!()
+        // assert_eq!(kind, 0);
+        // TODO: consider always succeeding, and supporting multiple of the same breakpoint?
+        // What does gdb expect?
+        // At the moment we fail, if the breakpoint already exists.
+        Ok(self.break_points.insert(addr))
     }
 
     fn remove_sw_breakpoint(
         &mut self,
         addr: u32,
-        kind: <Riscv32 as Arch>::BreakpointKind,
+        _kind: <Riscv32 as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        todo!()
+        // assert_eq!(kind, 0);
+        // TODO: consider always succeeding, and supporting multiple of the same breakpoint?
+        // What does gdb expect?
+        // At the moment we fail, if the breakpoint doesn't exist.
+        Ok(self.break_points.remove(&addr))
     }
 }
