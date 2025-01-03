@@ -11,16 +11,22 @@ use gdbstub::{
                     SingleThreadSingleStep, SingleThreadSingleStepOps,
                 },
             },
-            breakpoints::{Breakpoints, BreakpointsOps, SwBreakpoint, SwBreakpointOps},
+            breakpoints::{
+                Breakpoints, BreakpointsOps, HwBreakpointOps, SwBreakpoint, SwBreakpointOps,
+            },
         },
     },
 };
 use gdbstub_arch::riscv::Riscv32;
+use itertools::enumerate;
 
-pub struct MyTarget;
+use crate::{ByteAddr, EmuContext, VMState};
+
+// This should probably reference / or be VMState?
+pub struct MyTarget(VMState);
 
 impl Target for MyTarget {
-    type Error = ();
+    type Error = anyhow::Error;
     type Arch = gdbstub_arch::riscv::Riscv32;
 
     #[inline(always)]
@@ -41,14 +47,22 @@ impl SingleThreadBase for MyTarget {
         // regs: &mut gdbstub_arch::arm::reg::ArmCoreRegs,
         regs: &mut gdbstub_arch::riscv::reg::RiscvCoreRegs<u32>,
     ) -> TargetResult<(), Self> {
-        todo!()
+        for (i, reg) in enumerate(&mut regs.x) {
+            *reg = self.0.peek_register(i);
+        }
+        regs.pc = u32::from(self.0.get_pc());
+        Ok(())
     }
 
     fn write_registers(
         &mut self,
         regs: &gdbstub_arch::riscv::reg::RiscvCoreRegs<u32>,
     ) -> TargetResult<(), Self> {
-        todo!()
+        for (i, reg) in enumerate(&regs.x) {
+            self.0.init_register_unsafe(i, *reg);
+        }
+        self.0.set_pc(ByteAddr::from(regs.pc));
+        Ok(())
     }
 
     fn read_addrs(&mut self, start_addr: u32, data: &mut [u8]) -> TargetResult<usize, Self> {
@@ -87,6 +101,7 @@ impl SingleThreadSingleStep for MyTarget {
     }
 }
 
+// TODO: consider adding WatchKind, and perhaps hardware breakpoints?
 impl Breakpoints for MyTarget {
     // there are several kinds of breakpoints - this target uses software breakpoints
     #[inline(always)]
