@@ -22,10 +22,8 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
-#[cfg(target_arch = "riscv32")]
 mod syscalls;
-#[cfg(target_arch = "riscv32")]
-pub use syscalls::*;
+pub use syscalls::syscall_keccak_permute;
 
 #[no_mangle]
 #[linkage = "weak"]
