@@ -56,7 +56,7 @@ fn build_elfs() {
             dest,
             r#"#[allow(non_upper_case_globals)]
             pub const {example}: &[u8] =
-                include_bytes!(r"{CARGO_MANIFEST_DIR}/../target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
+                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
     rerun_all_but_target(Path::new("../examples"));
