@@ -1,11 +1,11 @@
 [workspace]
-exclude = ["examples"]
 members = [
   "ceno_emul",
   "ceno_host",
   "ceno_rt",
   "ceno_zkvm",
   "examples-builder",
+  "examples",
   "mpcs",
   "multilinear_extensions",
   "poseidon",

@@ -40,7 +40,7 @@ fn build_elfs() {
     // TODO(Matthias): skip building the elfs if we are in clippy or check mode.
     // See git history for an attempt to do this.
     let output = Command::new("cargo")
-        .args(["build", "--release", "--examples"])
+        .args(["build", "--release", "--examples", "--target-dir", "target"])
         .current_dir("../examples")
         .env_clear()
         .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
