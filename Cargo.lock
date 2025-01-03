@@ -286,6 +286,7 @@ name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ceno_rt",
  "elf",
  "itertools 0.13.0",
  "num-derive",
@@ -708,6 +709,14 @@ checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "examples"
+version = "0.1.0"
+dependencies = [
+ "ceno_rt",
+ "rkyv",
 ]
 
 [[package]]
