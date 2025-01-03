@@ -22,10 +22,7 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
-#[cfg(target_arch = "riscv32")]
-mod syscalls;
-#[cfg(target_arch = "riscv32")]
-pub use syscalls::*;
+pub mod syscalls;
 
 #[no_mangle]
 #[linkage = "weak"]

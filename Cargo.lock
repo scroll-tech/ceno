@@ -286,6 +286,7 @@ name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ceno_rt",
  "elf",
  "itertools 0.13.0",
  "num-derive",
