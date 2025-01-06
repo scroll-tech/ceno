@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, mem, sync::Arc};
 
 use ff_ext::ExtensionField;
 use gkr_iop::{
@@ -149,20 +149,10 @@ where
 {
     type Trace = TowerChipTrace;
 
-    fn phase1_witness(&self, phase1: &Self::Trace) -> Vec<Vec<E::BaseField>> {
+    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
         let mut res = vec![vec![]; 2];
-        res[self.committed_table] = phase1
-            .table
-            .iter()
-            .cloned()
-            .map(E::BaseField::from)
-            .collect();
-        res[self.committed_count] = phase1
-            .count
-            .iter()
-            .cloned()
-            .map(E::BaseField::from)
-            .collect();
+        res[self.committed_table] = phase1.table.into_iter().map(E::BaseField::from).collect();
+        res[self.committed_count] = phase1.count.into_iter().map(E::BaseField::from).collect();
         res
     }
 
@@ -182,39 +172,29 @@ where
 
         // Compute den_0, den_1, num_0, num_1 for each layer.
         let updated_table = table.iter().map(|x| beta + x).collect_vec();
-        let mut last_den = vec![];
-        let mut last_num = vec![];
 
-        (0..self.params.height).for_each(|i| {
-            if i == 0 {
-                let (num_0, num_1): (Vec<E::BaseField>, Vec<E::BaseField>) =
-                    count.chunks(2).map(|chunk| (chunk[0], chunk[1])).unzip();
-                let (den_0, den_1): (Vec<E>, Vec<E>) = updated_table
-                    .chunks(2)
-                    .map(|chunk| (chunk[0], chunk[1]))
-                    .unzip();
-                (last_den, last_num) = izip!(&den_0, &den_1, &num_0, &num_1)
-                    .map(|(den_0, den_1, num_0, num_1)| {
-                        (*den_0 * den_1, *den_0 * num_1 + *den_1 * num_0)
-                    })
-                    .unzip();
+        let (num_0, num_1): (Vec<E::BaseField>, Vec<E::BaseField>) = count.iter().tuples().unzip();
+        let (den_0, den_1): (Vec<E>, Vec<E>) = updated_table.into_iter().tuples().unzip();
+        let (mut last_den, mut last_num): (Vec<_>, Vec<_>) = izip!(&den_0, &den_1, &num_0, &num_1)
+            .map(|(&den_0, &den_1, &num_0, &num_1)| (den_0 * den_1, den_0 * num_1 + den_1 * num_0))
+            .unzip();
 
-                layer_wits.push(LayerWitness::new(vec![num_0, num_1], vec![den_0, den_1]));
-            } else {
-                let (den_0, den_1): (Vec<E>, Vec<E>) =
-                    last_den.chunks(2).map(|chunk| (chunk[0], chunk[1])).unzip();
-                let (num_0, num_1): (Vec<E>, Vec<E>) =
-                    last_num.chunks(2).map(|chunk| (chunk[0], chunk[1])).unzip();
+        layer_wits.push(LayerWitness::new(vec![num_0, num_1], vec![den_0, den_1]));
 
-                (last_den, last_num) = izip!(&den_0, &den_1, &num_0, &num_1)
-                    .map(|(den_0, den_1, num_0, num_1)| {
-                        (*den_0 * den_1, *den_0 * num_1 + *den_1 * num_0)
-                    })
-                    .unzip();
+        layer_wits.extend((1..self.params.height).map(|_i| {
+            let (den_0, den_1): (Vec<E>, Vec<E>) =
+                mem::take(&mut last_den).into_iter().tuples().unzip();
+            let (num_0, num_1): (Vec<E>, Vec<E>) =
+                mem::take(&mut last_num).into_iter().tuples().unzip();
 
-                layer_wits.push(LayerWitness::new(vec![], vec![den_0, den_1, num_0, num_1]));
-            }
-        });
+            (last_den, last_num) = izip!(&den_0, &den_1, &num_0, &num_1)
+                .map(|(&den_0, &den_1, &num_0, &num_1)| {
+                    (den_0 * den_1, den_0 * num_1 + den_1 * num_0)
+                })
+                .unzip();
+
+            LayerWitness::new(vec![], vec![den_0, den_1, num_0, num_1])
+        }));
         layer_wits.reverse();
 
         GKRCircuitWitness { layers: layer_wits }
@@ -234,7 +214,7 @@ fn main() {
         let count = (0..1 << log_size)
             .map(|_| OsRng.gen_range(0..1 << log_size as u64))
             .collect_vec();
-        let phase1_witness = layout.phase1_witness(&TowerChipTrace { table, count });
+        let phase1_witness = layout.phase1_witness(TowerChipTrace { table, count });
 
         let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
