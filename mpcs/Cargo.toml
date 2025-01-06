@@ -30,7 +30,7 @@ poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
-serde = { version = "1.0", features = ["derive"] }
+serde.workspace = true
 transcript = { path = "../transcript" }
 whir = { path = "../../whir", features = ["ceno"] }
 zeroize = "1.8"
