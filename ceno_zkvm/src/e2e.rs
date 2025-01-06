@@ -1,8 +1,11 @@
 use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
-        PublicValues, ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::MockProver,
-        prover::ZKVMProver, verifier::ZKVMVerifier,
+        PublicValues, ZKVMProof,
+        constants::MAX_NUM_VARIABLES,
+        mock_prover::{LkMultiplicityKey, MockProver},
+        prover::ZKVMProver,
+        verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{
@@ -21,7 +24,6 @@ use mpcs::PolynomialCommitmentScheme;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     iter::zip,
-    ops::Deref,
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
@@ -296,6 +298,7 @@ pub fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     emul_result: EmulationResult,
     program: &Program,
+    is_mock_proving: bool,
 ) -> ZKVMWitnesses<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
@@ -311,7 +314,7 @@ pub fn generate_witness<E: ExtensionField>(
         .dummy_config
         .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
-    zkvm_witness.finalize_lk_multiplicities();
+    zkvm_witness.finalize_lk_multiplicities(is_mock_proving);
 
     // assign table circuits
     system_config
@@ -370,7 +373,10 @@ pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 // state external to this pipeline (e.g, sanity check in bin/e2e.rs)
 
 #[allow(clippy::type_complexity)]
-pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
+pub fn run_e2e_with_checkpoint<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+>(
     program: Program,
     platform: Platform,
     hints: Vec<u32>,
@@ -414,6 +420,8 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
         .expect("keygen failed");
     let vk = pk.get_vk();
 
+    // Generate witness
+    let is_mock_proving = std::env::var("MOCK_PROVING").is_ok();
     if let Checkpoint::PrepE2EProving = checkpoint {
         return (
             None,
@@ -427,6 +435,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     &system_config,
                     pk,
                     zkvm_fixed_traces,
+                    is_mock_proving,
                 )
             }),
         );
@@ -442,22 +451,22 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
     if let Checkpoint::PrepWitnessGen = checkpoint {
         return (
             None,
-            Box::new(move || _ = generate_witness(&system_config, emul_result, program.deref())),
+            Box::new(move || _ = generate_witness(&system_config, emul_result, &program, false)),
         );
     }
 
-    // Generate witness
-    let zkvm_witness = generate_witness(&system_config, emul_result, &program);
+    let zkvm_witness = generate_witness(&system_config, emul_result, &program, is_mock_proving);
 
     // proving
     let prover = ZKVMProver::new(pk);
 
-    if std::env::var("MOCK_PROVING").is_ok() {
+    if is_mock_proving {
         MockProver::assert_satisfied_full(
             &system_config.zkvm_cs,
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            &program,
         );
         tracing::info!("Mock proving passed");
     }
@@ -481,7 +490,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
 
 // Runs program emulation + witness generation + proving
 #[allow(clippy::too_many_arguments)]
-pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommitmentScheme<E>>(
     program: Arc<Program>,
     max_steps: usize,
     init_full_mem: InitMemState,
@@ -490,6 +499,7 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     system_config: &ConstraintSystemConfig<E>,
     pk: ZKVMProvingKey<E, PCS>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
+    is_mock_proving: bool,
 ) -> ZKVMProof<E, PCS> {
     // Emulate program
     let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
@@ -498,17 +508,18 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let pi = emul_result.pi.clone();
 
     // Generate witness
-    let zkvm_witness = generate_witness(system_config, emul_result, program.deref());
+    let zkvm_witness = generate_witness(system_config, emul_result, &program, is_mock_proving);
 
     // proving
     let prover = ZKVMProver::new(pk);
 
-    if std::env::var("MOCK_PROVING").is_ok() {
+    if is_mock_proving {
         MockProver::assert_satisfied_full(
             &system_config.zkvm_cs,
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            &program,
         );
         tracing::info!("Mock proving passed");
     }

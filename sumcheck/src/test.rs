@@ -4,7 +4,7 @@ use ark_std::{rand::RngCore, test_rng};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
-use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::VirtualPolynomial};
+use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
@@ -52,7 +52,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     let mut rng = test_rng();
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
-    let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.num_variables);
+    let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.max_num_variables);
     #[allow(deprecated)]
     let mut prover_state = IOPProverState::prover_init_parallel(poly.clone());
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
@@ -81,7 +81,9 @@ fn test_sumcheck_internal<E: ExtensionField>(
             .flattened_ml_extensions
             .par_iter_mut()
             .for_each(|mle| {
-                Arc::make_mut(mle).fix_variables_in_place(&[p.elements]);
+                Arc::get_mut(mle)
+                    .unwrap()
+                    .fix_variables_in_place(&[p.elements]);
             });
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);

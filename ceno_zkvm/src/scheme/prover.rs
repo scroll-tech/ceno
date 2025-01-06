@@ -10,13 +10,12 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::build_eq_x_r_vec,
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::{IOPProverMessage, IOPProverStateV2},
+    structs::{IOPProverMessage, IOPProverState},
 };
 use transcript::{ForkableTranscript, Transcript};
 
@@ -583,7 +582,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
 
         tracing::debug!("main sel sumcheck start");
-        let (main_sel_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
             transcript,
@@ -1029,7 +1028,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
                 }
 
-                let (same_r_sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+                let (same_r_sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
                     num_threads,
                     virtual_polys.get_batched_polys(),
                     transcript,
@@ -1241,7 +1240,7 @@ impl TowerProver {
                             layer_polys
                                 .iter()
                                 .all(|f| {
-                                    f.evaluations().len() == (1 << (log_num_fanin * round))
+                                    f.evaluations().len() == 1 << (log_num_fanin * round)
                                 })
                         );
 
@@ -1287,7 +1286,7 @@ impl TowerProver {
                 // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
                 // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
                 // This is likely a bug in the tracing-flame crate.
-                let (sumcheck_proofs, state) = IOPProverStateV2::prove_batch_polys(
+                let (sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
                     num_threads,
                     virtual_polys.get_batched_polys(),
                     transcript,

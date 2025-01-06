@@ -76,6 +76,7 @@ fn main() {
         program_code,
         Default::default(),
     );
+    let program = Arc::new(program);
     let mem_addresses = CENO_PLATFORM.heap.clone();
     let io_addresses = CENO_PLATFORM.public_io.clone();
 
@@ -163,7 +164,7 @@ fn main() {
         // init vm.x1 = 1, vm.x2 = -1, vm.x3 = step_loop
         let public_io_init = init_public_io(&[1, u32::MAX, step_loop]);
 
-        let mut vm = VMState::new(CENO_PLATFORM, Arc::new(program.clone()));
+        let mut vm = VMState::new(CENO_PLATFORM, program.clone());
 
         // init memory mapped IO
         for record in &public_io_init {
@@ -201,7 +202,7 @@ fn main() {
         config
             .assign_opcode_circuit(&zkvm_cs, &mut zkvm_witness, all_records)
             .unwrap();
-        zkvm_witness.finalize_lk_multiplicities();
+        zkvm_witness.finalize_lk_multiplicities(false);
 
         // Find the final register values and cycles.
         let reg_final = reg_init
@@ -275,7 +276,13 @@ fn main() {
         trace_report.save_json("report.json");
         trace_report.save_table("report.txt");
 
-        MockProver::assert_satisfied_full(&zkvm_cs, zkvm_fixed_traces.clone(), &zkvm_witness, &pi);
+        MockProver::assert_satisfied_full(
+            &zkvm_cs,
+            zkvm_fixed_traces.clone(),
+            &zkvm_witness,
+            &pi,
+            &program,
+        );
 
         let timer = Instant::now();
 

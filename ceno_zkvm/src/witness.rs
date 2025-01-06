@@ -1,18 +1,19 @@
 use ff::Field;
-use std::{
-    array,
-    cell::RefCell,
-    collections::HashMap,
-    mem::{self},
-    ops::Index,
-    slice::{Chunks, ChunksMut},
-    sync::Arc,
-};
-
+use itertools::izip;
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
+};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fmt::Debug,
+    hash::Hash,
+    mem::{self},
+    ops::{AddAssign, Index},
+    slice::{Chunks, ChunksMut},
+    sync::Arc,
 };
 use thread_local::ThreadLocal;
 
@@ -125,26 +126,137 @@ impl<F: Sync + Send + Copy> Index<usize> for RowMajorMatrix<F> {
     }
 }
 
+pub type MultiplicityRaw<K> = [HashMap<K, usize>; mem::variant_count::<ROMType>()];
+
+#[derive(Clone, Default, Debug)]
+pub struct Multiplicity<K>(pub MultiplicityRaw<K>);
+
 /// A lock-free thread safe struct to count logup multiplicity for each ROM type
 /// Lock-free by thread-local such that each thread will only have its local copy
 /// struct is cloneable, for internallly it use Arc so the clone will be low cost
 #[derive(Clone, Default, Debug)]
 #[allow(clippy::type_complexity)]
-pub struct LkMultiplicity {
-    multiplicity: Arc<ThreadLocal<RefCell<[HashMap<u64, usize>; mem::variant_count::<ROMType>()]>>>,
+pub struct LkMultiplicityRaw<K: Copy + Clone + Debug + Eq + Hash + Send> {
+    multiplicity: Arc<ThreadLocal<RefCell<Multiplicity<K>>>>,
 }
+
+impl<K> AddAssign<Self> for LkMultiplicityRaw<K>
+where
+    K: Copy + Clone + Debug + Default + Eq + Hash + Send,
+{
+    fn add_assign(&mut self, rhs: Self) {
+        *self += Multiplicity(rhs.into_finalize_result());
+    }
+}
+
+impl<K> AddAssign<Self> for Multiplicity<K>
+where
+    K: Eq + Hash,
+{
+    fn add_assign(&mut self, rhs: Self) {
+        for (lhs, rhs) in izip!(&mut self.0, rhs.0) {
+            for (key, value) in rhs {
+                *lhs.entry(key).or_default() += value;
+            }
+        }
+    }
+}
+
+impl<K> AddAssign<Multiplicity<K>> for LkMultiplicityRaw<K>
+where
+    K: Copy + Clone + Debug + Default + Eq + Hash + Send,
+{
+    fn add_assign(&mut self, rhs: Multiplicity<K>) {
+        let multiplicity = self.multiplicity.get_or_default();
+        for (lhs, rhs) in izip!(&mut multiplicity.borrow_mut().0, rhs.0) {
+            for (key, value) in rhs {
+                *lhs.entry(key).or_default() += value;
+            }
+        }
+    }
+}
+
+impl<K> AddAssign<((ROMType, K), usize)> for LkMultiplicityRaw<K>
+where
+    K: Copy + Clone + Debug + Default + Eq + Hash + Send,
+{
+    fn add_assign(&mut self, ((rom_type, key), value): ((ROMType, K), usize)) {
+        let multiplicity = self.multiplicity.get_or_default();
+        (*multiplicity.borrow_mut().0[rom_type as usize]
+            .entry(key)
+            .or_default()) += value;
+    }
+}
+
+impl<K> AddAssign<(ROMType, K)> for LkMultiplicityRaw<K>
+where
+    K: Copy + Clone + Debug + Default + Eq + Hash + Send,
+{
+    fn add_assign(&mut self, (rom_type, key): (ROMType, K)) {
+        let multiplicity = self.multiplicity.get_or_default();
+        (*multiplicity.borrow_mut().0[rom_type as usize]
+            .entry(key)
+            .or_default()) += 1;
+    }
+}
+
+impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> {
+    /// Merge result from multiple thread local to single result.
+    pub fn into_finalize_result(self) -> MultiplicityRaw<K> {
+        let mut results = Multiplicity::default();
+        for y in Arc::try_unwrap(self.multiplicity).unwrap() {
+            results += y.into_inner();
+        }
+        results.0
+    }
+
+    pub fn increment(&mut self, rom_type: ROMType, key: K) {
+        *self += (rom_type, key);
+    }
+
+    pub fn set_count(&mut self, rom_type: ROMType, key: K, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let multiplicity = self.multiplicity.get_or_default();
+        let table = &mut multiplicity.borrow_mut().0[rom_type as usize];
+        if count == 0 {
+            table.remove(&key);
+        } else {
+            table.insert(key, count);
+        }
+    }
+
+    /// Clone inner, expensive operation.
+    pub fn deep_clone(&self) -> Self {
+        let multiplicity = self.multiplicity.get_or_default();
+        let deep_cloned = multiplicity.borrow().clone();
+        let thread_local = ThreadLocal::new();
+        thread_local.get_or(|| RefCell::new(deep_cloned));
+        LkMultiplicityRaw {
+            multiplicity: Arc::new(thread_local),
+        }
+    }
+}
+
+/// Default LkMultiplicity with u64 key.
+pub type LkMultiplicity = LkMultiplicityRaw<u64>;
 
 impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
-        match C {
-            16 => self.increment(ROMType::U16, v),
-            14 => self.increment(ROMType::U14, v),
-            8 => self.increment(ROMType::U8, v),
-            5 => self.increment(ROMType::U5, v),
-            _ => panic!("Unsupported bit range"),
-        }
+        use ROMType::*;
+        self.increment(
+            match C {
+                16 => U16,
+                14 => U14,
+                8 => U8,
+                5 => U5,
+                _ => panic!("Unsupported bit range"),
+            },
+            v,
+        );
     }
 
     /// Track a lookup into a logic table (AndTable, etc).
@@ -179,30 +291,6 @@ impl LkMultiplicity {
     /// Fetch instruction at pc
     pub fn fetch(&mut self, pc: u32) {
         self.increment(ROMType::Instruction, pc as u64);
-    }
-
-    /// merge result from multiple thread local to single result
-    pub fn into_finalize_result(self) -> [HashMap<u64, usize>; mem::variant_count::<ROMType>()] {
-        Arc::try_unwrap(self.multiplicity)
-            .unwrap()
-            .into_iter()
-            .fold(array::from_fn(|_| HashMap::new()), |mut x, y| {
-                x.iter_mut().zip(y.borrow().iter()).for_each(|(m1, m2)| {
-                    for (key, value) in m2 {
-                        *m1.entry(*key).or_insert(0) += value;
-                    }
-                });
-                x
-            })
-    }
-
-    fn increment(&mut self, rom_type: ROMType, key: u64) {
-        let multiplicity = self
-            .multiplicity
-            .get_or(|| RefCell::new(array::from_fn(|_| HashMap::new())));
-        (*multiplicity.borrow_mut()[rom_type as usize]
-            .entry(key)
-            .or_default()) += 1;
     }
 }
 

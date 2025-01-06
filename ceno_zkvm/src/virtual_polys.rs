@@ -9,14 +9,14 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     util::ceil_log2,
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
 };
 
 use crate::{expression::Expression, utils::transpose};
 
 pub struct VirtualPolynomials<'a, E: ExtensionField> {
     num_threads: usize,
-    polys: Vec<VirtualPolynomialV2<'a, E>>,
+    polys: Vec<VirtualPolynomial<'a, E>>,
     /// a storage to keep thread based mles, specific to multi-thread logic
     thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
 }
@@ -26,7 +26,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         VirtualPolynomials {
             num_threads,
             polys: (0..num_threads)
-                .map(|_| VirtualPolynomialV2::new(max_num_variables - ceil_log2(num_threads)))
+                .map(|_| VirtualPolynomial::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
             thread_based_mles_storage: HashMap::new(),
         }
@@ -77,7 +77,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             });
     }
 
-    pub fn get_batched_polys(self) -> Vec<VirtualPolynomialV2<'a, E>> {
+    pub fn get_batched_polys(self) -> Vec<VirtualPolynomial<'a, E>> {
         self.polys
     }
 
@@ -174,10 +174,9 @@ mod tests {
     use itertools::Itertools;
     use multilinear_extensions::{
         mle::IntoMLE,
-        virtual_poly::VPAuxInfo,
-        virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+        virtual_poly::{ArcMultilinearExtension, VPAuxInfo, VirtualPolynomial},
     };
-    use sumcheck::structs::{IOPProverStateV2, IOPVerifierState};
+    use sumcheck::structs::{IOPProverState, IOPVerifierState};
     use transcript::BasicTranscript as Transcript;
 
     use crate::{
@@ -284,7 +283,7 @@ mod tests {
         virtual_polys.add_mle_list(f2.iter().collect(), E::ONE);
         virtual_polys.add_mle_list(f3.iter().collect(), E::ONE);
 
-        let (sumcheck_proofs, _) = IOPProverStateV2::prove_batch_polys(
+        let (sumcheck_proofs, _) = IOPProverState::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
             &mut transcript,
@@ -296,13 +295,13 @@ mod tests {
             &sumcheck_proofs,
             &VPAuxInfo {
                 max_degree: 3,
-                num_variables: max_num_vars,
+                max_num_variables: max_num_vars,
                 phantom: std::marker::PhantomData,
             },
             &mut transcript,
         );
 
-        let mut verifier_poly = VirtualPolynomialV2::new(max_num_vars);
+        let mut verifier_poly = VirtualPolynomial::new(max_num_vars);
         verifier_poly.add_mle_list(f1.to_vec(), E::ONE);
         verifier_poly.add_mle_list(f2.to_vec(), E::ONE);
         verifier_poly.add_mle_list(f3.to_vec(), E::ONE);

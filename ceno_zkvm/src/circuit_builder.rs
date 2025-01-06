@@ -116,9 +116,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
-    pub lk_expressions_namespace_map: Vec<String>,
     pub lk_table_expressions: Vec<LogupTableExpression<E>>,
-    pub lk_table_expressions_namespace_map: Vec<String>,
+    pub lk_expressions_namespace_map: Vec<String>,
+    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     /// main constraints zero expression
     pub assert_zero_expressions: Vec<Expression<E>>,
@@ -136,7 +136,6 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_beta: Expression<E>,
 
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
-    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
 }
@@ -164,9 +163,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             w_table_expressions: vec![],
             w_table_expressions_namespace_map: vec![],
             lk_expressions: vec![],
-            lk_expressions_namespace_map: vec![],
             lk_table_expressions: vec![],
-            lk_table_expressions_namespace_map: vec![],
+            lk_expressions_namespace_map: vec![],
+            lk_expressions_items_map: vec![],
             assert_zero_expressions: vec![],
             assert_zero_expressions_namespace_map: vec![],
             assert_zero_sumcheck_expressions: vec![],
@@ -176,7 +175,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
             debug_map: HashMap::new(),
-            lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
         }
@@ -326,7 +324,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             table_len,
         });
         let path = self.ns.compute_path(name_fn().into());
-        self.lk_table_expressions_namespace_map.push(path);
+        self.lk_expressions_namespace_map.push(path);
         // Since lk_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
         self.lk_expressions_items_map.push((rom_type, record));

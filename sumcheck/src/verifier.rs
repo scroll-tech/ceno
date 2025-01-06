@@ -15,7 +15,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         aux_info: &VPAuxInfo<E>,
         transcript: &mut impl Transcript<E>,
     ) -> SumCheckSubClaim<E> {
-        if aux_info.num_variables == 0 {
+        if aux_info.max_num_variables == 0 {
             return SumCheckSubClaim {
                 point: vec![],
                 expected_evaluation: claimed_sum,
@@ -23,11 +23,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         }
         let start = start_timer!(|| "sum check verify");
 
-        transcript.append_message(&aux_info.num_variables.to_le_bytes());
+        transcript.append_message(&aux_info.max_num_variables.to_le_bytes());
         transcript.append_message(&aux_info.max_degree.to_le_bytes());
 
         let mut verifier_state = IOPVerifierState::verifier_init(aux_info);
-        for i in 0..aux_info.num_variables {
+        for i in 0..aux_info.max_num_variables {
             let prover_msg = proof.proofs.get(i).expect("proof is incomplete");
             prover_msg
                 .evaluations
@@ -47,11 +47,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         let start = start_timer!(|| "sum check verifier init");
         let verifier_state = Self {
             round: 1,
-            num_vars: index_info.num_variables,
+            num_vars: index_info.max_num_variables,
             max_degree: index_info.max_degree,
             finished: false,
-            polynomials_received: Vec::with_capacity(index_info.num_variables),
-            challenges: Vec::with_capacity(index_info.num_variables),
+            polynomials_received: Vec::with_capacity(index_info.max_num_variables),
+            challenges: Vec::with_capacity(index_info.max_num_variables),
         };
         end_timer!(start);
         verifier_state

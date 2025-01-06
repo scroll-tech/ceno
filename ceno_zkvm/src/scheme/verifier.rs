@@ -344,7 +344,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &VPAuxInfo {
                 // + 1 from sel_non_lc_zero_sumcheck
                 max_degree: SEL_DEGREE.max(cs.max_non_lc_degree + 1),
-                num_variables: log2_num_instances,
+                max_num_variables: log2_num_instances,
                 phantom: PhantomData,
             },
             transcript,
@@ -634,7 +634,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 },
                 &VPAuxInfo {
                     max_degree: SEL_DEGREE,
-                    num_variables: expected_max_rounds,
+                    max_num_variables: expected_max_rounds,
                     phantom: PhantomData,
                 },
                 transcript,
@@ -904,7 +904,7 @@ impl TowerVerify {
                     },
                     &VPAuxInfo {
                         max_degree: NUM_FANIN + 1, // + 1 for eq
-                        num_variables: (round + 1) * log2_num_fanin,
+                        max_num_variables: (round + 1) * log2_num_fanin,
                         phantom: PhantomData,
                     },
                     transcript,
