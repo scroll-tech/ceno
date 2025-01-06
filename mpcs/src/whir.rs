@@ -170,7 +170,7 @@ mod tests {
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
 
     #[test]
-    fn commit_open_verify_goldilocks() {
+    fn whir_commit_open_verify_goldilocks() {
         // TODO: Only support committing to base field polynomial now
         for gen_rand_poly in [gen_rand_poly_base] {
             // Challenge is over extension field, poly over the base field
