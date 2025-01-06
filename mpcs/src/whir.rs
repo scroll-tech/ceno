@@ -1,5 +1,3 @@
-use core::todo;
-
 use super::PolynomialCommitmentScheme;
 use utils::{digest_to_bytes, poly2whir};
 pub use whir::ceno_binding::Error;
