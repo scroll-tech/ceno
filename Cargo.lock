@@ -286,7 +286,6 @@ name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ceno_rt",
  "elf",
  "gdbstub",
  "gdbstub_arch",
