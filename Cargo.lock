@@ -2177,6 +2177,7 @@ dependencies = [
  "goldilocks",
  "itertools 0.13.0",
  "multilinear_extensions",
+ "p3-field",
  "rayon",
  "serde",
  "tracing",
@@ -2447,7 +2448,6 @@ dependencies = [
  "p3-poseidon",
  "p3-poseidon2",
  "p3-symmetric",
- "poseidon",
  "serde",
 ]
 
