@@ -183,7 +183,7 @@ where
 
     fn simple_batch_open(
         pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension<E>],
+        polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],
