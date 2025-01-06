@@ -1,7 +1,7 @@
 use crate::constants::{
     ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, N_ROUNDS, SPONGE_WIDTH,
 };
-use goldilocks::SmallField;
+use ff_ext::ExtensionField;
 use unroll::unroll_for_loops;
 
 pub trait Poseidon: AdaptedField {

@@ -18,6 +18,9 @@ itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
+p3-field.workspace = true
+p3-goldilocks.workspace = true
+p3-poseidon.workspace = true
 
 [dev-dependencies]
 env_logger = "0.11"

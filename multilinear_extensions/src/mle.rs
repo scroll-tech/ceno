@@ -5,10 +5,11 @@ use ark_std::{end_timer, rand::RngCore, start_timer};
 use core::hash::Hash;
 use ff::Field;
 use ff_ext::ExtensionField;
+use p3_field::FieldAlgebra;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fmt::Debug;
 
 pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
@@ -122,7 +123,7 @@ impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtens
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize)]
 #[serde(untagged)]
 /// Differentiate inner vector on base/extension field.
 pub enum FieldType<E: ExtensionField> {
@@ -159,7 +160,7 @@ impl<E: ExtensionField> FieldType<E> {
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.
-#[derive(Clone, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Default, Debug, Serialize)]
 pub struct DenseMultilinearExtension<E: ExtensionField> {
     /// The evaluation over {0,1}^`num_vars`
     pub evaluations: FieldType<E>,
@@ -489,7 +490,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                 FieldType::Ext(evaluations) => {
                     (0..evaluations.len()).step_by(2).for_each(|b| {
                         evaluations[b >> 1] =
-                            evaluations[b] + (evaluations[b + 1] - evaluations[b]) * point
+                            evaluations[b] + (evaluations[b + 1] - evaluations[b]) * *point
                     });
                 }
                 FieldType::Unreachable => unreachable!(),
@@ -568,7 +569,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                     lo.par_iter_mut()
                         .zip(hi)
                         .with_min_len(64)
-                        .for_each(|(lo, hi)| *lo += (*hi - *lo) * point);
+                        .for_each(|(lo, hi)| *lo += (*hi - *lo) * *point);
                     current_eval_size = half_size;
                 }
                 FieldType::Unreachable => unreachable!(),
@@ -672,7 +673,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                         .par_iter_mut()
                         .chunks(2)
                         .with_min_len(64)
-                        .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * point);
+                        .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * *point);
 
                     // sequentially update buf[b1, b2,..bt] = buf[b1, b2,..bt, 0]
                     for index in 0..1 << (max_log2_size - 1) {

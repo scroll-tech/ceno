@@ -2,7 +2,9 @@ use crate::{
     constants::N_PARTIAL_ROUNDS,
     poseidon::{AdaptedField, Poseidon},
 };
-use goldilocks::{EPSILON, Goldilocks, SmallField};
+use goldilocks::EPSILON;
+use p3_field::PrimeField64;
+use p3_goldilocks::Goldilocks;
 #[cfg(target_arch = "x86_64")]
 use std::hint::unreachable_unchecked;
 
@@ -214,7 +216,7 @@ impl Poseidon for Goldilocks {
 }
 
 impl AdaptedField for Goldilocks {
-    const ORDER: u64 = Goldilocks::MODULUS_U64;
+    const ORDER: u64 = Goldilocks::ORDER_U64;
 
     fn from_noncanonical_u96(n_lo: u64, n_hi: u32) -> Self {
         reduce96((n_lo, n_hi))
