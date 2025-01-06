@@ -2,7 +2,7 @@ use super::{field_wrapper::ExtensionFieldWrapper as FieldWrapper, spec::WhirSpec
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
-use whir::ceno_binding::InnerDigestOf as InnerDigestOfInner;
+use whir::ceno_binding::{InnerDigestOf as InnerDigestOfInner, Whir as WhirInner};
 
 type InnerDigestOf<Spec, E> = InnerDigestOfInner<<Spec as WhirSpec<E>>::Spec, FieldWrapper<E>>;
 
@@ -46,4 +46,49 @@ pub fn digest_to_bytes<Spec: WhirSpec<E>, E: ExtensionField>(
         .serialize_compressed(&mut buffer)
         .map_err(|err| crate::Error::Serialization(err.to_string()))?;
     Ok(buffer)
+}
+
+pub(crate) type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spec>;
+
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
+    inner: WhirInnerT<E, Spec>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_ff::Field;
+    use goldilocks::GoldilocksExt2;
+    use rand::Rng;
+    use whir::{
+        ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+    };
+
+    type F = super::super::field_wrapper::ExtensionFieldWrapper<GoldilocksExt2>;
+
+    #[test]
+    fn whir_inner_commit_prove_verify() {
+        let poly_size = 10;
+        let num_coeffs = 1 << poly_size;
+        let pp = WhirInner::<F, WhirDefaultSpecInner>::setup(num_coeffs as usize);
+
+        let poly = CoefficientList::new(
+            (0..num_coeffs)
+                .map(<F as Field>::BasePrimeField::from)
+                .collect(),
+        );
+
+        let witness = WhirInner::<F, WhirDefaultSpecInner>::commit(&pp, &poly).unwrap();
+        let comm = witness.commitment;
+
+        let mut rng = rand::thread_rng();
+        let point: Vec<F> = (0..poly_size).map(|_| F::from(rng.gen::<u64>())).collect();
+        let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
+
+        let proof =
+            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, witness, &point, &eval).unwrap();
+        WhirInner::<F, WhirDefaultSpecInner>::verify(&pp, &comm, &point, &eval, &proof).unwrap();
+    }
 }

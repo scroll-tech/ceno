@@ -3,23 +3,16 @@ use utils::poly2whir;
 pub use whir::ceno_binding::Error;
 
 use ff_ext::ExtensionField;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use whir::ceno_binding::{PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner};
+use serde::{Serialize, de::DeserializeOwned};
+use whir::ceno_binding::PolynomialCommitmentScheme as WhirPCS;
 
 mod field_wrapper;
 mod structure;
-use structure::{WhirDigest, digest_to_bytes};
+use structure::{Whir, WhirDigest, WhirInnerT, digest_to_bytes};
 mod utils;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 mod spec;
 use spec::WhirSpec;
-
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
-    inner: WhirInner<FieldWrapper<E>, Spec::Spec>,
-}
-
-type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spec>;
 
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
@@ -170,45 +163,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ark_ff::Field;
-    use goldilocks::GoldilocksExt2;
-    use rand::Rng;
-    use spec::WhirDefaultSpec;
-
-    use crate::test_util::{gen_rand_poly_base, run_commit_open_verify};
-
     use super::*;
-
-    type F = field_wrapper::ExtensionFieldWrapper<GoldilocksExt2>;
-
-    use whir::{
-        ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner},
-        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
-    };
-
-    #[test]
-    fn whir_inner_commit_prove_verify() {
-        let poly_size = 10;
-        let num_coeffs = 1 << poly_size;
-        let pp = WhirInner::<F, WhirDefaultSpecInner>::setup(num_coeffs as usize);
-
-        let poly = CoefficientList::new(
-            (0..num_coeffs)
-                .map(<F as Field>::BasePrimeField::from)
-                .collect(),
-        );
-
-        let witness = WhirInner::<F, WhirDefaultSpecInner>::commit(&pp, &poly).unwrap();
-        let comm = witness.commitment;
-
-        let mut rng = rand::thread_rng();
-        let point: Vec<F> = (0..poly_size).map(|_| F::from(rng.gen::<u64>())).collect();
-        let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
-
-        let proof =
-            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, witness, &point, &eval).unwrap();
-        WhirInner::<F, WhirDefaultSpecInner>::verify(&pp, &comm, &point, &eval, &proof).unwrap();
-    }
+    use crate::test_util::{gen_rand_poly_base, run_commit_open_verify};
+    use goldilocks::GoldilocksExt2;
+    use spec::WhirDefaultSpec;
 
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
 
