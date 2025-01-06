@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, mem, sync::Arc};
 
 use ff_ext::ExtensionField;
 use gkr_iop::{
@@ -173,8 +173,7 @@ where
         // Compute den_0, den_1, num_0, num_1 for each layer.
         let updated_table = table.iter().map(|x| beta + x).collect_vec();
 
-        let (num_0, num_1): (Vec<E::BaseField>, Vec<E::BaseField>) =
-            count.into_iter().tuples().unzip();
+        let (num_0, num_1): (Vec<E::BaseField>, Vec<E::BaseField>) = count.iter().tuples().unzip();
         let (den_0, den_1): (Vec<E>, Vec<E>) = updated_table.into_iter().tuples().unzip();
         let (mut last_den, mut last_num): (Vec<_>, Vec<_>) = izip!(&den_0, &den_1, &num_0, &num_1)
             .map(|(&den_0, &den_1, &num_0, &num_1)| (den_0 * den_1, den_0 * num_1 + den_1 * num_0))
@@ -183,8 +182,10 @@ where
         layer_wits.push(LayerWitness::new(vec![num_0, num_1], vec![den_0, den_1]));
 
         layer_wits.extend((1..self.params.height).map(|_i| {
-            let (den_0, den_1): (Vec<E>, Vec<E>) = last_den.into_iter().tuples().unzip();
-            let (num_0, num_1): (Vec<E>, Vec<E>) = last_num.into_iter().tuples().unzip();
+            let (den_0, den_1): (Vec<E>, Vec<E>) =
+                mem::take(&mut last_den).into_iter().tuples().unzip();
+            let (num_0, num_1): (Vec<E>, Vec<E>) =
+                mem::take(&mut last_num).into_iter().tuples().unzip();
 
             (last_den, last_num) = izip!(&den_0, &den_1, &num_0, &num_1)
                 .map(|(&den_0, &den_1, &num_0, &num_1)| {
