@@ -67,11 +67,15 @@ impl OpTableConfig {
     pub fn assign_instances<F: SmallField>(
         &self,
         num_witin: usize,
+        num_structural_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
     ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut witness =
-            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
+        let mut witness = RowMajorMatrix::<F>::new(
+            length,
+            num_witin + num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {

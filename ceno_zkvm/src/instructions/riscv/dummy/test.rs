@@ -1,4 +1,5 @@
 use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
+use dummy_ecall::KeccakSpec;
 use goldilocks::GoldilocksExt2;
 
 use super::*;
@@ -30,11 +31,35 @@ fn test_dummy_ecall() {
         .unwrap();
 
     let step = StepRecord::new_ecall_any(4, MOCK_PC_START);
-    let insn_code = step.insn_code();
+    let insn_code = step.insn();
     let (raw_witin, lkm) =
         EcallDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![step]).unwrap();
 
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+}
+
+#[test]
+fn test_dummy_keccak() {
+    type KeccakDummy = LargeEcallDummy<GoldilocksExt2, KeccakSpec>;
+
+    let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    let mut cb = CircuitBuilder::new(&mut cs);
+    let config = cb
+        .namespace(
+            || "keccak_dummy",
+            |cb| {
+                let config = KeccakDummy::construct_circuit(cb);
+                Ok(config)
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+    let (step, program) = ceno_emul::test_utils::keccak_step();
+    let (raw_witin, lkm) =
+        KeccakDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![step]).unwrap();
+
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &program, None, Some(lkm));
 }
 
 #[test]

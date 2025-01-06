@@ -10,7 +10,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind::EANY, PC_STEP_SIZE, Platform, StepRecord, Tracer};
+use ceno_emul::{InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 
 pub struct EcallInstructionConfig {
@@ -38,7 +38,7 @@ impl EcallInstructionConfig {
 
         cb.lk_fetch(&InsnRecord::new(
             pc.expr(),
-            EANY.into(),
+            ECALL.into(),
             None,
             0.into(),
             0.into(),

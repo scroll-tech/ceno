@@ -1,9 +1,17 @@
 [package]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+description = "Ceno RiscV guest examples"
 edition = "2021"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
+license = "MIT OR Apache-2.0"
 name = "examples"
 readme = "README.md"
-resolver = "2"
+repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
 ceno_rt = { path = "../ceno_rt" }
+rkyv = { version = "0.8", default-features = false, features = [
+  "alloc",
+  "bytecheck",
+] }

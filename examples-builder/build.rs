@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{File, read_dir},
     io::{self, Write},
     path::Path,
     process::Command,
@@ -14,8 +14,23 @@ const EXAMPLES: &[&str] = &[
     "ceno_rt_mem",
     "ceno_rt_mini",
     "ceno_rt_panic",
+    "ceno_rt_keccak",
+    "hints",
+    "sorting",
+    "median",
+    "bubble_sorting",
+    "hashing",
 ];
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+fn rerun_all_but_target(dir: &Path) {
+    for entry in read_dir(dir).unwrap().filter_map(Result::ok) {
+        if "target" == entry.file_name() {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", entry.path().to_string_lossy());
+    }
+}
 
 fn build_elfs() {
     let out_dir = std::env::var_os("OUT_DIR").unwrap();
@@ -41,14 +56,11 @@ fn build_elfs() {
             dest,
             r#"#[allow(non_upper_case_globals)]
             pub const {example}: &[u8] =
-                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-unknown-none-elf/release/examples/{example}");"#
+                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
-    let input_path = "../examples/";
-    let elfs_path = "../examples/target/riscv32im-unknown-none-elf/release/examples/";
-
-    println!("cargo:rerun-if-changed={input_path}");
-    println!("cargo:rerun-if-changed={elfs_path}");
+    rerun_all_but_target(Path::new("../examples"));
+    rerun_all_but_target(Path::new("../ceno_rt"));
 }
 
 fn main() {

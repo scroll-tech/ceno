@@ -28,7 +28,6 @@ mod i_insn;
 mod insn_base;
 mod j_insn;
 mod r_insn;
-mod u_insn;
 
 mod ecall_insn;
 
@@ -45,7 +44,7 @@ pub trait RIVInstruction {
 }
 
 pub use arith::{AddInstruction, SubInstruction};
-pub use jump::{AuipcInstruction, JalInstruction, JalrInstruction, LuiInstruction};
+pub use jump::{JalInstruction, JalrInstruction};
 pub use memory::{
     LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, LwInstruction, SbInstruction,
     ShInstruction, SwInstruction,

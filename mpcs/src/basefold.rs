@@ -66,7 +66,7 @@ mod commit_phase;
 use commit_phase::{batch_commit_phase, commit_phase, simple_batch_commit_phase};
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
@@ -947,8 +947,6 @@ where
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::batch_verify");
-        // 	let key = "RAYON_NUM_THREADS";
-        // 	env::set_var(key, "32");
         let comms = comms.iter().collect_vec();
         let num_vars = points.iter().map(|point| point.len()).max().unwrap();
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();

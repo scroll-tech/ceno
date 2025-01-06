@@ -33,13 +33,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let codes = I::INST_KIND.codes();
+        let kind = I::INST_KIND;
+        let format = InsnFormat::from(kind);
+        let category = InsnCategory::from(kind);
 
         // ECALL can do everything.
-        let is_ecall = matches!(codes.kind, InsnKind::EANY);
+        let is_ecall = matches!(kind, InsnKind::ECALL);
 
         // Regular instructions do what is implied by their format.
-        let (with_rs1, with_rs2, with_rd) = match codes.format {
+        let (with_rs1, with_rs2, with_rd) = match format {
             _ if is_ecall => (true, true, true),
             InsnFormat::R => (true, true, true),
             InsnFormat::I => (true, false, true),
@@ -48,10 +50,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
             InsnFormat::U => (false, false, true),
             InsnFormat::J => (false, false, true),
         };
-        let with_mem_write = matches!(codes.category, InsnCategory::Store) || is_ecall;
-        let with_mem_read = matches!(codes.category, InsnCategory::Load);
-        let branching = matches!(codes.category, InsnCategory::Branch)
-            || matches!(codes.kind, InsnKind::JAL | InsnKind::JALR)
+        let with_mem_write = matches!(category, InsnCategory::Store) || is_ecall;
+        let with_mem_read = matches!(category, InsnCategory::Load);
+        let branching = matches!(category, InsnCategory::Branch)
+            || matches!(kind, InsnKind::JAL | InsnKind::JALR)
             || is_ecall;
 
         DummyConfig::construct_circuit(
@@ -93,7 +95,7 @@ pub struct DummyConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> DummyConfig<E> {
     #[allow(clippy::too_many_arguments)]
-    fn construct_circuit(
+    pub(super) fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         kind: InsnKind,
         with_rs1: bool,
@@ -174,7 +176,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         // Fetch instruction
 
         // The register IDs of ECALL is fixed, not encoded.
-        let is_ecall = matches!(kind, InsnKind::EANY);
+        let is_ecall = matches!(kind, InsnKind::ECALL);
         let rs1_id = match &rs1 {
             Some((r, _)) if !is_ecall => r.id.expr(),
             _ => 0.into(),
@@ -211,7 +213,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         })
     }
 
-    fn assign_instance(
+    pub(super) fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
@@ -261,5 +263,9 @@ impl<E: ExtensionField> DummyConfig<E> {
         set_val!(instance, self.imm, imm);
 
         Ok(())
+    }
+
+    pub(super) fn ts(&self) -> WitIn {
+        self.vm_state.ts
     }
 }

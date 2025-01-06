@@ -274,9 +274,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 .into_iter()
                 .unzip();
 
-        let sum_expr = is_equal_per_limb
-            .iter()
-            .fold(Expression::ZERO, |acc, flag| acc.clone() + flag.expr());
+        let sum_expr = is_equal_per_limb.iter().map(ToExpr::expr).sum();
 
         let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
         let (is_equal, diff_inv) =
@@ -487,13 +485,13 @@ mod tests {
             // verify
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from(ret));
             });
 
             // overflow
             if overflow {
                 let carries = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &carries), E::ONE);
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, &carries), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
@@ -662,13 +660,13 @@ mod tests {
             // verify
             let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from(ret));
             });
 
             // overflow
             if overflow {
                 let overflow = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &overflow), E::ONE);
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, &overflow), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
@@ -689,7 +687,7 @@ mod tests {
         use goldilocks::GoldilocksExt2;
         use itertools::Itertools;
         use multilinear_extensions::{
-            mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+            mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
         };
 
         type E = GoldilocksExt2; // 18446744069414584321

@@ -1,8 +1,11 @@
 use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
-        PublicValues, ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::MockProver,
-        prover::ZKVMProver, verifier::ZKVMVerifier,
+        PublicValues, ZKVMProof,
+        constants::MAX_NUM_VARIABLES,
+        mock_prover::{LkMultiplicityKey, MockProver},
+        prover::ZKVMProver,
+        verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{
@@ -11,16 +14,16 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    ByteAddr, EmuContext, InsnKind::EANY, IterAddresses, Platform, Program, StepRecord, Tracer,
-    VMState, WORD_SIZE, WordAddr,
+    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord,
+    Tracer, VMState, WORD_SIZE, WordAddr,
 };
+use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::PolynomialCommitmentScheme;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     iter::zip,
-    ops::Deref,
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
@@ -73,7 +76,7 @@ fn emulate_program(
         .iter()
         .rev()
         .find(|record| {
-            record.insn().codes().kind == EANY
+            record.insn().kind == InsnKind::ECALL
                 && record.rs1().unwrap().value == Platform::ecall_halt()
         })
         .and_then(|halt_record| halt_record.rs2())
@@ -159,33 +162,79 @@ fn emulate_program(
     }
 }
 
-fn init_mem(
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Preset {
+    Ceno,
+    Sp1,
+}
+
+pub fn setup_platform(
+    preset: Preset,
     program: &Program,
-    platform: &Platform,
-    mem_padder: &mut MemPadder,
     stack_size: u32,
     heap_size: u32,
-) -> Vec<MemInitRecord> {
-    let stack_addrs = platform.stack_top - stack_size..platform.stack_top;
-    // Detect heap as starting after program data.
-    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
-    let heap_addrs = heap_start..heap_start + heap_size;
+    pub_io_size: u32,
+) -> Platform {
+    let preset = match preset {
+        Preset::Ceno => CENO_PLATFORM,
+        Preset::Sp1 => Platform {
+            // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
+            stack: 0x0020_0400..0x0020_0400,
+            unsafe_ecall_nop: true,
+            ..CENO_PLATFORM
+        },
+    };
+
+    let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
+    let stack = preset.stack.end - stack_size..preset.stack.end;
+    let heap = {
+        // Detect heap as starting after program data.
+        let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+        let heap = heap_start..heap_start + heap_size;
+        // Pad the total size to the next power of two.
+        let mem_size = prog_data.len() + stack.iter_addresses().len() + heap.iter_addresses().len();
+        let pad_size = mem_size.next_power_of_two() - mem_size;
+        let heap_end = heap.end as usize + pad_size * WORD_SIZE;
+        assert!(
+            heap_end <= u32::MAX as usize,
+            "not enough space for padding; reduce heap size"
+        );
+        heap.start..heap_end as u32
+    };
+
+    Platform {
+        rom: program.base_address
+            ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
+        prog_data,
+        stack,
+        heap,
+        public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
+        ..preset
+    }
+}
+
+fn init_mem(program: &Program, platform: &Platform) -> Vec<MemInitRecord> {
     let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
         addr: *addr,
         value: *value,
     });
 
-    let stack = stack_addrs
+    let stack = platform
+        .stack
         .iter_addresses()
         .map(|addr| MemInitRecord { addr, value: 0 });
 
-    let heap = heap_addrs
+    let heap = platform
+        .heap
         .iter_addresses()
         .map(|addr| MemInitRecord { addr, value: 0 });
 
-    let mem_init = chain!(program_addrs, stack, heap).collect_vec();
+    let mem_init = chain!(program_addrs, stack, heap)
+        .sorted_by_key(|record| record.addr)
+        .collect_vec();
 
-    mem_padder.padded_sorted(mem_init.len().next_power_of_two(), mem_init)
+    assert!(mem_init.len().is_power_of_two());
+    mem_init
 }
 
 pub struct ConstraintSystemConfig<E: ExtensionField> {
@@ -249,6 +298,7 @@ pub fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     emul_result: EmulationResult,
     program: &Program,
+    is_mock_proving: bool,
 ) -> ZKVMWitnesses<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
@@ -264,7 +314,7 @@ pub fn generate_witness<E: ExtensionField>(
         .dummy_config
         .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
-    zkvm_witness.finalize_lk_multiplicities();
+    zkvm_witness.finalize_lk_multiplicities(is_mock_proving);
 
     // assign table circuits
     system_config
@@ -323,34 +373,32 @@ pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 // state external to this pipeline (e.g, sanity check in bin/e2e.rs)
 
 #[allow(clippy::type_complexity)]
-pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
+pub fn run_e2e_with_checkpoint<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+>(
     program: Program,
     platform: Platform,
-    stack_size: u32,
-    heap_size: u32,
     hints: Vec<u32>,
     max_steps: usize,
     checkpoint: Checkpoint,
 ) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
-    // Detect heap as starting after program data.
-    let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
-    let heap_addrs = heap_start..heap_start + heap_size;
-    let mut mem_padder = MemPadder::new(heap_addrs.end..platform.ram.end);
-    let mem_init = init_mem(&program, &platform, &mut mem_padder, stack_size, heap_size);
+    let mem_init = init_mem(&program, &platform);
 
+    let pub_io_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: program.instructions.len(),
         static_memory_len: mem_init.len(),
-        ..ProgramParams::default()
+        pub_io_len,
     };
 
     let program = Arc::new(program);
     let system_config = construct_configs::<E>(program_params);
+    let reg_init = system_config.mmu_config.initial_registers();
 
     // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = mem_padder.padded_sorted(system_config.mmu_config.public_io_len(), vec![]);
-    let reg_init = system_config.mmu_config.initial_registers();
+    let io_init = MemPadder::init_mem(platform.public_io.clone(), pub_io_len, &[]);
 
     let init_full_mem = InitMemState {
         mem: mem_init,
@@ -372,6 +420,8 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
         .expect("keygen failed");
     let vk = pk.get_vk();
 
+    // Generate witness
+    let is_mock_proving = std::env::var("MOCK_PROVING").is_ok();
     if let Checkpoint::PrepE2EProving = checkpoint {
         return (
             None,
@@ -385,6 +435,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     &system_config,
                     pk,
                     zkvm_fixed_traces,
+                    is_mock_proving,
                 )
             }),
         );
@@ -400,22 +451,22 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
     if let Checkpoint::PrepWitnessGen = checkpoint {
         return (
             None,
-            Box::new(move || _ = generate_witness(&system_config, emul_result, program.deref())),
+            Box::new(move || _ = generate_witness(&system_config, emul_result, &program, false)),
         );
     }
 
-    // Generate witness
-    let zkvm_witness = generate_witness(&system_config, emul_result, &program);
+    let zkvm_witness = generate_witness(&system_config, emul_result, &program, is_mock_proving);
 
     // proving
     let prover = ZKVMProver::new(pk);
 
-    if std::env::var("MOCK_PROVING").is_ok() {
+    if is_mock_proving {
         MockProver::assert_satisfied_full(
             &system_config.zkvm_cs,
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            &program,
         );
         tracing::info!("Mock proving passed");
     }
@@ -439,7 +490,7 @@ pub fn run_e2e_with_checkpoint<E: ExtensionField, PCS: PolynomialCommitmentSchem
 
 // Runs program emulation + witness generation + proving
 #[allow(clippy::too_many_arguments)]
-pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommitmentScheme<E>>(
     program: Arc<Program>,
     max_steps: usize,
     init_full_mem: InitMemState,
@@ -448,6 +499,7 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     system_config: &ConstraintSystemConfig<E>,
     pk: ZKVMProvingKey<E, PCS>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
+    is_mock_proving: bool,
 ) -> ZKVMProof<E, PCS> {
     // Emulate program
     let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
@@ -456,17 +508,18 @@ pub fn run_e2e_proof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let pi = emul_result.pi.clone();
 
     // Generate witness
-    let zkvm_witness = generate_witness(system_config, emul_result, program.deref());
+    let zkvm_witness = generate_witness(system_config, emul_result, &program, is_mock_proving);
 
     // proving
     let prover = ZKVMProver::new(pk);
 
-    if std::env::var("MOCK_PROVING").is_ok() {
+    if is_mock_proving {
         MockProver::assert_satisfied_full(
             &system_config.zkvm_cs,
             zkvm_fixed_traces.clone(),
             &zkvm_witness,
             &pi,
+            &program,
         );
         tracing::info!("Mock proving passed");
     }
@@ -537,9 +590,8 @@ fn format_segments(
 
 fn format_segment(platform: &Platform, addr: u32) -> String {
     format!(
-        "{}{}{}",
+        "{}{}",
         if platform.can_read(addr) { "R" } else { "-" },
         if platform.can_write(addr) { "W" } else { "-" },
-        if platform.can_execute(addr) { "X" } else { "-" },
     )
 }

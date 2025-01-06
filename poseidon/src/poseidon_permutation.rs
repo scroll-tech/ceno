@@ -3,7 +3,7 @@ use crate::{
     poseidon::Poseidon,
 };
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct PoseidonPermutation<T: Poseidon> {
     state: [T; SPONGE_WIDTH],
 }

@@ -322,7 +322,8 @@ pub use basefold::{
     one_level_interp_hc,
 };
 mod whir;
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+
 fn validate_input<E: ExtensionField>(
     function: &str,
     param_num_vars: usize,
@@ -378,7 +379,7 @@ pub mod test_util {
     use multilinear_extensions::mle::DenseMultilinearExtension;
     #[cfg(test)]
     use multilinear_extensions::{
-        mle::MultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+        mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
     #[cfg(test)]
