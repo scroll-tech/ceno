@@ -4,27 +4,15 @@ pub use whir::ceno_binding::Error;
 
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use whir::ceno_binding::{
-    PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
-    WhirDefaultSpec as WhirDefaultSpecInner, WhirSpec as WhirSpecInner,
-};
+use whir::ceno_binding::{PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner};
 
 mod field_wrapper;
 mod structure;
 use structure::{WhirDigest, digest_to_bytes};
 mod utils;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
-
-pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
-    type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default;
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct WhirDefaultSpec;
-
-impl<E: ExtensionField> WhirSpec<E> for WhirDefaultSpec {
-    type Spec = WhirDefaultSpecInner;
-}
+mod spec;
+use spec::WhirSpec;
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
@@ -185,6 +173,7 @@ mod tests {
     use ark_ff::Field;
     use goldilocks::GoldilocksExt2;
     use rand::Rng;
+    use spec::WhirDefaultSpec;
 
     use crate::test_util::{gen_rand_poly_base, run_commit_open_verify};
 

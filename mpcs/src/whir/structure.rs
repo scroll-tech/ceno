@@ -1,4 +1,4 @@
-use super::{WhirSpec, field_wrapper::ExtensionFieldWrapper as FieldWrapper};
+use super::{field_wrapper::ExtensionFieldWrapper as FieldWrapper, spec::WhirSpec};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
