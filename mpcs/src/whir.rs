@@ -1,7 +1,7 @@
 use core::todo;
 
 use super::PolynomialCommitmentScheme;
-use utils::poly2whir;
+use utils::{digest_to_bytes, poly2whir};
 pub use whir::ceno_binding::Error;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -114,11 +114,7 @@ where
         comm: &Self::Commitment,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        let mut buffer = Vec::new();
-        comm.inner
-            .serialize_compressed(&mut buffer)
-            .map_err(|err| crate::Error::Serialization(err.to_string()))?;
-        transcript.append_message(&buffer);
+        transcript.append_message(&digest_to_bytes::<Spec, E>(&comm.inner)?);
         Ok(())
     }
 
