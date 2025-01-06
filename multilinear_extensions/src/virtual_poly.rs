@@ -220,7 +220,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         }
         for i in 0..1 << self.aux_info.max_num_variables {
             let point = bit_decompose(i, self.aux_info.max_num_variables);
-            let point_fr: Vec<E> = point.iter().map(|&x| E::from(x as u64)).collect();
+            let point_fr: Vec<E> = point.iter().map(|&x| E::from_bool(x)).collect();
             println!("{} {:?}", i, self.evaluate(point_fr.as_ref()))
         }
         println!()
@@ -371,8 +371,7 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
 mod tests {
     use crate::virtual_poly::{build_eq_x_r_vec, build_eq_x_r_vec_sequential};
     use ark_std::rand::thread_rng;
-    use ff::Field;
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::{FromUniformBytes, GoldilocksExt2};
 
     #[test]
     fn test_build_eq() {

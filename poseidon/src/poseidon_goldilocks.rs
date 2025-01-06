@@ -3,7 +3,7 @@ use crate::{
     poseidon::{AdaptedField, Poseidon},
 };
 use goldilocks::EPSILON;
-use p3_field::PrimeField64;
+use p3_field::{FieldAlgebra, PrimeField64};
 use p3_goldilocks::Goldilocks;
 #[cfg(target_arch = "x86_64")]
 use std::hint::unreachable_unchecked;
@@ -228,7 +228,10 @@ impl AdaptedField for Goldilocks {
 
     fn multiply_accumulate(&self, x: Self, y: Self) -> Self {
         // u64 + u64 * u64 cannot overflow.
-        reduce128((self.0 as u128) + (x.0 as u128) * (y.0 as u128))
+        reduce128(
+            (self.as_canonical_u64() as u128)
+                + (x.as_canonical_u64() as u128) * (y.as_canonical_u64() as u128),
+        )
     }
 }
 
@@ -278,7 +281,7 @@ const unsafe fn add_no_canonicalize_trashing_input(x: u64, y: u64) -> u64 {
 fn reduce96((x_lo, x_hi): (u64, u32)) -> Goldilocks {
     let t1 = x_hi as u64 * EPSILON;
     let t2 = unsafe { add_no_canonicalize_trashing_input(x_lo, t1) };
-    Goldilocks(t2)
+    Goldilocks::from_canonical_u64(t2)
 }
 
 /// Reduces to a 64-bit value. The result might not be in canonical form; it could be in between the
@@ -296,7 +299,7 @@ fn reduce128(x: u128) -> Goldilocks {
     }
     let t1 = x_hi_lo * EPSILON;
     let t2 = unsafe { add_no_canonicalize_trashing_input(t0, t1) };
-    Goldilocks(t2)
+    Goldilocks::from_canonical_u64(t2)
 }
 
 #[inline]

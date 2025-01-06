@@ -1,7 +1,7 @@
 use crate::constants::{
     ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, N_ROUNDS, SPONGE_WIDTH,
 };
-use ff_ext::ExtensionField;
+use ff_ext::SmallField;
 use unroll::unroll_for_loops;
 
 pub trait Poseidon: AdaptedField {
@@ -246,13 +246,6 @@ pub trait AdaptedField: SmallField {
     fn from_noncanonical_u128(n: u128) -> Self;
 
     fn multiply_accumulate(&self, x: Self, y: Self) -> Self;
-
-    /// Returns `n`. Assumes that `n` is already in canonical form, i.e. `n < Self::order()`.
-    // TODO: Should probably be unsafe.
-    fn from_canonical_u64(n: u64) -> Self {
-        debug_assert!(n < Self::ORDER);
-        Self::from(n)
-    }
 
     /// # Safety
     /// Equivalent to *self + Self::from_canonical_u64(rhs), but may be cheaper. The caller must

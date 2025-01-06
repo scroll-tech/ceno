@@ -4,7 +4,7 @@ use crate::{op_mle, util::ceil_log2};
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use core::hash::Hash;
 use ff::Field;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FromUniformBytes};
 use p3_field::FieldAlgebra;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -329,15 +329,6 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
         end_timer!(start);
         list
-    }
-
-    pub fn to_ext_field(&self) -> Self {
-        op_mle!(self, |evaluations| {
-            DenseMultilinearExtension::from_evaluations_ext_vec(
-                self.num_vars(),
-                evaluations.iter().cloned().map(E::from).collect(),
-            )
-        })
     }
 }
 
