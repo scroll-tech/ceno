@@ -71,7 +71,9 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         // extrapolation_aux only need to init once
         let extrapolation_aux = (1..max_degree)
             .map(|degree| {
-                let points = (0..1 + degree as u64).map(E::from).collect::<Vec<_>>();
+                let points = (0..1 + degree as u64)
+                    .map(E::from_canonical_u64)
+                    .collect::<Vec<_>>();
                 let weights = barycentric_weights(&points);
                 (points, weights)
             })

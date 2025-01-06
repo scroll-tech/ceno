@@ -4,7 +4,7 @@ use std::{array::from_fn, iter::repeat_with};
 
 pub use ff;
 use p3_field::{
-    ExtensionField as P3ExtensionField, Field as P3Field, PackedValue,
+    ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField,
     extension::BinomialExtensionField,
 };
 use p3_goldilocks::Goldilocks;
@@ -109,7 +109,7 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes
 {
     const DEGREE: usize;
 
-    type BaseField: SmallField + Ord + P3Field + FromUniformBytes;
+    type BaseField: SmallField + Ord + PrimeField + FromUniformBytes;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 

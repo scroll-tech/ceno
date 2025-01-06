@@ -39,6 +39,10 @@ plonky2 = "0.2"
 p3-field = { git = "https://github.com/plonky3/plonky3" }
 p3-goldilocks = { git = "https://github.com/plonky3/plonky3" }
 p3-poseidon = { git = "https://github.com/plonky3/plonky3" }
+p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3.git" }
+p3-challenger = { git = "https://github.com/plonky3/plonky3" }
+p3-mds = { git = "https://github.com/Plonky3/Plonky3.git" }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git" }
 poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"

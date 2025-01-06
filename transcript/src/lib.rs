@@ -7,6 +7,8 @@ pub mod basic;
 mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
+use ff_ext::SmallField;
+use p3_field::FieldAlgebra;
 pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
 
@@ -16,7 +18,6 @@ pub struct Challenge<F> {
 }
 
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
 /// The Transcript trait
 pub trait Transcript<E: ExtensionField> {
     /// Append a slice of base field elemets to the transcript.
@@ -98,7 +99,7 @@ pub trait ForkableTranscript<E: ExtensionField>: Transcript<E> + Sized + Clone {
         (0..n)
             .map(|i| {
                 let mut fork = self.clone();
-                fork.append_field_element(&(i as u64).into());
+                fork.append_field_element(&E::BaseField::from_canonical_u64(i as u64));
                 fork
             })
             .collect()
