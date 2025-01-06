@@ -1,24 +1,23 @@
 use super::PolynomialCommitmentScheme;
-use utils::{digest_to_bytes, poly2whir};
+use utils::poly2whir;
 pub use whir::ceno_binding::Error;
 
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use whir::ceno_binding::{
-    InnerDigestOf as InnerDigestOfInner, PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
+    PolynomialCommitmentScheme as WhirPCS, Whir as WhirInner,
     WhirDefaultSpec as WhirDefaultSpecInner, WhirSpec as WhirSpecInner,
 };
 
 mod field_wrapper;
+mod structure;
+use structure::{WhirDigest, digest_to_bytes};
 mod utils;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 
 pub trait WhirSpec<E: ExtensionField>: Default + std::fmt::Debug + Clone {
     type Spec: WhirSpecInner<FieldWrapper<E>> + std::fmt::Debug + Default;
 }
-
-type InnerDigestOf<Spec, E> = InnerDigestOfInner<<Spec as WhirSpec<E>>::Spec, FieldWrapper<E>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct WhirDefaultSpec;
@@ -33,38 +32,6 @@ pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
 }
 
 type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spec>;
-
-#[derive(Default, Clone, Debug)]
-pub struct WhirDigest<E: ExtensionField, Spec: WhirSpec<E>> {
-    inner: InnerDigestOf<Spec, E>,
-}
-
-impl<E: ExtensionField, Spec: WhirSpec<E>> Serialize for WhirDigest<E, Spec> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let digest = &self.inner;
-        // Create a buffer that implements the `Write` trait
-        let mut buffer = Vec::new();
-        digest.serialize_compressed(&mut buffer).unwrap();
-        serializer.serialize_bytes(&buffer)
-    }
-}
-
-impl<'de, E: ExtensionField, Spec: WhirSpec<E>> Deserialize<'de> for WhirDigest<E, Spec> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize the bytes into a buffer
-        let buffer: Vec<u8> = Deserialize::deserialize(deserializer)?;
-        // Deserialize the buffer into a proof
-        let inner = InnerDigestOf::<Spec, E>::deserialize_compressed(&buffer[..])
-            .map_err(serde::de::Error::custom)?;
-        Ok(WhirDigest { inner })
-    }
-}
 
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where

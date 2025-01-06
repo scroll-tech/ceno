@@ -1,5 +1,3 @@
-use super::InnerDigestOf;
-use ark_serialize::CanonicalSerialize;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use plonky2::util::reverse_index_bits_in_place;
@@ -7,7 +5,7 @@ use whir::poly_utils::coeffs::CoefficientList;
 
 use crate::util::arithmetic::interpolate_field_type_over_boolean_hypercube;
 
-use super::{WhirSpec, field_wrapper::BaseFieldWrapper};
+use super::field_wrapper::BaseFieldWrapper;
 
 pub fn poly2whir<E: ExtensionField>(
     poly: &DenseMultilinearExtension<E>,
@@ -28,16 +26,6 @@ pub fn poly2whir<E: ExtensionField>(
         }
         _ => unreachable!(),
     }
-}
-
-pub fn digest_to_bytes<Spec: WhirSpec<E>, E: ExtensionField>(
-    digest: &InnerDigestOf<Spec, E>,
-) -> Result<Vec<u8>, crate::Error> {
-    let mut buffer = Vec::new();
-    digest
-        .serialize_compressed(&mut buffer)
-        .map_err(|err| crate::Error::Serialization(err.to_string()))?;
-    Ok(buffer)
 }
 
 #[cfg(test)]
