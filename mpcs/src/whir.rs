@@ -1,18 +1,17 @@
+mod field_wrapper;
+mod spec;
+mod structure;
+mod utils;
+
 use super::PolynomialCommitmentScheme;
+use ff_ext::ExtensionField;
+use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
+use serde::{Serialize, de::DeserializeOwned};
+use spec::WhirSpec;
+use structure::{Whir, WhirDigest, WhirInnerT, digest_to_bytes};
 use utils::poly2whir;
 pub use whir::ceno_binding::Error;
-
-use ff_ext::ExtensionField;
-use serde::{Serialize, de::DeserializeOwned};
 use whir::ceno_binding::PolynomialCommitmentScheme as WhirPCS;
-
-mod field_wrapper;
-mod structure;
-use structure::{Whir, WhirDigest, WhirInnerT, digest_to_bytes};
-mod utils;
-use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
-mod spec;
-use spec::WhirSpec;
 
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
