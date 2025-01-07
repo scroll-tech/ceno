@@ -5,9 +5,9 @@ use crate::{
     util::{bit_decompose, create_uninit_vec, max_usable_threads},
 };
 use ark_std::{end_timer, rand::Rng, start_timer};
-use ff::PrimeField;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use p3_field::Field;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -228,7 +228,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
 }
 
 /// Evaluate eq polynomial.
-pub fn eq_eval<F: PrimeField>(x: &[F], y: &[F]) -> F {
+pub fn eq_eval<F: Field>(x: &[F], y: &[F]) -> F {
     assert_eq!(x.len(), y.len(), "x and y have different length");
 
     let start = start_timer!(|| "eq_eval");

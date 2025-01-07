@@ -3,9 +3,8 @@ use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 use crate::{op_mle, util::ceil_log2};
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use core::hash::Hash;
-use ff::Field;
 use ff_ext::{ExtensionField, FromUniformBytes};
-use p3_field::FieldAlgebra;
+use p3_field::{Field, FieldAlgebra};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };

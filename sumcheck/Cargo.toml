@@ -11,9 +11,7 @@ version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
-ff.workspace = true
 ff_ext = { path = "../ff_ext" }
-goldilocks.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
@@ -26,6 +24,8 @@ transcript = { path = "../transcript" }
 
 [dev-dependencies]
 criterion.workspace = true
+p3-goldilocks.workspace = true
+p3-mds.workspace = true
 
 [[bench]]
 harness = false
