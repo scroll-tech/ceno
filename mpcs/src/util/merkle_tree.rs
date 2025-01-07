@@ -1,6 +1,10 @@
+use std::marker::PhantomData;
+
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
+use p3_mds::MdsPermutation;
+use poseidon::SPONGE_WIDTH;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -24,28 +28,30 @@ use super::hash::write_digest_to_transcript;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "E: Serialize", deserialize = "E: DeserializeOwned"))]
-pub struct MerkleTree<E: ExtensionField>
+pub struct MerkleTree<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     inner: Vec<Vec<Digest<E::BaseField>>>,
     leaves: Vec<FieldType<E>>,
+    _phantom: PhantomData<Mds>,
 }
 
-impl<E: ExtensionField> MerkleTree<E>
+impl<E: ExtensionField, Mds> MerkleTree<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn compute_inner(leaves: &FieldType<E>) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize::<E>(&[leaves])
+        merkelize::<E, Mds>(&[leaves])
     }
 
     pub fn compute_inner_base(leaves: &[E::BaseField]) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize_base::<E>(&[leaves])
+        merkelize_base::<E, Mds>(&[leaves])
     }
 
     pub fn compute_inner_ext(leaves: &[E]) -> Vec<Vec<Digest<E::BaseField>>> {
-        merkelize_ext::<E>(&[leaves])
+        merkelize_ext::<E, Mds>(&[leaves])
     }
 
     pub fn root_from_inner(inner: &[Vec<Digest<E::BaseField>>]) -> Digest<E::BaseField> {
@@ -56,6 +62,7 @@ where
         Self {
             inner,
             leaves: vec![leaves],
+            _phantom: PhantomData,
         }
     }
 
@@ -63,13 +70,15 @@ where
         Self {
             inner: Self::compute_inner(&leaves),
             leaves: vec![leaves],
+            _phantom: PhantomData,
         }
     }
 
     pub fn from_batch_leaves(leaves: Vec<FieldType<E>>) -> Self {
         Self {
-            inner: merkelize::<E>(&leaves.iter().collect_vec()),
+            inner: merkelize::<E, Mds>(&leaves.iter().collect_vec()),
             leaves,
+            _phantom: PhantomData,
         }
     }
 
@@ -139,9 +148,9 @@ where
     pub fn merkle_path_without_leaf_sibling_or_root(
         &self,
         leaf_index: usize,
-    ) -> MerklePathWithoutLeafOrRoot<E> {
+    ) -> MerklePathWithoutLeafOrRoot<E, Mds> {
         assert!(leaf_index < self.size().1);
-        MerklePathWithoutLeafOrRoot::<E>::new(
+        MerklePathWithoutLeafOrRoot::<E, Mds>::new(
             self.inner
                 .iter()
                 .take(self.height() - 1)
@@ -155,19 +164,24 @@ where
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct MerklePathWithoutLeafOrRoot<E: ExtensionField>
+pub struct MerklePathWithoutLeafOrRoot<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     inner: Vec<Digest<E::BaseField>>,
+    _phantom: PhantomData<Mds>,
 }
 
-impl<E: ExtensionField> MerklePathWithoutLeafOrRoot<E>
+impl<E: ExtensionField, Mds> MerklePathWithoutLeafOrRoot<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn new(inner: Vec<Digest<E::BaseField>>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            _phantom: PhantomData,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -195,7 +209,7 @@ where
         index: usize,
         root: &Digest<E::BaseField>,
     ) {
-        authenticate_merkle_path_root::<E>(
+        authenticate_merkle_path_root::<E, Mds>(
             &self.inner,
             FieldType::Ext(vec![left, right]),
             index,
@@ -210,7 +224,7 @@ where
         index: usize,
         root: &Digest<E::BaseField>,
     ) {
-        authenticate_merkle_path_root::<E>(
+        authenticate_merkle_path_root::<E, Mds>(
             &self.inner,
             FieldType::Base(vec![left, right]),
             index,
@@ -225,7 +239,7 @@ where
         index: usize,
         root: &Digest<E::BaseField>,
     ) {
-        authenticate_merkle_path_root_batch::<E>(
+        authenticate_merkle_path_root_batch::<E, Mds>(
             &self.inner,
             FieldType::Ext(left),
             FieldType::Ext(right),
@@ -241,7 +255,7 @@ where
         index: usize,
         root: &Digest<E::BaseField>,
     ) {
-        authenticate_merkle_path_root_batch::<E>(
+        authenticate_merkle_path_root_batch::<E, Mds>(
             &self.inner,
             FieldType::Base(left),
             FieldType::Base(right),
@@ -253,7 +267,10 @@ where
 
 /// Merkle tree construction
 /// TODO: Support merkelizing mixed-type values
-fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::BaseField>>> {
+fn merkelize<E: ExtensionField, Mds>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::BaseField>>>
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     #[cfg(feature = "sanity-check")]
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
@@ -267,10 +284,10 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
             *hash = match &values[0] {
                 FieldType::Base(values) => {
-                    hash_two_leaves_base::<E>(&values[i << 1], &values[(i << 1) + 1])
+                    hash_two_leaves_base::<E, Mds>(&values[i << 1], &values[(i << 1) + 1])
                 }
                 FieldType::Ext(values) => {
-                    hash_two_leaves_ext::<E>(&values[i << 1], &values[(i << 1) + 1])
+                    hash_two_leaves_ext::<E, Mds>(&values[i << 1], &values[(i << 1) + 1])
                 }
                 FieldType::Unreachable => unreachable!(),
             };
@@ -278,7 +295,7 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
     } else {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
             *hash = match &values[0] {
-                FieldType::Base(_) => hash_two_leaves_batch_base::<E>(
+                FieldType::Base(_) => hash_two_leaves_batch_base::<E, Mds>(
                     values
                         .iter()
                         .map(|values| field_type_index_base(values, i << 1))
@@ -290,7 +307,7 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
                         .collect_vec()
                         .as_slice(),
                 ),
-                FieldType::Ext(_) => hash_two_leaves_batch_ext::<E>(
+                FieldType::Ext(_) => hash_two_leaves_batch_ext::<E, Mds>(
                     values
                         .iter()
                         .map(|values| field_type_index_ext(values, i << 1))
@@ -312,7 +329,7 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
-            .map(|ys| hash_two_digests(&ys[0], &ys[1]))
+            .map(|ys| hash_two_digests::<E::BaseField, Mds>(&ys[0], &ys[1]))
             .collect::<Vec<_>>();
 
         tree.push(oracle);
@@ -321,7 +338,12 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
     tree
 }
 
-fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Digest<E::BaseField>>> {
+fn merkelize_base<E: ExtensionField, Mds>(
+    values: &[&[E::BaseField]],
+) -> Vec<Vec<Digest<E::BaseField>>>
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     #[cfg(feature = "sanity-check")]
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
@@ -333,11 +355,11 @@ fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Dige
     let mut hashes = vec![Digest::default(); values[0].len() >> 1];
     if values.len() == 1 {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-            *hash = hash_two_leaves_base::<E>(&values[0][i << 1], &values[0][(i << 1) + 1]);
+            *hash = hash_two_leaves_base::<E, Mds>(&values[0][i << 1], &values[0][(i << 1) + 1]);
         });
     } else {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-            *hash = hash_two_leaves_batch_base::<E>(
+            *hash = hash_two_leaves_batch_base::<E, Mds>(
                 values
                     .iter()
                     .map(|values| values[i << 1])
@@ -357,7 +379,7 @@ fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Dige
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
-            .map(|ys| hash_two_digests(&ys[0], &ys[1]))
+            .map(|ys| hash_two_digests::<E::BaseField, Mds>(&ys[0], &ys[1]))
             .collect::<Vec<_>>();
 
         tree.push(oracle);
@@ -366,7 +388,10 @@ fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Dige
     tree
 }
 
-fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseField>>> {
+fn merkelize_ext<E: ExtensionField, Mds>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseField>>>
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     #[cfg(feature = "sanity-check")]
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
@@ -378,11 +403,11 @@ fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseFi
     let mut hashes = vec![Digest::default(); values[0].len() >> 1];
     if values.len() == 1 {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-            *hash = hash_two_leaves_ext::<E>(&values[0][i << 1], &values[0][(i << 1) + 1]);
+            *hash = hash_two_leaves_ext::<E, Mds>(&values[0][i << 1], &values[0][(i << 1) + 1]);
         });
     } else {
         hashes.par_iter_mut().enumerate().for_each(|(i, hash)| {
-            *hash = hash_two_leaves_batch_ext::<E>(
+            *hash = hash_two_leaves_batch_ext::<E, Mds>(
                 values
                     .iter()
                     .map(|values| values[i << 1])
@@ -402,7 +427,7 @@ fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseFi
     for i in 1..(log_v) {
         let oracle = tree[i - 1]
             .par_chunks_exact(2)
-            .map(|ys| hash_two_digests(&ys[0], &ys[1]))
+            .map(|ys| hash_two_digests::<E::BaseField, Mds>(&ys[0], &ys[1]))
             .collect::<Vec<_>>();
 
         tree.push(oracle);
@@ -411,17 +436,19 @@ fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseFi
     tree
 }
 
-fn authenticate_merkle_path_root<E: ExtensionField>(
+fn authenticate_merkle_path_root<E: ExtensionField, Mds>(
     path: &[Digest<E::BaseField>],
     leaves: FieldType<E>,
     x_index: usize,
     root: &Digest<E::BaseField>,
-) {
+) where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     let mut x_index = x_index;
     assert_eq!(leaves.len(), 2);
     let mut hash = match leaves {
-        FieldType::Base(leaves) => hash_two_leaves_base::<E>(&leaves[0], &leaves[1]),
-        FieldType::Ext(leaves) => hash_two_leaves_ext(&leaves[0], &leaves[1]),
+        FieldType::Base(leaves) => hash_two_leaves_base::<E, Mds>(&leaves[0], &leaves[1]),
+        FieldType::Ext(leaves) => hash_two_leaves_ext::<E, Mds>(&leaves[0], &leaves[1]),
         FieldType::Unreachable => unreachable!(),
     };
 
@@ -429,40 +456,42 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
     x_index >>= 1;
     for path_i in path.iter() {
         hash = if x_index & 1 == 0 {
-            hash_two_digests(&hash, path_i)
+            hash_two_digests::<E::BaseField, Mds>(&hash, path_i)
         } else {
-            hash_two_digests(path_i, &hash)
+            hash_two_digests::<E::BaseField, Mds>(path_i, &hash)
         };
         x_index >>= 1;
     }
     assert_eq!(&hash, root);
 }
 
-fn authenticate_merkle_path_root_batch<E: ExtensionField>(
+fn authenticate_merkle_path_root_batch<E: ExtensionField, Mds>(
     path: &[Digest<E::BaseField>],
     left: FieldType<E>,
     right: FieldType<E>,
     x_index: usize,
     root: &Digest<E::BaseField>,
-) {
+) where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     let mut x_index = x_index;
     let mut hash = if left.len() > 1 {
         match (left, right) {
             (FieldType::Base(left), FieldType::Base(right)) => {
-                hash_two_leaves_batch_base::<E>(&left, &right)
+                hash_two_leaves_batch_base::<E, Mds>(&left, &right)
             }
             (FieldType::Ext(left), FieldType::Ext(right)) => {
-                hash_two_leaves_batch_ext::<E>(&left, &right)
+                hash_two_leaves_batch_ext::<E, Mds>(&left, &right)
             }
             _ => unreachable!(),
         }
     } else {
         match (left, right) {
             (FieldType::Base(left), FieldType::Base(right)) => {
-                hash_two_leaves_base::<E>(&left[0], &right[0])
+                hash_two_leaves_base::<E, Mds>(&left[0], &right[0])
             }
             (FieldType::Ext(left), FieldType::Ext(right)) => {
-                hash_two_leaves_ext::<E>(&left[0], &right[0])
+                hash_two_leaves_ext::<E, Mds>(&left[0], &right[0])
             }
             _ => unreachable!(),
         }
@@ -472,9 +501,9 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
     x_index >>= 1;
     for path_i in path.iter() {
         hash = if x_index & 1 == 0 {
-            hash_two_digests(&hash, path_i)
+            hash_two_digests::<E::BaseField, Mds>(&hash, path_i)
         } else {
-            hash_two_digests(path_i, &hash)
+            hash_two_digests::<E::BaseField, Mds>(path_i, &hash)
         };
         x_index >>= 1;
     }

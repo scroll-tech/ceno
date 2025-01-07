@@ -25,6 +25,10 @@ num-bigint = "0.4"
 num-integer = "0.1"
 plonky2.workspace = true
 poseidon.workspace = true
+p3-field.workspace = true
+p3-goldilocks.workspace = true
+p3-mds.workspace = true
+p3-symmetric.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }

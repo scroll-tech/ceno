@@ -1,9 +1,8 @@
 use std::time::Duration;
 
 use criterion::*;
-use ff::Field;
-use goldilocks::GoldilocksExt2;
 
+use ff_ext::{FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{
     Basefold, BasefoldRSParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme,
@@ -14,11 +13,12 @@ use mpcs::{
 };
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
+use p3_goldilocks::MdsMatrixGoldilocks;
 use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, MdsMatrixGoldilocks>;
 type E = GoldilocksExt2;
 
 const NUM_SAMPLES: usize = 10;

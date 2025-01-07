@@ -4,13 +4,12 @@ use std::{array::from_fn, iter::repeat_with};
 
 pub use ff;
 use p3_field::{
-    ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField,
+    ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField, TwoAdicField,
     extension::BinomialExtensionField,
 };
 use p3_goldilocks::Goldilocks;
 use rand_core::RngCore;
 use serde::Serialize;
-
 pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
 
 fn array_try_from_uniform_bytes<
@@ -92,7 +91,7 @@ pub trait SmallField: Serialize + P3Field {
 pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes {
     const DEGREE: usize;
 
-    type BaseField: SmallField + Ord + PrimeField + FromUniformBytes;
+    type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 
@@ -174,5 +173,15 @@ mod impl_goldilocks {
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use p3_field::TwoAdicField;
+    use p3_goldilocks::Goldilocks;
+    #[test]
+    fn test() {
+        println!("{:?}", Goldilocks::two_adic_generator(21));
     }
 }
