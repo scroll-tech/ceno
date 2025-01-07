@@ -1,4 +1,4 @@
-use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
+use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript, basic::WIDTH};
 use ff_ext::ExtensionField;
 use p3_mds::MdsPermutation;
 use std::cell::RefCell;
@@ -18,7 +18,7 @@ pub struct BasicTranscriptWithStat<'a, E: ExtensionField, Mds> {
 
 impl<'a, E: ExtensionField, Mds> BasicTranscriptWithStat<'a, E, Mds>
 where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    Mds: MdsPermutation<E::BaseField, WIDTH> + Default,
 {
     pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
         Self {
@@ -30,7 +30,7 @@ where
 
 impl<E: ExtensionField, Mds> Transcript<E> for BasicTranscriptWithStat<'_, E, Mds>
 where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    Mds: MdsPermutation<E::BaseField, WIDTH> + Default,
 {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
         self.stat.borrow_mut().field_appended_num += 1;
@@ -64,6 +64,6 @@ where
 }
 
 impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E, Mds> where
-    Mds: MdsPermutation<E::BaseField, 8> + Default
+    Mds: MdsPermutation<E::BaseField, WIDTH> + Default
 {
 }

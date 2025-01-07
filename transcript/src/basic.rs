@@ -7,16 +7,20 @@ use p3_mds::MdsPermutation;
 use p3_poseidon::Poseidon;
 use p3_symmetric::Permutation;
 
+// follow https://github.com/Plonky3/Plonky3/blob/main/poseidon/benches/poseidon.rs#L22
+pub(crate) const WIDTH: usize = 8;
+pub(crate) const ALPHA: u64 = 7;
+
 #[derive(Clone)]
 pub struct BasicTranscript<E: ExtensionField, Mds> {
     // TODO generalized to accept general permutation
-    poseidon: Poseidon<E::BaseField, Mds, 8, 7>,
-    state: [E::BaseField; 8],
+    poseidon: Poseidon<E::BaseField, Mds, WIDTH, ALPHA>,
+    state: [E::BaseField; WIDTH],
 }
 
 impl<E: ExtensionField, Mds> BasicTranscript<E, Mds>
 where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    Mds: MdsPermutation<E::BaseField, WIDTH> + Default,
 {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
@@ -27,7 +31,7 @@ where
         let num_partial_rounds = 22;
 
         let num_rounds = 2 * half_num_full_rounds + num_partial_rounds;
-        let num_constants = 8 * num_rounds;
+        let num_constants = WIDTH * num_rounds;
         let constants = vec![E::BaseField::ZERO; num_constants];
 
         let poseidon = Poseidon::<E::BaseField, _, _, _>::new(
@@ -36,7 +40,7 @@ where
             constants,
             mds,
         );
-        let input: [E::BaseField; 8] = array::from_fn(|_| E::BaseField::ZERO);
+        let input = array::from_fn(|_| E::BaseField::ZERO);
         let label_f = E::BaseField::bytes_to_field_elements(label);
         let mut new = BasicTranscript::<E, _> {
             poseidon,
@@ -59,7 +63,7 @@ where
 
 impl<E: ExtensionField, Mds> Transcript<E> for BasicTranscript<E, Mds>
 where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    Mds: MdsPermutation<E::BaseField, WIDTH> + Default,
 {
     fn append_field_element_ext(&mut self, element: &E) {
         self.append_field_elements(element.as_bases());
@@ -102,6 +106,6 @@ where
 impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscript<E, Mds>
 where
     E::BaseField: FieldAlgebra + PrimeField,
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    Mds: MdsPermutation<E::BaseField, WIDTH> + Default,
 {
 }
