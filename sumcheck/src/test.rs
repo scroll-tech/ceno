@@ -6,6 +6,7 @@ use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use p3_field::FieldAlgebra;
 use p3_goldilocks::MdsMatrixGoldilocks;
 use p3_mds::MdsPermutation;
+use poseidon::{SPONGE_WIDTH, poseidon::PoseidonField};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
@@ -22,7 +23,8 @@ fn test_sumcheck<E: ExtensionField, Mds>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    E::BaseField: PoseidonField,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut rng = test_rng();
     let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
@@ -53,7 +55,8 @@ fn test_sumcheck_internal<E: ExtensionField, Mds>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    E::BaseField: PoseidonField,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut rng = test_rng();
     let (poly, asserted_sum) =
@@ -114,7 +117,8 @@ fn test_trivial_polynomial() {
 
 fn test_trivial_polynomial_helper<E: ExtensionField, Mds>()
 where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    E::BaseField: PoseidonField,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let nv = 1;
     let num_multiplicands_range = (4, 13);
@@ -132,7 +136,8 @@ fn test_normal_polynomial() {
 
 fn test_normal_polynomial_helper<E: ExtensionField, Mds>()
 where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    E::BaseField: PoseidonField,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let nv = 12;
     let num_multiplicands_range = (4, 9);
@@ -159,7 +164,8 @@ fn test_extract_sum() {
 
 fn test_extract_sum_helper<E: ExtensionField, Mds>()
 where
-    Mds: MdsPermutation<E::BaseField, 8> + Default,
+    E::BaseField: PoseidonField,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut rng = test_rng();
     let mut transcript = BasicTranscript::<E, Mds>::new(b"test");

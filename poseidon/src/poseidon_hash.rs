@@ -1,28 +1,38 @@
+use std::marker::PhantomData;
+
+use p3_mds::MdsPermutation;
+
 use crate::{
-    constants::{DIGEST_WIDTH, SPONGE_RATE},
+    constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
     digest::Digest,
-    poseidon::Poseidon,
+    poseidon::PoseidonField,
     poseidon_permutation::PoseidonPermutation,
 };
 
-pub struct PoseidonHash;
+pub struct PoseidonHash<F, Mds> {
+    _phantom: PhantomData<(F, Mds)>,
+}
 
-impl PoseidonHash {
-    pub fn two_to_one<F: Poseidon>(left: &Digest<F>, right: &Digest<F>) -> Digest<F> {
-        compress(left, right)
+impl<F: PoseidonField, Mds> PoseidonHash<F, Mds>
+where
+    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
+{
+    pub fn two_to_one(left: &Digest<F>, right: &Digest<F>) -> Digest<F>
+    where
+        Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
+    {
+        compress::<F, Mds>(left, right)
     }
 
-    pub fn hash_or_noop<F: Poseidon>(inputs: &[F]) -> Digest<F> {
+    pub fn hash_or_noop(inputs: &[F]) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
             Digest::from_partial(inputs)
         } else {
-            hash_n_to_hash_no_pad(inputs)
+            hash_n_to_hash_no_pad::<F, Mds>(inputs)
         }
     }
 
-    pub fn hash_or_noop_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
-        mut input_iter: I,
-    ) -> Digest<F> {
+    pub fn hash_or_noop_iter<'a, I: Iterator<Item = &'a F>>(mut input_iter: I) -> Digest<F> {
         let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
 
         for _ in 0..DIGEST_WIDTH + 1 {
@@ -42,15 +52,18 @@ impl PoseidonHash {
             )
         } else {
             let iter = initial_elements.into_iter().chain(input_iter);
-            hash_n_to_m_no_pad_iter(iter, DIGEST_WIDTH)
+            hash_n_to_m_no_pad_iter::<'_, F, _, Mds>(iter, DIGEST_WIDTH)
                 .try_into()
                 .unwrap()
         }
     }
 }
 
-pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<F> {
-    let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
+pub fn hash_n_to_m_no_pad<F: PoseidonField, Mds>(inputs: &[F], num_outputs: usize) -> Vec<F>
+where
+    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
+{
+    let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
 
     // Absorb all input chunks.
     for input_chunk in inputs.chunks(SPONGE_RATE) {
@@ -74,11 +87,14 @@ pub fn hash_n_to_m_no_pad<F: Poseidon>(inputs: &[F], num_outputs: usize) -> Vec<
     }
 }
 
-pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
+pub fn hash_n_to_m_no_pad_iter<'a, F: PoseidonField, I: Iterator<Item = &'a F>, Mds>(
     mut input_iter: I,
     num_outputs: usize,
-) -> Vec<F> {
-    let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
+) -> Vec<F>
+where
+    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
+{
+    let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
 
     // Absorb all input chunks.
     loop {
@@ -106,12 +122,20 @@ pub fn hash_n_to_m_no_pad_iter<'a, F: Poseidon, I: Iterator<Item = &'a F>>(
     }
 }
 
-pub fn hash_n_to_hash_no_pad<F: Poseidon>(inputs: &[F]) -> Digest<F> {
-    hash_n_to_m_no_pad(inputs, DIGEST_WIDTH).try_into().unwrap()
+pub fn hash_n_to_hash_no_pad<F: PoseidonField, Mds>(inputs: &[F]) -> Digest<F>
+where
+    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
+{
+    hash_n_to_m_no_pad::<F, Mds>(inputs, DIGEST_WIDTH)
+        .try_into()
+        .unwrap()
 }
 
-pub fn compress<F: Poseidon>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
-    let mut perm = PoseidonPermutation::new(core::iter::repeat(F::ZERO));
+pub fn compress<F: PoseidonField, Mds>(x: &Digest<F>, y: &Digest<F>) -> Digest<F>
+where
+    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
+{
+    let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
     perm.set_from_slice(x.elements(), 0);
     perm.set_from_slice(y.elements(), DIGEST_WIDTH);
 
@@ -123,7 +147,8 @@ pub fn compress<F: Poseidon>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
 #[cfg(test)]
 mod tests {
     use crate::{digest::Digest, poseidon_hash::PoseidonHash};
-    use goldilocks::Goldilocks;
+    use p3_field::FieldAlgebra;
+    use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
     use plonky2::{
         field::{
             goldilocks_field::GoldilocksField,
@@ -142,7 +167,7 @@ mod tests {
     fn ceno_goldy_from_plonky_goldy(values: &[GoldilocksField]) -> Vec<Goldilocks> {
         values
             .iter()
-            .map(|value| Goldilocks(value.to_canonical_u64()))
+            .map(|value| Goldilocks::from_canonical_u64(value.to_canonical_u64()))
             .collect()
     }
 
@@ -178,8 +203,10 @@ mod tests {
             let n = rng.gen_range(5..=100);
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
-            let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
-            let ceno_iter = PoseidonHash::hash_or_noop_iter(ceno_elems.iter());
+            let ceno_out =
+                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
+            let ceno_iter =
+                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
             assert!(compare_hash_output(plonky_out, ceno_iter));
         }
@@ -192,8 +219,10 @@ mod tests {
             let n = rng.gen_range(0..=4);
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
-            let ceno_out = PoseidonHash::hash_or_noop(ceno_elems.as_slice());
-            let ceno_iter = PoseidonHash::hash_or_noop_iter(ceno_elems.iter());
+            let ceno_out =
+                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
+            let ceno_iter =
+                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
             assert!(compare_hash_output(plonky_out, ceno_iter));
         }
@@ -205,7 +234,8 @@ mod tests {
             let (plonky_hash_a, ceno_hash_a) = random_hash_pair();
             let (plonky_hash_b, ceno_hash_b) = random_hash_pair();
             let plonky_combined = PlonkyPoseidonHash::two_to_one(plonky_hash_a, plonky_hash_b);
-            let ceno_combined = PoseidonHash::two_to_one(&ceno_hash_a, &ceno_hash_b);
+            let ceno_combined =
+                PoseidonHash::<_, MdsMatrixGoldilocks>::two_to_one(&ceno_hash_a, &ceno_hash_b);
             assert!(compare_hash_output(plonky_combined, ceno_combined));
         }
     }

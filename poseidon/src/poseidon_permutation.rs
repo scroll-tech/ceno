@@ -1,14 +1,28 @@
-use crate::{
-    constants::{SPONGE_RATE, SPONGE_WIDTH},
-    poseidon::Poseidon,
-};
+use p3_field::PrimeField;
+use p3_mds::MdsPermutation;
+use p3_poseidon::Poseidon;
 
-#[derive(Copy, Clone)]
-pub struct PoseidonPermutation<T: Poseidon> {
+use crate::{
+    constants::{
+        ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, SPONGE_RATE, SPONGE_WIDTH,
+    },
+    poseidon::PoseidonField,
+};
+use p3_symmetric::Permutation;
+
+// follow https://github.com/Plonky3/Plonky3/blob/main/poseidon/benches/poseidon.rs#L22
+pub(crate) const ALPHA: u64 = 7;
+
+#[derive(Clone)]
+pub struct PoseidonPermutation<T: PoseidonField, Mds> {
+    poseidon: Poseidon<T, Mds, SPONGE_WIDTH, ALPHA>,
     state: [T; SPONGE_WIDTH],
 }
 
-impl<T: Poseidon> PoseidonPermutation<T> {
+impl<T: PoseidonField + PrimeField, Mds> PoseidonPermutation<T, Mds>
+where
+    Mds: MdsPermutation<T, SPONGE_WIDTH> + Default,
+{
     /// Initialises internal state with values from `iter` until
     /// `iter` is exhausted or `SPONGE_WIDTH` values have been
     /// received; remaining state (if any) initialised with
@@ -18,6 +32,12 @@ impl<T: Poseidon> PoseidonPermutation<T> {
     /// or similar.
     pub fn new<I: IntoIterator<Item = T>>(elts: I) -> Self {
         let mut perm = Self {
+            poseidon: Poseidon::<T, _, SPONGE_WIDTH, ALPHA>::new(
+                HALF_N_FULL_ROUNDS,
+                N_PARTIAL_ROUNDS,
+                ALL_ROUND_CONSTANTS.map(T::from_canonical_u64).to_vec(),
+                Mds::default(),
+            ),
             state: [T::default(); SPONGE_WIDTH],
         };
         perm.set_from_iter(elts, 0);
@@ -43,7 +63,7 @@ impl<T: Poseidon> PoseidonPermutation<T> {
 
     /// Apply permutation to internal state
     pub fn permute(&mut self) {
-        self.state = T::poseidon(self.state);
+        self.poseidon.permute_mut(&mut self.state);
     }
 
     /// Return a slice of `RATE` elements

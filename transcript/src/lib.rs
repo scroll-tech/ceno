@@ -11,7 +11,6 @@ use ff_ext::SmallField;
 use p3_field::FieldAlgebra;
 pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
-
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Challenge<F> {
     pub elements: F,

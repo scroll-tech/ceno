@@ -26,6 +26,7 @@ transcript = { path = "../transcript" }
 criterion.workspace = true
 p3-goldilocks.workspace = true
 p3-mds.workspace = true
+poseidon.workspace = true
 
 [[bench]]
 harness = false
