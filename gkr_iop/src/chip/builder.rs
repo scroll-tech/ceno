@@ -25,7 +25,7 @@ impl Chip {
     /// Allocate `Witness` and `EvalExpression` for the input polynomials in a layer.
     /// Where `Witness` denotes the index and `EvalExpression` denotes the position
     /// to place the evaluation of the polynomial after processing the layer prover
-    /// for each polynomial.
+    /// for each polynomial. This should be called at most once for each layer!
     #[allow(clippy::type_complexity)]
     pub fn allocate_wits_in_layer<const M: usize, const N: usize>(
         &mut self,

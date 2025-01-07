@@ -16,7 +16,7 @@ pub struct Chip {
     /// All input evaluations generated at the end of layer protocols will be stored
     /// in a vector and this is the length.
     pub n_evaluations: usize,
-    /// The layers of the GKR circuit, in the reverse order.
+    /// The layers of the GKR circuit, in the order outputs-to-inputs.
     pub layers: Vec<Layer>,
 
     /// The polynomial index and evaluation expressions of the base inputs.

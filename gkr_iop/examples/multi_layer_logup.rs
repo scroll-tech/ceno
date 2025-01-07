@@ -65,6 +65,7 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
             (self.output_cumulative_sum.clone(), vec![]),
             |([den, num], challenges), i| {
                 let [den_0, den_1, num_0, num_1] = if i == height - 1 {
+                    // Allocate witnesses in the extension field, except numerator inputs in the base field.
                     let ([num_0, num_1], [den_0, den_1]) = chip.allocate_wits_in_layer();
                     [den_0, den_1, num_0, num_1]
                 } else {
