@@ -22,8 +22,7 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
-mod syscalls;
-pub use syscalls::syscall_keccak_permute;
+pub mod syscalls;
 
 #[no_mangle]
 #[linkage = "weak"]

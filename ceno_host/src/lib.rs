@@ -99,14 +99,19 @@ impl Items {
     }
 }
 
-impl From<&CenoStdin> for Vec<u32> {
-    fn from(stdin: &CenoStdin) -> Vec<u32> {
+impl From<&CenoStdin> for Vec<u8> {
+    fn from(stdin: &CenoStdin) -> Vec<u8> {
         let mut items = Items::default();
         for item in &stdin.items {
             items.append(Item::from(item));
         }
-        items
-            .finalise()
+        items.finalise()
+    }
+}
+
+impl From<&CenoStdin> for Vec<u32> {
+    fn from(stdin: &CenoStdin) -> Vec<u32> {
+        Vec::<u8>::from(stdin)
             .into_iter()
             .tuples()
             .map(|(a, b, c, d)| u32::from_le_bytes([a, b, c, d]))

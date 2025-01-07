@@ -1,10 +1,8 @@
 // Based on https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/zkvm/entrypoint/src/syscalls/keccak_permute.rs
-
-#[allow(dead_code)]
-const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
-
 #[cfg(target_os = "zkvm")]
 use core::arch::asm;
+
+pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
 
 /// Executes the Keccak256 permutation on the given state.
 ///
@@ -13,7 +11,7 @@ use core::arch::asm;
 /// The caller must ensure that `state` is valid pointer to data that is aligned along a four
 /// byte boundary.
 #[allow(unused_variables)]
-pub fn syscall_keccak_permute(state: &mut [u64; 25]) {
+pub fn keccak_permute(state: &mut [u64; 25]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(

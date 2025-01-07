@@ -18,6 +18,13 @@ use transcript::{
     BasicTranscript as Transcript, BasicTranscriptWithStat as TranscriptWithStat, StatisticRecorder,
 };
 
+fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
+    parse_size::Config::new()
+        .with_binary()
+        .parse_size(s)
+        .map(|size| size as u32)
+}
+
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -45,11 +52,11 @@ struct Args {
     hints: Option<String>,
 
     /// Stack size in bytes.
-    #[arg(long, default_value = "32768")]
+    #[arg(long, default_value = "32k", value_parser = parse_size)]
     stack_size: u32,
 
     /// Heap size in bytes.
-    #[arg(long, default_value = "2097152")]
+    #[arg(long, default_value = "2M", value_parser = parse_size)]
     heap_size: u32,
 }
 
