@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ark_std::{rand::RngCore, test_rng};
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
-use p3_field::FieldAlgebra;
+use p3_field::{Field, FieldAlgebra};
 use p3_goldilocks::MdsMatrixGoldilocks;
 use p3_mds::MdsPermutation;
 use poseidon::SPONGE_WIDTH;
