@@ -1105,6 +1105,9 @@ macro_rules! op_mle_product_3 {
             _ => op_mle_product_3!(@internal |$f1, $f2, $f3| $op, |$bb_out| $op_bb_out),
         }
     };
+    (|$f1:ident, $f2:ident, $f3:ident| $op:expr) => {
+        op_mle_product_3!(|$f1, $f2, $f3| $op, |out| out),
+    };
     (@internal |$f1:ident, $f2:ident, $f3:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$f1.evaluations(), &$f2.evaluations(), &$f3.evaluations()) {
             (
@@ -1119,21 +1122,21 @@ macro_rules! op_mle_product_3 {
                 $crate::mle::FieldType::Base(f2_vec),
                 $crate::mle::FieldType::Base(f3_vec),
             ) => {
-                op_mle3_range!($f1, $f2, $f3, f1_vec, f2_vec, f3_vec, $op, |$bb_out| $op_bb_out)
+                op_mle3_range!($f1, $f2, $f3, f1_vec, f2_vec, f3_vec, $op, |out| out)
             }
             (
                 $crate::mle::FieldType::Ext(f1_vec),
                 $crate::mle::FieldType::Ext(f2_vec),
                 $crate::mle::FieldType::Ext(f3_vec),
             ) => {
-                op_mle3_range!($f1, $f2, $f3, f1_vec, f2_vec, f3_vec, $op, |$bb_out| $op_bb_out)
+                op_mle3_range!($f1, $f2, $f3, f1_vec, f2_vec, f3_vec, $op, |out| out)
             }
             (
                 $crate::mle::FieldType::Ext(f1_vec),
                 $crate::mle::FieldType::Ext(f2_vec),
                 $crate::mle::FieldType::Base(f3_vec),
             ) => {
-                op_mle3_range!($f1, $f2, $f3, f1_vec, f2_vec, f3_vec, $op, |$bb_out| $op_bb_out)
+                op_mle3_range!($f1, $f2, $f3, f1_vec, f2_vec, f3_vec, $op, |out| out)
             }
             // ... add more canonial case if missing
             (a, b, c) => unreachable!(

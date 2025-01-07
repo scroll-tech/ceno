@@ -1,4 +1,4 @@
-use std::{array, mem, sync::Arc};
+use std::{mem, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
@@ -26,6 +26,7 @@ use crate::{
         merge_sumcheck_polys, serial_extrapolate,
     },
 };
+use p3_field::FieldAlgebra;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
@@ -438,11 +439,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                 let res = (0..largest_even_below(f.len()))
                                     .step_by(2)
                                     .rev()
-                                    .fold(AdditiveArray::<_, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
-                                            acc.0[0] += f[b];
-                                            acc.0[1] += f[b+1];
-                                            acc
-                                });
+                                    .map(|b| {
+                                        AdditiveArray([
+                                            f[b],
+                                            f[b+1],
+                                        ])
+                                }).sum::<AdditiveArray<_, 2>>();
                                 let res = if f.len() == 1 {
                                     AdditiveArray::<_, 2>([f[0]; 2])
                                 } else {
@@ -450,12 +452,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                 };
                                 let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
                                 if num_vars_multiplicity > 0 {
-                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from_canonical_u64(1 << num_vars_multiplicity)))
                                 } else {
                                     res
                                 }
                             },
-                            |sum| AdditiveArray(sum.0.map(E::from))
+                            |sum| AdditiveArray(sum.0.map(E::from_base))
                         }
                         .to_vec()
                     }
@@ -466,15 +468,15 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         );
                         commutative_op_mle_pair!(
                             |f, g| {
-                                let res = (0..largest_even_below(f.len())).step_by(2).rev().fold(
-                                    AdditiveArray::<_, 3>(array::from_fn(|_| 0.into())),
-                                    |mut acc, b| {
-                                        acc.0[0] += f[b] * g[b];
-                                        acc.0[1] += f[b + 1] * g[b + 1];
-                                        acc.0[2] +=
-                                            (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
-                                        acc
-                                });
+                                let res = (0..largest_even_below(f.len())).step_by(2).rev().map(|b| {
+                                    AdditiveArray([
+                                        f[b] * g[b],
+                                        f[b + 1] * g[b + 1],
+                                        (f[b + 1] + f[b + 1] - f[b])
+                                            * (g[b + 1] + g[b + 1] - g[b]),
+                                    ])
+                                })
+                                .sum::<AdditiveArray<_, 3>>();
                                 let res = if f.len() == 1 {
                                     AdditiveArray::<_, 3>([f[0] * g[0]; 3])
                                 } else {
@@ -482,12 +484,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                 };
                                 let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
                                 if num_vars_multiplicity > 0 {
-                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from_canonical_u64(1 << num_vars_multiplicity)))
                                 } else {
                                     res
                                 }
                             },
-                            |sum| AdditiveArray(sum.0.map(E::from))
+                            |sum| AdditiveArray(sum.0.map(E::from_base))
                         )
                         .to_vec()
                     }
@@ -524,19 +526,19 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                 };
                                 let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f1.len()).max(1) + self.round - 1);
                                 if num_vars_multiplicity > 0 {
-                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from_canonical_u64(1 << num_vars_multiplicity)))
                                 } else {
                                     res
                                 }
                             },
-                            |sum| AdditiveArray(sum.0.map(E::from))
+                            |sum| AdditiveArray(sum.0.map(E::from_base))
                         )
                         .to_vec()
                     }
                     _ => unimplemented!("do not support degree > 3"),
                 };
                 exit_span!(span);
-                sum.iter_mut().for_each(|sum| *sum *= coefficient);
+                sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                 let span = entered_span!("extrapolation");
                 let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
@@ -804,12 +806,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                     };
                                     let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
                                     if num_vars_multiplicity > 0 {
-                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from_canonical_u64(1 << num_vars_multiplicity)))
                                     } else {
                                         res
                                     }
                                 },
-                                |sum| AdditiveArray(sum.0.map(E::from))
+                                |sum| AdditiveArray(sum.0.map(E::from_base))
                             }
                             .to_vec()
                         }
@@ -840,12 +842,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                     };
                                     let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
                                     if num_vars_multiplicity > 0 {
-                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from_canonical_u64(1 << num_vars_multiplicity)))
                                     } else {
                                         res
                                     }
                                 },
-                                |sum| AdditiveArray(sum.0.map(E::from))
+                                |sum| AdditiveArray(sum.0.map(E::from_base))
                             )
                             .to_vec()
                         }
@@ -881,12 +883,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                     };
                                     let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f1.len()).max(1) + self.round - 1);
                                     if num_vars_multiplicity > 0 {
-                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from_canonical_u64(1 << num_vars_multiplicity)))
                                     } else {
                                         res
                                     }
                                 },
-                                |sum| AdditiveArray(sum.0.map(E::from))
+                                |sum| AdditiveArray(sum.0.map(E::from_base))
                             )
                             .to_vec()
                         }
