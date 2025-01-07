@@ -89,24 +89,7 @@ pub trait SmallField: Serialize + P3Field {
     fn to_noncanonical_u64(&self) -> u64;
 }
 
-pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes
-// + FromUniformBytes<64>
-// + From<Self::BaseField>
-// + Add<Self::BaseField, Output = Self>
-// + Sub<Self::BaseField, Output = Self>
-// + Mul<Self::BaseField, Output = Self>
-// // + for<'a> Add<&'a Self::BaseField, Output = Self>
-// + for<'a> Sub<&'a Self::BaseField, Output = Self>
-// + for<'a> Mul<&'a Self::BaseField, Output = Self>
-// + AddAssign<Self::BaseField>
-// + SubAssign<Self::BaseField>
-// + MulAssign<Self::BaseField>
-// + for<'a> AddAssign<&'a Self::BaseField>
-// + for<'a> SubAssign<&'a Self::BaseField>
-// + for<'a> MulAssign<&'a Self::BaseField>
-// + Ord
-// + std::hash::Hash
-{
+pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes {
     const DEGREE: usize;
 
     type BaseField: SmallField + Ord + PrimeField + FromUniformBytes;
@@ -174,7 +157,6 @@ mod impl_goldilocks {
         fn from_bases(bases: &[Goldilocks]) -> Self {
             debug_assert_eq!(bases.len(), 2);
             Self::from_base_slice(bases)
-            // Self([bases[0], bases[1]])
         }
 
         fn as_bases(&self) -> &[Goldilocks] {
@@ -183,7 +165,6 @@ mod impl_goldilocks {
 
         /// Convert limbs into self
         fn from_limbs(limbs: &[Self::BaseField]) -> Self {
-            // Self([limbs[0], limbs[1]])
             Self::from_base_slice(&limbs[0..2])
         }
 
@@ -192,7 +173,6 @@ mod impl_goldilocks {
                 .iter()
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()
-            // <GoldilocksExt2 as GoldilocksEF>::to_canonical_u64_vec(self)
         }
     }
 }

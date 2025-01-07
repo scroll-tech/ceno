@@ -15,10 +15,6 @@ ff.workspace = true
 goldilocks.workspace = true
 serde.workspace = true
 unroll = "0.1"
-ff_ext = { path = "../ff_ext" }
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-poseidon.workspace = true
 
 [dev-dependencies]
 ark-std.workspace = true

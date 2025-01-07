@@ -1365,18 +1365,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
-name = "p3-challenger"
-version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3#b0591e9b82d58d10f86359875b5d5fa96433b4cf"
-dependencies = [
- "p3-field",
- "p3-maybe-rayon",
- "p3-symmetric",
- "p3-util",
- "tracing",
-]
-
-[[package]]
 name = "p3-dft"
 version = "0.1.0"
 source = "git+https://github.com/plonky3/plonky3#b0591e9b82d58d10f86359875b5d5fa96433b4cf"
@@ -1645,11 +1633,7 @@ dependencies = [
  "ark-std",
  "criterion",
  "ff",
- "ff_ext",
  "goldilocks",
- "p3-field",
- "p3-goldilocks",
- "p3-poseidon",
  "plonky2",
  "rand",
  "serde",
@@ -2446,12 +2430,10 @@ dependencies = [
  "ff",
  "ff_ext",
  "goldilocks",
- "p3-challenger",
  "p3-field",
  "p3-goldilocks",
  "p3-mds",
  "p3-poseidon",
- "p3-poseidon2",
  "p3-symmetric",
  "serde",
 ]
