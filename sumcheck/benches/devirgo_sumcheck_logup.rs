@@ -8,15 +8,14 @@ use criterion::*;
 use ff::Field;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use sumcheck::{structs::IOPProverStateV2 as IOPProverState, util::ceil_log2};
+use sumcheck::{structs::IOPProverState, util::ceil_log2};
 
 use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     op_mle,
     util::max_usable_threads,
-    virtual_poly::build_eq_x_r_vec,
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2 as VirtualPolynomial},
+    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial, build_eq_x_r_vec},
 };
 use transcript::BasicTranscript as Transcript;
 
