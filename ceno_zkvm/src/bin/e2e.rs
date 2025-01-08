@@ -113,7 +113,7 @@ fn main() {
         args.heap_size,
         pub_io_size,
     );
-    tracing::info!("Running on platform {:?} {:?}", args.platform, platform);
+    tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
         args.stack_size,
