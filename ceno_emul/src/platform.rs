@@ -28,7 +28,7 @@ impl Display for Platform {
         };
         write!(
             f,
-            "Platform {{ rom: {:?}, prog_data: {:?}, stack: {:?}, heap: {:?}, public_io: {:?}, hints: {:?}, unsafe_ecall_nop: {} }}",
+            "Platform {{ rom: {:?}, prog_data: {:x?}, stack: {:?}, heap: {:?}, public_io: {:?}, hints: {:?}, unsafe_ecall_nop: {} }}",
             self.rom,
             prog_data,
             self.stack,
