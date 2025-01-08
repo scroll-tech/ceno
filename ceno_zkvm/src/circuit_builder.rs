@@ -9,7 +9,7 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, StructuralFixed, StructuralWitIn, WitIn},
+    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
@@ -57,6 +57,7 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
     pub table_len: usize,
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
@@ -93,10 +94,6 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
-
-    pub num_structural_fixed: usize,
-    pub structural_fixed_namespace_map: Vec<String>,
-    pub structural_fixed_len: Vec<usize>,
 
     pub instance_name_map: HashMap<Instance, String>,
 
@@ -155,9 +152,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
-            num_structural_fixed: 0,
-            structural_fixed_namespace_map: vec![],
-            structural_fixed_len: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_name_map: HashMap::new(),
             r_expressions: vec![],
@@ -270,21 +264,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(f)
     }
 
-    pub fn create_structural_fixed<NR: Into<String>, N: FnOnce() -> NR>(
-        &mut self,
-        n: N,
-        table_len: usize,
-    ) -> Result<StructuralFixed, ZKVMError> {
-        let f = StructuralFixed(self.num_fixed, table_len);
-        self.num_structural_fixed += 1;
-
-        let path = self.ns.compute_path(n().into());
-        self.structural_fixed_namespace_map.push(path);
-        self.structural_fixed_len.push(table_len);
-
-        Ok(f)
-    }
-
     pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         n: N,
@@ -336,6 +315,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         &mut self,
         name_fn: N,
         table_len: usize,
+        table_spec: SetTableSpec,
         rom_type: ROMType,
         record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
@@ -360,6 +340,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             values: rlc_record,
             multiplicity,
             table_len,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.lk_table_expressions_namespace_map.push(path);

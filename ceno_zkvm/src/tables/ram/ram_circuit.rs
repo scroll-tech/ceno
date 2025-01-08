@@ -84,11 +84,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
-        num_structural_fixed: usize,
         init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         // assume returned table is well-formed include padding
-        config.gen_init_state(num_fixed, num_structural_fixed, init_v)
+        config.gen_init_state(num_fixed, init_v)
     }
 
     fn assign_instances(
@@ -133,11 +132,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
-        num_structural_fixed: usize,
         io_addrs: &[Addr],
     ) -> RowMajorMatrix<E::BaseField> {
         // assume returned table is well-formed including padding
-        config.gen_init_state(num_fixed, num_structural_fixed, io_addrs)
+        config.gen_init_state(num_fixed, io_addrs)
     }
 
     fn assign_instances(
@@ -207,7 +205,6 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
     fn generate_fixed_traces(
         _config: &Self::TableConfig,
         _num_fixed: usize,
-        _num_structural_fixed: usize,
         _init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)

@@ -17,7 +17,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         for (c_name, cs) in self.circuit_css {
             // fixed_traces is optional
             // verifier will check it existent if cs.num_fixed > 0
-            let fixed_traces = if cs.num_fixed + cs.num_structural_fixed > 0 {
+            let fixed_traces = if cs.num_fixed > 0 {
                 vm_fixed_traces
                     .circuit_fixed_traces
                     .remove(&c_name)

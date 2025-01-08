@@ -19,8 +19,7 @@ impl<E: ExtensionField> Expression<E> {
                 }]
             }
 
-            Fixed(_) | StructuralFixed(_) | WitIn(_) | StructuralWitIn(..) | Instance(_)
-            | Challenge(..) => {
+            Fixed(_) | WitIn(_) | StructuralWitIn(..) | Instance(_) | Challenge(..) => {
                 vec![Term {
                     coeff: Expression::ONE,
                     vars: vec![self.clone()],
@@ -148,7 +147,7 @@ mod tests {
             E::random(&mut rng),
         ];
         move |expr: &Expression<E>| {
-            eval_by_expr_with_fixed(&fixed, &[], &witnesses, &[], &challenges, expr)
+            eval_by_expr_with_fixed(&fixed, &witnesses, &[], &challenges, expr)
         }
     }
 }

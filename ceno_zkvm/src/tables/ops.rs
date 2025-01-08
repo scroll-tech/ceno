@@ -119,12 +119,7 @@ mod tests {
 
         let config = PowTableCircuit::<E>::construct_circuit(&mut cb).unwrap();
 
-        let fixed = PowTableCircuit::<E>::generate_fixed_traces(
-            &config,
-            cb.cs.num_fixed,
-            cb.cs.num_structural_fixed,
-            &(),
-        );
+        let fixed = PowTableCircuit::<E>::generate_fixed_traces(&config, cb.cs.num_fixed, &());
 
         for (i, row) in fixed.iter_rows().enumerate() {
             let (base, exp) = PowTable::unpack(i as u64);

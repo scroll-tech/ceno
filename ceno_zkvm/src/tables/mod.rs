@@ -27,7 +27,6 @@ pub trait TableCircuit<E: ExtensionField> {
     fn generate_fixed_traces(
         config: &Self::TableConfig,
         num_fixed: usize,
-        num_structural_fixed: usize,
         input: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField>;
 

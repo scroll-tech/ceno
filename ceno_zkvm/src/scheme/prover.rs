@@ -189,6 +189,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pk,
                     witness,
                     wits_commit,
+                    // structural_witness,
                     &pi,
                     num_instances,
                     transcript,
@@ -276,7 +277,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .chain(cs.lk_expressions.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&[], &[], &witnesses, &[], pi, challenges, expr)
+                wit_infer_by_expr(&[], &witnesses, &[], pi, challenges, expr)
             })
             .collect();
         let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
@@ -556,7 +557,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 // sanity check in debug build and output != instance index for zero check sumcheck poly
                 if cfg!(debug_assertions) {
                     let expected_zero_poly =
-                        wit_infer_by_expr(&[], &[], &witnesses, &[], pi, challenges, expr);
+                        wit_infer_by_expr(&[], &witnesses, &[], pi, challenges, expr);
                     let top_100_errors = expected_zero_poly
                         .get_base_field_vec()
                         .iter()
@@ -699,7 +700,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         challenges: &[E; 2],
     ) -> Result<ResultCreateTableProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
-        let mut fixed = circuit_pk
+        let fixed = circuit_pk
             .fixed_traces
             .as_ref()
             .map(|fixed_traces| {
@@ -709,12 +710,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .collect::<Vec<ArcMultilinearExtension<E>>>()
             })
             .unwrap_or_default();
-        let structural_fixed = fixed.split_off(cs.num_fixed);
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
         assert_eq!(structural_witnesses.len(), cs.num_structural_witin as usize);
         assert_eq!(fixed.len(), cs.num_fixed);
-        assert_eq!(structural_fixed.len(), cs.num_structural_fixed);
         // check all witness size are power of 2
         assert!(
             witnesses
@@ -756,7 +755,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 assert_eq!(expr.degree(), 1);
                 wit_infer_by_expr(
                     &fixed,
-                    &structural_fixed,
                     &witnesses,
                     &structural_witnesses,
                     pi,

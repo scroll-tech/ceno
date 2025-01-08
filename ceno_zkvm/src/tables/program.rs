@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::InstancePaddingStrategy,
@@ -116,6 +116,10 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         cb.lk_table_record(
             || "prog table",
             cb.params.program_size.next_power_of_two(),
+            SetTableSpec {
+                len: None,
+                structural_witins: vec![],
+            },
             ROMType::Instruction,
             record_exprs,
             mlt.expr(),
@@ -131,7 +135,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     fn generate_fixed_traces(
         config: &ProgramTableConfig,
         num_fixed: usize,
-        num_structural_fixed: usize,
         program: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         let num_instructions = program.instructions.len();
@@ -140,7 +143,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         let mut fixed = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
-            num_fixed + num_structural_fixed,
+            num_fixed,
             InstancePaddingStrategy::Default,
         );
 
@@ -225,12 +228,8 @@ mod tests {
             }
         };
 
-        let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(
-            &config,
-            cb.cs.num_fixed,
-            cb.cs.num_structural_fixed,
-            &program,
-        );
+        let fixed =
+            ProgramTableCircuit::<E>::generate_fixed_traces(&config, cb.cs.num_fixed, &program);
         check(&fixed);
 
         let lkm = LkMultiplicity::default().into_finalize_result();

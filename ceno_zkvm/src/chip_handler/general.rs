@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, StructuralFixed, StructuralWitIn, ToExpr, WitIn},
+    expression::{Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn},
     instructions::riscv::constants::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
         UINT_LIMBS,
@@ -51,18 +51,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_fixed(name_fn)
     }
 
-    pub fn create_structural_fixed<NR, N>(
-        &mut self,
-        name_fn: N,
-        table_len: usize,
-    ) -> Result<StructuralFixed, ZKVMError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.cs.create_structural_fixed(name_fn, table_len)
-    }
-
     pub fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], ZKVMError> {
         Ok([
             self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
@@ -108,6 +96,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         &mut self,
         name_fn: N,
         table_len: usize,
+        table_spec: SetTableSpec,
         rom_type: ROMType,
         record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
@@ -116,8 +105,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs
-            .lk_table_record(name_fn, table_len, rom_type, record, multiplicity)
+        self.cs.lk_table_record(
+            name_fn,
+            table_len,
+            table_spec,
+            rom_type,
+            record,
+            multiplicity,
+        )
     }
 
     pub fn r_table_record<NR, N>(

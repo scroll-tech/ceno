@@ -7,7 +7,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use std::collections::HashMap;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::InstancePaddingStrategy,
@@ -38,7 +38,17 @@ impl OpTableConfig {
 
         let record_exprs = abc.into_iter().map(|f| Expression::Fixed(f)).collect_vec();
 
-        cb.lk_table_record(|| "record", table_len, rom_type, record_exprs, mlt.expr())?;
+        cb.lk_table_record(
+            || "record",
+            table_len,
+            SetTableSpec {
+                len: None,
+                structural_witins: vec![],
+            },
+            rom_type,
+            record_exprs,
+            mlt.expr(),
+        )?;
 
         Ok(Self { abc, mlt })
     }
@@ -46,14 +56,10 @@ impl OpTableConfig {
     pub fn generate_fixed_traces<F: SmallField>(
         &self,
         num_fixed: usize,
-        num_structural_fixed: usize,
         content: Vec<[u64; 3]>,
     ) -> RowMajorMatrix<F> {
-        let mut fixed = RowMajorMatrix::<F>::new(
-            content.len(),
-            num_fixed + num_structural_fixed,
-            InstancePaddingStrategy::Default,
-        );
+        let mut fixed =
+            RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Default);
 
         fixed
             .par_iter_mut()
