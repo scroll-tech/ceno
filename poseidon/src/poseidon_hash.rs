@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
+use p3_field::PrimeField;
 use p3_mds::MdsPermutation;
 
 use crate::{
     constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
     digest::Digest,
-    poseidon::PoseidonField,
     poseidon_permutation::PoseidonPermutation,
 };
 
@@ -13,7 +13,7 @@ pub struct PoseidonHash<F, Mds> {
     _phantom: PhantomData<(F, Mds)>,
 }
 
-impl<F: PoseidonField, Mds> PoseidonHash<F, Mds>
+impl<F: PrimeField, Mds> PoseidonHash<F, Mds>
 where
     Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
 {
@@ -59,7 +59,7 @@ where
     }
 }
 
-pub fn hash_n_to_m_no_pad<F: PoseidonField, Mds>(inputs: &[F], num_outputs: usize) -> Vec<F>
+pub fn hash_n_to_m_no_pad<F: PrimeField, Mds>(inputs: &[F], num_outputs: usize) -> Vec<F>
 where
     Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
 {
@@ -87,7 +87,7 @@ where
     }
 }
 
-pub fn hash_n_to_m_no_pad_iter<'a, F: PoseidonField, I: Iterator<Item = &'a F>, Mds>(
+pub fn hash_n_to_m_no_pad_iter<'a, F: PrimeField, I: Iterator<Item = &'a F>, Mds>(
     mut input_iter: I,
     num_outputs: usize,
 ) -> Vec<F>
@@ -122,7 +122,7 @@ where
     }
 }
 
-pub fn hash_n_to_hash_no_pad<F: PoseidonField, Mds>(inputs: &[F]) -> Digest<F>
+pub fn hash_n_to_hash_no_pad<F: PrimeField, Mds>(inputs: &[F]) -> Digest<F>
 where
     Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
 {
@@ -131,7 +131,7 @@ where
         .unwrap()
 }
 
-pub fn compress<F: PoseidonField, Mds>(x: &Digest<F>, y: &Digest<F>) -> Digest<F>
+pub fn compress<F: PrimeField, Mds>(x: &Digest<F>, y: &Digest<F>) -> Digest<F>
 where
     Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
 {
@@ -146,9 +146,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{digest::Digest, poseidon_hash::PoseidonHash};
+    use crate::{P2MdsMatrixGoldilocks, digest::Digest, poseidon_hash::PoseidonHash};
     use p3_field::FieldAlgebra;
-    use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
+    use p3_goldilocks::Goldilocks;
     use plonky2::{
         field::{
             goldilocks_field::GoldilocksField,
@@ -204,9 +204,9 @@ mod tests {
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out =
-                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
+                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
             let ceno_iter =
-                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
+                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
             assert!(compare_hash_output(plonky_out, ceno_iter));
         }
@@ -220,9 +220,9 @@ mod tests {
             let (plonky_elems, ceno_elems) = test_vector_pair(n);
             let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
             let ceno_out =
-                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
+                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
             let ceno_iter =
-                PoseidonHash::<_, MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
+                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
             assert!(compare_hash_output(plonky_out, ceno_out));
             assert!(compare_hash_output(plonky_out, ceno_iter));
         }
@@ -235,7 +235,7 @@ mod tests {
             let (plonky_hash_b, ceno_hash_b) = random_hash_pair();
             let plonky_combined = PlonkyPoseidonHash::two_to_one(plonky_hash_a, plonky_hash_b);
             let ceno_combined =
-                PoseidonHash::<_, MdsMatrixGoldilocks>::two_to_one(&ceno_hash_a, &ceno_hash_b);
+                PoseidonHash::<_, P2MdsMatrixGoldilocks>::two_to_one(&ceno_hash_a, &ceno_hash_b);
             assert!(compare_hash_output(plonky_combined, ceno_combined));
         }
     }

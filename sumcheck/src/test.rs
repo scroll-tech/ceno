@@ -6,7 +6,7 @@ use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use p3_field::FieldAlgebra;
 use p3_goldilocks::MdsMatrixGoldilocks;
 use p3_mds::MdsPermutation;
-use poseidon::{SPONGE_WIDTH, poseidon::PoseidonField};
+use poseidon::SPONGE_WIDTH;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
@@ -23,7 +23,6 @@ fn test_sumcheck<E: ExtensionField, Mds>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut rng = test_rng();
@@ -55,7 +54,6 @@ fn test_sumcheck_internal<E: ExtensionField, Mds>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut rng = test_rng();
@@ -117,7 +115,6 @@ fn test_trivial_polynomial() {
 
 fn test_trivial_polynomial_helper<E: ExtensionField, Mds>()
 where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let nv = 1;
@@ -136,7 +133,6 @@ fn test_normal_polynomial() {
 
 fn test_normal_polynomial_helper<E: ExtensionField, Mds>()
 where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let nv = 12;
@@ -164,7 +160,6 @@ fn test_extract_sum() {
 
 fn test_extract_sum_helper<E: ExtensionField, Mds>()
 where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut rng = test_rng();

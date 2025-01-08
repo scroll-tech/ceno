@@ -1,7 +1,7 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
 use ff_ext::ExtensionField;
 use p3_mds::MdsPermutation;
-use poseidon::{SPONGE_WIDTH, poseidon::PoseidonField};
+use poseidon::SPONGE_WIDTH;
 use std::cell::RefCell;
 
 #[derive(Debug, Default)]
@@ -12,17 +12,13 @@ pub struct Statistic {
 pub type StatisticRecorder = RefCell<Statistic>;
 
 #[derive(Clone)]
-pub struct BasicTranscriptWithStat<'a, E: ExtensionField, Mds>
-where
-    E::BaseField: PoseidonField,
-{
+pub struct BasicTranscriptWithStat<'a, E: ExtensionField, Mds> {
     inner: BasicTranscript<E, Mds>,
     stat: &'a StatisticRecorder,
 }
 
 impl<'a, E: ExtensionField, Mds> BasicTranscriptWithStat<'a, E, Mds>
 where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
@@ -35,7 +31,6 @@ where
 
 impl<E: ExtensionField, Mds> Transcript<E> for BasicTranscriptWithStat<'_, E, Mds>
 where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
@@ -69,9 +64,7 @@ where
     }
 }
 
-impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E, Mds>
-where
-    E::BaseField: PoseidonField,
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E, Mds> where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default
 {
 }

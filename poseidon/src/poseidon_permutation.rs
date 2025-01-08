@@ -2,11 +2,8 @@ use p3_field::PrimeField;
 use p3_mds::MdsPermutation;
 use p3_poseidon::Poseidon;
 
-use crate::{
-    constants::{
-        ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, SPONGE_RATE, SPONGE_WIDTH,
-    },
-    poseidon::PoseidonField,
+use crate::constants::{
+    ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, SPONGE_RATE, SPONGE_WIDTH,
 };
 use p3_symmetric::Permutation;
 
@@ -14,12 +11,12 @@ use p3_symmetric::Permutation;
 pub(crate) const ALPHA: u64 = 7;
 
 #[derive(Clone)]
-pub struct PoseidonPermutation<T: PoseidonField, Mds> {
+pub struct PoseidonPermutation<T, Mds> {
     poseidon: Poseidon<T, Mds, SPONGE_WIDTH, ALPHA>,
     state: [T; SPONGE_WIDTH],
 }
 
-impl<T: PoseidonField + PrimeField, Mds> PoseidonPermutation<T, Mds>
+impl<T: PrimeField, Mds> PoseidonPermutation<T, Mds>
 where
     Mds: MdsPermutation<T, SPONGE_WIDTH> + Default,
 {

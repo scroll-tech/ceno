@@ -5,7 +5,7 @@ use poseidon::poseidon_hash::PoseidonHash;
 use transcript::Transcript;
 
 pub use poseidon::digest::Digest;
-use poseidon::poseidon::PoseidonField;
+use poseidon::poseidon::PrimeField;
 
 pub fn write_digest_to_transcript<E: ExtensionField>(
     digest: &Digest<E::BaseField>,
@@ -44,6 +44,6 @@ pub fn hash_two_leaves_batch_base<E: ExtensionField>(
     hash_two_digests(&a_m_to_1_hash, &b_m_to_1_hash)
 }
 
-pub fn hash_two_digests<F: SmallField + PoseidonField>(a: &Digest<F>, b: &Digest<F>) -> Digest<F> {
+pub fn hash_two_digests<F: SmallField + PrimeField>(a: &Digest<F>, b: &Digest<F>) -> Digest<F> {
     PoseidonHash::two_to_one(a, b)
 }

@@ -1,12 +1,12 @@
 use crate::constants::DIGEST_WIDTH;
-use ff_ext::SmallField;
+use p3_field::PrimeField;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(bound = "")]
-pub struct Digest<F: SmallField>(pub [F; DIGEST_WIDTH]);
+pub struct Digest<F: PrimeField>(pub [F; DIGEST_WIDTH]);
 
-impl<F: SmallField> TryFrom<Vec<F>> for Digest<F> {
+impl<F: PrimeField> TryFrom<Vec<F>> for Digest<F> {
     type Error = String;
 
     fn try_from(values: Vec<F>) -> Result<Self, Self::Error> {
@@ -20,7 +20,7 @@ impl<F: SmallField> TryFrom<Vec<F>> for Digest<F> {
     }
 }
 
-impl<F: SmallField> Digest<F> {
+impl<F: PrimeField> Digest<F> {
     pub(crate) fn from_partial(inputs: &[F]) -> Self {
         let mut elements = [F::ZERO; DIGEST_WIDTH];
         elements[0..inputs.len()].copy_from_slice(inputs);

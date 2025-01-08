@@ -1,22 +1,18 @@
 use ff_ext::ExtensionField;
 use p3_mds::MdsPermutation;
-use poseidon::{SPONGE_WIDTH, poseidon::PoseidonField, poseidon_permutation::PoseidonPermutation};
+use poseidon::{SPONGE_WIDTH, poseidon_permutation::PoseidonPermutation};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
 use p3_field::FieldAlgebra;
 
 #[derive(Clone)]
-pub struct BasicTranscript<E: ExtensionField, Mds>
-where
-    E::BaseField: PoseidonField,
-{
+pub struct BasicTranscript<E: ExtensionField, Mds> {
     permutation: PoseidonPermutation<E::BaseField, Mds>,
 }
 
 impl<E: ExtensionField, Mds> BasicTranscript<E, Mds>
 where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     /// Create a new IOP transcript.
@@ -31,7 +27,6 @@ where
 
 impl<E: ExtensionField, Mds> Transcript<E> for BasicTranscript<E, Mds>
 where
-    E::BaseField: PoseidonField,
     Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
@@ -72,9 +67,7 @@ where
     }
 }
 
-impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscript<E, Mds>
-where
-    E::BaseField: PoseidonField,
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscript<E, Mds> where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default
 {
 }
