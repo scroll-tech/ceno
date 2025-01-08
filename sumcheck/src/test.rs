@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use ark_std::{rand::RngCore, test_rng};
-use ff::Field;
-use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
+use ff_ext::{ExtensionField, GoldilocksExt2};
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
+use p3_field::FieldAlgebra;
+use p3_goldilocks::MdsMatrixGoldilocks;
+use p3_mds::MdsPermutation;
+use poseidon::SPONGE_WIDTH;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
@@ -12,16 +14,19 @@ use crate::{
     structs::{IOPProverState, IOPVerifierState},
     util::interpolate_uni_poly,
 };
+use ff_ext::FromUniformBytes;
 
 // TODO add more tests related to various num_vars combination after PR #162
 
-fn test_sumcheck<E: ExtensionField>(
+fn test_sumcheck<E: ExtensionField, Mds>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
-) {
+) where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     let mut rng = test_rng();
-    let mut transcript = BasicTranscript::new(b"test");
+    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
 
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
@@ -29,7 +34,7 @@ fn test_sumcheck<E: ExtensionField>(
     #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
 
-    let mut transcript = BasicTranscript::new(b"test");
+    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
     assert!(
         poly.evaluate(
@@ -44,11 +49,13 @@ fn test_sumcheck<E: ExtensionField>(
     );
 }
 
-fn test_sumcheck_internal<E: ExtensionField>(
+fn test_sumcheck_internal<E: ExtensionField, Mds>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
-) {
+) where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     let mut rng = test_rng();
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
@@ -58,7 +65,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;
 
-    let mut transcript = BasicTranscript::new(b"test");
+    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
 
     transcript.append_message(b"initializing transcript for testing");
 
@@ -103,31 +110,37 @@ fn test_sumcheck_internal<E: ExtensionField>(
 #[test]
 #[ignore = "temporarily not supporting degree > 2"]
 fn test_trivial_polynomial() {
-    test_trivial_polynomial_helper::<GoldilocksExt2>();
+    test_trivial_polynomial_helper::<GoldilocksExt2, MdsMatrixGoldilocks>();
 }
 
-fn test_trivial_polynomial_helper<E: ExtensionField>() {
+fn test_trivial_polynomial_helper<E: ExtensionField, Mds>()
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     let nv = 1;
     let num_multiplicands_range = (4, 13);
     let num_products = 5;
 
-    test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<E, Mds>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<E, Mds>(nv, num_multiplicands_range, num_products);
 }
 
 #[test]
 #[ignore = "temporarily not supporting degree > 2"]
 fn test_normal_polynomial() {
-    test_normal_polynomial_helper::<GoldilocksExt2>();
+    test_normal_polynomial_helper::<GoldilocksExt2, MdsMatrixGoldilocks>();
 }
 
-fn test_normal_polynomial_helper<E: ExtensionField>() {
+fn test_normal_polynomial_helper<E: ExtensionField, Mds>()
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     let nv = 12;
     let num_multiplicands_range = (4, 9);
     let num_products = 5;
 
-    test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<E, Mds>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<E, Mds>(nv, num_multiplicands_range, num_products);
 }
 
 // #[test]
@@ -142,12 +155,15 @@ fn test_normal_polynomial_helper<E: ExtensionField>() {
 
 #[test]
 fn test_extract_sum() {
-    test_extract_sum_helper::<GoldilocksExt2>();
+    test_extract_sum_helper::<GoldilocksExt2, MdsMatrixGoldilocks>();
 }
 
-fn test_extract_sum_helper<E: ExtensionField>() {
+fn test_extract_sum_helper<E: ExtensionField, Mds>()
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     let mut rng = test_rng();
-    let mut transcript = BasicTranscript::<E>::new(b"test");
+    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
     #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly, &mut transcript);
@@ -183,7 +199,7 @@ fn test_interpolation() {
     // test a polynomial with 20 known points, i.e., with degree 19
     let poly = DensePolynomial::rand(20 - 1, &mut prng);
     let evals = (0..20)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from(i)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
@@ -192,7 +208,7 @@ fn test_interpolation() {
     // test a polynomial with 33 known points, i.e., with degree 32
     let poly = DensePolynomial::rand(33 - 1, &mut prng);
     let evals = (0..33)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from(i)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
@@ -201,7 +217,7 @@ fn test_interpolation() {
     // test a polynomial with 64 known points, i.e., with degree 63
     let poly = DensePolynomial::rand(64 - 1, &mut prng);
     let evals = (0..64)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from(i)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
