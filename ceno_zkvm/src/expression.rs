@@ -12,7 +12,7 @@ use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::SmallField;
 
-use multilinear_extensions::virtual_poly_v2::ArcMultilinearExtension;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -214,6 +214,10 @@ impl<E: ExtensionField> Expression<E> {
 
     pub fn to_monomial_form(&self) -> Self {
         self.to_monomial_form_inner()
+    }
+
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Expression::Constant(_))
     }
 
     fn is_zero_expr(expr: &Expression<E>) -> bool {

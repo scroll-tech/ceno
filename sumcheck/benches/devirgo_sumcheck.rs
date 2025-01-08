@@ -7,14 +7,14 @@ use ark_std::test_rng;
 use criterion::*;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use sumcheck::{structs::IOPProverStateV2 as IOPProverState, util::ceil_log2};
+use sumcheck::{structs::IOPProverState, util::ceil_log2};
 
 use goldilocks::GoldilocksExt2;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     op_mle,
     util::max_usable_threads,
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2 as VirtualPolynomial},
+    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
 };
 use transcript::BasicTranscript as Transcript;
 

@@ -16,7 +16,7 @@ use mpcs::{
 
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::ArcMultilinearExtension,
 };
 use transcript::{BasicTranscript, Transcript};
 

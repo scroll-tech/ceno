@@ -8,7 +8,7 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
     op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::ArcMultilinearExtension,
 };
 use rayon::{
     iter::{
@@ -415,7 +415,7 @@ mod tests {
         commutative_op_mle_pair,
         mle::{FieldType, IntoMLE},
         util::ceil_log2,
-        virtual_poly_v2::ArcMultilinearExtension,
+        virtual_poly::ArcMultilinearExtension,
     };
 
     use crate::{
