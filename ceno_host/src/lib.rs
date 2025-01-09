@@ -127,8 +127,10 @@ impl CenoStdin {
     pub fn write(
         &mut self,
         item: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
-    ) -> Result<(), Error> {
-        to_bytes::<Error>(item).map(|bytes| self.write_slice(bytes))
+    ) -> Result<&mut Self, Error> {
+        to_bytes::<Error>(item)
+            .map(|bytes| self.write_slice(bytes))
+            .map(|_| self)
     }
 }
 
