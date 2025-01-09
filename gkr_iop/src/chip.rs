@@ -3,6 +3,8 @@ use crate::{evaluation::EvalExpression, gkr::layer::Layer};
 pub mod builder;
 pub mod protocol;
 
+/// Chip stores all information required in the GKR protocol, including the 
+/// commit phases, the GKR phase and the opening phase.
 #[derive(Clone, Debug, Default)]
 pub struct Chip {
     /// The number of base inputs committed in the whole protocol.
