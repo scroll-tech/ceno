@@ -43,6 +43,7 @@ tracing-subscriber.workspace = true
 bincode = "1"
 clap = { version = "4.5", features = ["derive"] }
 generic_static = "0.2"
+parse-size = "1.1"
 rand.workspace = true
 tempfile = "3.14"
 thread_local = "1.1"

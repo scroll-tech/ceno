@@ -1,3 +1,4 @@
+use glob::glob;
 use std::{
     fs::{File, read_dir},
     io::{self, Write},
@@ -5,23 +6,6 @@ use std::{
     process::Command,
 };
 
-/// Add each example to this list.
-///
-/// Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
-const EXAMPLES: &[&str] = &[
-    "ceno_rt_alloc",
-    "ceno_rt_io",
-    "ceno_rt_mem",
-    "ceno_rt_mini",
-    "ceno_rt_panic",
-    "ceno_rt_keccak",
-    "hints",
-    "sorting",
-    "median",
-    "quadratic_sorting",
-    "hashing",
-    "is_prime",
-];
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 fn rerun_all_but_target(dir: &Path) {
@@ -52,7 +36,12 @@ fn build_elfs() {
         io::stderr().write_all(&output.stderr).unwrap();
         panic!("cargo build of examples failed.");
     }
-    for example in EXAMPLES {
+    // Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
+    for example in glob("../examples/examples/*.rs")
+        .unwrap()
+        .map(Result::unwrap)
+    {
+        let example = example.file_stem().unwrap().to_str().unwrap();
         writeln!(
             dest,
             r#"#[allow(non_upper_case_globals)]

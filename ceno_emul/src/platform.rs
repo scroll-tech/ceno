@@ -1,4 +1,5 @@
-use std::{collections::BTreeSet, ops::Range};
+use core::fmt::{self, Formatter};
+use std::{collections::BTreeSet, fmt::Display, ops::Range};
 
 use crate::addr::{Addr, RegIdx};
 
@@ -17,6 +18,26 @@ pub struct Platform {
     pub hints: Range<Addr>,
     /// If true, ecall instructions are no-op instead of trap. Testing only.
     pub unsafe_ecall_nop: bool,
+}
+
+impl Display for Platform {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let prog_data: Option<Range<Addr>> = match (self.prog_data.first(), self.prog_data.last()) {
+            (Some(first), Some(last)) => Some(*first..*last),
+            _ => None,
+        };
+        write!(
+            f,
+            "Platform {{ rom: {:?}, prog_data: {:?}, stack: {:?}, heap: {:?}, public_io: {:?}, hints: {:?}, unsafe_ecall_nop: {} }}",
+            self.rom,
+            prog_data,
+            self.stack,
+            self.heap,
+            self.public_io,
+            self.hints,
+            self.unsafe_ecall_nop
+        )
+    }
 }
 
 pub const CENO_PLATFORM: Platform = Platform {

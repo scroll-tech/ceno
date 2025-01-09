@@ -7,6 +7,7 @@ use ceno_emul::{
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
+use rand::{Rng, thread_rng};
 use tiny_keccak::keccakf;
 
 #[test]
@@ -111,14 +112,15 @@ fn test_ceno_rt_io() -> Result<()> {
 
 #[test]
 fn test_hints() -> Result<()> {
-    let mut hints = CenoStdin::default();
-    hints.write(&true)?;
-    hints.write(&"This is my hint string.".to_string())?;
-    hints.write(&1997_u32)?;
-    hints.write(&1999_u32)?;
-
-    let all_messages =
-        messages_to_strings(&ceno_host::run(CENO_PLATFORM, ceno_examples::hints, &hints));
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::hints,
+        CenoStdin::default()
+            .write(&true)?
+            .write(&"This is my hint string.".to_string())?
+            .write(&1997_u32)?
+            .write(&1999_u32)?,
+    ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
     }
@@ -128,17 +130,12 @@ fn test_hints() -> Result<()> {
 
 #[test]
 fn test_bubble_sorting() -> Result<()> {
-    use rand::Rng;
-    let mut hints = CenoStdin::default();
-    let mut rng = rand::thread_rng();
-
-    // Provide some random numbers to sort.
-    hints.write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
-
+    let mut rng = thread_rng();
     let all_messages = messages_to_strings(&ceno_host::run(
         CENO_PLATFORM,
         ceno_examples::quadratic_sorting,
-        &hints,
+        // Provide some random numbers to sort.
+        CenoStdin::default().write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
     ));
     for msg in &all_messages {
         print!("{msg}");
@@ -147,17 +144,12 @@ fn test_bubble_sorting() -> Result<()> {
 }
 #[test]
 fn test_sorting() -> Result<()> {
-    use rand::Rng;
-    let mut hints = CenoStdin::default();
-    let mut rng = rand::thread_rng();
-
-    // Provide some random numbers to sort.
-    hints.write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?;
-
+    let mut rng = thread_rng();
     let all_messages = messages_to_strings(&ceno_host::run(
         CENO_PLATFORM,
         ceno_examples::sorting,
-        &hints,
+        // Provide some random numbers to sort.
+        CenoStdin::default().write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -167,9 +159,8 @@ fn test_sorting() -> Result<()> {
 
 #[test]
 fn test_median() -> Result<()> {
-    use rand::Rng;
     let mut hints = CenoStdin::default();
-    let mut rng = rand::thread_rng();
+    let mut rng = thread_rng();
 
     // Provide some random numbers to find the median of.
     let mut nums = (0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>();
@@ -192,23 +183,22 @@ fn test_median() -> Result<()> {
 #[test]
 #[should_panic(expected = "Trap IllegalInstruction")]
 fn test_hashing_fail() {
-    use rand::Rng;
-    let mut hints = CenoStdin::default();
-    let mut rng = rand::thread_rng();
+    let mut rng = thread_rng();
 
     let mut nums = (0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>();
     // Add a duplicate number to make uniqueness check fail:
     nums[211] = nums[907];
-    hints.write(&nums).unwrap();
 
-    let _ = ceno_host::run(CENO_PLATFORM, ceno_examples::hashing, &hints);
+    let _ = ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::hashing,
+        CenoStdin::default().write(&nums).unwrap(),
+    );
 }
 
 #[test]
 fn test_hashing() -> Result<()> {
-    use rand::Rng;
-    let mut hints = CenoStdin::default();
-    let mut rng = rand::thread_rng();
+    let mut rng = thread_rng();
 
     // Provide some unique random numbers to verify:
     let uniques: Vec<u32> = {
@@ -219,11 +209,10 @@ fn test_hashing() -> Result<()> {
             .collect::<Vec<_>>()
     };
 
-    hints.write(&uniques)?;
     let all_messages = messages_to_strings(&ceno_host::run(
         CENO_PLATFORM,
         ceno_examples::hashing,
-        &hints,
+        CenoStdin::default().write(&uniques)?,
     ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
