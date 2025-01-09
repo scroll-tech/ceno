@@ -129,7 +129,7 @@ fn emulate_program(
             }
         })
         .collect_vec();
-    debug_memory_ranges(&vm, &mem_final);
+    // debug_memory_ranges(&vm, &mem_final);
 
     // Find the final public IO cycles.
     let io_final = io_init
@@ -443,7 +443,7 @@ pub fn run_e2e_with_checkpoint<
 
     // Emulate program
     let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
-
+    println!("Cycles: {:?}", emul_result.all_records.len());
     // Clone some emul_result fields before consuming
     let pi = emul_result.pi.clone();
     let exit_code = emul_result.exit_code;
