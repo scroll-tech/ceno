@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, StructuralWitIn, ToExpr, WitIn},
+    expression::{StructuralWitIn, ToExpr, WitIn},
     instructions::InstancePaddingStrategy,
     scheme::constants::MIN_PAR_SIZE,
     set_val,
@@ -28,16 +28,15 @@ impl RangeTableConfig {
         rom_type: ROMType,
         table_len: usize,
     ) -> Result<Self, ZKVMError> {
-        let range = cb.create_structural_witin(|| "structural fixed", table_len, 0, 1);
+        let range = cb.create_structural_witin(|| "structural range witin", table_len, 0, 1);
         let mlt = cb.create_witin(|| "mlt");
 
-        let record_exprs = vec![Expression::StructuralWitIn(range.id, table_len, 0, 1)];
+        let record_exprs = vec![range.expr()];
 
         cb.lk_table_record(
             || "record",
-            table_len,
             SetTableSpec {
-                len: None,
+                len: Some(table_len),
                 structural_witins: vec![range],
             },
             rom_type,
@@ -46,14 +45,6 @@ impl RangeTableConfig {
         )?;
 
         Ok(Self { range, mlt })
-    }
-
-    pub fn generate_fixed_traces<F: SmallField>(
-        &self,
-        num_fixed: usize,
-        content: Vec<u64>,
-    ) -> RowMajorMatrix<F> {
-        RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Default)
     }
 
     pub fn assign_instances<F: SmallField>(

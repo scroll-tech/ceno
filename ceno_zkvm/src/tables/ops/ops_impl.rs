@@ -40,9 +40,8 @@ impl OpTableConfig {
 
         cb.lk_table_record(
             || "record",
-            table_len,
             SetTableSpec {
-                len: None,
+                len: Some(table_len),
                 structural_witins: vec![],
             },
             rom_type,

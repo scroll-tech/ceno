@@ -115,9 +115,8 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         cb.lk_table_record(
             || "prog table",
-            cb.params.program_size.next_power_of_two(),
             SetTableSpec {
-                len: None,
+                len: Some(cb.params.program_size.next_power_of_two()),
                 structural_witins: vec![],
             },
             ROMType::Instruction,
