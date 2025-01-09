@@ -40,7 +40,7 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
     let output = {
         let mut state = [0_u64; KECCAK_CELLS];
         for (cell, (&lo, &hi)) in izip!(&mut state, input.iter().tuples()) {
-            *cell = lo as u64 | (hi as u64) << 32;
+            *cell = lo as u64 | ((hi as u64) << 32);
         }
 
         keccakf(&mut state);
