@@ -137,7 +137,7 @@ fn test_bubble_sorting() -> Result<()> {
 
     let all_messages = messages_to_strings(&ceno_host::run(
         CENO_PLATFORM,
-        ceno_examples::bubble_sorting,
+        ceno_examples::quadratic_sorting,
         &hints,
     ));
     for msg in &all_messages {
