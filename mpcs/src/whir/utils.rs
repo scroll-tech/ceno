@@ -28,6 +28,12 @@ pub fn poly2whir<E: ExtensionField>(
     }
 }
 
+pub fn polys2whir<E: ExtensionField>(
+    poly: &[DenseMultilinearExtension<E>],
+) -> Vec<CoefficientList<BaseFieldWrapper<E>>> {
+    poly.iter().map(|poly| poly2whir(poly)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use goldilocks::{Goldilocks, GoldilocksExt2};

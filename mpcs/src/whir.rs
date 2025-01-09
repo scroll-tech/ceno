@@ -9,7 +9,7 @@ use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 use serde::{Serialize, de::DeserializeOwned};
 use spec::WhirSpec;
 use structure::{Whir, WhirDigest, WhirInnerT, digest_to_bytes};
-use utils::poly2whir;
+use utils::{poly2whir, polys2whir};
 pub use whir::ceno_binding::Error;
 use whir::ceno_binding::PolynomialCommitmentScheme as WhirPCS;
 
@@ -112,38 +112,51 @@ where
         pp: &Self::ProverParam,
         polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        todo!()
+        let witness = WhirInnerT::<E, Spec>::batch_commit(&pp, &polys2whir(polys))
+            .map_err(crate::Error::WhirError)?;
+
+        Ok(witness)
     }
 
     fn batch_open(
-        pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithWitness],
-        points: &[Vec<E>],
-        evals: &[crate::Evaluation<E>],
-        transcript: &mut impl transcript::Transcript<E>,
+        _pp: &Self::ProverParam,
+        _polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
+        _comms: &[Self::CommitmentWithWitness],
+        _points: &[Vec<E>],
+        _evals: &[crate::Evaluation<E>],
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
 
     fn simple_batch_open(
         pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
+        _polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],
-        transcript: &mut impl transcript::Transcript<E>,
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        todo!()
+        WhirInnerT::<E, Spec>::simple_batch_open(
+            &pp,
+            comm.clone(), // TODO: Remove clone
+            point
+                .iter()
+                .map(|x| FieldWrapper(*x))
+                .collect::<Vec<_>>()
+                .as_slice(),
+            &evals.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
+        )
+        .map_err(crate::Error::WhirError)
     }
 
     fn batch_verify(
-        vp: &Self::VerifierParam,
-        comms: &[Self::Commitment],
-        points: &[Vec<E>],
-        evals: &[crate::Evaluation<E>],
-        proof: &Self::Proof,
-        transcript: &mut impl transcript::Transcript<E>,
+        _vp: &Self::VerifierParam,
+        _comms: &[Self::Commitment],
+        _points: &[Vec<E>],
+        _evals: &[crate::Evaluation<E>],
+        _proof: &Self::Proof,
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
     }
@@ -154,9 +167,16 @@ where
         point: &[E],
         evals: &[E],
         proof: &Self::Proof,
-        transcript: &mut impl transcript::Transcript<E>,
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        todo!()
+        WhirInnerT::<E, Spec>::simple_batch_verify(
+            vp,
+            &comm.inner,
+            &point.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
+            &evals.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
+            proof,
+        )
+        .map_err(crate::Error::WhirError)
     }
 }
 
