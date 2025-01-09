@@ -133,7 +133,7 @@ fn test_bubble_sorting() -> Result<()> {
     let mut rng = thread_rng();
     let all_messages = messages_to_strings(&ceno_host::run(
         CENO_PLATFORM,
-        ceno_examples::bubble_sorting,
+        ceno_examples::quadratic_sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
     ));
