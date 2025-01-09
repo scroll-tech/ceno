@@ -25,8 +25,8 @@ type E = GoldilocksExt2;
 
 // Relevant init data for fibonacci run
 fn setup() -> (Program, Platform) {
-    let stack_size = 32768;
-    let heap_size = 2097152;
+    let stack_size = 32 << 10;
+    let heap_size = 2 << 20;
     let pub_io_size = 16;
 
     let program = Program::load_elf(ceno_examples::quadratic_sorting, u32::MAX).unwrap();
@@ -42,10 +42,12 @@ fn quadratic_sorting_1(c: &mut Criterion) {
     for n in [100, 500] {
         let max_steps = usize::MAX;
         let mut hints = CenoStdin::default();
-        _ = hints.write(&(0..n).map(|_| rng.gen::<u32>()).collect::<Vec<_>>());
+        hints
+            .write(&(0..n).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())
+            .unwrap();
         let hints: Vec<u32> = (&hints).into();
 
-        let mut group = c.benchmark_group(format!("quadratic_sorting"));
+        let mut group = c.benchmark_group("quadratic_sorting".to_string());
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time

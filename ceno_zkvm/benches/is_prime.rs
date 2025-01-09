@@ -25,8 +25,8 @@ type E = GoldilocksExt2;
 
 // Relevant init data for fibonacci run
 fn setup() -> (Program, Platform) {
-    let stack_size = 32768;
-    let heap_size = 2097152;
+    let stack_size = 32 << 10;
+    let heap_size = 2 << 20;
     let pub_io_size = 16;
     let program = Program::load_elf(ceno_examples::is_prime, u32::MAX).unwrap();
     let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
@@ -39,7 +39,7 @@ fn is_prime_1(c: &mut Criterion) {
     for n in [100u32, 10000u32, 50000u32] {
         let max_steps = usize::MAX;
         let mut hints = CenoStdin::default();
-        _ = hints.write(&n);
+        hints.write(&n).unwrap();
         let hints: Vec<u32> = (&hints).into();
 
         let mut group = c.benchmark_group(format!("is_prime_{}", max_steps));
