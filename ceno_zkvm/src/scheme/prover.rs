@@ -188,7 +188,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pk,
                     witness,
                     wits_commit,
-                    // structural_witness,
                     &pi,
                     num_instances,
                     transcript,

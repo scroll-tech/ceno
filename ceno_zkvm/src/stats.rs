@@ -107,7 +107,7 @@ impl CircuitStats {
             })
         } else {
             let table_len = if !system.lk_table_expressions.is_empty() {
-                system.lk_table_expressions[0].table_len
+                system.lk_table_expressions[0].table_spec.len.unwrap_or(0)
             } else {
                 0
             };

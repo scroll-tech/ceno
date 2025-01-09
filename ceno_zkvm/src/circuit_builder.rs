@@ -1,4 +1,3 @@
-use ceno_emul::Addr;
 use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -56,14 +55,7 @@ impl NameSpace {
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
-    pub table_len: usize,
     pub table_spec: SetTableSpec,
-}
-
-#[derive(Clone, Debug)]
-pub struct DynamicAddr {
-    pub addr_witin_id: usize,
-    pub offset: Addr,
 }
 
 #[derive(Clone, Debug)]
@@ -189,24 +181,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         // transpose from row-major to column-major
         let fixed_traces = fixed_traces.map(RowMajorMatrix::into_mles);
 
-        let (fixed_commit, fixed_commit_wd) = if self.num_fixed != 0 {
-            let fixed_traces_no_structural = match fixed_traces.clone() {
-                None => None,
-                Some(fixed_traces) => {
-                    let mut fixed_traces = fixed_traces;
-                    let _ = fixed_traces.split_off(self.num_fixed);
-                    Some(fixed_traces)
-                }
-            };
-
-            let fixed_commit_wd = fixed_traces_no_structural
-                .as_ref()
-                .map(|traces| PCS::batch_commit(pp, traces).unwrap());
-            let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
-            (fixed_commit, fixed_commit_wd)
-        } else {
-            (None, None)
-        };
+        let fixed_commit_wd = fixed_traces
+            .as_ref()
+            .map(|traces| PCS::batch_commit(pp, traces).unwrap());
+        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
 
         ProvingKey {
             fixed_traces,
@@ -312,7 +290,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
         table_spec: SetTableSpec,
         rom_type: ROMType,
         record: Vec<Expression<E>>,
@@ -337,7 +314,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
             multiplicity,
-            table_len,
             table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());

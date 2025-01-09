@@ -95,7 +95,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
         table_spec: SetTableSpec,
         rom_type: ROMType,
         record: Vec<Expression<E>>,
@@ -105,14 +104,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs.lk_table_record(
-            name_fn,
-            table_len,
-            table_spec,
-            rom_type,
-            record,
-            multiplicity,
-        )
+        self.cs
+            .lk_table_record(name_fn, table_spec, rom_type, record, multiplicity)
     }
 
     pub fn r_table_record<NR, N>(

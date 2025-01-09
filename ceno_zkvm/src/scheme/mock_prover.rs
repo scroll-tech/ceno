@@ -821,13 +821,12 @@ Hints:
                 num_instances.insert(circuit_name.clone(), num_rows);
                 continue;
             }
-            let mut witness = witness.into_mles();
-            let structural_witness = witness.split_off(cs.num_witin as usize);
-            let witness = witness.into_iter().map(|w| w.into()).collect_vec();
-            let structural_witness = structural_witness
+            let mut witness = witness
+                .into_mles()
                 .into_iter()
                 .map(|w| w.into())
                 .collect_vec();
+            let structural_witness = witness.split_off(cs.num_witin as usize);
             let fixed: Vec<_> = fixed_trace
                 .circuit_fixed_traces
                 .remove(circuit_name)
