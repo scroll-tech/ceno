@@ -157,10 +157,7 @@ where
         res
     }
 
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>
-    where
-        E: ExtensionField,
-    {
+    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E> {
         // Generate witnesses.
         let table = &phase1[self.committed_table];
         let count = &phase1[self.committed_count];

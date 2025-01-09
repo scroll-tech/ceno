@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use chip::Chip;
 use ff_ext::ExtensionField;
 use gkr::GKRCircuitWitness;
@@ -47,13 +49,15 @@ where
     fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>>;
 
     /// GKR witness.
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>
-    where
-        E: ExtensionField;
+    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>;
 }
 
 // TODO: the following trait consists of `commit_phase1`, `commit_phase2`, `gkr_phase` and `opening_phase`.
-pub trait ProtocolProver<E: ExtensionField, Trans: Transcript<E>, PCS> {}
+pub struct ProtocolProver<E: ExtensionField, Trans: Transcript<E>, PCS>(
+    PhantomData<(E, Trans, PCS)>,
+);
 
 // TODO: the following trait consists of `commit_phase1`, `commit_phase2`, `gkr_phase` and `opening_phase`.
-pub trait ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS> {}
+pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
+    PhantomData<(E, Trans, PCS)>,
+);
