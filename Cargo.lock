@@ -1304,6 +1304,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2834,7 +2843,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/whir?branch=feat%2Fceno-binding#069437dcea224d845872f63ea54242efeb8a181d"
+source = "git+https://github.com/scroll-tech/whir?branch=feat%2Fceno-binding-batch#0bb33fcc3fbd17258597faed701fd6bca48b8a8a"
 dependencies = [
  "ark-crypto-primitives",
  "ark-ff",
@@ -2848,6 +2857,7 @@ dependencies = [
  "derivative",
  "derive_more",
  "goldilocks",
+ "itertools 0.14.0",
  "lazy_static",
  "nimue",
  "nimue-pow",
