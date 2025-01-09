@@ -36,38 +36,35 @@ fn setup() -> (Program, Platform) {
 fn is_prime_1(c: &mut Criterion) {
     let (program, platform) = setup();
 
-    for n in [100u32, 10000u32, 50000u32] {
+    for n in [100u32, 10000u32] {
         let max_steps = usize::MAX;
         let mut hints = CenoStdin::default();
         hints.write(&n).unwrap();
         let hints: Vec<u32> = (&hints).into();
 
-        let mut group = c.benchmark_group(format!("is_prime_{}", max_steps));
+        let mut group = c.benchmark_group("is_prime".to_string());
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
-        group.bench_function(
-            BenchmarkId::new("is_prime", format!("is_prime_n={}", n)),
-            |b| {
-                b.iter_custom(|iters| {
-                    let mut time = Duration::new(0, 0);
+        group.bench_function(BenchmarkId::new("is_prime", format!("n = {}", n)), |b| {
+            b.iter_custom(|iters| {
+                let mut time = Duration::new(0, 0);
 
-                    for _ in 0..iters {
-                        let (_, prove) = run_e2e_with_checkpoint::<E, Pcs>(
-                            program.clone(),
-                            platform.clone(),
-                            hints.clone(),
-                            max_steps,
-                            Checkpoint::PrepE2EProving,
-                        );
-                        let instant = std::time::Instant::now();
-                        prove();
-                        time += instant.elapsed();
-                    }
-                    time
-                });
-            },
-        );
+                for _ in 0..iters {
+                    let (_, prove) = run_e2e_with_checkpoint::<E, Pcs>(
+                        program.clone(),
+                        platform.clone(),
+                        hints.clone(),
+                        max_steps,
+                        Checkpoint::PrepE2EProving,
+                    );
+                    let instant = std::time::Instant::now();
+                    prove();
+                    time += instant.elapsed();
+                }
+                time
+            });
+        });
 
         group.finish();
     }
