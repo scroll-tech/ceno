@@ -19,8 +19,8 @@ serde.workspace = true
 serde_json.workspace = true
 
 base64 = "0.22"
-ceno_emul = { path = "../ceno_emul" }
 ceno-examples = { path = "../examples-builder" }
+ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
