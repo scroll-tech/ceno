@@ -23,7 +23,9 @@ pub use elf::Program;
 pub mod disassemble;
 
 mod syscalls;
-pub use syscalls::{KECCAK_PERMUTE, keccak_permute::KECCAK_WORDS};
+pub use syscalls::{
+    KECCAK_PERMUTE, SECP256K1_ADD, keccak_permute::KECCAK_WORDS, secp256k1::SECP256K1_WORDS,
+};
 
 pub mod test_utils;
 

@@ -24,3 +24,30 @@ pub fn keccak_permute(state: &mut [u64; 25]) {
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
 }
+
+pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;
+
+/// Adds two Secp256k1 points.
+///
+/// The result is stored in the first point.
+///
+/// ### Safety
+///
+/// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
+/// byte boundary. Additionally, the caller must ensure that `p` and `q` are valid points on the
+/// secp256k1 curve, and that `p` and `q` are not equal to each other.
+#[allow(unused_variables)]
+fn secp256k1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") SECP256K1_ADD,
+            in("a0") p,
+            in("a1") q
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
