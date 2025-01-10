@@ -1,5 +1,7 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
 use ff_ext::ExtensionField;
+use p3_mds::MdsPermutation;
+use poseidon::SPONGE_WIDTH;
 use std::cell::RefCell;
 
 #[derive(Debug, Default)]
@@ -10,21 +12,27 @@ pub struct Statistic {
 pub type StatisticRecorder = RefCell<Statistic>;
 
 #[derive(Clone)]
-pub struct BasicTranscriptWithStat<'a, E: ExtensionField> {
-    inner: BasicTranscript<E>,
+pub struct BasicTranscriptWithStat<'a, E: ExtensionField, Mds> {
+    inner: BasicTranscript<E, Mds>,
     stat: &'a StatisticRecorder,
 }
 
-impl<'a, E: ExtensionField> BasicTranscriptWithStat<'a, E> {
+impl<'a, E: ExtensionField, Mds> BasicTranscriptWithStat<'a, E, Mds>
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
         Self {
-            inner: BasicTranscript::<_>::new(label),
+            inner: BasicTranscript::<_, _>::new(label),
             stat,
         }
     }
 }
 
-impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
+impl<E: ExtensionField, Mds> Transcript<E> for BasicTranscriptWithStat<'_, E, Mds>
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
         self.stat.borrow_mut().field_appended_num += 1;
         self.inner.append_field_elements(elements)
@@ -56,4 +64,7 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
     }
 }
 
-impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E> {}
+impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E, Mds> where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default
+{
+}

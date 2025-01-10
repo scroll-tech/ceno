@@ -11,13 +11,12 @@ version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
-ff.workspace = true
 ff_ext = { path = "../ff_ext" }
-goldilocks.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
+p3-field.workspace = true
 
 crossbeam-channel.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
@@ -25,6 +24,9 @@ transcript = { path = "../transcript" }
 
 [dev-dependencies]
 criterion.workspace = true
+p3-goldilocks.workspace = true
+p3-mds.workspace = true
+poseidon.workspace = true
 
 [[bench]]
 harness = false
