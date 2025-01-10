@@ -280,6 +280,9 @@ dependencies = [
 [[package]]
 name = "ceno-examples"
 version = "0.1.0"
+dependencies = [
+ "glob",
+]
 
 [[package]]
 name = "ceno_emul"

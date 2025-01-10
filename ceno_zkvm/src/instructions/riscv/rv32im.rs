@@ -29,12 +29,15 @@ use ceno_emul::{
 };
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use mul::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet},
+};
 use strum::IntoEnumIterator;
 
 use super::{
@@ -337,14 +340,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             }
         });
 
-        for (insn_kind, (_, records)) in InsnKind::iter()
-            .zip(all_records.iter())
-            .sorted_by(|a, b| Ord::cmp(&a.1.1.len(), &b.1.1.len()))
-            .rev()
+        for (insn_kind, (_, records)) in
+            izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))
         {
-            if !records.is_empty() {
-                tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
-            }
+            tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
         }
 
         macro_rules! assign_opcode {
