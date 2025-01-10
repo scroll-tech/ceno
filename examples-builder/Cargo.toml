@@ -7,3 +7,6 @@ license.workspace = true
 name = "ceno-examples"
 repository.workspace = true
 version.workspace = true
+
+[build-dependencies]
+glob = "0.3"
