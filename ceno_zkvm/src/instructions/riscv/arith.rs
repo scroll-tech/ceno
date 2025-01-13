@@ -78,28 +78,42 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         )?;
 
         // debug_
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.ns: {:?}", circuit_builder.cs.ns);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.num_witin: {:?}", circuit_builder.cs.num_witin);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.witin_namespace_map: {:?}", circuit_builder.cs.witin_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.num_structural_witin: {:?}", circuit_builder.cs.num_structural_witin);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.structural_witin_namespace_map: {:?}", circuit_builder.cs.structural_witin_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.num_fixed: {:?}", circuit_builder.cs.num_fixed);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.fixed_namespace_map: {:?}", circuit_builder.cs.fixed_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.instance_name_map: {:?}", circuit_builder.cs.instance_name_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_expressions: {:?}", circuit_builder.cs.r_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_expressions_namespace_map: {:?}", circuit_builder.cs.r_expressions_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_ram_types: {:?}", circuit_builder.cs.r_ram_types);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_expressions: {:?}", circuit_builder.cs.w_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_expressions_namespace_map: {:?}", circuit_builder.cs.w_expressions_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_ram_types: {:?}", circuit_builder.cs.w_ram_types);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_table_expressions: {:?}", circuit_builder.cs.r_table_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_table_expressions_namespace_map: {:?}", circuit_builder.cs.r_table_expressions_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_table_expressions: {:?}", circuit_builder.cs.w_table_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_table_expressions_namespace_map: {:?}", circuit_builder.cs.w_table_expressions_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions: {:?}", circuit_builder.cs.lk_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_table_expressions: {:?}", circuit_builder.cs.lk_table_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions_namespace_map: {:?}", circuit_builder.cs.lk_expressions_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions_items_map: {:?}", circuit_builder.cs.lk_expressions_items_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.ns: {:?}", circuit_builder.cs.ns);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.num_witin: {:?}", circuit_builder.cs.num_witin);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.witin_namespace_map: {:?}", circuit_builder.cs.witin_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.num_structural_witin: {:?}", circuit_builder.cs.num_structural_witin);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.structural_witin_namespace_map: {:?}", circuit_builder.cs.structural_witin_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.num_fixed: {:?}", circuit_builder.cs.num_fixed);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.fixed_namespace_map: {:?}", circuit_builder.cs.fixed_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.instance_name_map: {:?}", circuit_builder.cs.instance_name_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_expressions: {:?}", circuit_builder.cs.r_expressions);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_expressions_namespace_map: {:?}", circuit_builder.cs.r_expressions_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_ram_types: {:?}", circuit_builder.cs.r_ram_types);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_expressions: {:?}", circuit_builder.cs.w_expressions);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_expressions_namespace_map: {:?}", circuit_builder.cs.w_expressions_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_ram_types: {:?}", circuit_builder.cs.w_ram_types);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_table_expressions: {:?}", circuit_builder.cs.r_table_expressions);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.r_table_expressions_namespace_map: {:?}", circuit_builder.cs.r_table_expressions_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_table_expressions: {:?}", circuit_builder.cs.w_table_expressions);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_table_expressions_namespace_map: {:?}", circuit_builder.cs.w_table_expressions_namespace_map);
+
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions");
+        for exp in circuit_builder.cs.lk_expressions.clone() {
+            println!("=> EXP: {:?}", exp);
+        }
+
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_table_expressions: {:?}", circuit_builder.cs.lk_table_expressions);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions_namespace_map: {:?}", circuit_builder.cs.lk_expressions_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions_items_map: {:?}", circuit_builder.cs.lk_expressions_items_map);
+
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_expressions: {:?}", circuit_builder.cs.assert_zero_expressions);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_expressions_namespace_map: {:?}", circuit_builder.cs.assert_zero_expressions_namespace_map);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_sumcheck_expressions: {:?}", circuit_builder.cs.assert_zero_sumcheck_expressions);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_sumcheck_expressions_namespace_map: {:?}", circuit_builder.cs.assert_zero_sumcheck_expressions_namespace_map);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.max_non_lc_degree: {:?}", circuit_builder.cs.max_non_lc_degree);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.chip_record_alpha: {:?}", circuit_builder.cs.chip_record_alpha);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.chip_record_beta: {:?}", circuit_builder.cs.chip_record_beta);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.debug_map: {:?}", circuit_builder.cs.debug_map);
 
         Ok(ArithConfig {
             r_insn,
