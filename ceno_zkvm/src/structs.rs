@@ -266,9 +266,17 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 
+        // debug_
+        println!("=> records: {:?}", records);
+
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
             OC::assign_instances(config, cs.num_witin as usize, records)?;
+
+        // debug_
+        println!("=> witness: {:?}", witness);
+        println!("=> logup_multiplicity: {:?}", logup_multiplicity);
+
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(

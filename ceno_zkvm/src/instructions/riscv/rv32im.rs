@@ -324,6 +324,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut all_records: BTreeMap<InsnKind, Vec<StepRecord>> = InsnKind::iter()
             .map(|insn_kind| (insn_kind, Vec::new()))
             .collect();
+
+        // debug_
+        println!("=> all_records: {:?}", all_records);
+
         let mut halt_records = Vec::new();
         steps.into_iter().for_each(|record| {
             let insn_kind = record.insn.kind;
@@ -357,6 +361,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         }
         // alu
         assign_opcode!(ADD, AddInstruction<E>, add_config);
+
+        // debug_
+        panic!();
+
         assign_opcode!(SUB, SubInstruction<E>, sub_config);
         assign_opcode!(AND, AndInstruction<E>, and_config);
         assign_opcode!(OR, OrInstruction<E>, or_config);

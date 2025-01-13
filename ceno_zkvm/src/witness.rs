@@ -38,7 +38,7 @@ macro_rules! set_fixed_val {
     };
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
     values: Vec<T>,

@@ -14,6 +14,7 @@ use crate::{
 };
 
 pub mod riscv;
+use std::fmt;
 
 #[derive(Clone)]
 pub enum InstancePaddingStrategy {
@@ -26,6 +27,12 @@ pub enum InstancePaddingStrategy {
     // `pad(i, j) = padding value for cell at row i, column j`
     // pad should be able to cross thread boundaries
     Custom(Arc<dyn Fn(u64, u64) -> u64 + Send + Sync>),
+}
+
+impl fmt::Debug for InstancePaddingStrategy{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "InstancePaddingStrategy")
+    }
 }
 
 pub trait Instruction<E: ExtensionField> {
