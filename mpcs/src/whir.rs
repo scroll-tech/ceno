@@ -183,7 +183,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{gen_rand_poly_base, run_commit_open_verify};
+    use crate::test_util::{
+        gen_rand_poly_base, run_commit_open_verify, run_simple_batch_commit_open_verify,
+    };
     use goldilocks::GoldilocksExt2;
     use spec::WhirDefaultSpec;
 
@@ -197,6 +199,39 @@ mod tests {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 10, 11);
             // Test trivial proof with small num vars
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 4, 6);
+        }
+    }
+
+    #[test]
+    fn basefold_simple_batch_commit_open_verify_goldilocks() {
+        for gen_rand_poly in [gen_rand_poly_base] {
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+                gen_rand_poly,
+                10,
+                11,
+                1,
+            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+                gen_rand_poly,
+                10,
+                11,
+                4,
+            );
+            // Test trivial proof with small num vars
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+                gen_rand_poly,
+                4,
+                6,
+                4,
+            );
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+                gen_rand_poly,
+                10,
+                11,
+                1,
+            );
         }
     }
 }
