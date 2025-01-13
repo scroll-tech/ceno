@@ -97,23 +97,38 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_table_expressions: {:?}", circuit_builder.cs.w_table_expressions);
         // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.w_table_expressions_namespace_map: {:?}", circuit_builder.cs.w_table_expressions_namespace_map);
 
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions");
-        for exp in circuit_builder.cs.lk_expressions.clone() {
-            println!("=> EXP: {:?}", exp);
-        }
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions");
+        // for exp in circuit_builder.cs.lk_expressions.clone() {
+        //     println!("=> EXP: {:?}", exp);
+        // }
 
         // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_table_expressions: {:?}", circuit_builder.cs.lk_table_expressions);
         // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions_namespace_map: {:?}", circuit_builder.cs.lk_expressions_namespace_map);
         // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.lk_expressions_items_map: {:?}", circuit_builder.cs.lk_expressions_items_map);
 
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_expressions: {:?}", circuit_builder.cs.assert_zero_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_expressions_namespace_map: {:?}", circuit_builder.cs.assert_zero_expressions_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_sumcheck_expressions: {:?}", circuit_builder.cs.assert_zero_sumcheck_expressions);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_sumcheck_expressions_namespace_map: {:?}", circuit_builder.cs.assert_zero_sumcheck_expressions_namespace_map);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.max_non_lc_degree: {:?}", circuit_builder.cs.max_non_lc_degree);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.chip_record_alpha: {:?}", circuit_builder.cs.chip_record_alpha);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.chip_record_beta: {:?}", circuit_builder.cs.chip_record_beta);
-        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.debug_map: {:?}", circuit_builder.cs.debug_map);
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_expressions");
+        for exp in circuit_builder.cs.assert_zero_expressions.clone() {
+            println!("=> Zero EXP: {:?}", exp);
+        }
+
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_expressions_namespace_map: {:?}", circuit_builder.cs.assert_zero_expressions_namespace_map);
+
+        println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_sumcheck_expressions");
+        for exp in circuit_builder.cs.assert_zero_sumcheck_expressions.clone() {
+            println!("=> Zero Sumcheck EXP: {:?}", exp);
+        }
+
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.assert_zero_sumcheck_expressions_namespace_map: {:?}", circuit_builder.cs.assert_zero_sumcheck_expressions_namespace_map);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.max_non_lc_degree: {:?}", circuit_builder.cs.max_non_lc_degree);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.chip_record_alpha: {:?}", circuit_builder.cs.chip_record_alpha);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.chip_record_beta: {:?}", circuit_builder.cs.chip_record_beta);
+        // println!("=> ArithInstruction::construct_circuit: circuit_builder.cs.debug_map: {:?}", circuit_builder.cs.debug_map);
+        
+
+
+
+
+
 
         Ok(ArithConfig {
             r_insn,
