@@ -1,17 +1,18 @@
+use std::iter;
+
 use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, WordAddr, WriteOp};
-use ceno_rt::println;
 use itertools::{Itertools, izip};
 use secp::Point;
 
 use super::{SyscallEffects, SyscallWitness};
 
-// A secp256k1 point in compressed form takes 33 bytes
-pub const SECP256K1_ARG_WORDS: usize = 9;
+// A secp256k1 point in uncompressed form takes 64 bytes
+pub const SECP256K1_ARG_WORDS: usize = 16;
 
-/// Trace the execution of a Keccak permutation.
+/// Trace the execution of a secp256k1_add call
 ///
 /// Compatible with:
-/// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/precompiles/keccak256/permute.rs
+/// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/precompiles/weierstrass/add.rs
 ///
 /// TODO: test compatibility.
 pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
@@ -40,21 +41,15 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
             .collect_vec()
     });
 
-    print!("{:?}", p_ptr % 4);
-    print!("{:?}", p_addrs);
-
-    // Extract arguments as byte vecs
-    let [p_bytes, q_bytes] = [
-        (p_addrs.clone(), (p_ptr % 4) as usize),
-        (q_addrs, (q_ptr % 4) as usize),
-    ]
-    .map(|(addrs, skipper)| {
-        addrs
-            .iter()
-            .map(|&addr| vm.peek_memory(addr).to_le_bytes().to_vec())
-            .flatten()
-            .skip(skipper)
-            .take(33)
+    // Extract arguments as byte vecs. Prepend the "tag byte" 0x04 for secp crate compatibility
+    let [p_bytes, q_bytes] = [p_addrs.clone(), q_addrs].map(|addrs| {
+        iter::once(4u8)
+            .chain(
+                addrs
+                    .iter()
+                    .map(|&addr| vm.peek_memory(addr).to_le_bytes().to_vec())
+                    .flatten(),
+            )
             .collect::<Vec<_>>()
     });
 
@@ -65,7 +60,8 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
         ))
     });
 
-    let output_bytes = (p + q).serialize();
+    // Ignore the "tag byte"
+    let output_bytes = (p + q).serialize_uncompressed()[1..].to_vec();
 
     let output_words: Vec<u32> = output_bytes
         .chunks_exact(4)
@@ -81,8 +77,7 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
         .map(|addr| vm.peek_memory(*addr))
         .collect_vec();
 
-    // write over p memory
-    // TODO: decide what happens with the last (partially touched) word
+    // overwrite result at point P
     let mem_ops = izip!(p_addrs, p_words, output_words)
         .map(|(addr, before, after)| WriteOp {
             addr,
