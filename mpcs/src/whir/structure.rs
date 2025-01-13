@@ -1,4 +1,6 @@
-use super::{field_wrapper::ExtensionFieldWrapper as FieldWrapper, spec::WhirSpec};
+use super::{
+    WhirDefaultSpec, field_wrapper::ExtensionFieldWrapper as FieldWrapper, spec::WhirSpec,
+};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
@@ -54,6 +56,8 @@ pub(crate) type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSp
 pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
     inner: WhirInnerT<E, Spec>,
 }
+
+pub type WhirDefault<E> = Whir<E, WhirDefaultSpec>;
 
 #[cfg(test)]
 mod tests {

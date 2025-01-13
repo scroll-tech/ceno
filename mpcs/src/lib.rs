@@ -323,6 +323,7 @@ pub use basefold::{
 };
 mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
 
 fn validate_input<E: ExtensionField>(
     function: &str,

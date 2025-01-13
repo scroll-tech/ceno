@@ -7,12 +7,13 @@ use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 use serde::{Serialize, de::DeserializeOwned};
+pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
-use structure::{Whir, WhirDigest, WhirInnerT, digest_to_bytes};
+pub use structure::{Whir, WhirDefault};
+use structure::{WhirDigest, WhirInnerT, digest_to_bytes};
 use utils::{poly2whir, polys2whir};
 pub use whir::ceno_binding::Error;
 use whir::ceno_binding::PolynomialCommitmentScheme as WhirPCS;
-
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
     E: Serialize + DeserializeOwned,
@@ -203,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn basefold_simple_batch_commit_open_verify_goldilocks() {
+    fn whir_simple_batch_commit_open_verify_goldilocks() {
         for gen_rand_poly in [gen_rand_poly_base] {
             // Both challenge and poly are over base field
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
@@ -217,6 +218,12 @@ mod tests {
                 10,
                 11,
                 4,
+            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+                gen_rand_poly,
+                7,
+                8,
+                3,
             );
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
                 gen_rand_poly,
