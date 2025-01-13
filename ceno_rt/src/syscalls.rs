@@ -37,7 +37,7 @@ pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;
 /// byte boundary. Additionally, the caller must ensure that `p` and `q` are valid points on the
 /// secp256k1 curve, and that `p` and `q` are not equal to each other.
 #[allow(unused_variables)]
-fn secp256k1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
+pub fn secp256k1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(

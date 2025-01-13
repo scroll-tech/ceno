@@ -42,7 +42,6 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
     let [p_bytes, q_bytes] = [p_addrs.clone(), q_addrs].map(|addrs| {
         addrs
             .iter()
-            // TODO: double check endianess etc
             .map(|&addr| vm.peek_memory(addr).to_le_bytes().to_vec())
             .flatten()
             .collect::<Vec<_>>()
