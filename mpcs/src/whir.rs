@@ -209,7 +209,7 @@ mod tests {
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
                 gen_rand_poly,
                 10,
-                11,
+                16,
                 1,
             );
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
@@ -217,6 +217,12 @@ mod tests {
                 10,
                 11,
                 4,
+            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+                gen_rand_poly,
+                7,
+                8,
+                2,
             );
             // Test trivial proof with small num vars
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
@@ -228,8 +234,8 @@ mod tests {
             // Both challenge and poly are over base field
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
                 gen_rand_poly,
-                10,
-                11,
+                4,
+                6,
                 1,
             );
         }

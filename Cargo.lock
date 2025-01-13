@@ -2843,7 +2843,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/whir?branch=feat%2Fceno-binding-batch#3bd6f975d1a181bbd4812d64643464a3c8531fa4"
+source = "git+https://github.com/scroll-tech/whir?branch=feat%2Fceno-binding-batch#1d988923a41510cb57d55ee2ce4324925bbe84e6"
 dependencies = [
  "ark-crypto-primitives",
  "ark-ff",
