@@ -311,6 +311,7 @@ pub enum Error {
     PolynomialTooLarge(usize),
     PolynomialSizesNotEqual,
     MerkleRootMismatch,
+    WhirError(whir::Error),
 }
 
 mod basefold;
@@ -320,7 +321,9 @@ pub use basefold::{
     EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
     one_level_interp_hc,
 };
+mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
 
 fn validate_input<E: ExtensionField>(
     function: &str,
