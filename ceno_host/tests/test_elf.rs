@@ -273,7 +273,7 @@ fn test_ceno_rt_keccak() -> Result<()> {
 
 #[test]
 fn test_ceno_rt_secp256k1_add() -> Result<()> {
-    let program_elf = ceno_examples::ceno_rt_keccak;
+    let program_elf = ceno_examples::ceno_rt_secp256k1_add;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
     let steps = run(&mut state)?;
 
