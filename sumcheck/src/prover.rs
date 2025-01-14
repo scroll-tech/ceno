@@ -892,6 +892,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                             )
                             .to_vec()
                         }
+                        4 => sumcheck_macro::sumcheck_code_gen!(4, |i| &self.poly.flattened_ml_extensions[products[i]]).to_vec(),
                         _ => unimplemented!("do not support degree > 3"),
                     };
                     exit_span!(span);

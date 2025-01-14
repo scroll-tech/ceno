@@ -50,9 +50,10 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let mut f_var_names = Vec::new();
     for i in 1..=degree {
         let f_var_name = ident(format!("f{}", i));
+        let idx = (i - 1) as usize;
         out = quote! {
             #out
-            let #f_var_name = product_access(#i as usize);
+            let #f_var_name = product_access(#idx);
         };
         f_var_names.push(f_var_name);
     }
