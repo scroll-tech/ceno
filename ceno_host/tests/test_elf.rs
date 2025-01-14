@@ -148,8 +148,8 @@ fn test_sorting() -> Result<()> {
     let all_messages = messages_to_strings(&ceno_host::run(
         CENO_PLATFORM,
         ceno_examples::sorting,
-        // Provide some random numbers to sort.
-        CenoStdin::default().write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
+        // Provide the number of random numbers to sort.
+        CenoStdin::default().write(&1000_u32)?,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
