@@ -2,9 +2,7 @@
 extern crate ceno_rt;
 use ceno_rt::syscalls::secp256k1_add;
 
-type DecompressedPoint = [u32; 16];
-
-// Example points from https://docs.rs/secp/latest/secp/#arithmetic-1, in decompressed byte array repr
+// Byte repr. of points from https://docs.rs/secp/latest/secp/#arithmetic-1
 const P: [u8; 65] = [
     4, 180, 53, 9, 32, 85, 226, 220, 154, 20, 116, 218, 199, 119, 48, 44, 23, 45, 222, 10, 64, 50,
     63, 8, 121, 191, 244, 141, 0, 37, 117, 182, 133, 190, 160, 239, 131, 180, 166, 242, 145, 107,
@@ -24,8 +22,11 @@ const P_PLUS_Q: [u8; 65] = [
     162, 111, 197, 70,
 ];
 
+type DecompressedPoint = [u32; 16];
+
+// interpret bytes for our internal interface [u32; 16]
 fn from_bytes(bytes: [u8; 65]) -> DecompressedPoint {
-    std::array::from_fn(|i| u32::from_le_bytes(std::array::from_fn(|j| bytes[1..][i * 4 + j])))
+    std::array::from_fn(|i| u32::from_le_bytes(bytes[1..][4 * i..4 * (i + 1)].try_into().unwrap()))
 }
 
 fn main() {
@@ -35,5 +36,4 @@ fn main() {
 
     secp256k1_add(&mut p, &mut q);
     assert_eq!(p, p_plus_q);
-    assert_eq!(1, 1);
 }

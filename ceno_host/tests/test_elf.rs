@@ -275,8 +275,8 @@ fn test_ceno_rt_keccak() -> Result<()> {
 fn test_ceno_rt_secp256k1_add() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_add_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let steps = run(&mut state)?;
-
+    let _ = run(&mut state)?;
+    // TODO: asserts on effects
     Ok(())
 }
 

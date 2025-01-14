@@ -25,6 +25,7 @@ pub fn keccak_permute(state: &mut [u64; 25]) {
     unreachable!()
 }
 
+// Based on https://github.com/succinctlabs/sp1/blob/dbe622aa4a6a33c88d76298c2a29a1d7ef7e90df/crates/zkvm/entrypoint/src/syscalls/secp256k1.rs
 pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;
 
 /// Adds two Secp256k1 points.
