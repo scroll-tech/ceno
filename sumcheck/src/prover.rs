@@ -6,7 +6,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
-    mle::{DenseMultilinearExtension, MultilinearExtension},
+    mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
     op_mle, op_mle_product_3, op_mle3_range,
     util::largest_even_below,
     virtual_poly::VirtualPolynomial,
@@ -429,6 +429,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 let span = entered_span!("sum");
 
                 let mut sum = match products.len() {
+                    // use macro to generate sumcheck protocol boipolate code here
                     1 => {
                         let f = &self.poly.flattened_ml_extensions[products[0]];
                         op_mle! {
@@ -458,6 +459,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         .to_vec()
                     }
                     2 => {
+                        // sumcheck_macro::sumcheck_code_gen!(2, |i| &self.poly.flattened_ml_extensions[products[i]])
                         let (f, g) = (
                             &self.poly.flattened_ml_extensions[products[0]],
                             &self.poly.flattened_ml_extensions[products[1]],
@@ -466,6 +468,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                             |f, g| {
                                 let res = (0..largest_even_below(f.len())).step_by(2).rev().fold(
                                     AdditiveArray::<_, 3>(array::from_fn(|_| 0.into())),
+                                    // compiler can do more optimisation if below code goes from f1 * f2 to f1 * f2 * f3 * f4
                                     |mut acc, b| {
                                         acc.0[0] += f[b] * g[b];
                                         acc.0[1] += f[b + 1] * g[b + 1];
@@ -507,7 +510,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                         let c3 = f3[b + 1] - f3[b];
                                         AdditiveArray([
                                             f1[b] * (f2[b] * f3[b]),
-                                            f1[b + 1] * (f2[b + 1] * f3[b + 1]),
+                                             f1[b + 1] * (f2[b + 1] * f3[b + 1]),
                                             (c1 + f1[b + 1])
                                                 * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
                                             (c1 + c1 + f1[b + 1])
@@ -531,7 +534,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         )
                         .to_vec()
                     }
-                    _ => unimplemented!("do not support degree > 3"),
+                    4 => sumcheck_macro::sumcheck_code_gen!(4, |i| &self.poly.flattened_ml_extensions[products[i]]).to_vec(),
+                    _ => unimplemented!("do not support degree > 3"), // I have to support degree 4 and more here
                 };
                 exit_span!(span);
                 sum.iter_mut().for_each(|sum| *sum *= coefficient);
@@ -781,6 +785,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         1 => {
                             let f = &self.poly.flattened_ml_extensions[products[0]];
                             op_mle! {
+                                // following code for Base or Ext
                                 |f| {
                                     let res = (0..largest_even_below(f.len()))
                                         .into_par_iter()
@@ -805,6 +810,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                         res
                                     }
                                 },
+                                // following code for Base after running above
                                 |sum| AdditiveArray(sum.0.map(E::from))
                             }
                             .to_vec()

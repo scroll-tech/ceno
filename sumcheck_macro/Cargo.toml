@@ -1,0 +1,25 @@
+[package]
+categories.workspace = true
+description = "Macros for the Ceno project"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "sumcheck_macro"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = {version = "2.0", features = ["full"]}
+quote = "1.0"
+proc-macro2 = "1.0.92"
+
+[dev-dependencies]
+ff_ext = { path = "../ff_ext" }
+goldilocks.workspace = true
+multilinear_extensions = { path = "../multilinear_extensions" }
+sumcheck = { path = "../sumcheck" }
+rayon = { workspace = true }
