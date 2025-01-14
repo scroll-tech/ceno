@@ -1,0 +1,7 @@
+[package]
+version = "0.1.0"
+name = "is_prime-program"
+edition = "2021"
+
+[dependencies]
+sp1-zkvm = "3.4"
