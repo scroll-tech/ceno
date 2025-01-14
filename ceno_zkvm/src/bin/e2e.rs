@@ -1,4 +1,5 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     with_panic_hook,
@@ -17,13 +18,6 @@ use tracing_subscriber::{
 use transcript::{
     BasicTranscript as Transcript, BasicTranscriptWithStat as TranscriptWithStat, StatisticRecorder,
 };
-
-fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
-    parse_size::Config::new()
-        .with_binary()
-        .parse_size(s)
-        .map(|size| size as u32)
-}
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
@@ -51,12 +45,15 @@ struct Args {
     #[arg(long)]
     hints: Option<String>,
 
+    #[arg(long, default_value = "100")]
+    n: u32,
+
     /// Stack size in bytes.
-    #[arg(long, default_value = "32k", value_parser = parse_size)]
+    #[arg(long, default_value = "32768")]
     stack_size: u32,
 
     /// Heap size in bytes.
-    #[arg(long, default_value = "2M", value_parser = parse_size)]
+    #[arg(long, default_value = "2097152")]
     heap_size: u32,
 }
 
@@ -104,7 +101,8 @@ fn main() {
         .init();
 
     tracing::info!("Loading ELF file: {}", &args.elf);
-    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    // let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let elf_bytes = ceno_examples::sorting;
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = setup_platform(
         args.platform,
@@ -113,7 +111,7 @@ fn main() {
         args.heap_size,
         pub_io_size,
     );
-    tracing::info!("Running on platform {:?} {}", args.platform, platform);
+    tracing::info!("Running on platform {:?} {:?}", args.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
         args.stack_size,
@@ -121,7 +119,10 @@ fn main() {
     );
 
     tracing::info!("Loading hints file: {:?}", args.hints);
-    let hints = memory_from_file(&args.hints);
+    // let hints = memory_from_file(&args.hints);
+    let mut hints = CenoStdin::default();
+    _ = hints.write(&args.n);
+    let hints: Vec<u32> = (&hints).into();
     assert!(
         hints.len() <= platform.hints.iter_addresses().len(),
         "hints must fit in {} bytes",

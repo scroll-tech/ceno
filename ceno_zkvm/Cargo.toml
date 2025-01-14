@@ -20,6 +20,9 @@ serde_json.workspace = true
 
 base64 = "0.22"
 ceno_emul = { path = "../ceno_emul" }
+ceno-examples = { path = "../examples-builder" }
+ceno_host = { path = "../ceno_host" }
+
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
@@ -40,7 +43,6 @@ tracing-subscriber.workspace = true
 bincode = "1"
 clap = { version = "4.5", features = ["derive"] }
 generic_static = "0.2"
-parse-size = "1.1"
 rand.workspace = true
 tempfile = "3.14"
 thread_local = "1.1"
@@ -50,6 +52,7 @@ cfg-if.workspace = true
 criterion.workspace = true
 pprof2.workspace = true
 proptest.workspace = true
+
 
 [build-dependencies]
 glob = "0.3"
