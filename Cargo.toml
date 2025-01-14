@@ -27,6 +27,7 @@ version = "0.1.0"
 anyhow = { version = "1.0", default-features = false }
 ark-std = "0.4"
 cfg-if = "1.0"
+clap = { version = "4.5", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 ff = "0.13"
@@ -34,6 +35,7 @@ goldilocks = { git = "https://github.com/scroll-tech/ceno-Goldilocks" }
 itertools = "0.13"
 num-derive = "0.4"
 num-traits = "0.2"
+parse-size = "1.1"
 paste = "1"
 plonky2 = "0.2"
 poseidon = { path = "./poseidon" }
