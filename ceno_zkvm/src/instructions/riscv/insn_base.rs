@@ -165,7 +165,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let op = step.rs2().expect("rs2 op");
+        let op = step.rs2().expect(&format!("{:?} rs2 op", step));
         set_val!(instance, self.id, op.register_index() as u64);
         set_val!(instance, self.prev_ts, op.previous_cycle);
 

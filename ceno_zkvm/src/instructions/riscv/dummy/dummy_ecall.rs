@@ -1,6 +1,9 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{Change, InsnKind, KECCAK_WORDS, StepRecord, WORD_SIZE};
+use ceno_emul::{
+    Change, InsnKind, KECCAK_PERMUTE, KECCAK_WORDS, SECP256K1_ADD, SECP256K1_ARG_WORDS, StepRecord,
+    WORD_SIZE,
+};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
@@ -18,20 +21,31 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-trait EcallSpec {
+pub trait EcallSpec {
     const NAME: &'static str;
 
     const REG_OPS_COUNT: usize;
     const MEM_OPS_COUNT: usize;
+    const CODE: u32;
 }
 
 pub struct KeccakSpec;
+pub struct Secp256k1AddSpec;
 
 impl EcallSpec for KeccakSpec {
     const NAME: &'static str = "KECCAK";
 
     const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = KECCAK_WORDS;
+    const CODE: u32 = KECCAK_PERMUTE;
+}
+
+impl EcallSpec for Secp256k1AddSpec {
+    const NAME: &'static str = "SECP256K1_ADD";
+
+    const REG_OPS_COUNT: usize = 2;
+    const MEM_OPS_COUNT: usize = SECP256K1_ARG_WORDS;
+    const CODE: u32 = SECP256K1_ADD;
 }
 
 /// LargeEcallDummy can handle any instruction and produce its effects,

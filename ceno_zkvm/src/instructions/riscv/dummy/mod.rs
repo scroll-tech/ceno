@@ -13,7 +13,7 @@ mod dummy_circuit;
 pub use dummy_circuit::DummyInstruction;
 
 mod dummy_ecall;
-pub use dummy_ecall::LargeEcallDummy;
+pub use dummy_ecall::{EcallSpec, KeccakSpec, LargeEcallDummy, Secp256k1AddSpec};
 
 #[cfg(test)]
 mod test;

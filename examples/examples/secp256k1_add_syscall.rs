@@ -25,7 +25,6 @@ const P_PLUS_Q: [u8; 65] = [
 ];
 
 fn from_bytes(bytes: [u8; 65]) -> DecompressedPoint {
-    assert!(bytes.len() == 65);
     std::array::from_fn(|i| u32::from_le_bytes(std::array::from_fn(|j| bytes[1..][i * 4 + j])))
 }
 
