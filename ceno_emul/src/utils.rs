@@ -4,8 +4,8 @@ use itertools::Itertools;
 
 use crate::{EmuContext, VMState, Word, WordAddr};
 
-/// Utilities for interpreting the address segment `[start..start + length]` of `vm`
-/// as an array of type T
+/// Utilities for interpreting memory of `vm` starting at address `start`
+/// as `length` consecutive instances of type `T`
 pub struct MemoryView<'a, T> {
     vm: &'a VMState,
     start: WordAddr,
@@ -71,6 +71,7 @@ impl<'a, T: Sized + HasByteRepr> MemoryView<'a, T> {
     }
 
     /// Interpret `T`s as words, usually for writing into memory
+    /// Going through bytes for generality; a bit wasteful, but not a concern right now
     pub fn into_words(vec: Vec<T>) -> Vec<Word> {
         Word::vec_from_bytes(&T::vec_into_bytes(vec))
     }
