@@ -1,10 +1,10 @@
 [package]
 categories.workspace = true
-description = "Multilinear extensions for the Ceno project"
+description = "GKR IOP protocol implementation"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "multilinear_extensions"
+name = "gkr_iop"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
@@ -15,13 +15,9 @@ ff.workspace = true
 ff_ext.workspace = true
 goldilocks.workspace = true
 itertools.workspace = true
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+rand.workspace = true
 rayon.workspace = true
-serde.workspace = true
-tracing.workspace = true
-
-[dev-dependencies]
-env_logger = "0.11"
-log = "0.4"
-
-[features]
-parallel = []
+subprotocols.workspace = true
+thiserror.workspace = true
+transcript.workspace = true
