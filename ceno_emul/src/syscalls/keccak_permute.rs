@@ -1,7 +1,7 @@
 use itertools::{Itertools, izip};
 use tiny_keccak::keccakf;
 
-use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, WordAddr, WriteOp};
+use crate::{Change, EmuContext, Platform, VMState, WriteOp, utils::MemoryView};
 
 use super::{SyscallEffects, SyscallWitness};
 
@@ -24,32 +24,16 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
         0, // Cycle set later in finalize().
     )];
 
-    let addrs = (state_ptr..)
-        .step_by(WORD_SIZE)
-        .take(KECCAK_WORDS)
-        .map(WordAddr::from)
-        .collect_vec();
+    // Create a u64 view of length = KECCAK_CELLS
+    let state_view = MemoryView::<u64>::new(vm, state_ptr, KECCAK_CELLS, true);
 
-    // Read Keccak state.
-    let input = addrs
-        .iter()
-        .map(|&addr| vm.peek_memory(addr))
-        .collect::<Vec<_>>();
-
-    // Compute Keccak permutation.
-    let output = {
-        let mut state = [0_u64; KECCAK_CELLS];
-        for (cell, (&lo, &hi)) in izip!(&mut state, input.iter().tuples()) {
-            *cell = lo as u64 | (hi as u64) << 32;
-        }
-
-        keccakf(&mut state);
-
-        state.into_iter().flat_map(|c| [c as u32, (c >> 32) as u32])
-    };
+    // Interpret memory as u64 array
+    let mut state: [u64; KECCAK_CELLS] = state_view.interpret().try_into().unwrap();
+    keccakf(&mut state);
+    let output_words = MemoryView::<u64>::into_words(state.to_vec());
 
     // Write permuted state.
-    let mem_ops = izip!(addrs, input, output)
+    let mem_ops = izip!(state_view.addrs(), state_view.words(), output_words)
         .map(|(addr, before, after)| WriteOp {
             addr,
             value: Change { before, after },

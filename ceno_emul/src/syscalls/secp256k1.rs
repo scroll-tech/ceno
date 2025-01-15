@@ -1,11 +1,13 @@
-use std::iter;
+use std::{iter, rc::Rc};
 
-use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, WordAddr, WriteOp};
+use crate::{
+    Change, EmuContext, Platform, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    utils::{HasByteRepr, MemoryView},
+};
 use itertools::{Itertools, izip};
-use secp::Point;
+use secp;
 
 use super::{SyscallEffects, SyscallWitness};
-
 // A secp256k1 point in uncompressed form takes 64 bytes
 pub const SECP256K1_ARG_WORDS: usize = 16;
 
@@ -33,52 +35,25 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
         ),
     ];
 
-    let [p_addrs, q_addrs] = [p_ptr, q_ptr].map(|ptr| {
-        (ptr..)
-            .step_by(WORD_SIZE)
-            .take(SECP256K1_ARG_WORDS)
-            .map(WordAddr::from)
-            .collect_vec()
-    });
+    // Create byte-views of point P and Q
+    let [p_view, q_view] = [p_ptr, q_ptr].map(|start| MemoryView::<u8>::new(vm, start, 64, true));
 
-    // Extract arguments as byte vecs. Prepend the "tag byte" 0x04 for secp crate compatibility
-    let [p_bytes, q_bytes] = [p_addrs.clone(), q_addrs].map(|addrs| {
-        iter::once(4u8)
-            .chain(
-                addrs
-                    .iter()
-                    .map(|&addr| vm.peek_memory(addr).to_le_bytes().to_vec())
-                    .flatten(),
-            )
-            .collect::<Vec<_>>()
-    });
-
-    let [p, q] = [p_bytes, q_bytes].map(|bytes| {
-        Point::from_slice(&bytes).expect(&format!(
+    let [p, q] = [&p_view, &q_view].map(|view| {
+        // prepend the "0x04" tag byte for secp compatibility
+        let bytes = iter::once(4u8).chain(view.iter_bytes()).collect_vec();
+        secp::Point::from_slice(&bytes).expect(&format!(
             "failed to parse affine point from byte array {:?}",
             bytes
         ))
     });
 
-    // Ignore the "tag byte"
-    let output_bytes = (p + q).serialize_uncompressed()[1..].to_vec();
-
-    let output_words: Vec<u32> = output_bytes
-        .chunks_exact(4)
-        .map(|chunk| {
-            let arr: [u8; 4] = chunk.try_into().unwrap();
-            u32::from_le_bytes(arr)
-        })
-        .collect();
-
-    let p_words = p_addrs
-        .clone()
-        .iter()
-        .map(|addr| vm.peek_memory(*addr))
-        .collect_vec();
+    // Perform the sum and serialize; ignore the "tag byte"
+    let output_bytes: [u8; 64] = (p + q).serialize_uncompressed()[1..].try_into().unwrap();
+    // Convert into words
+    let output_words: Vec<Word> = Word::vec_from_bytes(&output_bytes);
 
     // overwrite result at point P
-    let mem_ops = izip!(p_addrs, p_words, output_words)
+    let mem_ops = izip!(p_view.addrs(), p_view.words(), output_words)
         .map(|(addr, before, after)| WriteOp {
             addr,
             value: Change { before, after },
