@@ -1,5 +1,6 @@
 #![deny(clippy::cargo)]
 #![feature(step_trait)]
+#![feature(unsigned_is_multiple_of)]
 mod addr;
 pub use addr::*;
 
@@ -28,3 +29,5 @@ pub use syscalls::{KECCAK_PERMUTE, keccak_permute::KECCAK_WORDS};
 pub mod test_utils;
 
 pub mod host_utils;
+
+pub mod gdb;
