@@ -24,7 +24,8 @@ pub mod disassemble;
 
 mod syscalls;
 pub use syscalls::{
-    KECCAK_PERMUTE, SECP256K1_ADD, keccak_permute::KECCAK_WORDS, secp256k1::SECP256K1_ARG_WORDS,
+    KECCAK_PERMUTE, SECP256K1_ADD, SECP256K1_DOUBLE, keccak_permute::KECCAK_WORDS,
+    secp256k1::SECP256K1_ARG_WORDS,
 };
 
 pub mod utils;

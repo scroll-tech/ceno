@@ -280,6 +280,15 @@ fn test_ceno_rt_secp256k1_add() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_ceno_rt_secp256k1_double() -> Result<()> {
+    let program_elf = ceno_examples::secp256k1_double_syscall;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let _ = run(&mut state)?;
+    // TODO: asserts on effects
+    Ok(())
+}
+
 fn unsafe_platform() -> Platform {
     let mut platform = CENO_PLATFORM;
     platform.unsafe_ecall_nop = true;

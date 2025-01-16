@@ -52,3 +52,31 @@ pub fn secp256k1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
 }
+
+pub const SECP256K1_DOUBLE: u32 = 0x00_00_01_0B;
+
+/// Based on: https://github.com/succinctlabs/sp1/blob/dbe622aa4a6a33c88d76298c2a29a1d7ef7e90df/crates/zkvm/entrypoint/src/syscalls/secp256k1.rs
+/// Double a Secp256k1 point.
+///
+/// The result is stored in-place in the supplied buffer.
+///
+/// ### Safety
+///
+/// The caller must ensure that `p` is valid pointer to data that is aligned along a four byte
+/// boundary.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn secp256k1_double(p: *mut [u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") SECP256K1_DOUBLE,
+            in("a0") p,
+            in("a1") 0
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}

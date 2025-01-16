@@ -7,13 +7,14 @@ pub mod secp256k1;
 // Using the same function codes as sp1:
 // https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/code.rs
 
-pub use ceno_rt::syscalls::{KECCAK_PERMUTE, SECP256K1_ADD};
+pub use ceno_rt::syscalls::{KECCAK_PERMUTE, SECP256K1_ADD, SECP256K1_DOUBLE};
 
 /// Trace the inputs and effects of a syscall.
 pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects> {
     match function_code {
         KECCAK_PERMUTE => Ok(keccak_permute::keccak_permute(vm)),
         SECP256K1_ADD => Ok(secp256k1::secp256k1_add(vm)),
+        SECP256K1_DOUBLE => Ok(secp256k1::secp256k1_double(vm)),
         // TODO: introduce error types.
         _ => Err(anyhow::anyhow!("Unknown syscall: {}", function_code)),
     }

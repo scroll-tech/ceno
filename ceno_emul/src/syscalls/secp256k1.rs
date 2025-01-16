@@ -1,7 +1,7 @@
-use std::{iter, rc::Rc};
+use std::iter;
 
 use crate::{
-    Change, EmuContext, Platform, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    Change, EmuContext, Platform, VMState, Word, WriteOp,
     utils::{HasByteRepr, MemoryView},
 };
 use itertools::{Itertools, izip};
@@ -49,6 +49,58 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
 
     // Perform the sum and serialize; ignore the "tag byte"
     let output_bytes: [u8; 64] = (p + q).serialize_uncompressed()[1..].try_into().unwrap();
+    // Convert into words
+    let output_words: Vec<Word> = Word::vec_from_bytes(&output_bytes);
+
+    // overwrite result at point P
+    let mem_ops = izip!(p_view.addrs(), p_view.words(), output_words)
+        .map(|(addr, before, after)| WriteOp {
+            addr,
+            value: Change { before, after },
+            previous_cycle: 0, // Cycle set later in finalize().
+        })
+        .collect_vec();
+
+    assert_eq!(mem_ops.len(), SECP256K1_ARG_WORDS);
+    SyscallEffects {
+        witness: SyscallWitness { mem_ops, reg_ops },
+        next_pc: None,
+    }
+}
+
+/// Trace the execution of a secp256k1_double call
+///
+/// Compatible with:
+/// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/precompiles/weierstrass/add.rs
+///
+/// TODO: test compatibility.
+pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
+    let p_ptr = vm.peek_register(Platform::reg_arg0());
+
+    // Read the argument pointers
+    let reg_ops = vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(p_ptr, p_ptr),
+        0, // Cycle set later in finalize().
+    )];
+
+    // Create byte-view of P
+    let p_view = MemoryView::<u8>::new(vm, p_ptr, 64, true);
+
+    let p = {
+        // prepend the "0x04" tag byte for secp compatibility
+        let bytes = iter::once(4u8).chain(p_view.iter_bytes()).collect_vec();
+        secp::Point::from_slice(&bytes).expect(&format!(
+            "failed to parse affine point from byte array {:?}",
+            bytes
+        ))
+    };
+
+    // Multiply by 2 and serialize; ignore the "tag byte"
+    let output_bytes: [u8; 64] = (secp::Scalar::two() * p).serialize_uncompressed()[1..]
+        .try_into()
+        .unwrap();
+
     // Convert into words
     let output_words: Vec<Word> = Word::vec_from_bytes(&output_bytes);
 
