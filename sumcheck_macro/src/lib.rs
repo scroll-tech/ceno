@@ -2,24 +2,30 @@ extern crate proc_macro;
 use proc_macro2::Span;
 use quote::quote;
 use syn::{
-    Expr, ExprClosure, Ident, LitInt, Result, Token,
+    Expr, ExprClosure, Ident, LitBool, LitInt, Result, Token,
     parse::{Parse, ParseStream},
     parse_macro_input,
 };
 
 struct MyMacroInput {
-    number: LitInt,
+    degree: LitInt,
+    parallalize: LitBool,
     product_access: ExprClosure,
 }
 
 impl Parse for MyMacroInput {
     fn parse(input: ParseStream) -> Result<Self> {
-        let number = input.parse()?;
+        let degree = input.parse()?;
         input.parse::<Token![,]>()?;
+
+        let parallalize: LitBool = input.parse()?; // `<bool>`
+        input.parse::<Token![,]>()?; // `,`
+
         let expr = input.parse()?;
         match expr {
             Expr::Closure(product_access) => Ok(Self {
-                number,
+                degree,
+                parallalize,
                 product_access,
             }),
             _ => Err(syn::Error::new_spanned(
@@ -35,7 +41,8 @@ impl Parse for MyMacroInput {
 pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as MyMacroInput);
 
-    let degree = input.number.base10_parse::<u32>().unwrap();
+    let degree = input.degree.base10_parse::<u32>().unwrap();
+    let parallalize = input.parallalize.value;
     let product_access = input.product_access;
 
     // Output: let product_access = |i| closure_raw_code;
@@ -58,6 +65,82 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
         f_var_names.push(f_var_name);
     }
 
+    // Generate AdditiveArray based on degree to be used in match.
+    let additive_converter = {
+        // Generate AdditiveArray based on degree
+        let mut additive_array_items = proc_macro2::TokenStream::new();
+        for i in 1..=(degree + 1) {
+            let single = |f: Ident| match i {
+                1 => quote! {#f[b]},
+                2 => quote! {#f[b + 1]},
+                n => join_expr(
+                    quote! {+},
+                    false,
+                    std::iter::repeat_n(
+                        {
+                            // c1
+                            quote! {#f[b + 1] - #f[b]}
+                        },
+                        (n - 2) as usize,
+                    )
+                    .chain(std::iter::once(quote! {#f[b + 1]}))
+                    .collect(),
+                ),
+            };
+
+            let item = join_expr(
+                quote! {*},
+                true,
+                (1..=degree)
+                    .map(|j| single(ident(format!("v{j}"))))
+                    .collect(),
+            );
+
+            if i == 1 {
+                additive_array_items = quote! {#item};
+            } else {
+                additive_array_items = quote! {#additive_array_items, #item};
+            }
+        }
+        let additive_array_items = quote! {AdditiveArray([#additive_array_items])};
+        let additive_array_first_item =
+            (1..=degree).fold(proc_macro2::TokenStream::new(), |acc, i| {
+                let name = ident(format!("v{i}"));
+                if acc.is_empty() {
+                    quote! {#name[0]}
+                } else {
+                    quote! {#acc * #name[0]}
+                }
+            });
+
+        let degree_plus_one = (degree + 1) as usize;
+        let iter = if parallalize {
+            quote! {.into_par_iter().step_by(2).with_min_len(64)}
+        } else {
+            quote! {.step_by(2)}
+        };
+        quote! {
+                let res = (0..largest_even_below(v1.len()))
+                    #iter
+                    .map(|b| {
+                        #additive_array_items
+                    })
+                    .sum::<AdditiveArray<_, #degree_plus_one>>();
+                let res = if v1.len() == 1 {
+                    AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
+                } else {
+                    res
+                };
+                let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(v1.len()).max(1) + self.round - 1);
+                if num_vars_multiplicity > 0 {
+                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
+                } else {
+                    res
+                }
+
+        }
+    };
+
     // Map flattened_ml_extensions evaluations
     // match (&f0.evaluations(), &f1.evalutations(), ...) {
     //     (FieldType::Base(base1), FieldType::Base(base2), ...) => {...}
@@ -79,8 +162,8 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     // is done here is by sorting.
     let mut sorter_match_arms = proc_macro2::TokenStream::new();
     for case in 0..(2u32.pow(degree)) {
-        // 0 -> Base
         // 1 -> Ext
+        // 0 -> Base
         let bits_og = (0..degree)
             .enumerate()
             .map(|(idx, shift)| (idx, (case >> shift) & 1))
@@ -103,12 +186,12 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             let arm = bits_og
                 .iter()
                 .fold(proc_macro2::TokenStream::new(), |acc, (_, bit)| {
-                    // 0 -> Base
                     // 1 -> Ext
+                    // 0 -> Base
                     let field_type = if *bit == 0u32 {
-                        quote! {FieldType::Base(_)}
-                    } else {
                         quote! {FieldType::Ext(_)}
+                    } else {
+                        quote! {FieldType::Base(_)}
                     };
                     if acc.is_empty() {
                         quote! {#field_type}
@@ -158,15 +241,15 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     // Now we have sorted the f. If any Bases will tend to left side and Exts to right side.
     let mut match_arms = proc_macro2::TokenStream::new();
     for num_exts in 0..=degree {
-        // 0 -> Base
         // 1 -> Ext
+        // 0 -> Base
         let items = std::iter::repeat_n(0, (degree - num_exts) as usize)
             .chain(std::iter::repeat_n(1, num_exts as usize))
             .enumerate()
             .map(|(i, field_type)| {
                 let name = match field_type {
-                    0 => format!("base_{}", i + 1),
-                    1 => format!("ext_{}", i + 1),
+                    0 => format!("v{}", i + 1),
+                    1 => format!("v{}", i + 1),
                     _ => unreachable!(),
                 };
                 (i + 1, field_type, ident(name))
@@ -177,8 +260,8 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             proc_macro2::TokenStream::new(),
             |acc, (_, field_type, ident)| {
                 let arg = match field_type {
-                    0 => quote! {FieldType::Base(#ident)},
-                    1 => quote! {FieldType::Ext(#ident)},
+                    0 => quote! {FieldType::Ext(#ident)},
+                    1 => quote! {FieldType::Base(#ident)},
                     _ => unreachable!(),
                 };
                 if acc.is_empty() {
@@ -189,39 +272,31 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             },
         );
 
-        let mut arm_body = items.iter().fold(
-            proc_macro2::TokenStream::new(),
-            |acc, (i, field_type, ident)| {
-                let f = &f_var_names[*i - 1];
-                let mut code = quote! {
-                    #acc
-                    let #ident = if let Some((start, offset)) = #f.evaluations_range() {
-                        #ident[start..][..offset].to_vec()
-                    } else {
-                        #ident[..].to_vec()
-                    };
-                };
-                if *field_type == 0 {
-                    code = quote! {
-                        #code
-                        let #ident = #ident.into_iter().map(E::from).collect::<Vec<_>>();
-                    };
-                }
-                code
-            },
-        );
-        let args = items
-            .iter()
-            .fold(proc_macro2::TokenStream::new(), |acc, (_, _, ident)| {
-                if acc.is_empty() {
-                    quote! {#ident}
-                } else {
-                    quote! {#acc, #ident}
-                }
-            });
-        arm_body = quote! {
-            #arm_body
-            (#args)
+        let mut arm_body =
+            items
+                .iter()
+                .fold(proc_macro2::TokenStream::new(), |acc, (i, _, ident)| {
+                    let f = &f_var_names[*i - 1];
+                    quote! {
+                        #acc
+                        let #ident = if let Some((start, offset)) = #f.evaluations_range() {
+                            &#ident[start..][..offset]
+                        } else {
+                            &#ident[..]
+                        };
+                    }
+                });
+        arm_body = if num_exts == degree {
+            quote! {
+                #arm_body
+                let result = {#additive_converter};
+                AdditiveArray(result.0.map(E::from))
+            }
+        } else {
+            quote! {
+                #arm_body
+                #additive_converter
+            }
         };
 
         match_arms = quote! {
@@ -230,88 +305,15 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
         };
     }
     out = quote! {
-        #out
-
-        let (#f_tuple) = match (#match_input) {
-            #match_arms
-            _ => unreachable!(),
-        };
-    };
-
-    // Generate AdditiveArray based on degree
-    let mut additive_array_items = proc_macro2::TokenStream::new();
-    for i in 1..=(degree + 1) {
-        let single = |f: Ident| match i {
-            1 => quote! {#f[b]},
-            2 => quote! {#f[b + 1]},
-            n => join_expr(
-                quote! {+},
-                false,
-                std::iter::repeat_n(
-                    {
-                        // c1
-                        quote! {#f[b + 1] - #f[b]}
-                    },
-                    (n - 2) as usize,
-                )
-                .chain(std::iter::once(quote! {#f[b + 1]}))
-                .collect(),
-            ),
-        };
-
-        let item = join_expr(
-            quote! {*},
-            true,
-            (1..=degree)
-                .map(|j| single(ident(format!("f{j}"))))
-                .collect(),
-        );
-
-        if i == 1 {
-            additive_array_items = quote! {#item};
-        } else {
-            additive_array_items = quote! {#additive_array_items, #item};
-        }
-    }
-
-    let additive_array_items = quote! {AdditiveArray([#additive_array_items])};
-    let additive_array_first_item =
-        f_var_names
-            .iter()
-            .fold(proc_macro2::TokenStream::new(), |acc, f| {
-                if acc.is_empty() {
-                    quote! {#f[0]}
-                } else {
-                    quote! {#acc * #f[0]}
-                }
-            });
-
-    let f1 = &f_var_names[0];
-    let degree_plus_one = (degree + 1) as usize;
-    out = quote! {
         {
-            #out
-            let res = (0..largest_even_below(#f1.len()))
-                .into_par_iter()
-                .step_by(2)
-                .with_min_len(64)
-                .map(|b| {
-                    #additive_array_items
-                })
-                .sum::<AdditiveArray<_, #degree_plus_one>>();
-            let res = if #f1.len() == 1 {
-                AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
-            } else {
-                res
-            };
-            let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(#f1.len()).max(1) + self.round - 1);
-            if num_vars_multiplicity > 0 {
-                AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
-            } else {
-                res
+           #out
+            match (#match_input) {
+                #match_arms
+                _ => unreachable!(),
             }
         }
     };
+
     out.into()
 }
 
