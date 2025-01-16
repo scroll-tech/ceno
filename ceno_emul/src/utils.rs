@@ -52,7 +52,7 @@ macro_rules! impl_has_byte_repr {
 impl_has_byte_repr!(u32, 4);
 impl_has_byte_repr!(u64, 8);
 
-impl<'a, T: Sized + HasByteRepr> MemoryView<'a, T> {
+impl<'a, T: Sized + HasByteRepr + core::fmt::Debug> MemoryView<'a, T> {
     /// `strict_align = true` enforces that the address segment is aligned with
     /// the size of T
     pub fn new(vm: &'a VMState, start: u32, length: usize, strict_align: bool) -> Self {
@@ -114,5 +114,13 @@ impl<'a, T: Sized + HasByteRepr> MemoryView<'a, T> {
     // Interpret target segment as consecutive `T`s
     pub fn interpret(&self) -> Vec<T> {
         T::vec_from_bytes(&self.iter_bytes().collect_vec())
+    }
+
+    pub fn debug(&self) {
+        dbg!(self.start, self.length);
+        dbg!(self.addrs());
+        dbg!(self.words());
+        dbg!(self.bytes());
+        dbg!(self.interpret());
     }
 }

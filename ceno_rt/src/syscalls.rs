@@ -80,3 +80,39 @@ pub extern "C" fn secp256k1_double(p: *mut [u32; 16]) {
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
 }
+
+pub const SECP256K1_DECOMPRESS: u32 = 0x00_00_01_0C;
+
+/// Decompresses a compressed Secp256k1 point.
+///
+/// The input array should be 64 bytes long, with the first 32 bytes containing the X coordinate in
+/// big-endian format. The second half of the input will be overwritten with the Y coordinate of the
+/// decompressed point in big-endian format using the point's parity (is_odd).
+///
+/// ### Safety
+///
+/// The caller must ensure that `point` is valid pointer to data that is aligned along a four byte
+/// boundary.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn secp256k1_decompress(point: &mut [u8; 64], is_odd: bool) {
+    #[cfg(target_os = "zkvm")]
+    {
+        // Memory system/FpOps are little endian so we'll just flip the whole array before/after
+        // TODO: deal with reverse
+        // point.reverse();
+        let p = point.as_mut_ptr();
+        unsafe {
+            asm!(
+                "ecall",
+                in("t0") SECP256K1_DECOMPRESS,
+                in("a0") p,
+                in("a1") is_odd as u8
+            );
+        }
+        // point.reverse();
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
