@@ -68,3 +68,7 @@ name = "fft"
 [[bench]]
 harness = false
 name = "utils"
+
+[[bench]]
+harness = false
+name = "whir"
