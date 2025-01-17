@@ -204,6 +204,19 @@ mod tests {
     }
 
     #[test]
+    fn bench_whir_simple_batch_commit_open_verify_goldilocks() {
+        for gen_rand_poly in [gen_rand_poly_base] {
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 20, 21);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+                gen_rand_poly,
+                20,
+                21,
+                64,
+            );
+        }
+    }
+
+    #[test]
     fn whir_simple_batch_commit_open_verify_goldilocks() {
         for gen_rand_poly in [gen_rand_poly_base] {
             // Both challenge and poly are over base field

@@ -301,6 +301,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "246a225cc6131e9ee4f24619af0f19d67761fff15d7ccc22e42b80846e69449a"
 dependencies = [
+ "colored",
  "num-traits",
  "rand",
  "rayon",
@@ -2843,7 +2844,6 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/whir?branch=feat%2Fceno-binding-batch#c45846c29e468835be536c757070e7aef780afd1"
 dependencies = [
  "ark-crypto-primitives",
  "ark-ff",

@@ -32,7 +32,7 @@ rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
-whir = { git = "https://github.com/scroll-tech/whir", branch = "feat/ceno-binding-batch", features = ["ceno"] }
+whir = { path = "../../whir", features = ["ceno"] }
 zeroize = "1.8"
 
 [dev-dependencies]
@@ -42,7 +42,7 @@ criterion.workspace = true
 benchmark = ["parallel"]
 default = ["parallel"] # Add "sanity-check" to debug
 parallel = ["dep:rayon"]
-print-trace = ["ark-std/print-trace"]
+print-trace = ["ark-std/print-trace", "whir/print-trace"]
 sanity-check = []
 
 [[bench]]
