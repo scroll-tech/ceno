@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use plonky2::util::reverse_index_bits_in_place;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use whir::poly_utils::coeffs::CoefficientList;
 
 use crate::util::arithmetic::interpolate_field_type_over_boolean_hypercube;
@@ -22,7 +23,7 @@ pub fn poly2whir<E: ExtensionField>(
         }
         multilinear_extensions::mle::FieldType::Base(coeffs) => {
             reverse_index_bits_in_place(coeffs.as_mut_slice());
-            CoefficientList::new(coeffs.iter().map(|x| BaseFieldWrapper(*x)).collect())
+            CoefficientList::new(coeffs.par_iter().map(|x| BaseFieldWrapper(*x)).collect())
         }
         _ => unreachable!(),
     }
@@ -31,7 +32,7 @@ pub fn poly2whir<E: ExtensionField>(
 pub fn polys2whir<E: ExtensionField>(
     poly: &[DenseMultilinearExtension<E>],
 ) -> Vec<CoefficientList<BaseFieldWrapper<E>>> {
-    poly.iter().map(|poly| poly2whir(poly)).collect()
+    poly.par_iter().map(|poly| poly2whir(poly)).collect()
 }
 
 #[cfg(test)]
