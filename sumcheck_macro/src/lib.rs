@@ -65,34 +65,43 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
         f_var_names.push(f_var_name);
     }
 
+    let mut c_declarations = proc_macro2::TokenStream::new();
+    for i in 1..=degree {
+        if degree > 2 {
+            let v = ident(format!("v{i}"));
+            let c = ident(format!("c{i}"));
+            c_declarations = quote! {
+                #c_declarations
+                let #c = #v[b + 1] - #v[b];
+            };
+        }
+    }
+
     // Generate AdditiveArray based on degree to be used in match.
     let additive_converter = {
         // Generate AdditiveArray based on degree
         let mut additive_array_items = proc_macro2::TokenStream::new();
         for i in 1..=(degree + 1) {
-            let single = |f: Ident| match i {
-                1 => quote! {#f[b]},
-                2 => quote! {#f[b + 1]},
-                n => join_expr(
-                    quote! {+},
-                    false,
-                    std::iter::repeat_n(
-                        {
-                            // c1
-                            quote! {#f[b + 1] - #f[b]}
-                        },
-                        (n - 2) as usize,
-                    )
-                    .chain(std::iter::once(quote! {#f[b + 1]}))
-                    .collect(),
-                ),
-            };
-
             let item = join_expr(
                 quote! {*},
                 true,
                 (1..=degree)
-                    .map(|j| single(ident(format!("v{j}"))))
+                    .map(|j: u32| {
+                        let v = ident(format!("v{j}"));
+                        let c = ident(format!("c{j}"));
+                        match i {
+                            1 => quote! {#v[b]},
+                            2 => quote! {#v[b + 1]},
+                            3 => quote! {#v[b + 1] + #v[b + 1] - #v[b]},
+                            n => join_expr(
+                                quote! {+},
+                                false,
+                                std::iter::repeat_n(quote! {#c}, (n - 2) as usize)
+                                    .chain(std::iter::once(quote! {#v[b + 1]}))
+                                    .collect(),
+                            ),
+                        }
+                    })
                     .collect(),
             );
 
@@ -102,7 +111,10 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                 additive_array_items = quote! {#additive_array_items, #item};
             }
         }
-        let additive_array_items = quote! {AdditiveArray([#additive_array_items])};
+        let additive_array_items = quote! {
+            #c_declarations
+            AdditiveArray([#additive_array_items])
+        };
         let additive_array_first_item =
             (1..=degree).fold(proc_macro2::TokenStream::new(), |acc, i| {
                 let name = ident(format!("v{i}"));
@@ -117,7 +129,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
         let iter = if parallalize {
             quote! {.into_par_iter().step_by(2).with_min_len(64)}
         } else {
-            quote! {.step_by(2)}
+            quote! {.step_by(2).rev()}
         };
         quote! {
                 let res = (0..largest_even_below(v1.len()))
