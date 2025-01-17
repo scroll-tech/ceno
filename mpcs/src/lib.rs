@@ -311,6 +311,7 @@ pub enum Error {
     PolynomialTooLarge(usize),
     PolynomialSizesNotEqual,
     MerkleRootMismatch,
+    WhirError(whir::Error),
 }
 
 mod basefold;
@@ -320,7 +321,9 @@ pub use basefold::{
     EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
     one_level_interp_hc,
 };
+mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
 
 fn validate_input<E: ExtensionField>(
     function: &str,
@@ -380,6 +383,7 @@ pub mod test_util {
         mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
     #[cfg(test)]
     use transcript::BasicTranscript;
     use transcript::Transcript;
@@ -406,13 +410,14 @@ pub mod test_util {
     }
 
     pub fn gen_rand_polys<E: ExtensionField>(
-        num_vars: impl Fn(usize) -> usize,
+        num_vars: impl Fn(usize) -> usize + Sync,
         batch_size: usize,
         gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
     ) -> Vec<DenseMultilinearExtension<E>> {
         (0..batch_size)
+            .into_par_iter()
             .map(|i| gen_rand_poly(num_vars(i)))
-            .collect_vec()
+            .collect::<Vec<_>>()
     }
 
     pub fn get_point_from_challenge<E: ExtensionField>(
