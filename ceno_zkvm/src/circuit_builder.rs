@@ -1,4 +1,3 @@
-use ceno_emul::Addr;
 use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -56,13 +55,7 @@ impl NameSpace {
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
-    pub table_len: usize,
-}
-
-#[derive(Clone, Debug)]
-pub struct DynamicAddr {
-    pub addr_witin_id: usize,
-    pub offset: Addr,
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
@@ -297,7 +290,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rom_type: ROMType,
         record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
@@ -321,7 +314,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
             multiplicity,
-            table_len,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);

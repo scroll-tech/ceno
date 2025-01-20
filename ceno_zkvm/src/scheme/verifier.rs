@@ -522,6 +522,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let tower_proofs = &proof.tower_proof;
 
         let expected_rounds = cs
+            // only iterate r set, as read/write set round should match
             .r_table_expressions
             .iter()
             .flat_map(|r| {
@@ -538,13 +539,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .max()
                         .unwrap()
                 });
-                [num_vars, num_vars]
+                [num_vars, num_vars] // format: [read_round, write_round]
             })
-            .chain(
-                cs.lk_table_expressions
-                    .iter()
-                    .map(|l| ceil_log2(l.table_len)),
-            )
+            .chain(cs.lk_table_expressions.iter().map(|l| {
+                // iterate through structural witins and collect max round.
+                let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
+                    l.table_spec
+                        .structural_witins
+                        .iter()
+                        .map(|StructuralWitIn { id, max_len, .. }| {
+                            let hint_num_vars = proof.rw_hints_num_vars[*id as usize];
+                            assert!((1 << hint_num_vars) <= *max_len);
+                            hint_num_vars
+                        })
+                        .max()
+                        .unwrap()
+                });
+                num_vars
+            }))
             .collect_vec();
 
         for var in proof.rw_hints_num_vars.iter() {
@@ -693,9 +705,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let structural_witnesses = cs
             .r_table_expressions
             .iter()
-            .flat_map(|set_table_expression| {
-                set_table_expression
-                    .table_spec
+            .map(|r| &r.table_spec)
+            .chain(cs.lk_table_expressions.iter().map(|r| &r.table_spec))
+            .flat_map(|table_spec| {
+                table_spec
                     .structural_witins
                     .iter()
                     .map(
