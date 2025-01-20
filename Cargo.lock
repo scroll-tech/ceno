@@ -2021,8 +2021,23 @@ dependencies = [
  "multilinear_extensions",
  "rayon",
  "serde",
+ "sumcheck_macro",
  "tracing",
  "transcript",
+]
+
+[[package]]
+name = "sumcheck_macro"
+version = "0.1.0"
+dependencies = [
+ "ff_ext",
+ "goldilocks",
+ "multilinear_extensions",
+ "proc-macro2",
+ "quote",
+ "rayon",
+ "sumcheck",
+ "syn 2.0.90",
 ]
 
 [[package]]
