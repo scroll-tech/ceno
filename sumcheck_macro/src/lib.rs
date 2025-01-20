@@ -65,15 +65,26 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
         f_var_names.push(f_var_name);
     }
 
+    // Generate c declarations for optimising additions
     let mut c_declarations = proc_macro2::TokenStream::new();
     for i in 1..=degree {
-        if degree > 2 {
+        if degree >= 2 {
+            let n = degree - 1;
+            let n_bits = n.ilog2() + 1;
             let v = ident(format!("v{i}"));
-            let c = ident(format!("c{i}"));
-            c_declarations = quote! {
-                #c_declarations
-                let #c = #v[b + 1] - #v[b];
-            };
+            for j in 0..n_bits {
+                let c = ident(format!("c{i}_{}", j));
+                let declaration = if j == 0 {
+                    quote! { let #c = #v[b + 1] - #v[b]; }
+                } else {
+                    let c_last = ident(format!("c{i}_{}", j - 1));
+                    quote! { let #c = #c_last + #c_last; }
+                };
+                c_declarations = quote! {
+                    #c_declarations
+                    #declaration
+                };
+            }
         }
     }
 
@@ -88,18 +99,23 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                 (1..=degree)
                     .map(|j: u32| {
                         let v = ident(format!("v{j}"));
-                        let c = ident(format!("c{j}"));
                         match i {
                             1 => quote! {#v[b]},
                             2 => quote! {#v[b + 1]},
-                            3 => quote! {#v[b + 1] + #v[b + 1] - #v[b]},
-                            n => join_expr(
-                                quote! {+},
-                                false,
-                                std::iter::repeat_n(quote! {#c}, (n - 2) as usize)
-                                    .chain(std::iter::once(quote! {#v[b + 1]}))
-                                    .collect(),
-                            ),
+                            _ => {
+                                let c = idx_of_one_bits(i - 2).iter().fold(
+                                    proc_macro2::TokenStream::new(),
+                                    |acc, k| {
+                                        let c = ident(format!("c{j}_{}", k));
+                                        if acc.is_empty() {
+                                            quote! {#c}
+                                        } else {
+                                            quote! {#acc + #c}
+                                        }
+                                    },
+                                );
+                                quote! {#c + #v[b + 1]}
+                            }
                         }
                     })
                     .collect(),
@@ -350,4 +366,15 @@ fn join_expr(
                 quote! { (#acc) #op (#expr) }
             }
         })
+}
+
+fn idx_of_one_bits(n: u32) -> Vec<u32> {
+    let mut res = vec![];
+    let n_bits = n.ilog2() + 1;
+    for j in 0..n_bits {
+        if (n >> j) & 1 == 1 {
+            res.push(j);
+        }
+    }
+    res
 }
