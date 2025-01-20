@@ -334,6 +334,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         op_mle!(self, |evaluations| {
             DenseMultilinearExtension::from_evaluations_ext_vec(
                 self.num_vars(),
+                #[allow(clippy::useless_conversion)]
                 evaluations.iter().cloned().map(E::from).collect(),
             )
         })
