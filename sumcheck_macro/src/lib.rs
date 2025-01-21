@@ -356,7 +356,7 @@ fn join_exprs(op: TokenStream, parenthesis: bool, exprs: Vec<TokenStream>) -> To
         .fold(TokenStream::new(), |acc, (i, expr)| {
             if acc.is_empty() {
                 quote! {#expr}
-            } else if i < 2 || !parenthesis {
+            } else if i < 2 && !parenthesis {
                 quote! { #acc #op #expr }
             } else {
                 quote! { (#acc) #op (#expr) }
