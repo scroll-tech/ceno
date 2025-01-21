@@ -101,14 +101,13 @@ fn test_sumcheck_internal<E: ExtensionField>(
 }
 
 #[test]
-#[ignore = "temporarily not supporting degree > 2"]
 fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
 }
 
 fn test_trivial_polynomial_helper<E: ExtensionField>() {
     let nv = 1;
-    let num_multiplicands_range = (4, 13);
+    let num_multiplicands_range = (3, 5);
     let num_products = 5;
 
     test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
@@ -116,14 +115,13 @@ fn test_trivial_polynomial_helper<E: ExtensionField>() {
 }
 
 #[test]
-#[ignore = "temporarily not supporting degree > 2"]
 fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
 fn test_normal_polynomial_helper<E: ExtensionField>() {
     let nv = 12;
-    let num_multiplicands_range = (4, 9);
+    let num_multiplicands_range = (3, 5);
     let num_products = 5;
 
     test_sumcheck::<E>(nv, num_multiplicands_range, num_products);

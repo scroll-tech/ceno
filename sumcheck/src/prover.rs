@@ -434,7 +434,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     2 => sumcheck_code_gen!(2, false, |i| &f[products[i]]).to_vec(),
                     3 => sumcheck_code_gen!(3, false, |i| &f[products[i]]).to_vec(),
                     4 => sumcheck_code_gen!(4, false, |i| &f[products[i]]).to_vec(),
-                    _ => unimplemented!("do not support degree > 4"),
+                    5 => sumcheck_code_gen!(5, false, |i| &f[products[i]]).to_vec(),
+                    _ => unimplemented!("do not support degree {} > 5", products.len()),
                 };
                 exit_span!(span);
                 sum.iter_mut().for_each(|sum| *sum *= coefficient);
@@ -686,8 +687,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         2 => sumcheck_code_gen!(2, true, |i| &f[products[i]]).to_vec(),
                         3 => sumcheck_code_gen!(3, true, |i| &f[products[i]]).to_vec(),
                         4 => sumcheck_code_gen!(4, true, |i| &f[products[i]]).to_vec(),
-
-                        _ => unimplemented!("do not support degree > 5"),
+                        5 => sumcheck_code_gen!(5, true, |i| &f[products[i]]).to_vec(),
+                        _ => unimplemented!("do not support degree {} > 5", products.len()),
                     };
                     exit_span!(span);
                     sum.iter_mut().for_each(|sum| *sum *= coefficient);
