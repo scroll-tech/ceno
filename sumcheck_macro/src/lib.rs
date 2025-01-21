@@ -1,4 +1,5 @@
 extern crate proc_macro;
+use itertools::Itertools;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
@@ -94,21 +95,14 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             .collect::<Vec<_>>();
 
         let mut bits_sorted = bits_og.clone();
-        bits_sorted.sort_by(|a, b| a.1.cmp(&b.1));
+        bits_sorted.sort_by_key(|v| v.1);
 
-        let is_sorted = bits_sorted
-            .iter()
-            .fold((false, 0), |(is_sorted, last_idx), (idx, _)| {
-                if last_idx > *idx {
-                    (true, *idx)
-                } else {
-                    (is_sorted, *idx)
-                }
-            });
+        // If we come across a case where idx decreases, means this case was sorted.
+        let is_sorted = bits_sorted.iter().tuple_windows().any(|(a, b)| a.0 > b.0);
 
         // Only print the arm if this case is sorted. Skip if this case was not sorted then it's one of
         // those degree+1 cases and will be added to the next match statement.
-        if is_sorted.0 {
+        if is_sorted {
             let arm = bits_og.iter().fold(TokenStream::new(), |acc, (_, bit)| {
                 // 1 -> Ext
                 // 0 -> Base

@@ -16,6 +16,7 @@ proc-macro = true
 syn = {version = "2.0", features = ["full"]}
 quote = "1.0"
 proc-macro2 = "1.0.92"
+itertools.workspace = true
 
 [dev-dependencies]
 ff_ext = { path = "../ff_ext" }

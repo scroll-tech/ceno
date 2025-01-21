@@ -2032,6 +2032,7 @@ version = "0.1.0"
 dependencies = [
  "ff_ext",
  "goldilocks",
+ "itertools 0.13.0",
  "multilinear_extensions",
  "proc-macro2",
  "quote",
