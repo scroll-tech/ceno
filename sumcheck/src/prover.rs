@@ -429,7 +429,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 let span = entered_span!("sum");
 
                 let f = &self.poly.flattened_ml_extensions;
-                let mut sum = match products.len() {
+                let mut sum: Vec<E> = match products.len() {
                     1 => sumcheck_code_gen!(1, false, |i| &f[products[i]]).to_vec(),
                     2 => sumcheck_code_gen!(2, false, |i| &f[products[i]]).to_vec(),
                     3 => sumcheck_code_gen!(3, false, |i| &f[products[i]]).to_vec(),
@@ -682,7 +682,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     let span = entered_span!("sum");
 
                     let f = &self.poly.flattened_ml_extensions;
-                    let mut sum = match products.len() {
+                    let mut sum: Vec<E> = match products.len() {
                         1 => sumcheck_code_gen!(1, true, |i| &f[products[i]]).to_vec(),
                         2 => sumcheck_code_gen!(2, true, |i| &f[products[i]]).to_vec(),
                         3 => sumcheck_code_gen!(3, true, |i| &f[products[i]]).to_vec(),
