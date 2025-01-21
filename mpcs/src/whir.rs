@@ -74,7 +74,7 @@ where
     ) -> Result<Self::Proof, crate::Error> {
         WhirInnerT::<E, Spec>::open(
             &pp,
-            comm.clone(), // TODO: Remove clone
+            comm,
             point
                 .iter()
                 .map(|x| FieldWrapper(*x))
@@ -140,7 +140,7 @@ where
     ) -> Result<Self::Proof, crate::Error> {
         WhirInnerT::<E, Spec>::simple_batch_open(
             &pp,
-            comm.clone(), // TODO: Remove clone
+            comm,
             point
                 .iter()
                 .map(|x| FieldWrapper(*x))
