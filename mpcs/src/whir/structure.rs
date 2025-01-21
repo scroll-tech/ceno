@@ -92,7 +92,7 @@ mod tests {
         let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
 
         let proof =
-            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, witness, &point, &eval).unwrap();
+            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, &witness, &point, &eval).unwrap();
         WhirInner::<F, WhirDefaultSpecInner>::verify(&pp, &comm, &point, &eval, &proof).unwrap();
     }
 }
