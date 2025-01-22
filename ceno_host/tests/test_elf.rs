@@ -271,12 +271,16 @@ fn test_ceno_rt_keccak() -> Result<()> {
     Ok(())
 }
 
-type DecompressedPoint = [u32; 16];
+fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
+    // ignore the tag byte (specific to the secp repr.)
+    let mut bytes: [u8; 64] = bytes.clone()[1..].try_into().unwrap();
 
-// split bytes into words
-fn bytes_to_words(bytes: [u8; 65]) -> DecompressedPoint {
-    // Ignore "tag" byte
-    std::array::from_fn(|i| u32::from_le_bytes(bytes[1..][4 * i..4 * (i + 1)].try_into().unwrap()))
+    // Reverse the order of bytes for each coordinate
+    bytes[0..32].reverse();
+    bytes[32..].reverse();
+    let ret =
+        std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()));
+    ret
 }
 
 #[test]
@@ -370,21 +374,32 @@ fn test_secp256k1_decompress() -> Result<()> {
     let y_address = x_address + SECP256K1_ARG_WORDS / 2;
 
     // Complete decompressed point (X and Y)
-    const DECOMPRESSED: [u8; 65] = [
+    let mut decompressed: [u8; 65] = [
         4, 180, 53, 9, 32, 85, 226, 220, 154, 20, 116, 218, 199, 119, 48, 44, 23, 45, 222, 10, 64,
         50, 63, 8, 121, 191, 244, 141, 0, 37, 117, 182, 133, 190, 160, 239, 131, 180, 166, 242,
         145, 107, 249, 24, 168, 27, 69, 86, 58, 86, 159, 10, 210, 164, 20, 152, 148, 67, 37, 222,
         234, 108, 57, 84, 148,
     ];
 
+    decompressed[33..].reverse();
+
     // Writes should cover the Y coordinate, i.e latter half of the repr
-    let expect = bytes_to_words(DECOMPRESSED)[8..].to_vec();
+    let expect = bytes_to_words(decompressed)[8..].to_vec();
 
     for (i, write_op) in witness.mem_ops.iter().enumerate() {
         assert_eq!(write_op.addr, y_address + i);
         assert_eq!(write_op.value.after, expect[i]);
     }
 
+    Ok(())
+}
+
+#[test]
+fn test_syscalls_compatibility() -> Result<()> {
+    let program_elf = ceno_examples::syscalls;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let _ = run(&mut state)?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 // Test decompression of curve point. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::syscalls::secp256k1_decompress;
+use ceno_rt::syscalls::syscall_secp256k1_decompress;
 
 // Byte repr. of point P1 from https://docs.rs/secp/latest/secp/#arithmetic-1
 const COMPRESSED: [u8; 33] = [
@@ -27,6 +27,6 @@ fn main() {
         .try_into()
         .unwrap();
 
-    secp256k1_decompress(&mut compressed_with_space, is_odd);
+    syscall_secp256k1_decompress(&mut compressed_with_space, is_odd);
     assert_eq!(compressed_with_space, DECOMPRESSED);
 }

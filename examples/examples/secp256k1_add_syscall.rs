@@ -1,6 +1,6 @@
 // Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::syscalls::secp256k1_add;
+use ceno_rt::syscalls::syscall_secp256k1_add;
 
 // Byte repr. of points from https://docs.rs/secp/latest/secp/#arithmetic-1
 const P: [u8; 65] = [
@@ -24,17 +24,28 @@ const P_PLUS_Q: [u8; 65] = [
 
 type DecompressedPoint = [u32; 16];
 
-// split bytes into words
-fn bytes_to_words(bytes: [u8; 65]) -> DecompressedPoint {
-    // Ignore "tag" byte
-    std::array::from_fn(|i| u32::from_le_bytes(bytes[1..][4 * i..4 * (i + 1)].try_into().unwrap()))
-}
+/// `bytes` is expected to contain the uncompressed representation of
+/// a curve point, as described in https://docs.rs/secp/latest/secp/struct.Point.html
+///
+/// The return value is an array of words compatible with the sp1 syscall for `add` and `double`
+/// Notably, these words should encode the X and Y coordinates of the point
+/// in "little endian" and not "big endian" as is the case of secp
+fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
+    // ignore the tag byte (specific to the secp repr.)
+    let mut bytes: [u8; 64] = bytes.clone()[1..].try_into().unwrap();
 
+    // Reverse the order of bytes for each coordinate
+    bytes[0..32].reverse();
+    bytes[32..].reverse();
+    let ret =
+        std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()));
+    ret
+}
 fn main() {
     let mut p: DecompressedPoint = bytes_to_words(P);
     let mut q: DecompressedPoint = bytes_to_words(Q);
     let p_plus_q: DecompressedPoint = bytes_to_words(P_PLUS_Q);
 
-    secp256k1_add(&mut p, &mut q);
+    syscall_secp256k1_add(&mut p, &mut q);
     assert_eq!(p, p_plus_q);
 }
