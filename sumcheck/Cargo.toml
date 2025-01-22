@@ -21,8 +21,8 @@ tracing.workspace = true
 
 crossbeam-channel.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
-transcript = { path = "../transcript" }
 sumcheck_macro = { path = "../sumcheck_macro" }
+transcript = { path = "../transcript" }
 
 [dev-dependencies]
 criterion.workspace = true
