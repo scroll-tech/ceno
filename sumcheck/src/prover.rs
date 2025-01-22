@@ -541,15 +541,21 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 .flattened_ml_extensions
                 .par_iter_mut()
                 .for_each(|mle| {
-                    if let Some(mle) = Arc::get_mut(mle) {
+                    if num_variables == 1 {
+                        // first time fix variable should be create new instance
                         if mle.num_vars() > 0 {
-                            mle.fix_variables_in_place(&[p.elements])
+                            *mle = mle.fix_variables(&[p.elements]).into();
+                        } else {
+                            *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                                0,
+                                mle.get_base_field_vec().to_vec(),
+                            ))
                         }
                     } else {
-                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            0,
-                            mle.get_base_field_vec().to_vec(),
-                        ))
+                        let mle = Arc::get_mut(mle).unwrap();
+                        if mle.num_vars() > 0 {
+                            mle.fix_variables_in_place(&[p.elements]);
+                        }
                     }
                 });
         };
