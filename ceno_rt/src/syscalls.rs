@@ -98,8 +98,7 @@ pub const SECP256K1_DECOMPRESS: u32 = 0x00_00_01_0C;
 pub extern "C" fn secp256k1_decompress(point: &mut [u8; 64], is_odd: bool) {
     #[cfg(target_os = "zkvm")]
     {
-        // Memory system/FpOps are little endian so we'll just flip the whole array before/after
-        // TODO: deal with reverse
+        // TODO: clear up reverse
         // point.reverse();
         let p = point.as_mut_ptr();
         unsafe {

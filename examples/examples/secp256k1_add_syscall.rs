@@ -24,15 +24,16 @@ const P_PLUS_Q: [u8; 65] = [
 
 type DecompressedPoint = [u32; 16];
 
-// interpret bytes for our internal interface [u32; 16]
-fn from_bytes(bytes: [u8; 65]) -> DecompressedPoint {
+// split bytes into words
+fn bytes_to_words(bytes: [u8; 65]) -> DecompressedPoint {
+    // Ignore "tag" byte
     std::array::from_fn(|i| u32::from_le_bytes(bytes[1..][4 * i..4 * (i + 1)].try_into().unwrap()))
 }
 
 fn main() {
-    let mut p: DecompressedPoint = from_bytes(P);
-    let mut q: DecompressedPoint = from_bytes(Q);
-    let p_plus_q: DecompressedPoint = from_bytes(P_PLUS_Q);
+    let mut p: DecompressedPoint = bytes_to_words(P);
+    let mut q: DecompressedPoint = bytes_to_words(Q);
+    let p_plus_q: DecompressedPoint = bytes_to_words(P_PLUS_Q);
 
     secp256k1_add(&mut p, &mut q);
     assert_eq!(p, p_plus_q);

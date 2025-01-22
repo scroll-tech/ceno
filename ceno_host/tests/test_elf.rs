@@ -2,8 +2,8 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
-    CENO_PLATFORM, EmuContext, InsnKind, Platform, Program, StepRecord, VMState, WORD_SIZE,
-    host_utils::read_all_messages,
+    CENO_PLATFORM, EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS, StepRecord,
+    VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
@@ -271,30 +271,120 @@ fn test_ceno_rt_keccak() -> Result<()> {
     Ok(())
 }
 
+type DecompressedPoint = [u32; 16];
+
+// split bytes into words
+fn bytes_to_words(bytes: [u8; 65]) -> DecompressedPoint {
+    // Ignore "tag" byte
+    std::array::from_fn(|i| u32::from_le_bytes(bytes[1..][4 * i..4 * (i + 1)].try_into().unwrap()))
+}
+
 #[test]
-fn test_ceno_rt_secp256k1_add() -> Result<()> {
+fn test_secp256k1_add() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_add_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let _ = run(&mut state)?;
-    // TODO: asserts on effects
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let p_address = witness.reg_ops[0].value.after;
+    assert_eq!(p_address, witness.reg_ops[0].value.before);
+    let p_address: WordAddr = p_address.into();
+
+    const P_PLUS_Q: [u8; 65] = [
+        4, 188, 11, 115, 232, 35, 63, 79, 186, 163, 11, 207, 165, 64, 247, 109, 81, 125, 56, 83,
+        131, 221, 140, 154, 19, 186, 109, 173, 9, 127, 142, 169, 219, 108, 17, 216, 218, 125, 37,
+        30, 87, 86, 194, 151, 20, 122, 64, 118, 123, 210, 29, 60, 209, 138, 131, 11, 247, 157, 212,
+        209, 123, 162, 111, 197, 70,
+    ];
+    let expect = bytes_to_words(P_PLUS_Q);
+
+    for (i, write_op) in witness.mem_ops.iter().enumerate() {
+        assert_eq!(write_op.addr, p_address + i);
+        assert_eq!(write_op.value.after, expect[i]);
+    }
+
     Ok(())
 }
 
 #[test]
-fn test_ceno_rt_secp256k1_double() -> Result<()> {
+fn test_secp256k1_double() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_double_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let _ = run(&mut state)?;
-    // TODO: asserts on effects
+
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 1);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+
+    let p_address = witness.reg_ops[0].value.after;
+    assert_eq!(p_address, witness.reg_ops[0].value.before);
+    let p_address: WordAddr = p_address.into();
+
+    const DOUBLE_P: [u8; 65] = [
+        4, 111, 137, 182, 244, 228, 50, 13, 91, 93, 34, 231, 93, 191, 248, 105, 28, 226, 251, 23,
+        66, 192, 188, 66, 140, 44, 218, 130, 239, 101, 255, 164, 76, 202, 170, 134, 48, 127, 46,
+        14, 9, 192, 64, 102, 67, 163, 33, 48, 157, 140, 217, 10, 97, 231, 183, 28, 129, 177, 185,
+        253, 179, 135, 182, 253, 203,
+    ];
+    let expect = bytes_to_words(DOUBLE_P);
+
+    for (i, write_op) in witness.mem_ops.iter().enumerate() {
+        assert_eq!(write_op.addr, p_address + i);
+        assert_eq!(write_op.value.after, expect[i]);
+    }
+
     Ok(())
 }
 
 #[test]
-fn test_ceno_rt_secp256k1_decompress() -> Result<()> {
+fn test_secp256k1_decompress() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_decompress_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let _ = run(&mut state)?;
-    // TODO: asserts on effects
+
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let x_address = witness.reg_ops[0].value.after;
+    assert_eq!(x_address, witness.reg_ops[0].value.before);
+    let x_address: WordAddr = x_address.into();
+    // Y coordinate  should be written immediately after X coordinate
+    // X coordinate takes "half an argument" of words
+    let y_address = x_address + SECP256K1_ARG_WORDS / 2;
+
+    // Complete decompressed point (X and Y)
+    const DECOMPRESSED: [u8; 65] = [
+        4, 180, 53, 9, 32, 85, 226, 220, 154, 20, 116, 218, 199, 119, 48, 44, 23, 45, 222, 10, 64,
+        50, 63, 8, 121, 191, 244, 141, 0, 37, 117, 182, 133, 190, 160, 239, 131, 180, 166, 242,
+        145, 107, 249, 24, 168, 27, 69, 86, 58, 86, 159, 10, 210, 164, 20, 152, 148, 67, 37, 222,
+        234, 108, 57, 84, 148,
+    ];
+
+    // Writes should cover the Y coordinate, i.e latter half of the repr
+    let expect = bytes_to_words(DECOMPRESSED)[8..].to_vec();
+
+    for (i, write_op) in witness.mem_ops.iter().enumerate() {
+        assert_eq!(write_op.addr, y_address + i);
+        assert_eq!(write_op.value.after, expect[i]);
+    }
+
     Ok(())
 }
 
