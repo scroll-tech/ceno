@@ -87,8 +87,8 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     // is done here is by sorting.
     let mut sorter_match_arms = TokenStream::new();
     for case in 0..(2u32.pow(degree)) {
-        // 1 -> Ext
-        // 0 -> Base
+        // 0 -> Ext
+        // 1 -> Base
         let bits_og = (0..degree)
             .enumerate()
             .map(|(idx, shift)| (idx, (case >> shift) & 1))
@@ -104,8 +104,8 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
         // those degree+1 cases and will be added to the next match statement.
         if is_sorted {
             let arm = bits_og.iter().fold(TokenStream::new(), |acc, (_, bit)| {
-                // 1 -> Ext
-                // 0 -> Base
+                // 0 -> Ext
+                // 1 -> Base
                 let field_type = if *bit == 0u32 {
                     quote! {FieldType::Ext(_)}
                 } else {
@@ -252,8 +252,8 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     // Since f vars are sorted already, any Bases will tend to right side and Exts to left side.
     let mut match_arms = TokenStream::new();
     for num_exts in 0..=degree {
-        // 1 -> Ext
-        // 0 -> Base
+        // 0 -> Ext
+        // 1 -> Base
         let arg_items = std::iter::repeat_n(0, (degree - num_exts) as usize)
             .chain(std::iter::repeat_n(1, num_exts as usize))
             .enumerate()
