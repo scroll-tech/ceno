@@ -25,12 +25,12 @@ impl From<[Word; KECCAK_WORDS]> for KeccakState {
     }
 }
 
-impl Into<[Word; KECCAK_WORDS]> for KeccakState {
-    fn into(self) -> [Word; KECCAK_WORDS] {
-        self.0
+impl From<KeccakState> for [Word; KECCAK_WORDS] {
+    fn from(state: KeccakState) -> [Word; KECCAK_WORDS] {
+        state
+            .0
             .iter()
-            .map(|&elem| [elem as u32, (elem >> 32) as u32])
-            .flatten()
+            .flat_map(|&elem| [elem as u32, (elem >> 32) as u32])
             .collect_vec()
             .try_into()
             .unwrap()

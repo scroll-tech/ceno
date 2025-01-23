@@ -37,7 +37,7 @@ impl<'a, const LENGTH: usize> MemoryView<'a, LENGTH> {
     }
 
     pub fn iter_bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.iter_words().map(|word| word.to_le_bytes()).flatten()
+        self.iter_words().flat_map(|word| word.to_le_bytes())
     }
 
     pub fn bytes(&self) -> Vec<u8> {

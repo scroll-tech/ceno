@@ -15,7 +15,7 @@ impl From<[Word; SECP256K1_ARG_WORDS]> for SecpPoint {
     fn from(words: [Word; SECP256K1_ARG_WORDS]) -> Self {
         // Prepend the "tag" byte as expected by secp
         let mut bytes = iter::once(4u8)
-            .chain(words.iter().map(|word| word.to_le_bytes()).flatten())
+            .chain(words.iter().flat_map(|word| word.to_le_bytes()))
             .collect_vec();
 
         // The call-site uses "little endian", while secp uses "big endian"
@@ -25,17 +25,14 @@ impl From<[Word; SECP256K1_ARG_WORDS]> for SecpPoint {
         bytes[1..33].reverse();
         // Reverse Y coordinate
         bytes[33..].reverse();
-        SecpPoint(secp::Point::from_slice(&bytes).expect(&format!(
-            "failed to parse affine point from byte array {:?}",
-            bytes
-        )))
+        SecpPoint(secp::Point::from_slice(&bytes).unwrap())
     }
 }
 
-impl Into<[Word; SECP256K1_ARG_WORDS]> for SecpPoint {
-    fn into(self) -> [Word; SECP256K1_ARG_WORDS] {
+impl From<SecpPoint> for [Word; SECP256K1_ARG_WORDS] {
+    fn from(point: SecpPoint) -> [Word; SECP256K1_ARG_WORDS] {
         // reuse MaybePoint implementation
-        SecpMaybePoint(self.0.into()).into()
+        SecpMaybePoint(point.0.into()).into()
     }
 }
 
@@ -43,9 +40,11 @@ impl Into<[Word; SECP256K1_ARG_WORDS]> for SecpPoint {
 /// from and to VM word-representations according to the syscall spec
 pub struct SecpMaybePoint(pub secp::MaybePoint);
 
-impl Into<[Word; SECP256K1_ARG_WORDS]> for SecpMaybePoint {
-    fn into(self) -> [Word; SECP256K1_ARG_WORDS] {
-        let mut bytes: [u8; 64] = self.0.serialize_uncompressed()[1..].try_into().unwrap();
+impl From<SecpMaybePoint> for [Word; SECP256K1_ARG_WORDS] {
+    fn from(maybe_point: SecpMaybePoint) -> [Word; SECP256K1_ARG_WORDS] {
+        let mut bytes: [u8; 64] = maybe_point.0.serialize_uncompressed()[1..]
+            .try_into()
+            .unwrap();
         // The call-site expects "little endian", while secp uses "big endian"
         // We need to reverse the coordinate representations
 
@@ -152,7 +151,7 @@ pub struct SecpCoordinate(pub [u8; COORDINATE_WORDS * WORD_SIZE]);
 
 impl From<[Word; COORDINATE_WORDS]> for SecpCoordinate {
     fn from(words: [Word; COORDINATE_WORDS]) -> Self {
-        let bytes = (words.iter().map(|word| word.to_le_bytes()).flatten())
+        let bytes = (words.iter().flat_map(|word| word.to_le_bytes()))
             .collect_vec()
             .try_into()
             .unwrap();
@@ -160,9 +159,10 @@ impl From<[Word; COORDINATE_WORDS]> for SecpCoordinate {
     }
 }
 
-impl Into<[Word; COORDINATE_WORDS]> for SecpCoordinate {
-    fn into(self) -> [Word; COORDINATE_WORDS] {
-        self.0
+impl From<SecpCoordinate> for [Word; COORDINATE_WORDS] {
+    fn from(coord: SecpCoordinate) -> [Word; COORDINATE_WORDS] {
+        coord
+            .0
             .chunks_exact(4)
             .map(|chunk| Word::from_le_bytes(chunk.try_into().unwrap()))
             .collect_vec()
@@ -210,10 +210,7 @@ pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
             .chain(coordinate_bytes.iter().cloned())
             .collect::<Vec<u8>>();
 
-        secp::Point::from_slice(&bytes).expect(&format!(
-            "failed to parse affine point from byte array {:?}",
-            bytes
-        ))
+        secp::Point::from_slice(&bytes).unwrap()
     };
 
     // Get uncompressed repr. of the point and extract the Y-coordinate bytes

@@ -9,7 +9,7 @@ pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
 /// ### Spec
 ///
 /// - The caller must ensure that `state` is valid pointer to data that is aligned along a four
-/// byte boundary.
+///   byte boundary.
 #[allow(unused_variables)]
 pub fn syscall_keccak_permute(state: &mut [u64; 25]) {
     #[cfg(target_os = "zkvm")]
@@ -32,10 +32,10 @@ pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;
 ///
 /// ### Spec
 /// - The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
-/// byte boundary.
+///   byte boundary.
 /// - Point representation: the first `8` words describe the X-coordinate, the last `8` describe the Y-coordinate. Each
-/// coordinate is encoded as follows: its `32` bytes are ordered from lowest significance to highest and then stored into little endian words.
-/// For example, the word `p[0]` contains the least significant `4` bytes of `X` and their significance is maintained w.r.t `p[0]`
+///   coordinate is encoded as follows: its `32` bytes are ordered from lowest significance to highest and then stored into little endian words.
+///   For example, the word `p[0]` contains the least significant `4` bytes of `X` and their significance is maintained w.r.t `p[0]`
 /// - The caller must ensure that `p` and `q` are valid points on the `secp256k1` curve, and that `p` and `q` are not equal to each other.
 /// - The result is stored in the first point.
 #[allow(unused_variables)]
@@ -62,8 +62,8 @@ pub const SECP256K1_DOUBLE: u32 = 0x00_00_01_0B;
 /// ### Spec
 /// - The caller must ensure that `p` is a valid pointer to data that is aligned along a four byte boundary.
 /// - Point representation: the first `8` words describe the X-coordinate, the last `8` describe the Y-coordinate. Each
-/// coordinate is encoded as follows: its `32` bytes are ordered from lowest significance to highest and then stored into little endian words.
-/// For example, the word `p[0]` contains the least significant `4` bytes of `X` and their significance is maintained w.r.t `p[0]`
+///   coordinate is encoded as follows: its `32` bytes are ordered from lowest significance to highest and then stored into little endian words.
+///   For example, the word `p[0]` contains the least significant `4` bytes of `X` and their significance is maintained w.r.t `p[0]`
 /// - The result is stored in p
 #[allow(unused_variables)]
 pub fn syscall_secp256k1_double(p: *mut [u32; 16]) {
@@ -87,12 +87,12 @@ pub const SECP256K1_DECOMPRESS: u32 = 0x00_00_01_0C;
 ///
 /// ### Spec
 /// - The input array should be 64 bytes long, with the first 32 bytes containing the X coordinate in
-/// big-endian format. Note that this byte ordering is different than the one implied in the spec
-/// of the `add` and `double` operations
+///   big-endian format. Note that this byte ordering is different than the one implied in the spec
+///   of the `add` and `double` operations
 /// - The second half of the input will be overwritten with the Y coordinate of the
-/// decompressed point in big-endian format using the point's parity (is_odd).
+///   decompressed point in big-endian format using the point's parity (is_odd).
 /// - The caller must ensure that `point` is valid pointer to data that is aligned along a four byte
-/// boundary.
+///   boundary.
 #[allow(unused_variables)]
 pub fn syscall_secp256k1_decompress(point: &mut [u8; 64], is_odd: bool) {
     #[cfg(target_os = "zkvm")]
