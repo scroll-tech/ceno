@@ -273,14 +273,12 @@ fn test_ceno_rt_keccak() -> Result<()> {
 
 fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
     // ignore the tag byte (specific to the secp repr.)
-    let mut bytes: [u8; 64] = bytes.clone()[1..].try_into().unwrap();
+    let mut bytes: [u8; 64] = bytes[1..].try_into().unwrap();
 
     // Reverse the order of bytes for each coordinate
     bytes[0..32].reverse();
     bytes[32..].reverse();
-    let ret =
-        std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()));
-    ret
+    std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()))
 }
 
 #[test]
