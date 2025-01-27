@@ -1,4 +1,5 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     with_panic_hook,
@@ -50,6 +51,9 @@ struct Args {
     /// Zero-padded to the right to the next power-of-two size.
     #[arg(long)]
     hints: Option<String>,
+
+    #[arg(long, default_value = "100")]
+    n: u32,
 
     /// Stack size in bytes.
     #[arg(long, default_value = "32k", value_parser = parse_size)]
@@ -104,7 +108,8 @@ fn main() {
         .init();
 
     tracing::info!("Loading ELF file: {}", &args.elf);
-    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    // let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let elf_bytes = ceno_examples::is_prime;
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = setup_platform(
         args.platform,
@@ -121,7 +126,10 @@ fn main() {
     );
 
     tracing::info!("Loading hints file: {:?}", args.hints);
-    let hints = memory_from_file(&args.hints);
+    // let hints = memory_from_file(&args.hints);
+    let mut hints = CenoStdin::default();
+    _ = hints.write(&args.n);
+    let hints: Vec<u32> = (&hints).into();
     assert!(
         hints.len() <= platform.hints.iter_addresses().len(),
         "hints must fit in {} bytes",
