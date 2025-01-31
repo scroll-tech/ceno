@@ -3,8 +3,7 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 use anyhow::Result;
 use ceno_emul::{
     CENO_PLATFORM, COORDINATE_WORDS, EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS,
-    SECP256K1_DECOMPRESS, SHA_EXTEND_WORDS, StepRecord, VMState, WORD_SIZE, WordAddr,
-    host_utils::read_all_messages,
+    SHA_EXTEND_WORDS, StepRecord, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};

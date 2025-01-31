@@ -1,11 +1,12 @@
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 
-use crate::{EmuContext, VMState, WORD_SIZE, Word, WordAddr};
+use crate::{Change, EmuContext, VMState, WORD_SIZE, Word, WordAddr, WriteOp};
 
 /// Utilities for reading/manipulating a memory segment of fixed length
 pub struct MemoryView<'a, const LENGTH: usize> {
     vm: &'a VMState,
     start: WordAddr,
+    writes: Option<[Word; LENGTH]>,
 }
 
 impl<'a, const LENGTH: usize> MemoryView<'a, LENGTH> {
@@ -17,6 +18,7 @@ impl<'a, const LENGTH: usize> MemoryView<'a, LENGTH> {
         MemoryView {
             vm,
             start: WordAddr::from(start),
+            writes: None,
         }
     }
 
@@ -42,6 +44,27 @@ impl<'a, const LENGTH: usize> MemoryView<'a, LENGTH> {
 
     pub fn bytes(&self) -> Vec<u8> {
         self.iter_bytes().collect_vec()
+    }
+
+    pub fn write(&mut self, writes: [Word; LENGTH]) {
+        assert!(self.writes.is_none(), "view can only be written once");
+        self.writes = Some(writes);
+    }
+
+    pub fn mem_ops(&self) -> [WriteOp; LENGTH] {
+        izip!(
+            self.addrs(),
+            self.words(),
+            self.writes.unwrap_or(self.words())
+        )
+        .map(|(addr, before, after)| WriteOp {
+            addr,
+            value: Change { before, after },
+            previous_cycle: 0, // Cycle set later in finalize().
+        })
+        .collect_vec()
+        .try_into()
+        .unwrap()
     }
 
     pub fn debug(&self) {

@@ -1,4 +1,4 @@
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use tiny_keccak::keccakf;
 
 use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryView};
@@ -71,19 +71,13 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
         ),
     ];
 
-    let state_view = MemoryView::<KECCAK_WORDS>::new(vm, state_ptr);
+    let mut state_view = MemoryView::<KECCAK_WORDS>::new(vm, state_ptr);
     let mut state = KeccakState::from(state_view.words());
     keccakf(&mut state.0);
     let output_words: [Word; KECCAK_WORDS] = state.into();
 
-    // Write permuted state.
-    let mem_ops = izip!(state_view.addrs(), state_view.words(), output_words)
-        .map(|(addr, before, after)| WriteOp {
-            addr,
-            value: Change { before, after },
-            previous_cycle: 0, // Cycle set later in finalize().
-        })
-        .collect_vec();
+    state_view.write(output_words);
+    let mem_ops: Vec<WriteOp> = state_view.mem_ops().to_vec();
 
     assert_eq!(mem_ops.len(), KECCAK_WORDS);
     SyscallEffects {

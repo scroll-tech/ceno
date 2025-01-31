@@ -1,5 +1,3 @@
-use itertools::{Itertools, izip};
-
 use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryView};
 
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
@@ -64,19 +62,13 @@ pub fn extend(vm: &VMState) -> SyscallEffects {
         ),
     ];
 
-    let state_view = MemoryView::<SHA_EXTEND_WORDS>::new(vm, state_ptr);
+    let mut state_view = MemoryView::<SHA_EXTEND_WORDS>::new(vm, state_ptr);
     let mut sha_extend_words = ShaExtendWords::from(state_view.words());
     sha_extend(&mut sha_extend_words.0);
     let output_words: [Word; SHA_EXTEND_WORDS] = sha_extend_words.into();
 
-    // Write state changes. Note that the first 16 words shouldn't change.
-    let mem_ops = izip!(state_view.addrs(), state_view.words(), output_words)
-        .map(|(addr, before, after)| WriteOp {
-            addr,
-            value: Change { before, after },
-            previous_cycle: 0, // Cycle set later in finalize().
-        })
-        .collect_vec();
+    state_view.write(output_words);
+    let mem_ops = state_view.mem_ops().to_vec();
 
     assert_eq!(mem_ops.len(), SHA_EXTEND_WORDS);
     SyscallEffects {

@@ -1,5 +1,5 @@
 use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, Word, WriteOp, utils::MemoryView};
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use secp::{self};
 use std::iter;
 
@@ -110,7 +110,7 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
     ];
 
     // Memory segments of P and Q
-    let [p_view, q_view] =
+    let [mut p_view, q_view] =
         [p_ptr, q_ptr].map(|start| MemoryView::<SECP256K1_ARG_WORDS>::new(vm, start));
 
     // Read P and Q from words via wrapper type
@@ -120,29 +120,12 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
     let sum = SecpMaybePoint(p.0 + q.0);
     let output_words: [Word; SECP256K1_ARG_WORDS] = sum.into();
 
-    let mem_ops_p = izip!(p_view.addrs(), p_view.words(), output_words)
-        .map(|(addr, before, after)| WriteOp {
-            addr,
-            value: Change { before, after },
-            previous_cycle: 0, // Cycle set later in finalize().
-        })
-        .collect_vec();
+    p_view.write(output_words);
 
-    // Record reads on Q
-    let mem_ops_q = izip!(q_view.addrs(), q_view.words())
-        .map(|(addr, before)| WriteOp {
-            addr,
-            value: Change {
-                before,
-                after: before,
-            },
-            previous_cycle: 0,
-        })
-        .collect_vec();
-
-    let mem_ops = mem_ops_p
+    let mem_ops = p_view
+        .mem_ops()
         .into_iter()
-        .chain(mem_ops_q.into_iter())
+        .chain(q_view.mem_ops().into_iter())
         .collect_vec();
 
     assert_eq!(mem_ops.len(), 2 * SECP256K1_ARG_WORDS);
@@ -174,7 +157,7 @@ pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
     ];
 
     // P's memory segment
-    let p_view = MemoryView::<SECP256K1_ARG_WORDS>::new(vm, p_ptr);
+    let mut p_view = MemoryView::<SECP256K1_ARG_WORDS>::new(vm, p_ptr);
     // Create point from words via wrapper type
     let p = SecpPoint::from(p_view.words());
 
@@ -182,14 +165,9 @@ pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
     let result = SecpPoint(secp::Scalar::two() * p.0);
     let output_words: [Word; SECP256K1_ARG_WORDS] = result.into();
 
-    // overwrite result at point P
-    let mem_ops = izip!(p_view.addrs(), p_view.words(), output_words)
-        .map(|(addr, before, after)| WriteOp {
-            addr,
-            value: Change { before, after },
-            previous_cycle: 0, // Cycle set later in finalize().
-        })
-        .collect_vec();
+    p_view.write(output_words);
+
+    let mem_ops = p_view.mem_ops().to_vec();
 
     assert_eq!(mem_ops.len(), SECP256K1_ARG_WORDS);
     SyscallEffects {
@@ -249,7 +227,7 @@ pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
     // Memory segment of X coordinate
     let input_view = MemoryView::<COORDINATE_WORDS>::new(vm, ptr);
     // Memory segment where Y coordinate will be written
-    let output_view =
+    let mut output_view =
         MemoryView::<COORDINATE_WORDS>::new(vm, ptr + (COORDINATE_WORDS * WORD_SIZE) as u32);
 
     let point = {
@@ -278,24 +256,10 @@ pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
     // Convert into words via the internal wrapper type
     let output_words: [Word; COORDINATE_WORDS] = SecpCoordinate(y_bytes).into();
 
-    let y_mem_ops = izip!(output_view.addrs(), output_view.words(), output_words)
-        .map(|(addr, before, after)| WriteOp {
-            addr,
-            value: Change { before, after },
-            previous_cycle: 0, // Cycle set later in finalize().
-        })
-        .collect_vec();
+    output_view.write(output_words);
 
-    let x_mem_ops = izip!(input_view.addrs(), input_view.words())
-        .map(|(addr, before)| WriteOp {
-            addr,
-            value: Change {
-                before,
-                after: before,
-            },
-            previous_cycle: 0, // Cycle set later in finalize().
-        })
-        .collect_vec();
+    let y_mem_ops = output_view.mem_ops();
+    let x_mem_ops = input_view.mem_ops();
 
     let mem_ops = x_mem_ops
         .into_iter()
