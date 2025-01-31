@@ -91,7 +91,7 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
     let sum = SecpMaybePoint(p.0 + q.0);
     let output_words: [Word; SECP256K1_ARG_WORDS] = sum.into();
 
-    let mem_ops = izip!(p_view.addrs(), p_view.words(), output_words)
+    let mem_ops_p = izip!(p_view.addrs(), p_view.words(), output_words)
         .map(|(addr, before, after)| WriteOp {
             addr,
             value: Change { before, after },
@@ -99,9 +99,26 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
         })
         .collect_vec();
 
-    assert_eq!(mem_ops.len(), SECP256K1_ARG_WORDS);
+    // Record reads on Q
+    let mem_ops_q = izip!(q_view.addrs(), q_view.words())
+        .map(|(addr, before)| WriteOp {
+            addr,
+            value: Change {
+                before,
+                after: before,
+            },
+            previous_cycle: 0,
+        })
+        .collect_vec();
+
+    let mem_ops = mem_ops_p
+        .into_iter()
+        .chain(mem_ops_q.into_iter())
+        .collect_vec();
+
+    assert_eq!(mem_ops.len(), 2 * SECP256K1_ARG_WORDS);
     SyscallEffects {
-        witness: SyscallWitness { mem_ops, reg_ops },
+        witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
     }
 }
@@ -110,12 +127,22 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
 pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
 
+    // for compatibility with sp1 spec
+    assert_eq!(vm.peek_register(Platform::reg_arg1()), 0);
+
     // Read the argument pointers
-    let reg_ops = vec![WriteOp::new_register_op(
-        Platform::reg_arg0(),
-        Change::new(p_ptr, p_ptr),
-        0, // Cycle set later in finalize().
-    )];
+    let reg_ops = vec![
+        WriteOp::new_register_op(
+            Platform::reg_arg0(),
+            Change::new(p_ptr, p_ptr),
+            0, // Cycle set later in finalize().
+        ),
+        WriteOp::new_register_op(
+            Platform::reg_arg1(),
+            Change::new(0, 0),
+            0, // Cycle set later in finalize().
+        ),
+    ];
 
     // P's memory segment
     let p_view = MemoryView::<SECP256K1_ARG_WORDS>::new(vm, p_ptr);
@@ -137,7 +164,7 @@ pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
 
     assert_eq!(mem_ops.len(), SECP256K1_ARG_WORDS);
     SyscallEffects {
-        witness: SyscallWitness { mem_ops, reg_ops },
+        witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
     }
 }
@@ -222,7 +249,7 @@ pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
     // Convert into words via the internal wrapper type
     let output_words: [Word; COORDINATE_WORDS] = SecpCoordinate(y_bytes).into();
 
-    let mem_ops = izip!(output_view.addrs(), output_view.words(), output_words)
+    let y_mem_ops = izip!(output_view.addrs(), output_view.words(), output_words)
         .map(|(addr, before, after)| WriteOp {
             addr,
             value: Change { before, after },
@@ -230,9 +257,25 @@ pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
         })
         .collect_vec();
 
-    assert_eq!(mem_ops.len(), COORDINATE_WORDS);
+    let x_mem_ops = izip!(input_view.addrs(), input_view.words())
+        .map(|(addr, before)| WriteOp {
+            addr,
+            value: Change {
+                before,
+                after: before,
+            },
+            previous_cycle: 0, // Cycle set later in finalize().
+        })
+        .collect_vec();
+
+    let mem_ops = x_mem_ops
+        .into_iter()
+        .chain(y_mem_ops.into_iter())
+        .collect_vec();
+
+    assert_eq!(mem_ops.len(), 2 * COORDINATE_WORDS);
     SyscallEffects {
-        witness: SyscallWitness { mem_ops, reg_ops },
+        witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
     }
 }

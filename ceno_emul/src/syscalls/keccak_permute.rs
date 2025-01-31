@@ -44,12 +44,22 @@ impl From<KeccakState> for [Word; KECCAK_WORDS] {
 pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
+    // for compatibility with sp1 spec
+    assert_eq!(vm.peek_register(Platform::reg_arg1()), 0);
+
     // Read the argument `state_ptr`.
-    let reg_ops = vec![WriteOp::new_register_op(
-        Platform::reg_arg0(),
-        Change::new(state_ptr, state_ptr),
-        0, // Cycle set later in finalize().
-    )];
+    let reg_ops = vec![
+        WriteOp::new_register_op(
+            Platform::reg_arg0(),
+            Change::new(state_ptr, state_ptr),
+            0, // Cycle set later in finalize().
+        ),
+        WriteOp::new_register_op(
+            Platform::reg_arg1(),
+            Change::new(0, 0),
+            0, // Cycle set later in finalize().
+        ),
+    ];
 
     let state_view = MemoryView::<KECCAK_WORDS>::new(vm, state_ptr);
     let mut state = KeccakState::from(state_view.words());
@@ -67,7 +77,7 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
 
     assert_eq!(mem_ops.len(), KECCAK_WORDS);
     SyscallEffects {
-        witness: SyscallWitness { mem_ops, reg_ops },
+        witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
     }
 }

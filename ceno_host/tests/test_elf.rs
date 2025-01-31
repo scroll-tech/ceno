@@ -2,8 +2,8 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
-    CENO_PLATFORM, EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS, StepRecord,
-    VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
+    CENO_PLATFORM, COORDINATE_WORDS, EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS,
+    StepRecord, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
@@ -248,8 +248,9 @@ fn test_ceno_rt_keccak() -> Result<()> {
 
     // Check the syscall effects.
     for (witness, expect) in izip!(syscalls, keccak_outs) {
-        assert_eq!(witness.reg_ops.len(), 1);
+        assert_eq!(witness.reg_ops.len(), 2);
         assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+        assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
 
         assert_eq!(witness.mem_ops.len(), expect.len() * 2);
         let got = witness
@@ -299,6 +300,10 @@ fn test_secp256k1_add() -> Result<()> {
     assert_eq!(p_address, witness.reg_ops[0].value.before);
     let p_address: WordAddr = p_address.into();
 
+    let q_address = witness.reg_ops[1].value.after;
+    assert_eq!(q_address, witness.reg_ops[1].value.before);
+    let q_address: WordAddr = q_address.into();
+
     const P_PLUS_Q: [u8; 65] = [
         4, 188, 11, 115, 232, 35, 63, 79, 186, 163, 11, 207, 165, 64, 247, 109, 81, 125, 56, 83,
         131, 221, 140, 154, 19, 186, 109, 173, 9, 127, 142, 169, 219, 108, 17, 216, 218, 125, 37,
@@ -307,9 +312,22 @@ fn test_secp256k1_add() -> Result<()> {
     ];
     let expect = bytes_to_words(P_PLUS_Q);
 
-    for (i, write_op) in witness.mem_ops.iter().enumerate() {
+    // Expect first half to consist of read/writes on P
+    for (i, write_op) in witness.mem_ops.iter().take(SECP256K1_ARG_WORDS).enumerate() {
         assert_eq!(write_op.addr, p_address + i);
         assert_eq!(write_op.value.after, expect[i]);
+    }
+
+    // Expect second half to consist of reads on Q
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .skip(SECP256K1_ARG_WORDS)
+        .take(SECP256K1_ARG_WORDS)
+        .enumerate()
+    {
+        assert_eq!(write_op.addr, q_address + i);
+        assert_eq!(write_op.value.after, write_op.value.before);
     }
 
     Ok(())
@@ -326,7 +344,7 @@ fn test_secp256k1_double() -> Result<()> {
     assert_eq!(syscalls.len(), 1);
 
     let witness = syscalls[0];
-    assert_eq!(witness.reg_ops.len(), 1);
+    assert_eq!(witness.reg_ops.len(), 2);
     assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
 
     let p_address = witness.reg_ops[0].value.after;
@@ -384,7 +402,20 @@ fn test_secp256k1_decompress() -> Result<()> {
     // Writes should cover the Y coordinate, i.e latter half of the repr
     let expect = bytes_to_words(decompressed)[8..].to_vec();
 
-    for (i, write_op) in witness.mem_ops.iter().enumerate() {
+    // Reads on X
+    for (i, write_op) in witness.mem_ops.iter().take(COORDINATE_WORDS).enumerate() {
+        assert_eq!(write_op.addr, x_address + i);
+        assert_eq!(write_op.value.after, write_op.value.before);
+    }
+
+    // Reads/writes on Y
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .skip(COORDINATE_WORDS)
+        .take(COORDINATE_WORDS)
+        .enumerate()
+    {
         assert_eq!(write_op.addr, y_address + i);
         assert_eq!(write_op.value.after, expect[i]);
     }

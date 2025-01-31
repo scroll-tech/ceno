@@ -8,6 +8,7 @@ use crate::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
+            dummy::Secp256k1DecompressSpec,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -446,6 +447,8 @@ pub struct DummyExtraConfig<E: ExtensionField> {
         <LargeEcallDummy<E, Secp256k1AddSpec> as Instruction<E>>::InstructionConfig,
     secp256k1_double_config:
         <LargeEcallDummy<E, Secp256k1DoubleSpec> as Instruction<E>>::InstructionConfig,
+    secp256k1_decompress_config:
+        <LargeEcallDummy<E, Secp256k1DecompressSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
@@ -456,11 +459,14 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>();
         let secp256k1_double_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>();
+        let secp256k1_decompress_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>();
         Self {
             ecall_config,
             keccak_config,
             secp256k1_add_config,
             secp256k1_double_config,
+            secp256k1_decompress_config,
         }
     }
 
@@ -473,6 +479,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
     }
 
     pub fn assign_opcode_circuit(
@@ -486,6 +493,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let mut keccak_steps = Vec::new();
         let mut secp256k1_add_steps = Vec::new();
         let mut secp256k1_double_steps = Vec::new();
+        let mut secp256k1_decompress_steps = Vec::new();
         let mut other_steps = Vec::new();
 
         if let Some(ecall_steps) = steps.remove(&ECALL) {
@@ -494,6 +502,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
                     KeccakSpec::CODE => keccak_steps.push(step),
                     Secp256k1AddSpec::CODE => secp256k1_add_steps.push(step),
                     Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
+                    Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
                     _ => other_steps.push(step),
                 }
             }
@@ -513,6 +522,11 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs,
             &self.secp256k1_double_config,
             secp256k1_double_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(
+            cs,
+            &self.secp256k1_decompress_config,
+            secp256k1_decompress_steps,
         )?;
         witness.assign_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config, other_steps)?;
 

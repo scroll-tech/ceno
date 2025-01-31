@@ -28,6 +28,24 @@ pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects
 pub struct SyscallWitness {
     pub mem_ops: Vec<WriteOp>,
     pub reg_ops: Vec<WriteOp>,
+    _marker: (),
+}
+
+impl SyscallWitness {
+    fn new(mem_ops: Vec<WriteOp>, reg_ops: Vec<WriteOp>) -> SyscallWitness {
+        for (i, op) in mem_ops.iter().enumerate() {
+            assert_eq!(
+                op.addr,
+                mem_ops[0].addr + i,
+                "Dummy circuit expects that mem_ops addresses are consecutive."
+            );
+        }
+        SyscallWitness {
+            mem_ops,
+            reg_ops,
+            _marker: (),
+        }
+    }
 }
 
 /// The effects of a syscall to apply on the VM.
