@@ -2,9 +2,20 @@ use itertools::{Itertools, izip};
 
 use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryView};
 
-use super::{SyscallEffects, SyscallWitness};
+use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
 pub const SHA_EXTEND_WORDS: usize = 64; // u64 cells
+
+pub struct Sha256ExtendSpec;
+
+impl SyscallSpec for Sha256ExtendSpec {
+    const NAME: &'static str = "SHA256_EXTEND";
+
+    const REG_OPS_COUNT: usize = 2;
+    const MEM_OPS_COUNT: usize = SHA_EXTEND_WORDS;
+    const CODE: u32 = ceno_rt::syscalls::SHA_EXTEND;
+}
+
 /// Wrapper type for the sha_extend argument that implements conversions
 /// from and to VM word-representations according to the syscall spec
 pub struct ShaExtendWords(pub [Word; SHA_EXTEND_WORDS]);

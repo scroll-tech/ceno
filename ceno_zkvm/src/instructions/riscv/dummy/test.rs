@@ -1,5 +1,4 @@
-use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-use dummy_ecall::KeccakSpec;
+use ceno_emul::{Change, InsnKind, KeccakSpec, StepRecord, encode_rv32};
 use goldilocks::GoldilocksExt2;
 
 use super::*;

@@ -8,7 +8,6 @@ use crate::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
-            dummy::Secp256k1DecompressSpec,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -26,9 +25,10 @@ use crate::{
 };
 use ceno_emul::{
     InsnKind::{self, *},
-    Platform, StepRecord,
+    KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
+    Sha256ExtendSpec, StepRecord, SyscallSpec,
 };
-use dummy::{EcallSpec, KeccakSpec, LargeEcallDummy, Secp256k1AddSpec, Secp256k1DoubleSpec};
+use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
@@ -38,13 +38,13 @@ use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
 };
 use strum::IntoEnumIterator;
 
 use super::{
-    arith::AddInstruction, branch::BltuInstruction, dummy::Sha256ExtendSpec,
-    ecall::HaltInstruction, jump::JalInstruction, memory::LwInstruction,
+    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
+    memory::LwInstruction,
 };
 
 pub mod mmu;

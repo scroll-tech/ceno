@@ -12,6 +12,14 @@ pub use ceno_rt::syscalls::{
     KECCAK_PERMUTE, SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SHA_EXTEND,
 };
 
+pub trait SyscallSpec {
+    const NAME: &'static str;
+
+    const REG_OPS_COUNT: usize;
+    const MEM_OPS_COUNT: usize;
+    const CODE: u32;
+}
+
 /// Trace the inputs and effects of a syscall.
 pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects> {
     match function_code {

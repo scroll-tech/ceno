@@ -1,10 +1,6 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{
-    COORDINATE_WORDS, Change, InsnKind, KECCAK_PERMUTE, KECCAK_WORDS, SECP256K1_ADD,
-    SECP256K1_ARG_WORDS, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SHA_EXTEND, SHA_EXTEND_WORDS,
-    StepRecord, WORD_SIZE,
-};
+use ceno_emul::{Change, InsnKind, StepRecord, SyscallSpec, WORD_SIZE};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
@@ -22,68 +18,13 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-pub trait EcallSpec {
-    const NAME: &'static str;
-
-    const REG_OPS_COUNT: usize;
-    const MEM_OPS_COUNT: usize;
-    const CODE: u32;
-}
-
-pub struct KeccakSpec;
-pub struct Secp256k1AddSpec;
-pub struct Secp256k1DoubleSpec;
-pub struct Secp256k1DecompressSpec;
-
-pub struct Sha256ExtendSpec;
-
-impl EcallSpec for KeccakSpec {
-    const NAME: &'static str = "KECCAK";
-
-    const REG_OPS_COUNT: usize = 2;
-    const MEM_OPS_COUNT: usize = KECCAK_WORDS;
-    const CODE: u32 = KECCAK_PERMUTE;
-}
-
-impl EcallSpec for Secp256k1AddSpec {
-    const NAME: &'static str = "SECP256K1_ADD";
-
-    const REG_OPS_COUNT: usize = 2;
-    const MEM_OPS_COUNT: usize = 2 * SECP256K1_ARG_WORDS;
-    const CODE: u32 = SECP256K1_ADD;
-}
-
-impl EcallSpec for Secp256k1DoubleSpec {
-    const NAME: &'static str = "SECP256K1_DOUBLE";
-
-    const REG_OPS_COUNT: usize = 2;
-    const MEM_OPS_COUNT: usize = SECP256K1_ARG_WORDS;
-    const CODE: u32 = SECP256K1_DOUBLE;
-}
-
-impl EcallSpec for Secp256k1DecompressSpec {
-    const NAME: &'static str = "SECP256K1_DECOMPRESS";
-
-    const REG_OPS_COUNT: usize = 2;
-    const MEM_OPS_COUNT: usize = 2 * COORDINATE_WORDS;
-    const CODE: u32 = SECP256K1_DECOMPRESS;
-}
-
-impl EcallSpec for Sha256ExtendSpec {
-    const NAME: &'static str = "SHA256_EXTEND";
-
-    const REG_OPS_COUNT: usize = 2;
-    const MEM_OPS_COUNT: usize = SHA_EXTEND_WORDS;
-    const CODE: u32 = SHA_EXTEND;
-}
-
 /// LargeEcallDummy can handle any instruction and produce its effects,
 /// including multiple memory operations.
 ///
 /// Unsafe: The content is not constrained.
 pub struct LargeEcallDummy<E, S>(PhantomData<(E, S)>);
 
-impl<E: ExtensionField, S: EcallSpec> Instruction<E> for LargeEcallDummy<E, S> {
+impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S> {
     type InstructionConfig = LargeEcallConfig<E>;
 
     fn name() -> String {

@@ -3,10 +3,20 @@ use tiny_keccak::keccakf;
 
 use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryView};
 
-use super::{SyscallEffects, SyscallWitness};
+use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
 const KECCAK_CELLS: usize = 25; // u64 cells
 pub const KECCAK_WORDS: usize = KECCAK_CELLS * 2; // u32 words
+
+pub struct KeccakSpec;
+
+impl SyscallSpec for KeccakSpec {
+    const NAME: &'static str = "KECCAK";
+
+    const REG_OPS_COUNT: usize = 2;
+    const MEM_OPS_COUNT: usize = KECCAK_WORDS;
+    const CODE: u32 = ceno_rt::syscalls::KECCAK_PERMUTE;
+}
 
 /// Wrapper type for the keccak_permute argument that implements conversions
 /// from and to VM word-representations according to the syscall spec

@@ -3,7 +3,36 @@ use itertools::{Itertools, izip};
 use secp::{self};
 use std::iter;
 
-use super::{SyscallEffects, SyscallWitness};
+use super::{SyscallEffects, SyscallSpec, SyscallWitness};
+
+pub struct Secp256k1AddSpec;
+pub struct Secp256k1DoubleSpec;
+pub struct Secp256k1DecompressSpec;
+
+impl SyscallSpec for Secp256k1AddSpec {
+    const NAME: &'static str = "SECP256K1_ADD";
+
+    const REG_OPS_COUNT: usize = 2;
+    const MEM_OPS_COUNT: usize = 2 * SECP256K1_ARG_WORDS;
+    const CODE: u32 = ceno_rt::syscalls::SECP256K1_ADD;
+}
+
+impl SyscallSpec for Secp256k1DoubleSpec {
+    const NAME: &'static str = "SECP256K1_DOUBLE";
+
+    const REG_OPS_COUNT: usize = 2;
+    const MEM_OPS_COUNT: usize = SECP256K1_ARG_WORDS;
+    const CODE: u32 = ceno_rt::syscalls::SECP256K1_DOUBLE;
+}
+
+impl SyscallSpec for Secp256k1DecompressSpec {
+    const NAME: &'static str = "SECP256K1_DECOMPRESS";
+
+    const REG_OPS_COUNT: usize = 2;
+    const MEM_OPS_COUNT: usize = 2 * COORDINATE_WORDS;
+    const CODE: u32 = ceno_rt::syscalls::SECP256K1_DECOMPRESS;
+}
+
 // A secp256k1 point in uncompressed form takes 64 bytes
 pub const SECP256K1_ARG_WORDS: usize = 16;
 
