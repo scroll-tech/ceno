@@ -38,13 +38,13 @@ use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
 };
 use strum::IntoEnumIterator;
 
 use super::{
-    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
-    memory::LwInstruction,
+    arith::AddInstruction, branch::BltuInstruction, dummy::Sha256ExtendSpec,
+    ecall::HaltInstruction, jump::JalInstruction, memory::LwInstruction,
 };
 
 pub mod mmu;
@@ -449,6 +449,8 @@ pub struct DummyExtraConfig<E: ExtensionField> {
         <LargeEcallDummy<E, Secp256k1DoubleSpec> as Instruction<E>>::InstructionConfig,
     secp256k1_decompress_config:
         <LargeEcallDummy<E, Secp256k1DecompressSpec> as Instruction<E>>::InstructionConfig,
+    sha256_extend_config:
+        <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
@@ -461,12 +463,15 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>();
         let secp256k1_decompress_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>();
+        let sha256_extend_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
         Self {
             ecall_config,
             keccak_config,
             secp256k1_add_config,
             secp256k1_double_config,
             secp256k1_decompress_config,
+            sha256_extend_config,
         }
     }
 
@@ -480,6 +485,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(cs);
     }
 
     pub fn assign_opcode_circuit(
@@ -494,6 +500,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let mut secp256k1_add_steps = Vec::new();
         let mut secp256k1_double_steps = Vec::new();
         let mut secp256k1_decompress_steps = Vec::new();
+        let mut sha256_extend_steps = Vec::new();
         let mut other_steps = Vec::new();
 
         if let Some(ecall_steps) = steps.remove(&ECALL) {
@@ -503,6 +510,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
                     Secp256k1AddSpec::CODE => secp256k1_add_steps.push(step),
                     Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
                     Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
+                    Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
                     _ => other_steps.push(step),
                 }
             }
@@ -527,6 +535,11 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs,
             &self.secp256k1_decompress_config,
             secp256k1_decompress_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
+            cs,
+            &self.sha256_extend_config,
+            sha256_extend_steps,
         )?;
         witness.assign_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config, other_steps)?;
 

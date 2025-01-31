@@ -5,8 +5,6 @@ use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryV
 use super::{SyscallEffects, SyscallWitness};
 
 pub const SHA_EXTEND_WORDS: usize = 64; // u64 cells
-const SHA_EXTEND_INITIAL_WORDS: usize = 16;
-
 /// Wrapper type for the sha_extend argument that implements conversions
 /// from and to VM word-representations according to the syscall spec
 pub struct ShaExtendWords(pub [Word; SHA_EXTEND_WORDS]);
@@ -38,34 +36,40 @@ pub fn sha_extend(w: &mut [u32]) {
 pub fn extend(vm: &VMState) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
+    // for compatibility with sp1 spec
+    assert_eq!(vm.peek_register(Platform::reg_arg1()), 0);
+
     // Read the argument `state_ptr`.
-    let reg_ops = vec![WriteOp::new_register_op(
-        Platform::reg_arg0(),
-        Change::new(state_ptr, state_ptr),
-        0, // Cycle set later in finalize().
-    )];
+    let reg_ops = vec![
+        WriteOp::new_register_op(
+            Platform::reg_arg0(),
+            Change::new(state_ptr, state_ptr),
+            0, // Cycle set later in finalize().
+        ),
+        WriteOp::new_register_op(
+            Platform::reg_arg1(),
+            Change::new(0, 0),
+            0, // Cycle set later in finalize().
+        ),
+    ];
 
     let state_view = MemoryView::<SHA_EXTEND_WORDS>::new(vm, state_ptr);
     let mut sha_extend_words = ShaExtendWords::from(state_view.words());
     sha_extend(&mut sha_extend_words.0);
     let output_words: [Word; SHA_EXTEND_WORDS] = sha_extend_words.into();
 
-    // Write state changes. Note that the first 16 words do not change.
-    let mem_ops = izip!(
-        state_view.addrs()[SHA_EXTEND_INITIAL_WORDS..].into_iter(),
-        state_view.words()[SHA_EXTEND_INITIAL_WORDS..].into_iter(),
-        output_words[SHA_EXTEND_INITIAL_WORDS..].into_iter()
-    )
-    .map(|(&addr, &before, &after)| WriteOp {
-        addr,
-        value: Change { before, after },
-        previous_cycle: 0, // Cycle set later in finalize().
-    })
-    .collect_vec();
+    // Write state changes. Note that the first 16 words shouldn't change.
+    let mem_ops = izip!(state_view.addrs(), state_view.words(), output_words)
+        .map(|(addr, before, after)| WriteOp {
+            addr,
+            value: Change { before, after },
+            previous_cycle: 0, // Cycle set later in finalize().
+        })
+        .collect_vec();
 
-    assert_eq!(mem_ops.len(), SHA_EXTEND_WORDS - SHA_EXTEND_INITIAL_WORDS);
+    assert_eq!(mem_ops.len(), SHA_EXTEND_WORDS);
     SyscallEffects {
-        witness: SyscallWitness { mem_ops, reg_ops },
+        witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
     }
 }

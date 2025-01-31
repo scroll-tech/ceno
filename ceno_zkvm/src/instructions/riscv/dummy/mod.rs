@@ -15,7 +15,7 @@ pub use dummy_circuit::DummyInstruction;
 mod dummy_ecall;
 pub use dummy_ecall::{
     EcallSpec, KeccakSpec, LargeEcallDummy, Secp256k1AddSpec, Secp256k1DecompressSpec,
-    Secp256k1DoubleSpec,
+    Secp256k1DoubleSpec, Sha256ExtendSpec,
 };
 
 #[cfg(test)]

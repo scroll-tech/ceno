@@ -3,7 +3,8 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 use anyhow::Result;
 use ceno_emul::{
     CENO_PLATFORM, COORDINATE_WORDS, EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS,
-    StepRecord, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
+    SECP256K1_DECOMPRESS, SHA_EXTEND_WORDS, StepRecord, VMState, WORD_SIZE, WordAddr,
+    host_utils::read_all_messages,
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
@@ -312,6 +313,7 @@ fn test_secp256k1_add() -> Result<()> {
     ];
     let expect = bytes_to_words(P_PLUS_Q);
 
+    assert_eq!(witness.mem_ops.len(), 2 * SECP256K1_ARG_WORDS);
     // Expect first half to consist of read/writes on P
     for (i, write_op) in witness.mem_ops.iter().take(SECP256K1_ARG_WORDS).enumerate() {
         assert_eq!(write_op.addr, p_address + i);
@@ -359,6 +361,7 @@ fn test_secp256k1_double() -> Result<()> {
     ];
     let expect = bytes_to_words(DOUBLE_P);
 
+    assert_eq!(witness.mem_ops.len(), SECP256K1_ARG_WORDS);
     for (i, write_op) in witness.mem_ops.iter().enumerate() {
         assert_eq!(write_op.addr, p_address + i);
         assert_eq!(write_op.value.after, expect[i]);
@@ -402,6 +405,7 @@ fn test_secp256k1_decompress() -> Result<()> {
     // Writes should cover the Y coordinate, i.e latter half of the repr
     let expect = bytes_to_words(decompressed)[8..].to_vec();
 
+    assert_eq!(witness.mem_ops.len(), 2 * COORDINATE_WORDS);
     // Reads on X
     for (i, write_op) in witness.mem_ops.iter().take(COORDINATE_WORDS).enumerate() {
         assert_eq!(write_op.addr, x_address + i);
@@ -428,7 +432,41 @@ fn test_sha256_extend() -> Result<()> {
     let program_elf = ceno_examples::sha_extend_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
 
-    let _ = run(&mut state)?;
+    let steps = run(&mut state)?;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let state_ptr = witness.reg_ops[0].value.after;
+    assert_eq!(state_ptr, witness.reg_ops[0].value.before);
+    let state_ptr: WordAddr = state_ptr.into();
+
+    let expected = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 34013193, 67559435, 1711661200,
+        3020350282, 1447362251, 3118632270, 4004188394, 690615167, 6070360, 1105370215, 2385558114,
+        2348232513, 507799627, 2098764358, 5845374, 823657968, 2969863067, 3903496557, 4274682881,
+        2059629362, 1849247231, 2656047431, 835162919, 2096647516, 2259195856, 1779072524,
+        3152121987, 4210324067, 1557957044, 376930560, 982142628, 3926566666, 4164334963,
+        789545383, 1028256580, 2867933222, 3843938318, 1135234440, 390334875, 2025924737,
+        3318322046, 3436065867, 652746999, 4261492214, 2543173532, 3334668051, 3166416553,
+        634956631,
+    ];
+
+    assert_eq!(witness.mem_ops.len(), SHA_EXTEND_WORDS);
+
+    for (i, write_op) in witness.mem_ops.iter().enumerate() {
+        assert_eq!(write_op.addr, state_ptr + i);
+        assert_eq!(write_op.value.after, expected[i]);
+        if i < 16 {
+            // sanity check: first 16 entries remain unchanged
+            assert_eq!(write_op.value.before, write_op.value.after);
+        }
+    }
+
     Ok(())
 }
 

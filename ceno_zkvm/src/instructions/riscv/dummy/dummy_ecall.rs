@@ -2,7 +2,8 @@ use std::marker::PhantomData;
 
 use ceno_emul::{
     COORDINATE_WORDS, Change, InsnKind, KECCAK_PERMUTE, KECCAK_WORDS, SECP256K1_ADD,
-    SECP256K1_ARG_WORDS, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, StepRecord, WORD_SIZE,
+    SECP256K1_ARG_WORDS, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SHA_EXTEND, SHA_EXTEND_WORDS,
+    StepRecord, WORD_SIZE,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -34,6 +35,8 @@ pub struct Secp256k1AddSpec;
 pub struct Secp256k1DoubleSpec;
 pub struct Secp256k1DecompressSpec;
 
+pub struct Sha256ExtendSpec;
+
 impl EcallSpec for KeccakSpec {
     const NAME: &'static str = "KECCAK";
 
@@ -64,6 +67,14 @@ impl EcallSpec for Secp256k1DecompressSpec {
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * COORDINATE_WORDS;
     const CODE: u32 = SECP256K1_DECOMPRESS;
+}
+
+impl EcallSpec for Sha256ExtendSpec {
+    const NAME: &'static str = "SHA256_EXTEND";
+
+    const REG_OPS_COUNT: usize = 2;
+    const MEM_OPS_COUNT: usize = SHA_EXTEND_WORDS;
+    const CODE: u32 = SHA_EXTEND;
 }
 
 /// LargeEcallDummy can handle any instruction and produce its effects,
