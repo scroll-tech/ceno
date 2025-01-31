@@ -111,3 +111,28 @@ pub fn syscall_secp256k1_decompress(point: &mut [u8; 64], is_odd: bool) {
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
 }
+
+pub const SHA_EXTEND: u32 = 0x00_30_01_05;
+/// Based on: https://github.com/succinctlabs/sp1/blob/2aed8fea16a67a5b2983ffc471b2942c2f2512c8/crates/zkvm/entrypoint/src/syscalls/sha_extend.rs#L12
+
+/// Executes the SHA256 extend operation on the given word array.
+///
+/// ### Safety
+///
+/// The caller must ensure that `w` is valid pointer to data that is aligned along a four byte
+/// boundary.
+#[allow(unused_variables)]
+pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") SHA_EXTEND,
+            in("a0") w,
+            in("a1") 0
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}

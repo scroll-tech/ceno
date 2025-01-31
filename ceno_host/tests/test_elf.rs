@@ -424,6 +424,15 @@ fn test_secp256k1_decompress() -> Result<()> {
 }
 
 #[test]
+fn test_sha256_extend() -> Result<()> {
+    let program_elf = ceno_examples::sha_extend_syscall;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let _ = run(&mut state)?;
+    Ok(())
+}
+
+#[test]
 fn test_syscalls_compatibility() -> Result<()> {
     let program_elf = ceno_examples::syscalls;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
