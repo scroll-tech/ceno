@@ -740,7 +740,7 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
                 self.evaluations = b;
             }
             (a, b) => panic!(
-                "do not support merge differnt field type DME a: {:?} b: {:?}",
+                "do not support merge different field type DME a: {:?} b: {:?}",
                 a, b
             ),
         }
