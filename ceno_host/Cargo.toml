@@ -18,4 +18,6 @@ tiny-keccak.workspace = true
 
 [dev-dependencies]
 ceno-examples = { path = "../examples-builder" }
+clap.workspace = true
+parse-size.workspace = true
 rand.workspace = true

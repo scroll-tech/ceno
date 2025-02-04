@@ -308,7 +308,9 @@ dependencies = [
  "anyhow",
  "ceno-examples",
  "ceno_emul",
+ "clap",
  "itertools 0.13.0",
+ "parse-size",
  "rand",
  "rkyv",
  "tiny-keccak",
@@ -720,6 +722,7 @@ name = "examples"
 version = "0.1.0"
 dependencies = [
  "ceno_rt",
+ "rand",
  "rkyv",
 ]
 
