@@ -125,7 +125,7 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
     let mem_ops = p_view
         .mem_ops()
         .into_iter()
-        .chain(q_view.mem_ops().into_iter())
+        .chain(q_view.mem_ops())
         .collect_vec();
 
     assert_eq!(mem_ops.len(), 2 * SECP256K1_ARG_WORDS);
@@ -261,10 +261,7 @@ pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
     let y_mem_ops = output_view.mem_ops();
     let x_mem_ops = input_view.mem_ops();
 
-    let mem_ops = x_mem_ops
-        .into_iter()
-        .chain(y_mem_ops.into_iter())
-        .collect_vec();
+    let mem_ops = x_mem_ops.into_iter().chain(y_mem_ops).collect_vec();
 
     assert_eq!(mem_ops.len(), 2 * COORDINATE_WORDS);
     SyscallEffects {

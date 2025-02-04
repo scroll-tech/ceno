@@ -1,12 +1,11 @@
 // Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
+use std::array;
+
 use ceno_rt::syscalls::syscall_sha256_extend;
 
 fn main() {
-    let mut words = [0u32; 64];
-    for i in 0..16 {
-        words[i] = i as u32;
-    }
+    let mut words: [u32; 64] = array::from_fn(|i| i as u32);
 
     let expected = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 34013193, 67559435, 1711661200,
