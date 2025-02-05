@@ -129,7 +129,7 @@ fn emulate_program(
             }
         })
         .collect_vec();
-    debug_memory_ranges(&vm, &mem_final);
+    // debug_memory_ranges(&vm, &mem_final);
 
     // Find the final public IO cycles.
     let io_final = io_init
