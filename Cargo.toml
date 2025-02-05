@@ -57,6 +57,9 @@ tracing = { version = "0.1", features = [
 ] }
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uint = "0.8"
+num-bigint = {version = "0.4.6"}
+substrate-bn = {version = "0.6.0"}
 
 [profile.dev]
 lto = "thin"

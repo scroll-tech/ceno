@@ -3,11 +3,14 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 use anyhow::Result;
 use ceno_emul::{
     CENO_PLATFORM, COORDINATE_WORDS, EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS,
-    SHA_EXTEND_WORDS, StepRecord, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
+    SHA_EXTEND_WORDS, StepRecord, VMState, WORD_SIZE, WordAddr,
+    bn254::{BN254_FP_WORDS, BN254_FP2_WORDS},
+    host_utils::read_all_messages,
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
 use rand::{Rng, thread_rng};
+use substrate_bn::{Fq, Fq2, Fr, G2, Group};
 use tiny_keccak::keccakf;
 
 #[test]
@@ -468,6 +471,173 @@ fn test_sha256_extend() -> Result<()> {
 
     Ok(())
 }
+
+const A: &str = "20088242871839275224246405745257275088696311157297823662689037894645226208583";
+const B: &str = "21888202871839275222246405745257275088696311157297823662689037894645226208583";
+#[test]
+fn test_bn254_fp_addmod() -> Result<()> {
+    let program_elf = ceno_examples::bn254_fp_syscalls;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let p_address = witness.reg_ops[0].value.after;
+    assert_eq!(p_address, witness.reg_ops[0].value.before);
+    let p_address: WordAddr = p_address.into();
+
+    let q_address = witness.reg_ops[1].value.after;
+    assert_eq!(q_address, witness.reg_ops[1].value.before);
+    let q_address: WordAddr = q_address.into();
+
+    let rng = &mut rand::thread_rng();
+    let a = Fq::from_str(A).unwrap();
+    let b = Fq::from_str(B).unwrap();
+
+    let expected = a + b;
+
+    let result_words = witness
+        .mem_ops
+        .iter()
+        .take(8)
+        .map(|op| op.value.after)
+        .collect_vec();
+
+    let bytes = result_words
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .rev()
+        .collect_vec();
+
+    let result = Fq::from_slice(&bytes).unwrap();
+
+    assert_eq!(result, expected);
+
+    assert_eq!(witness.mem_ops.len(), 2 * BN254_FP_WORDS);
+
+    // // Expect first half to consist of read/writes on P
+    // for (i, write_op) in witness.mem_ops.iter().take(SECP256K1_ARG_WORDS).enumerate() {
+    //     assert_eq!(write_op.addr, p_address + i);
+    //     assert_eq!(write_op.value.after, expect[i]);
+    // }
+
+    // // Expect second half to consist of reads on Q
+    // for (i, write_op) in witness
+    //     .mem_ops
+    //     .iter()
+    //     .skip(SECP256K1_ARG_WORDS)
+    //     .take(SECP256K1_ARG_WORDS)
+    //     .enumerate()
+    // {
+    //     assert_eq!(write_op.addr, q_address + i);
+    //     assert_eq!(write_op.value.after, write_op.value.before);
+    // }
+
+    Ok(())
+}
+
+#[test]
+fn test_bn254_fp2_addmod() -> Result<()> {
+    let program_elf = ceno_examples::bn254_fp2_syscalls;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let p_address = witness.reg_ops[0].value.after;
+    assert_eq!(p_address, witness.reg_ops[0].value.before);
+    let p_address: WordAddr = p_address.into();
+
+    let q_address = witness.reg_ops[1].value.after;
+    assert_eq!(q_address, witness.reg_ops[1].value.before);
+    let q_address: WordAddr = q_address.into();
+
+    let rng = &mut rand::thread_rng();
+    let a = Fq::from_str(A).unwrap();
+    let b = Fq::from_str(B).unwrap();
+
+    let first = Fq2::new(a, b);
+    let second = Fq2::new(b, a);
+    let expected = first + second;
+
+    let result_words = witness
+        .mem_ops
+        .iter()
+        .take(16)
+        .map(|op| op.value.after)
+        .collect_vec();
+
+    let a_bytes = result_words[..8]
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .rev()
+        .collect_vec();
+
+    let b_bytes = result_words[8..]
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .rev()
+        .collect_vec();
+
+    let result = Fq2::new(
+        Fq::from_slice(&a_bytes).unwrap(),
+        Fq::from_slice(&b_bytes).unwrap(),
+    );
+
+    assert_eq!(result, expected);
+
+    assert_eq!(witness.mem_ops.len(), 2 * BN254_FP2_WORDS);
+
+    // // Expect first half to consist of read/writes on P
+    // for (i, write_op) in witness.mem_ops.iter().take(SECP256K1_ARG_WORDS).enumerate() {
+    //     assert_eq!(write_op.addr, p_address + i);
+    //     assert_eq!(write_op.value.after, expect[i]);
+    // }
+
+    // // Expect second half to consist of reads on Q
+    // for (i, write_op) in witness
+    //     .mem_ops
+    //     .iter()
+    //     .skip(SECP256K1_ARG_WORDS)
+    //     .take(SECP256K1_ARG_WORDS)
+    //     .enumerate()
+    // {
+    //     assert_eq!(write_op.addr, q_address + i);
+    //     assert_eq!(write_op.value.after, write_op.value.before);
+    // }
+
+    Ok(())
+}
+
+#[test]
+fn test_bn254_add() -> Result<()> {
+    let program_elf = ceno_examples::bn254_syscalls;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let _ = run(&mut state)?;
+
+    Ok(())
+}
+
+// #[test]
+// fn test_bn254_double() -> Result<()> {
+//     let program_elf = ceno_examples::bn254_add_syscall;
+//     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+//     let _ = run(&mut state)?;
+
+//     Ok(())
+// }
 
 #[test]
 fn test_syscalls_compatibility() -> Result<()> {

@@ -134,3 +134,157 @@ pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
 }
+
+/// Executes the `BN254_ADD` precompile.
+pub const BN254_ADD: u32 = 0x00_01_01_0E;
+
+/// Executes the `BN254_DOUBLE` precompile.
+pub const BN254_DOUBLE: u32 = 0x00_00_01_0F;
+
+/// Executes the `BN254_FP_ADD` precompile.
+pub const BN254_FP_ADD: u32 = 0x00_01_01_26;
+
+/// Executes the `BN254_FP_SUB` precompile.
+pub const BN254_FP_SUB: u32 = 0x00_01_01_27;
+
+/// Executes the `BN254_FP_MUL` precompile.
+pub const BN254_FP_MUL: u32 = 0x00_01_01_28;
+
+/// Executes the `BN254_FP2_ADD` precompile.
+pub const BN254_FP2_ADD: u32 = 0x00_01_01_29;
+
+/// Executes the `BN254_FP2_SUB` precompile.
+pub const BN254_FP2_SUB: u32 = 0x00_01_01_2A;
+
+/// Executes the `BN254_FP2_MUL` precompile.
+pub const BN254_FP2_MUL: u32 = 0x00_01_01_2B;
+
+/// Adds two Bn254 points.
+///
+/// The result is stored in the first point.
+///
+/// ### Safety
+///
+/// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
+/// byte boundary.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_ADD,
+            in("a0") p,
+            in("a1") q,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Double a Bn254 point.
+///
+/// The result is stored in the first point.
+///
+/// ### Safety
+///
+/// The caller must ensure that `p` is valid pointer to data that is aligned along a four byte
+/// boundary.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_DOUBLE,
+            in("a0") p,
+            in("a1") 0,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Fp addition operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP_ADD,
+            in("a0") x,
+            in("a1") y,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Fp multiplication operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP_MUL,
+            in("a0") x,
+            in("a1") y,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// BN254 Fp2 addition operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP2_ADD,
+            in("a0") x,
+            in("a1") y,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// BN254 Fp2 multiplication operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp2_mulmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP2_MUL,
+            in("a0") x,
+            in("a1") y,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
