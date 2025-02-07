@@ -34,6 +34,7 @@ serde.workspace = true
 transcript = { path = "../transcript" }
 whir = { git = "https://github.com/scroll-tech/whir", branch = "feat/ceno-binding-batch", features = ["ceno"] }
 zeroize = "1.8"
+bincode = "1.3.3"
 
 [dev-dependencies]
 criterion.workspace = true

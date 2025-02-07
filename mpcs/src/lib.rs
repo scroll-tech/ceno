@@ -486,6 +486,11 @@ pub mod test_util {
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for single poly: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
@@ -567,6 +572,11 @@ pub mod test_util {
                 Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for batch: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
@@ -620,6 +630,11 @@ pub mod test_util {
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for simple batch: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
