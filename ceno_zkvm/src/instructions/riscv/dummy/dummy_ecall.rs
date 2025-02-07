@@ -58,15 +58,15 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             .map(|i| {
                 let val_before = cb.create_witin(|| format!("mem_before_{}", i));
                 let val_after = cb.create_witin(|| format!("mem_after_{}", i));
-
+                let addr = cb.create_witin(|| format!("addr_{}", i));
                 WriteMEM::construct_circuit(
                     cb,
-                    start_addr.expr() + (i * WORD_SIZE) as u64,
+                    addr.expr(),
                     val_before.expr(),
                     val_after.expr(),
                     dummy_insn.ts(),
                 )
-                .map(|writer| (Change::new(val_before, val_after), writer))
+                .map(|writer| (addr, Change::new(val_before, val_after), writer))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -100,9 +100,10 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
         }
 
         // Assign memory.
-        for ((value, writer), op) in config.mem_writes.iter().zip_eq(&ops.mem_ops) {
+        for ((addr, value, writer), op) in config.mem_writes.iter().zip_eq(&ops.mem_ops) {
             set_val!(instance, value.before, op.value.before as u64);
             set_val!(instance, value.after, op.value.after as u64);
+            set_val!(instance, addr, u64::from(op.addr));
             writer.assign_op(instance, lk_multiplicity, step.cycle(), op)?;
         }
 
@@ -117,5 +118,5 @@ pub struct LargeEcallConfig<E: ExtensionField> {
     reg_writes: Vec<(UInt<E>, WriteRD<E>)>,
 
     start_addr: WitIn,
-    mem_writes: Vec<(Change<WitIn>, WriteMEM)>,
+    mem_writes: Vec<(WitIn, Change<WitIn>, WriteMEM)>,
 }
