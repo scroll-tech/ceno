@@ -27,7 +27,7 @@ impl From<[Word; KECCAK_WORDS]> for KeccakState {
         KeccakState(
             words
                 .chunks_exact(2)
-                .map(|chunk| (chunk[0] as u64 | (chunk[1] as u64) << 32))
+                .map(|chunk| (chunk[0] as u64 | ((chunk[1] as u64) << 32)))
                 .collect_vec()
                 .try_into()
                 .expect("failed to parse words into [u64; 25]"),
