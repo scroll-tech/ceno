@@ -25,7 +25,6 @@ pub mod disassemble;
 mod syscalls;
 pub use syscalls::{
     KECCAK_PERMUTE, SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SHA_EXTEND, SyscallSpec,
-    bn254,
     bn254::{
         BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, Bn254AddSpec, Bn254DoubleSpec,
         Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec, Bn254FpMulSpec,
