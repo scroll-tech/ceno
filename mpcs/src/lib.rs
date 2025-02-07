@@ -457,6 +457,8 @@ pub mod test_util {
     ) where
         Pcs: PolynomialCommitmentScheme<E>,
     {
+        use poseidon::poseidon::POSEIDON_CALL_COUNT;
+
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
@@ -482,7 +484,13 @@ pub mod test_util {
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_ext(&eval);
+
+                let poseidon_count = *POSEIDON_CALL_COUNT.lock().unwrap();
                 Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
+                println!(
+                    "Number of poseidons used in verification: {}",
+                    *POSEIDON_CALL_COUNT.lock().unwrap() - poseidon_count
+                );
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
@@ -591,6 +599,8 @@ pub mod test_util {
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
     {
+        use poseidon::poseidon::POSEIDON_CALL_COUNT;
+
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
@@ -625,8 +635,13 @@ pub mod test_util {
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_exts(&evals);
 
+                let poseidon_count = *POSEIDON_CALL_COUNT.lock().unwrap();
                 Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript)
                     .unwrap();
+                println!(
+                    "Number of poseidons used in verification: {}",
+                    *POSEIDON_CALL_COUNT.lock().unwrap() - poseidon_count
+                );
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);

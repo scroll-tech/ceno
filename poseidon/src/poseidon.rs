@@ -2,7 +2,10 @@ use crate::constants::{
     ALL_ROUND_CONSTANTS, HALF_N_FULL_ROUNDS, N_PARTIAL_ROUNDS, N_ROUNDS, SPONGE_WIDTH,
 };
 use goldilocks::SmallField;
+use std::sync::{LazyLock, Mutex};
 use unroll::unroll_for_loops;
+
+pub static POSEIDON_CALL_COUNT: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(0));
 
 pub trait Poseidon: AdaptedField {
     // Total number of round constants required: width of the input
@@ -27,6 +30,12 @@ pub trait Poseidon: AdaptedField {
     fn poseidon(input: [Self; SPONGE_WIDTH]) -> [Self; SPONGE_WIDTH] {
         let mut state = input;
         let mut round_ctr = 0;
+
+        // Increment the global counter
+        {
+            let mut counter = POSEIDON_CALL_COUNT.lock().unwrap();
+            *counter += 1;
+        }
 
         Self::full_rounds(&mut state, &mut round_ctr);
         Self::partial_rounds(&mut state, &mut round_ctr);
