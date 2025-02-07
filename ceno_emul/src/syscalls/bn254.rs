@@ -111,6 +111,7 @@ pub fn bn254_add(vm: &VMState) -> SyscallEffects {
     // Read P and Q from words via wrapper type
     let [p, q] = [&p_view, &q_view].map(|view| Bn254Point::from(view.words()));
 
+    // TODO: what does sp1 do with invalid points? equal points?
     // Compute the sum and convert back to words
     let sum = Bn254Point(p.0 + q.0);
     let output_words: [Word; BN254_POINT_WORDS] = sum.into();
@@ -232,8 +233,8 @@ pub fn bn254_fp_binary_op(vm: &VMState, is_add: bool) -> SyscallEffects {
     let p = Bn254Fp::from(p_view.words());
     let q = Bn254Fp::from(q_view.words());
     let result = match is_add {
-        true => Bn254Fp((p.0 + q.0)),
-        false => Bn254Fp((p.0 * q.0)),
+        true => Bn254Fp(p.0 + q.0),
+        false => Bn254Fp(p.0 * q.0),
     };
     p_view.write(result.into());
 
