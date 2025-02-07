@@ -25,8 +25,10 @@ use crate::{
 };
 use ceno_emul::{
     InsnKind::{self, *},
-    Platform, StepRecord,
+    KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
+    Sha256ExtendSpec, StepRecord, SyscallSpec,
 };
+use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
@@ -440,12 +442,37 @@ pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
     ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
+    keccak_config: <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
+    secp256k1_add_config:
+        <LargeEcallDummy<E, Secp256k1AddSpec> as Instruction<E>>::InstructionConfig,
+    secp256k1_double_config:
+        <LargeEcallDummy<E, Secp256k1DoubleSpec> as Instruction<E>>::InstructionConfig,
+    secp256k1_decompress_config:
+        <LargeEcallDummy<E, Secp256k1DecompressSpec> as Instruction<E>>::InstructionConfig,
+    sha256_extend_config:
+        <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        Self { ecall_config }
+        let keccak_config = cs.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>();
+        let secp256k1_add_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>();
+        let secp256k1_double_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>();
+        let secp256k1_decompress_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>();
+        let sha256_extend_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
+        Self {
+            ecall_config,
+            keccak_config,
+            secp256k1_add_config,
+            secp256k1_double_config,
+            secp256k1_decompress_config,
+            sha256_extend_config,
+        }
     }
 
     pub fn generate_fixed_traces(
@@ -454,6 +481,11 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
         fixed.register_opcode_circuit::<EcallDummy<E>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(cs);
     }
 
     pub fn assign_opcode_circuit(
@@ -464,17 +496,52 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     ) -> Result<(), ZKVMError> {
         let mut steps = steps.0;
 
-        macro_rules! assign_opcode {
-            ($insn_kind:ident,$instruction:ty,$config:ident) => {
-                witness.assign_opcode_circuit::<$instruction>(
-                    cs,
-                    &self.$config,
-                    steps.remove(&($insn_kind)).unwrap(),
-                )?;
-            };
+        let mut keccak_steps = Vec::new();
+        let mut secp256k1_add_steps = Vec::new();
+        let mut secp256k1_double_steps = Vec::new();
+        let mut secp256k1_decompress_steps = Vec::new();
+        let mut sha256_extend_steps = Vec::new();
+        let mut other_steps = Vec::new();
+
+        if let Some(ecall_steps) = steps.remove(&ECALL) {
+            for step in ecall_steps {
+                match step.rs1().unwrap().value {
+                    KeccakSpec::CODE => keccak_steps.push(step),
+                    Secp256k1AddSpec::CODE => secp256k1_add_steps.push(step),
+                    Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
+                    Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
+                    Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
+                    _ => other_steps.push(step),
+                }
+            }
         }
 
-        assign_opcode!(ECALL, EcallDummy<E>, ecall_config);
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(
+            cs,
+            &self.keccak_config,
+            keccak_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
+            cs,
+            &self.secp256k1_add_config,
+            secp256k1_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(
+            cs,
+            &self.secp256k1_double_config,
+            secp256k1_double_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(
+            cs,
+            &self.secp256k1_decompress_config,
+            secp256k1_decompress_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
+            cs,
+            &self.sha256_extend_config,
+            sha256_extend_steps,
+        )?;
+        witness.assign_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config, other_steps)?;
 
         let _ = steps.remove(&INVALID);
         let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();

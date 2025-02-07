@@ -46,6 +46,7 @@ rand_chacha = { version = "0.3", features = ["serde1"] }
 rand_core = "0.6"
 rand_xorshift = "0.3"
 rayon = "1.10"
+secp = "0.4.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = "0.26"
