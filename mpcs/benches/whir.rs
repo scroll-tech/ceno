@@ -1,23 +1,15 @@
 use std::time::Duration;
 
 use criterion::*;
-use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 
-use itertools::{Itertools, chain};
+use itertools::Itertools;
 use mpcs::{
-    Evaluation, PolynomialCommitmentScheme, Whir, WhirDefault,
-    test_util::{
-        commit_polys_individually, gen_rand_poly_base, gen_rand_poly_ext, gen_rand_polys,
-        get_point_from_challenge, get_points_from_challenge, setup_pcs,
-    },
-    util::plonky2_util::log2_ceil,
+    PolynomialCommitmentScheme, WhirDefault,
+    test_util::{gen_rand_poly_base, gen_rand_polys, get_point_from_challenge, setup_pcs},
 };
 
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly::ArcMultilinearExtension,
-};
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
 use transcript::{BasicTranscript, Transcript};
 
 type T = BasicTranscript<GoldilocksExt2>;
