@@ -52,10 +52,7 @@ pub fn bn254_add(vm: &VMState) -> SyscallEffects {
 
     // TODO: what does sp1 do with invalid points? equal points?
     // Compute the sum and convert back to words
-    let sum = p + q;
-    let output_words: [Word; BN254_POINT_WORDS] = sum.into();
-
-    println!("{:?}", output_words);
+    let output_words: [Word; BN254_POINT_WORDS] = (p + q).into();
 
     p_view.write(output_words);
 

@@ -21,10 +21,9 @@ rrs_lib = { package = "rrs-succinct", version = "0.1.0" }
 secp.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
+substrate-bn.workspace = true
 tiny-keccak.workspace = true
 tracing.workspace = true
-substrate-bn.workspace = true
-# uint.workspace = true
 
 [features]
 default = ["forbid_overflow"]

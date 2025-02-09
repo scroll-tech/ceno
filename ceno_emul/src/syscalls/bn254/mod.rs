@@ -1,8 +1,8 @@
-mod bn254;
+mod bn254_curve;
 mod bn254_fptower;
 mod types;
 
-pub use bn254::{Bn254AddSpec, Bn254DoubleSpec, bn254_add, bn254_double};
+pub use bn254_curve::{Bn254AddSpec, Bn254DoubleSpec, bn254_add, bn254_double};
 
 pub use bn254_fptower::{
     Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec, Bn254FpMulSpec, bn254_fp_add, bn254_fp_mul,

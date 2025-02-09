@@ -1,10 +1,13 @@
-// Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
-
-use ceno_rt::syscalls::{
-    syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
-    syscall_bn254_fp2_mulmod,
+use ceno_rt::{
+    info_out,
+    syscalls::{
+        syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
+        syscall_bn254_fp2_mulmod,
+    },
 };
+use rand::{SeedableRng, rngs::StdRng};
+use std::slice;
 use substrate_bn::{Fq, Fq2};
 
 fn bytes_to_words(bytes: [u8; 32]) -> [u32; 8] {
@@ -26,50 +29,74 @@ fn fq2_to_words(val: Fq2) -> [u32; 16] {
 }
 
 fn main() {
+    let log_flag = true;
+
+    let log_state = |state: &[u32]| {
+        if log_flag {
+            let out = unsafe {
+                slice::from_raw_parts(state.as_ptr() as *const u8, std::mem::size_of_val(state))
+            };
+            info_out().write_frame(out);
+        }
+    };
+
     let mut a = Fq::one();
     let mut b = Fq::one();
+    let seed = [0u8; 32];
+    let mut rng = StdRng::from_seed(seed);
+    const RUNS: usize = 10;
 
-    for i in 0..50 {
+    for _ in 0..RUNS {
         let mut a_words = fq_to_words(a);
-        let a_backup = a_words.clone();
+
+        let a_backup = a_words;
         let b_words = fq_to_words(b);
 
+        log_state(&a_words);
+        log_state(&b_words);
         syscall_bn254_fp_addmod(&mut a_words[0], &b_words[0]);
         let sum_words = fq_to_words(a + b);
         assert_eq!(a_words, sum_words);
+        log_state(&a_words);
 
         a_words.copy_from_slice(&a_backup);
 
+        log_state(&a_words);
+        log_state(&b_words);
         syscall_bn254_fp_mulmod(&mut a_words[0], &b_words[0]);
         let prod_words = fq_to_words(a * b);
         assert_eq!(a_words, prod_words);
+        log_state(&a_words);
 
-        a = Fq::from_str("29").unwrap() * a + Fq::from_str("133000").unwrap();
-        b = Fq::from_str("471").unwrap() * b + Fq::from_str("3045").unwrap();
+        a = Fq::random(&mut rng);
+        b = Fq::random(&mut rng);
     }
-
-    let a_twist = Fq2::new(a, b);
-    let b_twist = Fq2::new(b, a);
 
     let mut a = Fq2::one();
     let mut b = Fq2::one();
 
-    for i in 0..50 {
+    for _ in 0..RUNS {
         let mut a_words = fq2_to_words(a);
-        let a_backup = a_words.clone();
+        let a_backup = a_words;
         let b_words = fq2_to_words(b);
 
+        log_state(&a_words);
+        log_state(&b_words);
         syscall_bn254_fp2_addmod(&mut a_words[0], &b_words[0]);
         let sum_words = fq2_to_words(a + b);
         assert_eq!(a_words, sum_words);
+        log_state(&a_words);
 
         a_words.copy_from_slice(&a_backup);
 
+        log_state(&a_words);
+        log_state(&b_words);
         syscall_bn254_fp2_mulmod(&mut a_words[0], &b_words[0]);
         let prod_words = fq2_to_words(a * b);
         assert_eq!(a_words, prod_words);
+        log_state(&a_words);
 
-        a = a * a_twist;
-        b = b * b_twist;
+        a = Fq2::new(Fq::random(&mut rng), Fq::random(&mut rng));
+        b = Fq2::new(Fq::random(&mut rng), Fq::random(&mut rng));
     }
 }

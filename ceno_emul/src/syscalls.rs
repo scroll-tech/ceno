@@ -42,6 +42,7 @@ pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects
 }
 
 /// A syscall event, available to the circuit witness generators.
+/// TODO: separate mem_ops into two stages: reads-and-writes
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyscallWitness {
     pub mem_ops: Vec<WriteOp>,
@@ -51,14 +52,6 @@ pub struct SyscallWitness {
 
 impl SyscallWitness {
     fn new(mem_ops: Vec<WriteOp>, reg_ops: Vec<WriteOp>) -> SyscallWitness {
-        for (i, op) in mem_ops.iter().enumerate() {
-            // TODO: figure out appropriate check
-            // assert_eq!(
-            //     op.addr,
-            //     mem_ops[0].addr + i,
-            //     "Dummy circuit expects that mem_ops addresses are consecutive."
-            // );
-        }
         SyscallWitness {
             mem_ops,
             reg_ops,

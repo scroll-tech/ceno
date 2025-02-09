@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{Change, InsnKind, StepRecord, SyscallSpec, WORD_SIZE};
+use ceno_emul::{Change, InsnKind, StepRecord, SyscallSpec};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
@@ -30,7 +30,6 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
     fn name() -> String {
         format!("{}_DUMMY", S::NAME)
     }
-
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let dummy_insn = DummyConfig::construct_circuit(
             cb,
