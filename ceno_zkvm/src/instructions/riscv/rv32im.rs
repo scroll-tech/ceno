@@ -24,6 +24,8 @@ use crate::{
     },
 };
 use ceno_emul::{
+    Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
+    Bn254FpMulSpec,
     InsnKind::{self, *},
     KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
     Sha256ExtendSpec, StepRecord, SyscallSpec,
@@ -451,6 +453,14 @@ pub struct DummyExtraConfig<E: ExtensionField> {
         <LargeEcallDummy<E, Secp256k1DecompressSpec> as Instruction<E>>::InstructionConfig,
     sha256_extend_config:
         <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
+    bn254_add_config: <LargeEcallDummy<E, Bn254AddSpec> as Instruction<E>>::InstructionConfig,
+    bn254_double_config: <LargeEcallDummy<E, Bn254DoubleSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp_add_config: <LargeEcallDummy<E, Bn254FpAddSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp_mul_config: <LargeEcallDummy<E, Bn254FpMulSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp2_add_config:
+        <LargeEcallDummy<E, Bn254Fp2AddSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp2_mul_config:
+        <LargeEcallDummy<E, Bn254Fp2MulSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
@@ -465,6 +475,18 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>();
         let sha256_extend_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
+        let bn254_add_config = cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>();
+        let bn254_double_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>();
+        let bn254_fp_add_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>();
+        let bn254_fp_mul_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>();
+        let bn254_fp2_add_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>();
+        let bn254_fp2_mul_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>();
+
         Self {
             ecall_config,
             keccak_config,
@@ -472,6 +494,12 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             secp256k1_double_config,
             secp256k1_decompress_config,
             sha256_extend_config,
+            bn254_add_config,
+            bn254_double_config,
+            bn254_fp_add_config,
+            bn254_fp_mul_config,
+            bn254_fp2_add_config,
+            bn254_fp2_mul_config,
         }
     }
 
@@ -486,6 +514,12 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>(cs);
     }
 
     pub fn assign_opcode_circuit(
@@ -501,6 +535,12 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let mut secp256k1_double_steps = Vec::new();
         let mut secp256k1_decompress_steps = Vec::new();
         let mut sha256_extend_steps = Vec::new();
+        let mut bn254_add_steps = Vec::new();
+        let mut bn254_double_steps = Vec::new();
+        let mut bn254_fp_add_steps = Vec::new();
+        let mut bn254_fp_mul_steps = Vec::new();
+        let mut bn254_fp2_add_steps = Vec::new();
+        let mut bn254_fp2_mul_steps = Vec::new();
         let mut other_steps = Vec::new();
 
         if let Some(ecall_steps) = steps.remove(&ECALL) {
@@ -511,6 +551,12 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
                     Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
                     Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
                     Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
+                    Bn254AddSpec::CODE => bn254_add_steps.push(step),
+                    Bn254DoubleSpec::CODE => bn254_double_steps.push(step),
+                    Bn254FpAddSpec::CODE => bn254_fp_add_steps.push(step),
+                    Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
+                    Bn254Fp2AddSpec::CODE => bn254_fp2_add_steps.push(step),
+                    Bn254Fp2MulSpec::CODE => bn254_fp2_mul_steps.push(step),
                     _ => other_steps.push(step),
                 }
             }
@@ -540,6 +586,36 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs,
             &self.sha256_extend_config,
             sha256_extend_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(
+            cs,
+            &self.bn254_add_config,
+            bn254_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(
+            cs,
+            &self.bn254_double_config,
+            bn254_double_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(
+            cs,
+            &self.bn254_fp_add_config,
+            bn254_fp_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>(
+            cs,
+            &self.bn254_fp_mul_config,
+            bn254_fp_mul_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>(
+            cs,
+            &self.bn254_fp2_add_config,
+            bn254_fp2_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>(
+            cs,
+            &self.bn254_fp2_mul_config,
+            bn254_fp2_mul_steps,
         )?;
         witness.assign_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config, other_steps)?;
 
