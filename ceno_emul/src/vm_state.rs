@@ -21,7 +21,7 @@ pub struct VMState {
     memory: HashMap<WordAddr, Word>,
     registers: [Word; VMState::REG_COUNT],
     // Termination.
-    halted: bool,
+    pub halted: bool,
     tracer: Tracer,
 }
 

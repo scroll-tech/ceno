@@ -1,5 +1,6 @@
 #![deny(clippy::cargo)]
 #![feature(step_trait)]
+#![feature(unsigned_is_multiple_of)]
 mod addr;
 pub use addr::*;
 
@@ -38,3 +39,5 @@ pub mod utils;
 pub mod test_utils;
 
 pub mod host_utils;
+
+pub mod gdb;
