@@ -20,6 +20,7 @@ serde_json.workspace = true
 
 base64 = "0.22"
 ceno_emul = { path = "../ceno_emul" }
+ceno_host = { path = "../ceno_host" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
