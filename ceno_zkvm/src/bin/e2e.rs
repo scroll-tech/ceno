@@ -1,4 +1,5 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     with_panic_hook,
@@ -48,8 +49,16 @@ struct Args {
     /// Hints: prover-private unconstrained input.
     /// This is a raw file mapped as a memory segment.
     /// Zero-padded to the right to the next power-of-two size.
-    #[arg(long)]
-    hints: Option<String>,
+    #[arg(long, conflicts_with = "structured_hints")]
+    raw_hints: Option<String>,
+
+    /// Hints: prover-private unconstrained input.
+    /// This is a file containing decimal representations of
+    /// a value N, followed by N u32 integers.
+    /// The N integers are processed so they can be read
+    /// directly by guest programs.
+    #[arg(long, conflicts_with = "raw_hints")]
+    structured_hints: Option<String>,
 
     /// Stack size in bytes.
     #[arg(long, default_value = "32k", value_parser = parse_size)]
@@ -120,8 +129,19 @@ fn main() {
         args.heap_size
     );
 
-    tracing::info!("Loading hints file: {:?}", args.hints);
-    let hints = memory_from_file(&args.hints);
+    let (hints, filename) = if args.raw_hints.is_some() {
+        (read_raw_hints(&args.raw_hints), args.raw_hints)
+    } else if args.structured_hints.is_some() {
+        (
+            read_structured_hints(&args.structured_hints),
+            args.structured_hints,
+        )
+    } else {
+        (vec![], None)
+    };
+
+    tracing::info!("Loading hints file: {:?}", filename);
+
     assert!(
         hints.len() <= platform.hints.iter_addresses().len(),
         "hints must fit in {} bytes",
@@ -187,7 +207,7 @@ fn main() {
         }
     };
 }
-fn memory_from_file(path: &Option<String>) -> Vec<u32> {
+fn read_raw_hints(path: &Option<String>) -> Vec<u32> {
     path.as_ref()
         .map(|path| {
             let mut buf = fs::read(path).expect("could not read file");
@@ -197,4 +217,22 @@ fn memory_from_file(path: &Option<String>) -> Vec<u32> {
                 .collect_vec()
         })
         .unwrap_or_default()
+}
+
+/// Reads a sequence of u32s and formats it as guest input
+fn read_structured_hints(path: &Option<String>) -> Vec<u32> {
+    let structured_hints =
+        fs::read_to_string(path.as_ref().unwrap()).expect("could not read structured hints file");
+
+    let mut parts = structured_hints.split_whitespace();
+    let n: usize = parts.next().unwrap().parse().expect("could not parse N");
+    let values: Vec<u32> = parts
+        .take(n)
+        .map(|part| part.parse().expect("could not parse hint"))
+        .collect();
+
+    // Serialize the read values into the suitable format
+    let mut input = CenoStdin::default();
+    input.write(&values).unwrap();
+    (&input).into()
 }

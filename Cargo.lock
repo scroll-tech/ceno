@@ -353,6 +353,7 @@ dependencies = [
  "base64",
  "bincode",
  "ceno_emul",
+ "ceno_host",
  "cfg-if",
  "clap",
  "criterion",
