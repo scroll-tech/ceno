@@ -774,7 +774,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if circuit_vk.fixed_commit.is_some() {
             let Some(fixed_opening_proof) = &proof.fixed_opening_proof else {
                 return Err(ZKVMError::VerifyError(
-                    "fixed openning proof shoudn't be none".into(),
+                    "fixed opening proof shouldn't be none".into(),
                 ));
             };
             PCS::simple_batch_verify(
