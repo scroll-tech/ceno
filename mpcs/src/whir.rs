@@ -34,16 +34,9 @@ where
 
     fn trim(
         param: Self::Param,
-        poly_size: usize,
+        _poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        if poly_size > (1 << param.num_variables) {
-            return Err(crate::Error::InvalidPcsParam(
-                "Poly size is greater than param poly size".to_string(),
-            ));
-        }
-        // TODO: Do the real trim instead of regenerating.
-        let param = WhirInnerT::<E, Spec>::setup(poly_size);
-        Ok((param.clone(), param.clone()))
+        Ok((param, param))
     }
 
     fn commit(
