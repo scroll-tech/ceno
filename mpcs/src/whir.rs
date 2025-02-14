@@ -197,6 +197,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "For benchmarking and profiling only"]
     fn bench_whir_simple_batch_commit_open_verify_goldilocks() {
         for gen_rand_poly in [gen_rand_poly_base] {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 20, 21);

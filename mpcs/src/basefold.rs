@@ -1249,6 +1249,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "For benchmarking and profiling only"]
     fn bench_basefold_simple_batch_commit_open_verify_goldilocks() {
         for gen_rand_poly in [gen_rand_poly_base] {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 20, 21);
