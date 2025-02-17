@@ -12,6 +12,8 @@ use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use p3_mds::MdsPermutation;
+use poseidon::SPONGE_WIDTH;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -28,14 +30,15 @@ use super::{
     structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
 };
 
-pub fn prover_query_phase<E: ExtensionField>(
+pub fn prover_query_phase<E: ExtensionField, Mds>(
     transcript: &mut impl Transcript<E>,
-    comm: &BasefoldCommitmentWithWitness<E>,
-    trees: &[MerkleTree<E>],
+    comm: &BasefoldCommitmentWithWitness<E, Mds>,
+    trees: &[MerkleTree<E, Mds>],
     num_verifier_queries: usize,
 ) -> QueriesResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let queries: Vec<_> = (0..num_verifier_queries)
         .map(|_| {
@@ -57,22 +60,23 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    basefold_get_query::<E>(&comm.get_codewords()[0], trees, *x_index),
+                    basefold_get_query::<E, Mds>(&comm.get_codewords()[0], trees, *x_index),
                 )
             })
             .collect(),
     }
 }
 
-pub fn batch_prover_query_phase<E: ExtensionField>(
+pub fn batch_prover_query_phase<E: ExtensionField, Mds>(
     transcript: &mut impl Transcript<E>,
     codeword_size: usize,
-    comms: &[BasefoldCommitmentWithWitness<E>],
-    trees: &[MerkleTree<E>],
+    comms: &[BasefoldCommitmentWithWitness<E, Mds>],
+    trees: &[MerkleTree<E, Mds>],
     num_verifier_queries: usize,
 ) -> BatchedQueriesResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let queries: Vec<_> = (0..num_verifier_queries)
         .map(|_| {
@@ -94,21 +98,22 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    batch_basefold_get_query::<E>(comms, trees, codeword_size, *x_index),
+                    batch_basefold_get_query::<E, Mds>(comms, trees, codeword_size, *x_index),
                 )
             })
             .collect(),
     }
 }
 
-pub fn simple_batch_prover_query_phase<E: ExtensionField>(
+pub fn simple_batch_prover_query_phase<E: ExtensionField, Mds>(
     transcript: &mut impl Transcript<E>,
-    comm: &BasefoldCommitmentWithWitness<E>,
-    trees: &[MerkleTree<E>],
+    comm: &BasefoldCommitmentWithWitness<E, Mds>,
+    trees: &[MerkleTree<E, Mds>],
     num_verifier_queries: usize,
 ) -> SimpleBatchQueriesResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let queries: Vec<_> = (0..num_verifier_queries)
         .map(|_| {
@@ -130,7 +135,11 @@ where
             .map(|x_index| {
                 (
                     *x_index,
-                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), trees, *x_index),
+                    simple_batch_basefold_get_query::<E, Mds>(
+                        comm.get_codewords(),
+                        trees,
+                        *x_index,
+                    ),
                 )
             })
             .collect(),
@@ -138,10 +147,10 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, Mds>(
     indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-    queries: &QueriesResultWithMerklePath<E>,
+    queries: &QueriesResultWithMerklePath<E, Mds>,
     sum_check_messages: &[Vec<E>],
     fold_challenges: &[E],
     num_rounds: usize,
@@ -153,6 +162,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     eval: &E,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let timer = start_timer!(|| "Verifier query phase");
 
@@ -210,10 +220,10 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, Mds>(
     indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-    queries: &BatchedQueriesResultWithMerklePath<E>,
+    queries: &BatchedQueriesResultWithMerklePath<E, Mds>,
     sum_check_messages: &[Vec<E>],
     fold_challenges: &[E],
     num_rounds: usize,
@@ -226,6 +236,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     eval: &E,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
@@ -286,10 +297,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>, Mds>(
     indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-    queries: &SimpleBatchQueriesResultWithMerklePath<E>,
+    queries: &SimpleBatchQueriesResultWithMerklePath<E, Mds>,
     sum_check_messages: &[Vec<E>],
     fold_challenges: &[E],
     batch_coeffs: &[E],
@@ -302,6 +313,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     evals: &[E],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let timer = start_timer!(|| "Verifier query phase");
 
@@ -364,13 +376,14 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     end_timer!(timer);
 }
 
-fn basefold_get_query<E: ExtensionField>(
+fn basefold_get_query<E: ExtensionField, Mds>(
     poly_codeword: &FieldType<E>,
-    trees: &[MerkleTree<E>],
+    trees: &[MerkleTree<E, Mds>],
     x_index: usize,
 ) -> SingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut index = x_index;
     let p1 = index | 1;
@@ -410,14 +423,15 @@ where
     }
 }
 
-fn batch_basefold_get_query<E: ExtensionField>(
-    comms: &[BasefoldCommitmentWithWitness<E>],
-    trees: &[MerkleTree<E>],
+fn batch_basefold_get_query<E: ExtensionField, Mds>(
+    comms: &[BasefoldCommitmentWithWitness<E, Mds>],
+    trees: &[MerkleTree<E, Mds>],
     codeword_size: usize,
     x_index: usize,
 ) -> BatchedSingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut oracle_list_queries = Vec::with_capacity(trees.len());
 
@@ -465,13 +479,14 @@ where
     }
 }
 
-fn simple_batch_basefold_get_query<E: ExtensionField>(
+fn simple_batch_basefold_get_query<E: ExtensionField, Mds>(
     poly_codewords: &[FieldType<E>],
-    trees: &[MerkleTree<E>],
+    trees: &[MerkleTree<E, Mds>],
     x_index: usize,
 ) -> SimpleBatchSingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let mut index = x_index;
     let p1 = index | 1;
@@ -529,6 +544,7 @@ where
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum CodewordPointPair<E: ExtensionField> {
+    #[serde(bound = "")]
     Ext(E, E),
     Base(E::BaseField, E::BaseField),
 }
@@ -543,6 +559,7 @@ impl<E: ExtensionField> CodewordPointPair<E> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 enum SimpleBatchLeavesPair<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -588,6 +605,7 @@ where
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct CodewordSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -630,17 +648,20 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CodewordSingleQueryResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+struct CodewordSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     query: CodewordSingleQueryResult<E>,
-    merkle_path: MerklePathWithoutLeafOrRoot<E>,
+    merkle_path: MerklePathWithoutLeafOrRoot<E, Mds>,
 }
 
-impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> CodewordSingleQueryResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
@@ -659,6 +680,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct OracleListQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -667,6 +689,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct CommitmentsQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -675,37 +698,29 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OracleListQueryResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+struct OracleListQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
-    E::BaseField: Serialize + DeserializeOwned,
+    E::BaseField: Serialize,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
+    inner: Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CommitmentsQueryResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+struct CommitmentsQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
+    inner: Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>>,
 }
 
-impl<E: ExtensionField> ListQueryResult<E> for OracleListQueryResult<E>
+impl<E: ExtensionField, Mds> ListQueryResult<E, Mds> for OracleListQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-{
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
-        &self.inner
-    }
-
-    fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<E>> {
-        self.inner
-    }
-}
-
-impl<E: ExtensionField> ListQueryResult<E> for CommitmentsQueryResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
         &self.inner
@@ -716,35 +731,54 @@ where
     }
 }
 
-impl<E: ExtensionField> ListQueryResultWithMerklePath<E> for OracleListQueryResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> ListQueryResult<E, Mds> for CommitmentsQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E>> {
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
         &self.inner
     }
 
-    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>) -> Self {
+    fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<E>> {
+        self.inner
+    }
+}
+
+impl<E: ExtensionField, Mds> ListQueryResultWithMerklePath<E, Mds>
+    for OracleListQueryResultWithMerklePath<E, Mds>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>> {
+        &self.inner
+    }
+
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>>) -> Self {
         Self { inner }
     }
 }
 
-impl<E: ExtensionField> ListQueryResultWithMerklePath<E> for CommitmentsQueryResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> ListQueryResultWithMerklePath<E, Mds>
+    for CommitmentsQueryResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E>> {
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>> {
         &self.inner
     }
 
-    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>) -> Self {
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>>) -> Self {
         Self { inner }
     }
 }
 
-trait ListQueryResult<E: ExtensionField>
+trait ListQueryResult<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>>;
 
@@ -752,8 +786,8 @@ where
 
     fn merkle_path(
         &self,
-        path: impl Fn(usize, usize) -> MerklePathWithoutLeafOrRoot<E>,
-    ) -> Vec<MerklePathWithoutLeafOrRoot<E>> {
+        path: impl Fn(usize, usize) -> MerklePathWithoutLeafOrRoot<E, Mds>,
+    ) -> Vec<MerklePathWithoutLeafOrRoot<E, Mds>> {
         let ret = self
             .get_inner()
             .iter()
@@ -764,17 +798,18 @@ where
     }
 }
 
-trait ListQueryResultWithMerklePath<E: ExtensionField>: Sized
+trait ListQueryResultWithMerklePath<E: ExtensionField, Mds>: Sized
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>) -> Self;
+    fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>>) -> Self;
 
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E>>;
+    fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E, Mds>>;
 
-    fn from_query_and_trees<LQR: ListQueryResult<E>>(
+    fn from_query_and_trees<LQR: ListQueryResult<E, Mds>>(
         query_result: LQR,
-        path: impl Fn(usize, usize) -> MerklePathWithoutLeafOrRoot<E>,
+        path: impl Fn(usize, usize) -> MerklePathWithoutLeafOrRoot<E, Mds>,
     ) -> Self {
         Self::new(
             query_result
@@ -804,6 +839,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct SingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -813,22 +849,25 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SingleQueryResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+struct SingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    oracle_query: OracleListQueryResultWithMerklePath<E>,
-    commitment_query: CodewordSingleQueryResultWithMerklePath<E>,
+    oracle_query: OracleListQueryResultWithMerklePath<E, Mds>,
+    commitment_query: CodewordSingleQueryResultWithMerklePath<E, Mds>,
 }
 
-impl<E: ExtensionField> SingleQueryResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> SingleQueryResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn from_single_query_result(
         single_query_result: SingleQueryResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithWitness<E>,
+        oracle_trees: &[MerkleTree<E, Mds>],
+        commitment: &BasefoldCommitmentWithWitness<E, Mds>,
     ) -> Self {
         assert!(commitment.codeword_tree.height() > 0);
         Self {
@@ -909,16 +948,19 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueriesResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+pub struct QueriesResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    inner: Vec<(usize, SingleQueryResultWithMerklePath<E>)>,
+    inner: Vec<(usize, SingleQueryResultWithMerklePath<E, Mds>)>,
 }
 
-impl<E: ExtensionField> QueriesResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> QueriesResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn empty() -> Self {
         Self { inner: vec![] }
@@ -926,8 +968,8 @@ where
 
     pub fn from_query_result(
         query_result: QueriesResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithWitness<E>,
+        oracle_trees: &[MerkleTree<E, Mds>],
+        commitment: &BasefoldCommitmentWithWitness<E, Mds>,
     ) -> Self {
         Self {
             inner: query_result
@@ -978,6 +1020,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct BatchedSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -987,22 +1030,25 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct BatchedSingleQueryResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+struct BatchedSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    oracle_query: OracleListQueryResultWithMerklePath<E>,
-    commitments_query: CommitmentsQueryResultWithMerklePath<E>,
+    oracle_query: OracleListQueryResultWithMerklePath<E, Mds>,
+    commitments_query: CommitmentsQueryResultWithMerklePath<E, Mds>,
 }
 
-impl<E: ExtensionField> BatchedSingleQueryResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> BatchedSingleQueryResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn from_batched_single_query_result(
         batched_single_query_result: BatchedSingleQueryResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitments: &[BasefoldCommitmentWithWitness<E>],
+        oracle_trees: &[MerkleTree<E, Mds>],
+        commitments: &[BasefoldCommitmentWithWitness<E, Mds>],
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -1133,21 +1179,24 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchedQueriesResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+pub struct BatchedQueriesResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<E>)>,
+    inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<E, Mds>)>,
 }
 
-impl<E: ExtensionField> BatchedQueriesResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> BatchedQueriesResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn from_batched_query_result(
         batched_query_result: BatchedQueriesResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitments: &[BasefoldCommitmentWithWitness<E>],
+        oracle_trees: &[MerkleTree<E, Mds>],
+        commitments: &[BasefoldCommitmentWithWitness<E, Mds>],
     ) -> Self {
         Self {
             inner: batched_query_result
@@ -1202,6 +1251,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct SimpleBatchCommitmentSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1246,17 +1296,20 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SimpleBatchCommitmentSingleQueryResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+struct SimpleBatchCommitmentSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     query: SimpleBatchCommitmentSingleQueryResult<E>,
-    merkle_path: MerklePathWithoutLeafOrRoot<E>,
+    merkle_path: MerklePathWithoutLeafOrRoot<E, Mds>,
 }
 
-impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
@@ -1283,6 +1336,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct SimpleBatchSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1292,22 +1346,25 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    oracle_query: OracleListQueryResultWithMerklePath<E>,
-    commitment_query: SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>,
+    oracle_query: OracleListQueryResultWithMerklePath<E, Mds>,
+    commitment_query: SimpleBatchCommitmentSingleQueryResultWithMerklePath<E, Mds>,
 }
 
-impl<E: ExtensionField> SimpleBatchSingleQueryResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> SimpleBatchSingleQueryResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn from_single_query_result(
         single_query_result: SimpleBatchSingleQueryResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithWitness<E>,
+        oracle_trees: &[MerkleTree<E, Mds>],
+        commitment: &BasefoldCommitmentWithWitness<E, Mds>,
     ) -> Self {
         Self {
             oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
@@ -1389,21 +1446,24 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField>
+#[serde(bound = "")]
+pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
-    inner: Vec<(usize, SimpleBatchSingleQueryResultWithMerklePath<E>)>,
+    inner: Vec<(usize, SimpleBatchSingleQueryResultWithMerklePath<E, Mds>)>,
 }
 
-impl<E: ExtensionField> SimpleBatchQueriesResultWithMerklePath<E>
+impl<E: ExtensionField, Mds> SimpleBatchQueriesResultWithMerklePath<E, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     pub fn from_query_result(
         query_result: SimpleBatchQueriesResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitment: &BasefoldCommitmentWithWitness<E>,
+        oracle_trees: &[MerkleTree<E, Mds>],
+        commitment: &BasefoldCommitmentWithWitness<E, Mds>,
     ) -> Self {
         Self {
             inner: query_result

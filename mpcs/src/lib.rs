@@ -2,6 +2,8 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
+use p3_mds::MdsPermutation;
+use poseidon::SPONGE_WIDTH;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::{BasicTranscript, Transcript};
@@ -221,10 +223,11 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     ) -> Result<(), Error>;
 }
 
-pub trait NoninteractivePCS<E: ExtensionField>:
+pub trait NoninteractivePCS<E: ExtensionField, Mds>:
     PolynomialCommitmentScheme<E, CommitmentChunk = Digest<E::BaseField>>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     fn ni_open(
         pp: &Self::ProverParam,
@@ -233,7 +236,7 @@ where
         point: &[E],
         eval: &E,
     ) -> Result<Self::Proof, Error> {
-        let mut transcript = BasicTranscript::<E>::new(b"BaseFold");
+        let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
         Self::open(pp, poly, comm, point, eval, &mut transcript)
     }
 
@@ -244,7 +247,7 @@ where
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
     ) -> Result<Self::Proof, Error> {
-        let mut transcript = BasicTranscript::<E>::new(b"BaseFold");
+        let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
         Self::batch_open(pp, polys, comms, points, evals, &mut transcript)
     }
 
@@ -255,7 +258,7 @@ where
         eval: &E,
         proof: &Self::Proof,
     ) -> Result<(), Error> {
-        let mut transcript = BasicTranscript::<E>::new(b"BaseFold");
+        let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
         Self::verify(vp, comm, point, eval, proof, &mut transcript)
     }
 
@@ -269,7 +272,7 @@ where
     where
         Self::Commitment: 'a,
     {
-        let mut transcript = BasicTranscript::<E>::new(b"BaseFold");
+        let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
         Self::batch_verify(vp, comms, points, evals, proof, &mut transcript)
     }
 }
@@ -379,6 +382,10 @@ pub mod test_util {
     use multilinear_extensions::{
         mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
+    #[cfg(test)]
+    use p3_mds::MdsPermutation;
+    #[cfg(test)]
+    use poseidon::SPONGE_WIDTH;
     use rand::rngs::OsRng;
     #[cfg(test)]
     use transcript::BasicTranscript;
@@ -445,19 +452,20 @@ pub mod test_util {
     }
 
     #[cfg(test)]
-    pub fn run_commit_open_verify<E: ExtensionField, Pcs>(
+    pub fn run_commit_open_verify<E: ExtensionField, Pcs, Mds>(
         gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
     ) where
         Pcs: PolynomialCommitmentScheme<E>,
+        Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
             // Commit and open
             let (comm, eval, proof, challenge) = {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
                 let poly = gen_rand_poly(num_vars);
                 let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
@@ -473,7 +481,7 @@ pub mod test_util {
             };
             // Verify
             {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_ext(&eval);
@@ -486,12 +494,13 @@ pub mod test_util {
     }
 
     #[cfg(test)]
-    pub fn run_batch_commit_open_verify<E, Pcs>(
+    pub fn run_batch_commit_open_verify<E, Pcs, Mds>(
         gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
     ) where
         E: ExtensionField,
+        Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
         Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
@@ -508,7 +517,7 @@ pub mod test_util {
             .collect_vec();
 
             let (comms, evals, proof, challenge) = {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
                 let polys = gen_rand_polys(|i| num_vars - (i >> 1), batch_size, gen_rand_poly);
 
                 let comms =
@@ -539,7 +548,7 @@ pub mod test_util {
             };
             // Batch verify
             {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
                 let comms = comms
                     .iter()
                     .map(|comm| {
@@ -567,20 +576,21 @@ pub mod test_util {
     }
 
     #[cfg(test)]
-    pub(super) fn run_simple_batch_commit_open_verify<E, Pcs>(
+    pub(super) fn run_simple_batch_commit_open_verify<E, Pcs, Mds>(
         gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
         batch_size: usize,
     ) where
         E: ExtensionField,
+        Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
         Pcs: PolynomialCommitmentScheme<E>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
             let (comm, evals, proof, challenge) = {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
                 let polys = gen_rand_polys(|_| num_vars, batch_size, gen_rand_poly);
                 let comm =
                     Pcs::batch_commit_and_write(&pp, polys.as_slice(), &mut transcript).unwrap();
@@ -604,7 +614,7 @@ pub mod test_util {
             };
             // Batch verify
             {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::<E, Mds>::new(b"BaseFold");
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
 
                 let point = get_point_from_challenge(num_vars, &mut transcript);
