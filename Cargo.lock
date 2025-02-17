@@ -339,6 +339,8 @@ dependencies = [
  "mpcs",
  "multilinear_extensions",
  "num-traits",
+ "p3-field",
+ "p3-goldilocks",
  "parse-size",
  "paste",
  "pprof2",

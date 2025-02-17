@@ -8,9 +8,8 @@ use std::{
 };
 
 use ceno_emul::InsnKind;
-use ff::Field;
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
+use p3_field::FieldAlgebra;
 
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
@@ -358,7 +357,7 @@ impl<E: ExtensionField> Add for Expression<E> {
             | (
                 Expression::Challenge(challenge_id, pow, scalar, offset),
                 Expression::Constant(c1),
-            ) => Expression::Challenge(*challenge_id, *pow, *scalar, *offset + c1),
+            ) => Expression::Challenge(*challenge_id, *pow, *scalar, *offset + *c1),
 
             // challenge + challenge
             (
@@ -369,8 +368,8 @@ impl<E: ExtensionField> Add for Expression<E> {
                     Expression::Challenge(
                         *challenge_id1,
                         *pow1,
-                        *scalar1 + scalar2,
-                        *offset1 + offset2,
+                        *scalar1 + *scalar2,
+                        *offset1 + *offset2,
                     )
                 } else {
                     Expression::Sum(Box::new(self), Box::new(rhs))
@@ -378,7 +377,7 @@ impl<E: ExtensionField> Add for Expression<E> {
             }
 
             // constant + constant
-            (Expression::Constant(c1), Expression::Constant(c2)) => Expression::Constant(*c1 + c2),
+            (Expression::Constant(c1), Expression::Constant(c2)) => Expression::Constant(*c1 + *c2),
 
             // constant + scaled sum
             (c1 @ Expression::Constant(_), Expression::ScaledSum(x, a, b))
@@ -500,13 +499,13 @@ impl<E: ExtensionField> Sub for Expression<E> {
             (
                 Expression::Constant(c1),
                 Expression::Challenge(challenge_id, pow, scalar, offset),
-            ) => Expression::Challenge(*challenge_id, *pow, *scalar, offset.neg() + c1),
+            ) => Expression::Challenge(*challenge_id, *pow, *scalar, offset.neg() + *c1),
 
             // challenge - constant
             (
                 Expression::Challenge(challenge_id, pow, scalar, offset),
                 Expression::Constant(c1),
-            ) => Expression::Challenge(*challenge_id, *pow, *scalar, *offset - c1),
+            ) => Expression::Challenge(*challenge_id, *pow, *scalar, *offset - *c1),
 
             // challenge - challenge
             (
@@ -517,8 +516,8 @@ impl<E: ExtensionField> Sub for Expression<E> {
                     Expression::Challenge(
                         *challenge_id1,
                         *pow1,
-                        *scalar1 - scalar2,
-                        *offset1 - offset2,
+                        *scalar1 - *scalar2,
+                        *offset1 - *offset2,
                     )
                 } else {
                     Expression::Sum(Box::new(self), Box::new(-rhs))
@@ -526,7 +525,7 @@ impl<E: ExtensionField> Sub for Expression<E> {
             }
 
             // constant - constant
-            (Expression::Constant(c1), Expression::Constant(c2)) => Expression::Constant(*c1 - c2),
+            (Expression::Constant(c1), Expression::Constant(c2)) => Expression::Constant(*c1 - *c2),
 
             // constant - scalesum
             (c1 @ Expression::Constant(_), Expression::ScaledSum(x, a, b)) => {
@@ -705,7 +704,7 @@ impl<E: ExtensionField> Mul for Expression<E> {
             | (
                 Expression::Challenge(challenge_id, pow, scalar, offset),
                 Expression::Constant(c1),
-            ) => Expression::Challenge(*challenge_id, *pow, *scalar * c1, *offset * c1),
+            ) => Expression::Challenge(*challenge_id, *pow, *scalar * *c1, *offset * *c1),
             // challenge * challenge
             (
                 Expression::Challenge(challenge_id1, pow1, s1, offset1),
@@ -719,8 +718,8 @@ impl<E: ExtensionField> Mul for Expression<E> {
                     let mut result = Expression::Challenge(
                         *challenge_id1,
                         pow1 + pow2,
-                        *s1 * s2,
-                        *offset1 * offset2,
+                        *s1 * *s2,
+                        *offset1 * *offset2,
                     );
 
                     // offset2 * s1 * c1^(pow1)
@@ -756,7 +755,7 @@ impl<E: ExtensionField> Mul for Expression<E> {
             }
 
             // constant * constant
-            (Expression::Constant(c1), Expression::Constant(c2)) => Expression::Constant(*c1 * c2),
+            (Expression::Constant(c1), Expression::Constant(c2)) => Expression::Constant(*c1 * *c2),
             // scaledsum * constant
             (Expression::ScaledSum(x, a, b), c2 @ Expression::Constant(_))
             | (c2 @ Expression::Constant(_), Expression::ScaledSum(x, a, b)) => {
@@ -914,7 +913,7 @@ macro_rules! impl_from_unsigned {
         $(
             impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
-                    Expression::Constant(F::from(value as u64))
+                    Expression::Constant(F::from_canonical_u64(value as u64))
                 }
             }
         )*
@@ -929,7 +928,7 @@ macro_rules! impl_from_signed {
             impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
                     let reduced = (value as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
-                    Expression::Constant(F::from(reduced))
+                    Expression::Constant(F::from_canonical_u64(reduced))
                 }
             }
         )*
@@ -967,18 +966,18 @@ pub mod fmt {
                 )
             }
             Expression::Challenge(id, pow, scaler, offset) => {
-                if *pow == 1 && *scaler == 1.into() && *offset == 0.into() {
+                if *pow == 1 && *scaler == E::ONE && *offset == E::ZERO {
                     format!("Challenge({})", id)
                 } else {
                     let mut s = String::new();
-                    if *scaler != 1.into() {
+                    if *scaler != E::ONE {
                         write!(s, "{}*", field(scaler)).unwrap();
                     }
                     write!(s, "Challenge({})", id,).unwrap();
                     if *pow > 1 {
                         write!(s, "^{}", pow).unwrap();
                     }
-                    if *offset != 0.into() {
+                    if *offset != E::ZERO {
                         write!(s, "+{}", field(offset)).unwrap();
                     }
                     s
@@ -1025,7 +1024,9 @@ pub mod fmt {
             .iter()
             .map(|b| base_field::<E::BaseField>(b, false))
             .collect::<Vec<String>>();
-        let only_one_limb = field.as_bases()[1..].iter().all(|&x| x == 0.into());
+        let only_one_limb = field.as_bases()[1..]
+            .iter()
+            .all(|&x| x == E::BaseField::ZERO);
 
         if only_one_limb {
             data[0].to_string()
@@ -1083,12 +1084,11 @@ pub mod fmt {
 
 #[cfg(test)]
 mod tests {
-    use goldilocks::GoldilocksExt2;
-
-    use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
 
     use super::{Expression, ToExpr, fmt};
-    use ff::Field;
+    use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
+    use ff_ext::GoldilocksExt2;
+    use p3_field::FieldAlgebra;
 
     #[test]
     fn test_expression_arithmetics() {

@@ -18,12 +18,11 @@ use crate::{
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
-use ff::Field;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
-use goldilocks::{GoldilocksExt2, SmallField};
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
+use p3_field::FieldAlgebra;
 use rand::thread_rng;
 use std::{
     cmp::max,
