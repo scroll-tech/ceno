@@ -1,7 +1,8 @@
 use ark_std::test_rng;
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
-use ff::Field;
-use goldilocks::Goldilocks;
+use ff_ext::FromUniformBytes;
+use p3_field::FieldAlgebra;
+use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Sample},
     hash::{
@@ -34,7 +35,7 @@ fn plonky_hash_single(a: GoldilocksField) {
 }
 
 fn ceno_hash_single(a: Goldilocks) {
-    let _result = black_box(PoseidonHash::hash_or_noop(&[a]));
+    let _result = black_box(PoseidonHash::<Goldilocks, MdsMatrixGoldilocks>::hash_or_noop(&[a]));
 }
 
 fn plonky_hash_2_to_1(left: HashOut<GoldilocksField>, right: HashOut<GoldilocksField>) {
@@ -42,7 +43,9 @@ fn plonky_hash_2_to_1(left: HashOut<GoldilocksField>, right: HashOut<GoldilocksF
 }
 
 fn ceno_hash_2_to_1(left: &Digest<Goldilocks>, right: &Digest<Goldilocks>) {
-    let _result = black_box(PoseidonHash::two_to_one(left, right));
+    let _result = black_box(PoseidonHash::<Goldilocks, MdsMatrixGoldilocks>::two_to_one(
+        left, right,
+    ));
 }
 
 fn plonky_hash_many_to_1(values: &[GoldilocksField]) {
@@ -50,7 +53,7 @@ fn plonky_hash_many_to_1(values: &[GoldilocksField]) {
 }
 
 fn ceno_hash_many_to_1(values: &[Goldilocks]) {
-    let _result = black_box(PoseidonHash::hash_or_noop(values));
+    let _result = black_box(PoseidonHash::<Goldilocks, MdsMatrixGoldilocks>::hash_or_noop(values));
 }
 
 pub fn hashing_benchmark(c: &mut Criterion) {
@@ -111,9 +114,10 @@ pub fn hashing_benchmark(c: &mut Criterion) {
 // bench permutation
 pub fn permutation_benchmark(c: &mut Criterion) {
     let mut plonky_permutation = PoseidonPermutation::new(core::iter::repeat(GoldilocksField(0)));
-    let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::new(
-        core::iter::repeat(Goldilocks::ZERO),
-    );
+    let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::<
+        Goldilocks,
+        MdsMatrixGoldilocks,
+    >::new(core::iter::repeat(Goldilocks::ZERO));
 
     c.bench_function("plonky permute", |bencher| {
         bencher.iter(|| plonky_permutation.permute())

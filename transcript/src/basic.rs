@@ -1,16 +1,20 @@
-use ff::Field;
 use ff_ext::ExtensionField;
-use goldilocks::SmallField;
-use poseidon::poseidon_permutation::PoseidonPermutation;
+use p3_mds::MdsPermutation;
+use poseidon::{SPONGE_WIDTH, poseidon_permutation::PoseidonPermutation};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
+use ff_ext::SmallField;
+use p3_field::FieldAlgebra;
 
-#[derive(Copy, Clone)]
-pub struct BasicTranscript<E: ExtensionField> {
-    permutation: PoseidonPermutation<E::BaseField>,
+#[derive(Clone)]
+pub struct BasicTranscript<E: ExtensionField, Mds> {
+    permutation: PoseidonPermutation<E::BaseField, Mds>,
 }
 
-impl<E: ExtensionField> BasicTranscript<E> {
+impl<E: ExtensionField, Mds> BasicTranscript<E, Mds>
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
         let mut permutation = PoseidonPermutation::new(core::iter::repeat(E::BaseField::ZERO));
@@ -21,7 +25,10 @@ impl<E: ExtensionField> BasicTranscript<E> {
     }
 }
 
-impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
+impl<E: ExtensionField, Mds> Transcript<E> for BasicTranscript<E, Mds>
+where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+{
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
         self.permutation.set_from_slice(elements, 0);
         self.permutation.permute();
@@ -60,4 +67,7 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 }
 
-impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}
+impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscript<E, Mds> where
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default
+{
+}
