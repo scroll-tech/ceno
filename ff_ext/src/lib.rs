@@ -1,8 +1,5 @@
 #![deny(clippy::cargo)]
 
-use std::{array::from_fn, iter::repeat_with};
-
-pub use ff;
 use p3_field::{
     ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField, TwoAdicField,
     extension::BinomialExtensionField,
@@ -10,6 +7,7 @@ use p3_field::{
 use p3_goldilocks::Goldilocks;
 use rand_core::RngCore;
 use serde::Serialize;
+use std::{array::from_fn, iter::repeat_with};
 pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
 
 fn array_try_from_uniform_bytes<

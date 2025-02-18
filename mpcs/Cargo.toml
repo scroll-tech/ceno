@@ -14,11 +14,9 @@ aes = "0.8"
 ark-std.workspace = true
 bitvec = "1.0"
 ctr = "0.9"
-ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 # TODO: move to version 1, once our dependencies are updated
 generic-array = { version = "0.14", features = ["serde"] }
-goldilocks.workspace = true
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
