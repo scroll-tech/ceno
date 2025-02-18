@@ -36,7 +36,7 @@ where
         param: Self::Param,
         _poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        Ok((param, param))
+        Ok((param.clone(), param))
     }
 
     fn commit(
