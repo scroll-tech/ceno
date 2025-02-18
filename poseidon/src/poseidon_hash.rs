@@ -1,27 +1,28 @@
 use std::marker::PhantomData;
 
+use p3_challenger::{CanObserve, CanSample};
 use p3_field::PrimeField;
 use p3_mds::MdsPermutation;
+use p3_symmetric::CryptographicPermutation;
 
 use crate::{
+    challenger::DefaultChallenger,
     constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
     digest::Digest,
+    poseidon::PoseidonField,
     poseidon_permutation::PoseidonPermutation,
 };
 
-pub struct PoseidonHash<F, Mds> {
-    _phantom: PhantomData<(F, Mds)>,
+pub struct PoseidonHash<F, C> {
+    _phantom: PhantomData<(F, C)>,
 }
 
-impl<F: PrimeField, Mds> PoseidonHash<F, Mds>
+impl<F: PoseidonField, P> PoseidonHash<F, P>
 where
-    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
+    P: CryptographicPermutation<[F; 8]>,
 {
-    pub fn two_to_one(left: &Digest<F>, right: &Digest<F>) -> Digest<F>
-    where
-        Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
-    {
-        compress::<F, Mds>(left, right)
+    pub fn two_to_one(left: &Digest<F>, right: &Digest<F>) -> Digest<F> {
+        compress::<F, P>(left, right)
     }
 
     pub fn hash_or_noop(inputs: &[F]) -> Digest<F> {
@@ -131,17 +132,18 @@ where
         .unwrap()
 }
 
-pub fn compress<F: PrimeField, Mds>(x: &Digest<F>, y: &Digest<F>) -> Digest<F>
-where
-    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
-{
-    let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
-    perm.set_from_slice(x.elements(), 0);
-    perm.set_from_slice(y.elements(), DIGEST_WIDTH);
+pub fn compress<F: PoseidonField>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
+    let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
+    challenger.observe_slice(x.elements());
+    challenger.observe_slice(y.elements());
+    Digest(challenger.sample_array::<DIGEST_WIDTH>())
+    // let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
+    // perm.set_from_slice(x.elements(), 0);
+    // perm.set_from_slice(y.elements(), DIGEST_WIDTH);
 
-    perm.permute();
+    // perm.permute();
 
-    Digest(perm.squeeze()[..DIGEST_WIDTH].try_into().unwrap())
+    // Digest(perm.squeeze()[..DIGEST_WIDTH].try_into().unwrap())
 }
 
 #[cfg(test)]
