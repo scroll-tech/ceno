@@ -311,6 +311,7 @@ pub enum Error {
     PolynomialTooLarge(usize),
     PolynomialSizesNotEqual,
     MerkleRootMismatch,
+    WhirError(whir::Error),
 }
 
 mod basefold;
@@ -320,7 +321,9 @@ pub use basefold::{
     EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
     one_level_interp_hc,
 };
+mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
 
 fn validate_input<E: ExtensionField>(
     function: &str,
@@ -380,6 +383,7 @@ pub mod test_util {
         mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
     #[cfg(test)]
     use transcript::BasicTranscript;
     use transcript::Transcript;
@@ -406,13 +410,14 @@ pub mod test_util {
     }
 
     pub fn gen_rand_polys<E: ExtensionField>(
-        num_vars: impl Fn(usize) -> usize,
+        num_vars: impl Fn(usize) -> usize + Sync,
         batch_size: usize,
         gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
     ) -> Vec<DenseMultilinearExtension<E>> {
         (0..batch_size)
+            .into_par_iter()
             .map(|i| gen_rand_poly(num_vars(i)))
-            .collect_vec()
+            .collect::<Vec<_>>()
     }
 
     pub fn get_point_from_challenge<E: ExtensionField>(
@@ -452,6 +457,8 @@ pub mod test_util {
     ) where
         Pcs: PolynomialCommitmentScheme<E>,
     {
+        use poseidon::poseidon::POSEIDON_CALL_COUNT;
+
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
@@ -477,10 +484,21 @@ pub mod test_util {
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_ext(&eval);
+
+                let poseidon_count = *POSEIDON_CALL_COUNT.lock().unwrap();
                 Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
+                println!(
+                    "Number of poseidons used in verification: {}",
+                    *POSEIDON_CALL_COUNT.lock().unwrap() - poseidon_count
+                );
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for single poly: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
@@ -562,6 +580,11 @@ pub mod test_util {
                 Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for batch: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
@@ -576,6 +599,8 @@ pub mod test_util {
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
     {
+        use poseidon::poseidon::POSEIDON_CALL_COUNT;
+
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
@@ -610,11 +635,21 @@ pub mod test_util {
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_exts(&evals);
 
+                let poseidon_count = *POSEIDON_CALL_COUNT.lock().unwrap();
                 Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript)
                     .unwrap();
+                println!(
+                    "Number of poseidons used in verification: {}",
+                    *POSEIDON_CALL_COUNT.lock().unwrap() - poseidon_count
+                );
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for simple batch: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
