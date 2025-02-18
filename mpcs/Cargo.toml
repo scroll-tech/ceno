@@ -14,21 +14,19 @@ aes = "0.8"
 ark-std.workspace = true
 bitvec = "1.0"
 ctr = "0.9"
-ff.workspace = true
 ff_ext = { path = "../ff_ext" }
 # TODO: move to version 1, once our dependencies are updated
 generic-array = { version = "0.14", features = ["serde"] }
-goldilocks.workspace = true
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
-plonky2.workspace = true
-poseidon.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
 p3-mds.workspace = true
 p3-symmetric.workspace = true
+plonky2.workspace = true
+poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }

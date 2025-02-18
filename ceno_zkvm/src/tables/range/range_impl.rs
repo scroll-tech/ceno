@@ -1,7 +1,6 @@
 //! The implementation of range tables. No generics.
 
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::collections::HashMap;
 
@@ -51,7 +50,7 @@ impl RangeTableConfig {
             .with_min_len(MIN_PAR_SIZE)
             .zip(content.into_par_iter())
             .for_each(|(row, i)| {
-                set_fixed_val!(row, self.fixed, F::from(i));
+                set_fixed_val!(row, self.fixed, F::from_v(i));
             });
 
         fixed
@@ -80,7 +79,7 @@ impl RangeTableConfig {
             .with_min_len(MIN_PAR_SIZE)
             .zip(mlts.into_par_iter())
             .for_each(|(row, mlt)| {
-                set_val!(row, self.mlt, F::from(mlt as u64));
+                set_val!(row, self.mlt, F::from_v(mlt as u64));
             });
 
         Ok(witness)

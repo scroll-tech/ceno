@@ -21,6 +21,8 @@ use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::PolynomialCommitmentScheme;
+use p3_mds::MdsPermutation;
+use poseidon::SPONGE_WIDTH;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     iter::zip,
@@ -376,6 +378,7 @@ pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 pub fn run_e2e_with_checkpoint<
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + 'static,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 >(
     program: Program,
     platform: Platform,
@@ -426,7 +429,7 @@ pub fn run_e2e_with_checkpoint<
         return (
             None,
             Box::new(move || {
-                _ = run_e2e_proof(
+                _ = run_e2e_proof::<E, _, Mds>(
                     program,
                     max_steps,
                     init_full_mem,
@@ -472,14 +475,14 @@ pub fn run_e2e_with_checkpoint<
     }
 
     // Run proof phase
-    let transcript = Transcript::new(b"riscv");
+    let transcript = Transcript::<E, Mds>::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
     let verifier = ZKVMVerifier::new(vk);
 
-    run_e2e_verify(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+    run_e2e_verify::<E, _, Mds>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
 
     if let Checkpoint::PrepSanityCheck = checkpoint {
         return (Some((zkvm_proof, verifier)), Box::new(|| ()));
@@ -490,7 +493,11 @@ pub fn run_e2e_with_checkpoint<
 
 // Runs program emulation + witness generation + proving
 #[allow(clippy::too_many_arguments)]
-pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_e2e_proof<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E>,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+>(
     program: Arc<Program>,
     max_steps: usize,
     init_full_mem: InitMemState,
@@ -524,19 +531,23 @@ pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommi
         tracing::info!("Mock proving passed");
     }
 
-    let transcript = Transcript::new(b"riscv");
+    let transcript = Transcript::<E, Mds>::new(b"riscv");
     prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed")
 }
 
-pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_e2e_verify<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
+>(
     verifier: &ZKVMVerifier<E, PCS>,
     zkvm_proof: ZKVMProof<E, PCS>,
     exit_code: Option<u32>,
     max_steps: usize,
 ) {
-    let transcript = Transcript::new(b"riscv");
+    let transcript = Transcript::<E, Mds>::new(b"riscv");
     assert!(
         verifier
             .verify_proof_halt(zkvm_proof, transcript, exit_code.is_some())

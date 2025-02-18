@@ -1,8 +1,5 @@
 #![deny(clippy::cargo)]
 
-use std::{array::from_fn, iter::repeat_with};
-
-pub use ff;
 use p3_field::{
     ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField, TwoAdicField,
     extension::BinomialExtensionField,
@@ -10,6 +7,7 @@ use p3_field::{
 use p3_goldilocks::Goldilocks;
 use rand_core::RngCore;
 use serde::Serialize;
+use std::{array::from_fn, iter::repeat_with};
 pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
 
 fn array_try_from_uniform_bytes<
@@ -70,8 +68,20 @@ macro_rules! impl_from_uniform_bytes_for_binomial_extension {
 
 impl_from_uniform_bytes_for_binomial_extension!(p3_goldilocks::Goldilocks, 2);
 
+/// define a custom conversion trait like `From<T>`
+/// an util to simulate general from function
+pub trait FieldFrom<T> {
+    fn from_v(value: T) -> Self;
+}
+
+/// define a custom trait that relies on `FieldFrom<T>`
+/// an util to simulate general into function
+pub trait FieldInto<T> {
+    fn into_f(self) -> T;
+}
+
 // TODO remove SmallField
-pub trait SmallField: Serialize + P3Field {
+pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
     /// MODULUS as u64
     const MODULUS_U64: u64;
 
@@ -88,7 +98,7 @@ pub trait SmallField: Serialize + P3Field {
     fn to_noncanonical_u64(&self) -> u64;
 }
 
-pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes {
+pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord {
     const DEGREE: usize;
 
     type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField;
@@ -105,9 +115,38 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes {
 }
 
 mod impl_goldilocks {
-    use crate::{ExtensionField, FromUniformBytes, GoldilocksExt2, SmallField};
+    use crate::{
+        ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
+    };
     use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField64};
     use p3_goldilocks::Goldilocks;
+
+    impl FieldFrom<u64> for Goldilocks {
+        fn from_v(v: u64) -> Self {
+            Self::from_canonical_u64(v)
+        }
+    }
+
+    impl FieldFrom<u64> for GoldilocksExt2 {
+        fn from_v(v: u64) -> Self {
+            Self::from_canonical_u64(v)
+        }
+    }
+
+    impl<U, T> FieldInto<U> for T
+    where
+        U: FieldFrom<T>,
+    {
+        fn into_f(self) -> U {
+            U::from_v(self)
+        }
+    }
+
+    impl FieldInto<Goldilocks> for Goldilocks {
+        fn into_f(self) -> Goldilocks {
+            self
+        }
+    }
 
     impl FromUniformBytes for Goldilocks {
         type Bytes = [u8; 8];
@@ -173,15 +212,5 @@ mod impl_goldilocks {
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use p3_field::TwoAdicField;
-    use p3_goldilocks::Goldilocks;
-    #[test]
-    fn test() {
-        println!("{:?}", Goldilocks::two_adic_generator(21));
     }
 }

@@ -9,6 +9,7 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
+use p3_field::FieldAlgebra;
 
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,
@@ -21,10 +22,10 @@ use ceno_zkvm::{
     stats::{StaticReport, TraceReport},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
 };
-use ff_ext::ff::Field;
-use goldilocks::{Goldilocks, GoldilocksExt2};
+use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
 use sumcheck::macros::{entered_span, exit_span};
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::BasicTranscript as Transcript;
@@ -66,7 +67,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, MdsMatrixGoldilocks>;
     let program_code = program_code();
     let program_size = program_code.len();
 
@@ -286,7 +287,7 @@ fn main() {
 
         let timer = Instant::now();
 
-        let transcript = Transcript::new(b"riscv");
+        let transcript = Transcript::<E, MdsMatrixGoldilocks>::new(b"riscv");
 
         let mut zkvm_proof = prover
             .create_proof(zkvm_witness, pi, transcript)
@@ -298,14 +299,14 @@ fn main() {
             timer.elapsed().as_secs()
         );
 
-        let transcript = Transcript::new(b"riscv");
+        let transcript = Transcript::<E, MdsMatrixGoldilocks>::new(b"riscv");
         assert!(
             verifier
                 .verify_proof(zkvm_proof.clone(), transcript)
                 .expect("verify proof return with error"),
         );
 
-        let transcript = Transcript::new(b"riscv");
+        let transcript = Transcript::<E, MdsMatrixGoldilocks>::new(b"riscv");
         // change public input maliciously should cause verifier to reject proof
         zkvm_proof.raw_pi[0] = vec![Goldilocks::ONE];
         zkvm_proof.raw_pi[1] = vec![Goldilocks::ONE];

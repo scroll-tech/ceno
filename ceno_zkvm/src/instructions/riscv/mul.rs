@@ -81,8 +81,9 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
+use p3_field::FieldAlgebra;
+use p3_goldilocks::Goldilocks;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -173,7 +174,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
+        assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
 
         // 0. Registers and instruction lookup
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
@@ -353,8 +354,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
-                let rd_f = E::BaseField::from(rd as u64);
-                let avoid_f = E::BaseField::from(u32::MAX.into());
+                let rd_f = E::BaseField::from_canonical_u64(rd as u64);
+                let avoid_f = E::BaseField::from_canonical_u32(u32::MAX);
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
                 // only take the low part of the product
@@ -366,8 +367,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 assert_eq!(prod_lo, rd);
 
                 let prod_hi = prod >> BIT_WIDTH;
-                let avoid_f = E::BaseField::from(u32::MAX.into());
-                constrain_rd.assign_instance(instance, E::BaseField::from(prod_hi), avoid_f)?;
+                let avoid_f = E::BaseField::from_canonical_u32(u32::MAX);
+                constrain_rd.assign_instance(
+                    instance,
+                    E::BaseField::from_canonical_u64(prod_hi),
+                    avoid_f,
+                )?;
                 prod_hi as u32
             }
             MulhSignDependencies::SU {
@@ -401,7 +406,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, StepRecord, encode_rv32};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use super::*;
     use crate::{

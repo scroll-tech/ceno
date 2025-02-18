@@ -5,7 +5,7 @@ use ceno_zkvm::{
     stats::{StaticReport, TraceReport},
     structs::ZKVMConstraintSystem,
 };
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 type E = GoldilocksExt2;
 fn main() {
     let mut zkvm_cs = ZKVMConstraintSystem::default();

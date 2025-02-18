@@ -1,8 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use ceno_emul::{Addr, Cycle, WORD_SIZE};
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -19,6 +18,7 @@ use crate::{
     structs::ProgramParams,
     witness::RowMajorMatrix,
 };
+use ff_ext::FieldInto;
 
 use super::{
     MemInitRecord,
@@ -133,15 +133,15 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             .for_each(|(row, rec)| {
                 if self.init_v.len() == 1 {
                     // Assign value directly.
-                    set_fixed_val!(row, self.init_v[0], (rec.value as u64).into());
+                    set_fixed_val!(row, self.init_v[0], (rec.value as u64).into_f());
                 } else {
                     // Assign value limbs.
                     self.init_v.iter().enumerate().for_each(|(l, limb)| {
                         let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                        set_fixed_val!(row, limb, (val as u64).into());
+                        set_fixed_val!(row, limb, (val as u64).into_f());
                     });
                 }
-                set_fixed_val!(row, self.addr, (rec.addr as u64).into());
+                set_fixed_val!(row, self.addr, (rec.addr as u64).into_f());
             });
 
         init_table
@@ -270,7 +270,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             .with_min_len(MIN_PAR_SIZE)
             .zip_eq(io_addrs.into_par_iter())
             .for_each(|(row, addr)| {
-                set_fixed_val!(row, self.addr, (*addr as u64).into());
+                set_fixed_val!(row, self.addr, (*addr as u64).into_f());
             });
         init_table
     }
@@ -452,8 +452,10 @@ mod tests {
     };
 
     use ceno_emul::WORD_SIZE;
-    use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
+    use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
+    use p3_field::FieldAlgebra;
+    use p3_goldilocks::Goldilocks as F;
 
     #[test]
     fn test_well_formed_address_padding() {
@@ -492,7 +494,7 @@ mod tests {
         let addr_padded_view = wit.column_padded(addr_column + cb.cs.num_witin as usize);
         // Expect addresses to proceed consecutively inside the padding as well
         let expected = successors(Some(addr_padded_view[0]), |idx| {
-            Some(*idx + F::from(WORD_SIZE as u64))
+            Some(*idx + F::from_canonical_u64(WORD_SIZE as u64))
         })
         .take(next_pow2_instance_padding(wit.num_instances()))
         .collect::<Vec<_>>();

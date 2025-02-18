@@ -85,7 +85,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},

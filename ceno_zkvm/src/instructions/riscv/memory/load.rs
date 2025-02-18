@@ -17,8 +17,9 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
+use p3_field::FieldAlgebra;
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
@@ -225,7 +226,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             .memory_addr
             .assign_instance(instance, lk_multiplicity, unaligned_addr.into())?;
         if let Some(&limb) = config.target_limb.as_ref() {
-            set_val!(instance, limb, E::BaseField::from(target_limb as u64));
+            set_val!(
+                instance,
+                limb,
+                E::BaseField::from_canonical_u16(target_limb)
+            );
         }
         if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
             if addr_low_bits[0] == 1 {
@@ -233,12 +238,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 // target_limb_bytes[1] = target_limb.to_le_bytes[0]
                 target_limb_bytes.reverse();
             }
-            for (&col, byte) in izip!(
-                limb_bytes.iter(),
-                target_limb_bytes.into_iter().map(|byte| byte as u64)
-            ) {
-                lk_multiplicity.assert_ux::<8>(byte);
-                set_val!(instance, col, E::BaseField::from(byte));
+            for (&col, byte) in izip!(limb_bytes.iter(), target_limb_bytes.into_iter()) {
+                lk_multiplicity.assert_ux::<8>(byte as u64);
+                set_val!(instance, col, E::BaseField::from_canonical_u8(byte));
             }
         }
         let val = match I::INST_KIND {

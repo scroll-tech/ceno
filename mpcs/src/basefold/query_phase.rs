@@ -543,8 +543,11 @@ where
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 enum CodewordPointPair<E: ExtensionField> {
-    #[serde(bound = "")]
     Ext(E, E),
     Base(E::BaseField, E::BaseField),
 }
@@ -559,7 +562,10 @@ impl<E: ExtensionField> CodewordPointPair<E> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 enum SimpleBatchLeavesPair<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -605,7 +611,10 @@ where
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CodewordSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -648,7 +657,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CodewordSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -680,7 +692,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct OracleListQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -689,7 +704,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CommitmentsQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -698,7 +716,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct OracleListQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize,
@@ -708,7 +729,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CommitmentsQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -839,7 +863,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -849,7 +876,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -948,7 +978,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct QueriesResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1020,7 +1053,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct BatchedSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1030,7 +1066,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct BatchedSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1179,7 +1218,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct BatchedQueriesResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1251,7 +1293,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchCommitmentSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1296,7 +1341,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchCommitmentSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1336,7 +1384,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1346,7 +1397,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1446,7 +1500,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField, Mds>
 where
     E::BaseField: Serialize + DeserializeOwned,

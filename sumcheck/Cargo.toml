@@ -13,10 +13,10 @@ version.workspace = true
 ark-std.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
+p3-field.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
-p3-field.workspace = true
 
 crossbeam-channel.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }

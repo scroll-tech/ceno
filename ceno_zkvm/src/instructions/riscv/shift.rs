@@ -11,6 +11,7 @@ use crate::{
     instructions::Instruction,
     set_val,
 };
+use ff_ext::FieldInto;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 
@@ -232,7 +233,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 #[cfg(test)]
 mod tests {
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use crate::{
         Value,

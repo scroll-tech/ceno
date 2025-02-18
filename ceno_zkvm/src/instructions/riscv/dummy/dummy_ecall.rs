@@ -17,6 +17,7 @@ use crate::{
     set_val,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 trait EcallSpec {
     const NAME: &'static str;

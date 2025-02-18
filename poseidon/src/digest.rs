@@ -1,9 +1,9 @@
 use crate::constants::DIGEST_WIDTH;
 use p3_field::PrimeField;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(bound = "")]
+#[serde(bound(serialize = "F: Serialize", deserialize = "F: DeserializeOwned"))]
 pub struct Digest<F: PrimeField>(pub [F; DIGEST_WIDTH]);
 
 impl<F: PrimeField> TryFrom<Vec<F>> for Digest<F> {

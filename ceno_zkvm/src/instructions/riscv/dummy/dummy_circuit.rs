@@ -19,6 +19,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
 pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);
