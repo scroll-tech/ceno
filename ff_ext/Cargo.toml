@@ -10,8 +10,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-serde.workspace = true
-rand_core.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
 p3-poseidon.workspace = true
+rand_core.workspace = true
+serde.workspace = true

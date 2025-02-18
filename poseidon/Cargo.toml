@@ -11,14 +11,14 @@ version.workspace = true
 
 [dependencies]
 criterion.workspace = true
-serde.workspace = true
 ff_ext = { path = "../ff_ext" }
-unroll = "0.1"
 p3-field.workspace = true
 p3-goldilocks.workspace = true
-p3-poseidon.workspace = true
 p3-mds.workspace = true
+p3-poseidon.workspace = true
 p3-symmetric.workspace = true
+serde.workspace = true
+unroll = "0.1"
 
 [dev-dependencies]
 ark-std.workspace = true

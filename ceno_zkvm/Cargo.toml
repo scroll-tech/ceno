@@ -24,16 +24,16 @@ multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 sumcheck = { version = "0", path = "../sumcheck" }
 transcript = { path = "../transcript" }
 
+itertools.workspace = true
+num-traits.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
 p3-mds.workspace = true
-itertools.workspace = true
-num-traits.workspace = true
 paste.workspace = true
+poseidon.workspace = true
 prettytable-rs.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
-poseidon.workspace = true
 tracing.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
