@@ -6,9 +6,10 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 use criterion::*;
+use p3_goldilocks::MdsMatrixGoldilocks;
 use transcript::{BasicTranscriptWithStat, StatisticRecorder};
 
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
@@ -21,7 +22,7 @@ criterion_main!(fibonacci_prove_group);
 
 const NUM_SAMPLES: usize = 10;
 
-type Pcs = BasefoldDefault<E>;
+type Pcs = BasefoldDefault<E, MdsMatrixGoldilocks>;
 type E = GoldilocksExt2;
 
 // Relevant init data for fibonacci run
@@ -41,7 +42,7 @@ fn fibonacci_prove(c: &mut Criterion) {
     let (program, platform) = setup();
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
         // estimate proof size data first
-        let (proof, verifier) = run_e2e_with_checkpoint::<E, Pcs>(
+        let (proof, verifier) = run_e2e_with_checkpoint::<E, Pcs, MdsMatrixGoldilocks>(
             program.clone(),
             platform.clone(),
             vec![],
@@ -53,7 +54,8 @@ fn fibonacci_prove(c: &mut Criterion) {
 
         let serialize_size = bincode::serialize(&proof).unwrap().len();
         let stat_recorder = StatisticRecorder::default();
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        let transcript =
+            BasicTranscriptWithStat::<E, MdsMatrixGoldilocks>::new(&stat_recorder, b"riscv");
         assert!(
             verifier
                 .verify_proof_halt(proof, transcript, false)
@@ -81,13 +83,14 @@ fn fibonacci_prove(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let (_, run_e2e_proof) = run_e2e_with_checkpoint::<E, Pcs>(
-                            program.clone(),
-                            platform.clone(),
-                            vec![],
-                            max_steps,
-                            Checkpoint::PrepE2EProving,
-                        );
+                        let (_, run_e2e_proof) =
+                            run_e2e_with_checkpoint::<E, Pcs, MdsMatrixGoldilocks>(
+                                program.clone(),
+                                platform.clone(),
+                                vec![],
+                                max_steps,
+                                Checkpoint::PrepE2EProving,
+                            );
                         let instant = std::time::Instant::now();
                         run_e2e_proof();
                         let elapsed = instant.elapsed();
