@@ -15,7 +15,6 @@ use crate::{
     structs::ROMType,
     witness::RowMajorMatrix,
 };
-use ff_ext::FieldInto;
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {
@@ -57,7 +56,7 @@ impl OpTableConfig {
             .zip(content.into_par_iter())
             .for_each(|(row, abc)| {
                 for (col, val) in self.abc.iter().zip(abc.iter()) {
-                    set_fixed_val!(row, *col, F::from(*val));
+                    set_fixed_val!(row, *col, F::from_v(*val));
                 }
             });
 
@@ -87,7 +86,7 @@ impl OpTableConfig {
             .with_min_len(MIN_PAR_SIZE)
             .zip(mlts.into_par_iter())
             .for_each(|(row, mlt)| {
-                set_val!(row, self.mlt, F::from(mlt as u64));
+                set_val!(row, self.mlt, F::from_v(mlt as u64));
             });
 
         Ok(witness)

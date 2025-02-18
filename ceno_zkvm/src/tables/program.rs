@@ -17,6 +17,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
+use p3_field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
@@ -40,11 +41,11 @@ impl<T> InsnRecord<T> {
 impl<F: SmallField> InsnRecord<F> {
     fn from_decoded(pc: u32, insn: &Instruction) -> Self {
         InsnRecord([
-            (pc as u64).into(),
-            (insn.kind as u64).into(),
-            (insn.rd_internal() as u64).into(),
-            (insn.rs1_or_zero() as u64).into(),
-            (insn.rs2_or_zero() as u64).into(),
+            (pc as u64).into_f(),
+            (insn.kind as u64).into_f(),
+            (insn.rd_internal() as u64).into_f(),
+            (insn.rs1_or_zero() as u64).into_f(),
+            (insn.rs2_or_zero() as u64).into_f(),
             i64_to_base(InsnRecord::imm_internal(insn)),
         ])
     }
@@ -185,7 +186,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .with_min_len(MIN_PAR_SIZE)
             .zip(prog_mlt.into_par_iter())
             .for_each(|(row, mlt)| {
-                set_val!(row, config.mlt, E::BaseField::from(mlt as u64));
+                set_val!(
+                    row,
+                    config.mlt,
+                    E::BaseField::from_canonical_u64(mlt as u64)
+                );
             });
 
         Ok(witness)
@@ -197,8 +202,9 @@ mod tests {
     use super::*;
     use crate::{circuit_builder::ConstraintSystem, witness::LkMultiplicity};
     use ceno_emul::encode_rv32;
-    use ff::Field;
-    use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
+
+    use ff_ext::GoldilocksExt2 as E;
+    use p3_goldilocks::Goldilocks as F;
 
     #[test]
     fn test_program_padding() {
