@@ -20,6 +20,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {

@@ -1,7 +1,6 @@
 //! The implementation of ops tables. No generics.
 
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::collections::HashMap;
@@ -16,6 +15,7 @@ use crate::{
     structs::ROMType,
     witness::RowMajorMatrix,
 };
+use ff_ext::FieldInto;
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {

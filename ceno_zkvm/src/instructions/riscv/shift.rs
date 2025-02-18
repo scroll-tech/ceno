@@ -11,6 +11,7 @@ use crate::{
     instructions::Instruction,
     set_val,
 };
+use ff_ext::FieldInto;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 

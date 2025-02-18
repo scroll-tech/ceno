@@ -1243,9 +1243,9 @@ mod tests {
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
-    use ff::Field;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::mle::IntoMLE;
+    use p3_goldilocks::Goldilocks;
 
     #[derive(Debug)]
     struct AssertZeroCircuit {

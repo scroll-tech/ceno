@@ -6,7 +6,6 @@ use ceno_emul::{
     InsnKind::{ADD, ECALL},
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
-use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
 use itertools::Itertools;

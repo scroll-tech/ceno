@@ -14,7 +14,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use std::marker::PhantomData;
 
 pub struct ShiftImmConfig<E: ExtensionField> {

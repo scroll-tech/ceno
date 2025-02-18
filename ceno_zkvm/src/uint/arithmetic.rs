@@ -1,5 +1,4 @@
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};

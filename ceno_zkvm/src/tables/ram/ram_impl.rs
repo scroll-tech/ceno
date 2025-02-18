@@ -1,8 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use ceno_emul::{Addr, Cycle, WORD_SIZE};
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -19,6 +18,7 @@ use crate::{
     structs::ProgramParams,
     witness::RowMajorMatrix,
 };
+use ff_ext::FieldInto;
 
 use super::{
     MemInitRecord,

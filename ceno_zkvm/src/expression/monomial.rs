@@ -3,6 +3,7 @@ use itertools::{Itertools, chain, iproduct};
 
 use super::Expression;
 use Expression::*;
+use ff_ext::FieldInto;
 use std::iter::Sum;
 
 impl<E: ExtensionField> Expression<E> {
@@ -98,7 +99,7 @@ mod tests {
         let x = || WitIn(0);
         let y = || WitIn(1);
         let z = || WitIn(2);
-        let n = || Constant(104.into());
+        let n = || Constant(104u64.into_f());
         let m = || Constant(-F::from_canonical_u64(599));
         let r = || Challenge(0, 1, E::ONE, E::ZERO);
 

@@ -15,6 +15,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 use super::SignedExtendConfig;
 
@@ -276,7 +277,7 @@ impl InnerLtConfig {
         is_lt: bool,
     ) -> Result<(), ZKVMError> {
         let range_offset: F = if is_lt {
-            Self::range(self.max_num_u16_limbs).into()
+            Self::range(self.max_num_u16_limbs).into_f()
         } else {
             F::ZERO
         };
