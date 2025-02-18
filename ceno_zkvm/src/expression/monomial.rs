@@ -81,7 +81,7 @@ mod tests {
     use crate::{expression::Fixed as FixedS, scheme::utils::eval_by_expr_with_fixed};
 
     use super::*;
-    use ff_ext::{FromUniformBytes, GoldilocksExt2 as E};
+    use ff_ext::{FieldInto, FromUniformBytes, GoldilocksExt2 as E};
     use p3_field::FieldAlgebra;
     use p3_goldilocks::Goldilocks as F;
     use rand_chacha::{ChaChaRng, rand_core::SeedableRng};
