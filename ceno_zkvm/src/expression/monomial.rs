@@ -3,7 +3,6 @@ use itertools::{Itertools, chain, iproduct};
 
 use super::Expression;
 use Expression::*;
-use ff_ext::FieldInto;
 use std::iter::Sum;
 
 impl<E: ExtensionField> Expression<E> {

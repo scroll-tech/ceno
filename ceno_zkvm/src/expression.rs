@@ -1087,7 +1087,7 @@ mod tests {
 
     use super::{Expression, ToExpr, fmt};
     use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{FieldInto, GoldilocksExt2};
     use p3_field::FieldAlgebra;
 
     #[test]
@@ -1101,15 +1101,15 @@ mod tests {
         // 3 * x + 2
         let expr: Expression<E> = 3 * x.expr() + 2;
         // c^3 + 1
-        let c = Expression::Challenge(0, 3, 1.into(), 1.into());
+        let c = Expression::Challenge(0, 3, 1.into_f(), 1.into_f());
         // res
         // x* (c^3*3 + 3) + 2c^3 + 2
         assert_eq!(
             c * expr,
             Expression::ScaledSum(
                 Box::new(x.expr()),
-                Box::new(Expression::Challenge(0, 3, 3.into(), 3.into())),
-                Box::new(Expression::Challenge(0, 3, 2.into(), 2.into()))
+                Box::new(Expression::Challenge(0, 3, 3.into_f(), 3.into_f())),
+                Box::new(Expression::Challenge(0, 3, 2.into_f(), 2.into_f()))
             )
         );
 
@@ -1120,21 +1120,24 @@ mod tests {
             expr,
             Expression::ScaledSum(
                 Box::new(x.expr()),
-                Box::new(Expression::Constant(3.into())),
-                Box::new(Expression::Constant(0.into()))
+                Box::new(Expression::Constant(3.into_f())),
+                Box::new(Expression::Constant(0.into_f()))
             )
         );
 
         // constant * challenge
         // 3 * (c^3 + 1)
-        let expr: Expression<E> = Expression::Constant(3.into());
-        let c = Expression::Challenge(0, 3, 1.into(), 1.into());
-        assert_eq!(expr * c, Expression::Challenge(0, 3, 3.into(), 3.into()));
+        let expr: Expression<E> = Expression::Constant(3.into_f());
+        let c = Expression::Challenge(0, 3, 1.into_f(), 1.into_f());
+        assert_eq!(
+            expr * c,
+            Expression::Challenge(0, 3, 3.into_f(), 3.into_f())
+        );
 
         // challenge * challenge
         // (2c^3 + 1) * (2c^2 + 1) = 4c^5 + 2c^3 + 2c^2 + 1
-        let res: Expression<E> = Expression::Challenge(0, 3, 2.into(), 1.into())
-            * Expression::Challenge(0, 2, 2.into(), 1.into());
+        let res: Expression<E> = Expression::Challenge(0, 3, 2.into_f(), 1.into_f())
+            * Expression::Challenge(0, 2, 2.into_f(), 1.into_f());
         assert_eq!(
             res,
             Expression::Sum(
@@ -1143,14 +1146,14 @@ mod tests {
                     Box::new(Expression::Challenge(
                         0,
                         3 + 2,
-                        (2 * 2).into(),
+                        (2 * 2).into_f(),
                         E::ONE * E::ONE,
                     )),
                     // offset2 * s1 * c1^(pow1)
-                    Box::new(Expression::Challenge(0, 3, 2.into(), E::ZERO)),
+                    Box::new(Expression::Challenge(0, 3, 2.into_f(), E::ZERO)),
                 )),
                 // offset1 * s2 * c2^(pow2))
-                Box::new(Expression::Challenge(0, 2, 2.into(), E::ZERO)),
+                Box::new(Expression::Challenge(0, 2, 2.into_f(), E::ZERO)),
             )
         );
     }
@@ -1175,14 +1178,14 @@ mod tests {
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into()) * x.expr() * y.expr()
+            Expression::Challenge(0, 1, 2_u64.into_f(), 3_u64.into_f()) * x.expr() * y.expr()
                 - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
         // complex linear operation
         // (2c + 3) * x * y - 6z
         let expr: Expression<E> =
-            Expression::Challenge(0, 1, 2_u64.into(), 3_u64.into()) * x.expr() * y.expr()
+            Expression::Challenge(0, 1, 2_u64.into_f(), 3_u64.into_f()) * x.expr() * y.expr()
                 - 6 * z.expr();
         assert!(expr.is_monomial_form());
 
@@ -1207,8 +1210,8 @@ mod tests {
 
     #[test]
     fn test_fmt_expr_challenge_1() {
-        let a = Expression::<GoldilocksExt2>::Challenge(0, 2, 3.into(), 4.into());
-        let b = Expression::<GoldilocksExt2>::Challenge(0, 5, 6.into(), 7.into());
+        let a = Expression::<GoldilocksExt2>::Challenge(0, 2, 3.into_f(), 4.into_f());
+        let b = Expression::<GoldilocksExt2>::Challenge(0, 5, 6.into_f(), 7.into_f());
 
         let mut wtns_acc = vec![];
         let s = fmt::expr(&(a * b), &mut wtns_acc, false);
@@ -1221,8 +1224,8 @@ mod tests {
 
     #[test]
     fn test_fmt_expr_challenge_2() {
-        let a = Expression::<GoldilocksExt2>::Challenge(0, 1, 1.into(), 0.into());
-        let b = Expression::<GoldilocksExt2>::Challenge(0, 1, 1.into(), 0.into());
+        let a = Expression::<GoldilocksExt2>::Challenge(0, 1, 1.into_f(), 0.into_f());
+        let b = Expression::<GoldilocksExt2>::Challenge(0, 1, 1.into_f(), 0.into_f());
 
         let mut wtns_acc = vec![];
         let s = fmt::expr(&(a * b), &mut wtns_acc, false);

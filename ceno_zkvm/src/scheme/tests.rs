@@ -22,7 +22,7 @@ use ceno_emul::{
     InsnKind::{ADD, ECALL},
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
-use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
+use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
 use multilinear_extensions::{
