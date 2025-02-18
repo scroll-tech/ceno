@@ -1,20 +1,5 @@
 use std::marker::PhantomData;
 
-use ark_std::test_rng;
-use ceno_emul::{
-    CENO_PLATFORM,
-    InsnKind::{ADD, ECALL},
-    Platform, Program, StepRecord, VMState, encode_rv32,
-};
-use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
-};
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
-
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -31,6 +16,21 @@ use crate::{
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
+use ark_std::test_rng;
+use ceno_emul::{
+    CENO_PLATFORM,
+    InsnKind::{ADD, ECALL},
+    Platform, Program, StepRecord, VMState, encode_rv32,
+};
+use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
+use itertools::Itertools;
+use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use multilinear_extensions::{
+    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
+};
+use p3_field::FieldAlgebra;
+use p3_goldilocks::MdsMatrixGoldilocks;
+use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 
 use super::{
     PublicValues,
@@ -89,7 +89,7 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
         type E = GoldilocksExt2;
-        type Pcs = BasefoldDefault<E>;
+        type Pcs = BasefoldDefault<E, MdsMatrixGoldilocks>;
 
         // pcs setup
         let param = Pcs::setup(1 << 13).unwrap();
@@ -124,7 +124,7 @@ fn test_rw_lk_expression_combination() {
 
         // get proof
         let prover = ZKVMProver::new(pk);
-        let mut transcript = BasicTranscript::new(b"test");
+        let mut transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"test");
         let wits_in = zkvm_witness
             .into_iter_sorted()
             .next()
@@ -156,7 +156,8 @@ fn test_rw_lk_expression_combination() {
         // verify proof
         let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
+        let mut v_transcript =
+            BasicTranscriptWithStat::<E, MdsMatrixGoldilocks>::new(&stat_recorder, b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -201,7 +202,7 @@ const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, MdsMatrixGoldilocks>;
 
     // set up program
     let program = Program::new(
@@ -288,7 +289,7 @@ fn test_single_add_instance_e2e() {
         .unwrap();
 
     let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
-    let transcript = BasicTranscript::new(b"riscv");
+    let transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
@@ -297,7 +298,8 @@ fn test_single_add_instance_e2e() {
 
     let stat_recorder = StatisticRecorder::default();
     {
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        let transcript =
+            BasicTranscriptWithStat::<E, MdsMatrixGoldilocks>::new(&stat_recorder, b"riscv");
         assert!(
             verifier
                 .verify_proof(zkvm_proof, transcript)
@@ -318,7 +320,7 @@ fn test_tower_proof_various_prod_size() {
         let num_vars = ceil_log2(leaf_layer_size);
         let mut rng = test_rng();
         type E = GoldilocksExt2;
-        let mut transcript = BasicTranscript::new(b"test_tower_proof");
+        let mut transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"test_tower_proof");
         let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)
             .map(|_| E::random(&mut rng))
             .collect_vec()
@@ -341,7 +343,7 @@ fn test_tower_proof_various_prod_size() {
             &mut transcript,
         );
 
-        let mut transcript = BasicTranscript::new(b"test_tower_proof");
+        let mut transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"test_tower_proof");
         let (rt_tower_v, prod_point_and_eval, _, _) = TowerVerify::verify(
             vec![
                 layers[0]

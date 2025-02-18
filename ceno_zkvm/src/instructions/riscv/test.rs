@@ -1,5 +1,6 @@
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
+use p3_goldilocks::MdsMatrixGoldilocks;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -11,7 +12,7 @@ use super::arith::{AddInstruction, SubInstruction};
 #[test]
 fn test_multiple_opcode() {
     type E = GoldilocksExt2;
-    type Pcs = BasefoldDefault<E>;
+    type Pcs = BasefoldDefault<E, MdsMatrixGoldilocks>;
 
     let mut cs = ConstraintSystem::new(|| "riscv");
     let _add_config = cs.namespace(
