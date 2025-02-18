@@ -12,7 +12,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{fmt::Debug, iter, ops::AddAssign};
 use transcript::Transcript;
 
@@ -32,7 +32,10 @@ macro_rules! zip_self {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct Coefficients<E: ExtensionField>(FieldType<E>);
 
 impl<E: ExtensionField> ClassicSumCheckRoundMessage<E> for Coefficients<E> {

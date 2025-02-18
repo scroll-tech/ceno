@@ -8,7 +8,7 @@ use p3_field::{Field, FieldAlgebra};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 
 pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
@@ -124,7 +124,10 @@ impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtens
 
 #[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 /// Differentiate inner vector on base/extension field.
 pub enum FieldType<E: ExtensionField> {
     Base(#[serde(skip)] Vec<E::BaseField>),
@@ -161,7 +164,10 @@ impl<E: ExtensionField> FieldType<E> {
 
 /// Stores a multilinear polynomial in dense evaluation form.
 #[derive(Clone, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
-#[serde(bound = "")]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct DenseMultilinearExtension<E: ExtensionField> {
     /// The evaluation over {0,1}^`num_vars`
     pub evaluations: FieldType<E>,
