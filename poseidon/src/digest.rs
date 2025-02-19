@@ -22,8 +22,20 @@ impl<F: PrimeField> TryFrom<Vec<F>> for Digest<F> {
 
 impl<F: PrimeField> Digest<F> {
     pub(crate) fn from_partial(inputs: &[F]) -> Self {
+        assert!(
+            inputs.len() < DIGEST_WIDTH,
+            "undefine behaviours for input > DIGEST_WIDTH {DIGEST_WIDTH}"
+        );
         let mut elements = [F::ZERO; DIGEST_WIDTH];
         elements[0..inputs.len()].copy_from_slice(inputs);
+        Self(elements)
+    }
+
+    pub(crate) fn from_iter<'a, I: Iterator<Item = &'a F>>(input_iter: I) -> Digest<F> {
+        let mut elements = [F::ZERO; DIGEST_WIDTH];
+        for (a, v) in elements[0..DIGEST_WIDTH].iter_mut().zip(input_iter) {
+            *a = *v;
+        }
         Self(elements)
     }
 
