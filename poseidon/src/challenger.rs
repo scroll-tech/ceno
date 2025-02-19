@@ -8,6 +8,8 @@ pub use p3_challenger::*;
 
 use ff_ext::PoseidonField;
 
+/// this wrap a DuplexChallenger as inner field,
+/// while expose some factory method to create default permutation object with defined constant
 #[derive(Clone, Debug)]
 pub struct DefaultChallenger<F, P>
 where
@@ -39,23 +41,6 @@ where
         }
     }
 }
-
-// pub trait Default<T> {
-//     fn default_new() -> T;
-// }
-
-// impl Default<Self> for DefaultChallenger<Goldilocks, Poseidon2GoldilocksHL<8>> {
-//     fn default_new() -> Self {
-//         let perm: Poseidon2GoldilocksHL<8> = Poseidon2GoldilocksHL::new(
-//             ExternalLayerConstants::<Goldilocks, 8>::new_from_saved_array(
-//                 HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
-//                 new_array,
-//             ),
-//             new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
-//         );
-//         Self::new(perm)
-//     }
-// }
 
 impl<F, P> Deref for DefaultChallenger<F, P>
 where
@@ -133,43 +118,3 @@ where
     P: CryptographicPermutation<[F; 8]>,
 {
 }
-
-// impl<F, T, H> CanObserve<T> for DefaultChallenger<F, H>
-// where
-//     T: Serialize,
-//     H: CryptographicHasher<u8, [u8; 32]>,
-// {
-//     fn observe(&mut self, value: T) {
-//         todo!()
-//     }
-// }
-
-// impl<F, E, H> CanSample<E> for DefaultChallenger<F, H>
-// where
-//     F: SmallField,
-//     E: ExtensionField,
-//     H: CryptographicHasher<u8, [u8; 32]>,
-// {
-//     fn sample(&mut self) -> E {
-//         let sample_base = |inner: &mut HashChallenger<u8, H, 32>| {
-//             F::from_uniform_bytes(|bytes| bytes.fill_with(|| inner.sample()))
-//         };
-//         E::from_base_fn(|_| sample_base(&mut self.inner))
-//     }
-// }
-
-// impl<F, H> CanSampleBits<usize> for DefaultChallenger<F, H>
-// where
-//     H: CryptographicHasher<u8, [u8; 32]>,
-// {
-//     fn sample_bits(&mut self, bits: usize) -> usize {
-//         usize::from_le_bytes(self.inner.sample_array()) & ((1 << bits) - 1)
-//     }
-// }
-
-// impl<F, H> FieldChallenger<F> for DefaultChallenger<F, H>
-// where
-//     F: Sync + Field + FromUniformBytes,
-//     H: Sync + CryptographicHasher<u8, [u8; 32]>,
-// {
-// }

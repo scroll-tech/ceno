@@ -705,7 +705,7 @@ where
 ))]
 struct OracleListQueryResultWithMerklePath<E: ExtensionField>
 where
-    E::BaseField: Serialize,
+    E::BaseField: Serialize + DeserializeOwned,
 {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
 }

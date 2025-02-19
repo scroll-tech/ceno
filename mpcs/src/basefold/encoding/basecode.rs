@@ -216,7 +216,7 @@ where
         let x0: E::BaseField = query_root_table_from_rng_aes::<E>(level, index, &mut cipher);
         let x1 = -x0;
 
-        let w = (x1 - x0).try_inverse().unwrap();
+        let w = (x1 - x0).inverse();
 
         (E::from(x0), E::from(x1), E::from(w))
     }

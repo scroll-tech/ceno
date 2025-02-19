@@ -115,10 +115,6 @@ use p3_symmetric::Permutation;
 pub fn permutation_benchmark(c: &mut Criterion) {
     let mut plonky_permutation = PoseidonPermutation::new(core::iter::repeat(GoldilocksField(0)));
     let ceno_challenger = DefaultChallenger::<Goldilocks, _>::new_poseidon_default();
-    // let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::<
-    //     Goldilocks,
-    //     MdsMatrixGoldilocks,
-    // >::new(core::iter::repeat(Goldilocks::ZERO));
 
     c.bench_function("plonky permute", |bencher| {
         bencher.iter(|| plonky_permutation.permute())
