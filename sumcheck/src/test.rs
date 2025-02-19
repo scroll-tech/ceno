@@ -4,9 +4,6 @@ use ark_std::{rand::RngCore, test_rng};
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use p3_field::FieldAlgebra;
-use p3_goldilocks::MdsMatrixGoldilocks;
-use p3_mds::MdsPermutation;
-use poseidon::SPONGE_WIDTH;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
@@ -18,15 +15,13 @@ use ff_ext::FromUniformBytes;
 
 // TODO add more tests related to various num_vars combination after PR #162
 
-fn test_sumcheck<E: ExtensionField, Mds>(
+fn test_sumcheck<E: ExtensionField>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
-) where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
-{
+) {
     let mut rng = test_rng();
-    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
+    let mut transcript = BasicTranscript::new(b"test");
 
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
@@ -34,7 +29,7 @@ fn test_sumcheck<E: ExtensionField, Mds>(
     #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
 
-    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
+    let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
     assert!(
         poly.evaluate(
@@ -49,13 +44,11 @@ fn test_sumcheck<E: ExtensionField, Mds>(
     );
 }
 
-fn test_sumcheck_internal<E: ExtensionField, Mds>(
+fn test_sumcheck_internal<E: ExtensionField>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
-) where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
-{
+) {
     let mut rng = test_rng();
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
@@ -65,7 +58,7 @@ fn test_sumcheck_internal<E: ExtensionField, Mds>(
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;
 
-    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
+    let mut transcript = BasicTranscript::new(b"test");
 
     transcript.append_message(b"initializing transcript for testing");
 
@@ -110,37 +103,31 @@ fn test_sumcheck_internal<E: ExtensionField, Mds>(
 #[test]
 #[ignore = "temporarily not supporting degree > 2"]
 fn test_trivial_polynomial() {
-    test_trivial_polynomial_helper::<GoldilocksExt2, MdsMatrixGoldilocks>();
+    test_trivial_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_trivial_polynomial_helper<E: ExtensionField, Mds>()
-where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
-{
+fn test_trivial_polynomial_helper<E: ExtensionField>() {
     let nv = 1;
     let num_multiplicands_range = (4, 13);
     let num_products = 5;
 
-    test_sumcheck::<E, Mds>(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal::<E, Mds>(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
 }
 
 #[test]
 #[ignore = "temporarily not supporting degree > 2"]
 fn test_normal_polynomial() {
-    test_normal_polynomial_helper::<GoldilocksExt2, MdsMatrixGoldilocks>();
+    test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_normal_polynomial_helper<E: ExtensionField, Mds>()
-where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
-{
+fn test_normal_polynomial_helper<E: ExtensionField>() {
     let nv = 12;
     let num_multiplicands_range = (4, 9);
     let num_products = 5;
 
-    test_sumcheck::<E, Mds>(nv, num_multiplicands_range, num_products);
-    test_sumcheck_internal::<E, Mds>(nv, num_multiplicands_range, num_products);
+    test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
 }
 
 // #[test]
@@ -155,15 +142,12 @@ where
 
 #[test]
 fn test_extract_sum() {
-    test_extract_sum_helper::<GoldilocksExt2, MdsMatrixGoldilocks>();
+    test_extract_sum_helper::<GoldilocksExt2>();
 }
 
-fn test_extract_sum_helper<E: ExtensionField, Mds>()
-where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
-{
+fn test_extract_sum_helper<E: ExtensionField>() {
     let mut rng = test_rng();
-    let mut transcript = BasicTranscript::<E, Mds>::new(b"test");
+    let mut transcript = BasicTranscript::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
     #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly, &mut transcript);

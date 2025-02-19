@@ -14,7 +14,7 @@ use ff_ext::{FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
-use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
+use p3_goldilocks::Goldilocks;
 use transcript::{BasicTranscript, Transcript};
 
 cfg_if::cfg_if! {
@@ -38,7 +38,7 @@ criterion_main!(op_add);
 const NUM_SAMPLES: usize = 10;
 
 fn bench_add(c: &mut Criterion) {
-    type Pcs = BasefoldDefault<E, MdsMatrixGoldilocks>;
+    type Pcs = BasefoldDefault<E>;
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     let _ = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -87,8 +87,7 @@ fn bench_add(c: &mut Criterion) {
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;
-                        let mut transcript =
-                            BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"riscv");
+                        let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
                             Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
                                 .unwrap();

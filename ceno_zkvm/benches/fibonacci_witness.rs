@@ -9,7 +9,6 @@ use criterion::*;
 
 use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
-use p3_goldilocks::MdsMatrixGoldilocks;
 
 criterion_group! {
   name = fibonacci;
@@ -20,7 +19,7 @@ criterion_group! {
 criterion_main!(fibonacci);
 
 const NUM_SAMPLES: usize = 10;
-type Pcs = BasefoldDefault<E, MdsMatrixGoldilocks>;
+type Pcs = BasefoldDefault<E>;
 type E = GoldilocksExt2;
 
 // Relevant init data for fibonacci run
@@ -53,14 +52,13 @@ fn fibonacci_witness(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let (_, generate_witness) =
-                        run_e2e_with_checkpoint::<E, Pcs, MdsMatrixGoldilocks>(
-                            program.clone(),
-                            platform.clone(),
-                            vec![],
-                            max_steps,
-                            Checkpoint::PrepWitnessGen,
-                        );
+                    let (_, generate_witness) = run_e2e_with_checkpoint::<E, Pcs>(
+                        program.clone(),
+                        platform.clone(),
+                        vec![],
+                        max_steps,
+                        Checkpoint::PrepWitnessGen,
+                    );
                     let instant = std::time::Instant::now();
                     generate_witness();
                     let elapsed = instant.elapsed();

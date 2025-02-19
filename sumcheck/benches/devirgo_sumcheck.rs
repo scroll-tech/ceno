@@ -7,7 +7,6 @@ use ark_std::test_rng;
 use criterion::*;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::Itertools;
-use p3_goldilocks::MdsMatrixGoldilocks;
 use sumcheck::{structs::IOPProverState, util::ceil_log2};
 
 use multilinear_extensions::{
@@ -103,7 +102,6 @@ fn prepare_input<'a, E: ExtensionField>(
 
 fn sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
-    type Mds = MdsMatrixGoldilocks;
 
     for nv in NV {
         // expand more input size once runtime is acceptable
@@ -117,7 +115,7 @@ fn sumcheck_fn(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let mut prover_transcript = Transcript::<E, Mds>::new(b"test");
+                        let mut prover_transcript = Transcript::new(b"test");
                         let (_, virtual_poly, _) = { prepare_input(nv) };
 
                         let instant = std::time::Instant::now();
@@ -140,7 +138,6 @@ fn sumcheck_fn(c: &mut Criterion) {
 
 fn devirgo_sumcheck_fn(c: &mut Criterion) {
     type E = GoldilocksExt2;
-    type Mds = MdsMatrixGoldilocks;
 
     let threads = max_usable_threads();
     for nv in NV {
@@ -155,7 +152,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let mut prover_transcript = Transcript::<E, Mds>::new(b"test");
+                        let mut prover_transcript = Transcript::new(b"test");
                         let (_, _, virtual_poly_splitted) = { prepare_input(nv) };
 
                         let instant = std::time::Instant::now();

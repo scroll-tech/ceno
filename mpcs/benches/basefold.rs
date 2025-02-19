@@ -17,12 +17,11 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::ArcMultilinearExtension,
 };
-use p3_goldilocks::MdsMatrixGoldilocks;
 use transcript::{BasicTranscript, Transcript};
 
-type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams, MdsMatrixGoldilocks>;
-type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodeParams, MdsMatrixGoldilocks>;
-type T = BasicTranscript<GoldilocksExt2, MdsMatrixGoldilocks>;
+type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
+type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
+type T = BasicTranscript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 
 const NUM_SAMPLES: usize = 10;
@@ -292,7 +291,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let comm = Pcs::get_pure_commitment(&comm);
 
             // Batch verify
-            let mut transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"BaseFold");
+            let mut transcript = BasicTranscript::<E>::new(b"BaseFold");
             Pcs::write_commitment(&comm, &mut transcript).unwrap();
 
             let point = get_point_from_challenge(num_vars, &mut transcript);

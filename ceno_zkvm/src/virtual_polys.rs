@@ -177,7 +177,7 @@ mod tests {
         virtual_poly::{ArcMultilinearExtension, VPAuxInfo, VirtualPolynomial},
     };
     use p3_field::FieldAlgebra;
-    use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
+    use p3_goldilocks::Goldilocks;
     use sumcheck::structs::{IOPProverState, IOPVerifierState};
     use transcript::BasicTranscript as Transcript;
 
@@ -252,7 +252,7 @@ mod tests {
             )
         };
         let num_threads = 1;
-        let mut transcript = Transcript::<E, MdsMatrixGoldilocks>::new(b"test");
+        let mut transcript = Transcript::new(b"test");
 
         let mut rng = test_rng();
 
@@ -290,7 +290,7 @@ mod tests {
             &mut transcript,
         );
 
-        let mut transcript = Transcript::<E, MdsMatrixGoldilocks>::new(b"test");
+        let mut transcript = Transcript::new(b"test");
         let subclaim = IOPVerifierState::<E>::verify(
             fn_eval(&f1) + fn_eval(&f2) + fn_eval(&f3),
             &sumcheck_proofs,

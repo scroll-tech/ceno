@@ -8,6 +8,8 @@ use p3_goldilocks::Goldilocks;
 use rand_core::RngCore;
 use serde::Serialize;
 use std::{array::from_fn, iter::repeat_with};
+mod poseidon;
+pub use poseidon::PoseidonField;
 pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
 
 fn array_try_from_uniform_bytes<
@@ -101,7 +103,7 @@ pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
 pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord {
     const DEGREE: usize;
 
-    type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField;
+    type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField + PoseidonField;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 
@@ -117,9 +119,14 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
 mod impl_goldilocks {
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
+        poseidon::{PoseidonField, new_array},
     };
     use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField64};
-    use p3_goldilocks::Goldilocks;
+    use p3_goldilocks::{
+        Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
+        HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
+    };
+    use p3_poseidon2::ExternalLayerConstants;
 
     impl FieldFrom<u64> for Goldilocks {
         fn from_v(v: u64) -> Self {
@@ -145,6 +152,19 @@ mod impl_goldilocks {
     impl FieldInto<Goldilocks> for Goldilocks {
         fn into_f(self) -> Goldilocks {
             self
+        }
+    }
+
+    impl PoseidonField for Goldilocks {
+        type T = Poseidon2GoldilocksHL<8>;
+        fn get_perm() -> Self::T {
+            Poseidon2GoldilocksHL::new(
+                ExternalLayerConstants::<Goldilocks, 8>::new_from_saved_array(
+                    HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
+                    new_array,
+                ),
+                new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
+            )
         }
     }
 

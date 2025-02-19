@@ -1,53 +1,37 @@
-use ff_ext::ExtensionField;
-use p3_mds::MdsPermutation;
-use poseidon::{SPONGE_WIDTH, poseidon_permutation::PoseidonPermutation};
+use ff_ext::{ExtensionField, PoseidonField};
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
-use p3_field::FieldAlgebra;
 
 #[derive(Clone)]
-pub struct BasicTranscript<E: ExtensionField, Mds> {
-    permutation: PoseidonPermutation<E::BaseField, Mds>,
+pub struct BasicTranscript<E: ExtensionField> {
+    challenger: DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>,
 }
 
-impl<E: ExtensionField, Mds> BasicTranscript<E, Mds>
-where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
-{
+impl<E: ExtensionField> BasicTranscript<E> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
-        let mut permutation = PoseidonPermutation::new(core::iter::repeat(E::BaseField::ZERO));
+        let mut challenger = DefaultChallenger::<E::BaseField, <E::BaseField as PoseidonField>::T>::new_poseidon_default();
         let label_f = E::BaseField::bytes_to_field_elements(label);
-        permutation.set_from_slice(label_f.as_slice(), 0);
-        permutation.permute();
-        Self { permutation }
+        challenger.observe_slice(label_f.as_slice());
+        Self { challenger }
     }
 }
 
-impl<E: ExtensionField, Mds> Transcript<E> for BasicTranscript<E, Mds>
-where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
-{
+impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
-        self.permutation.set_from_slice(elements, 0);
-        self.permutation.permute();
+        self.challenger.observe_slice(elements);
     }
 
     fn append_field_element_ext(&mut self, element: &E) {
-        self.append_field_elements(element.as_bases())
+        self.challenger.observe_ext_element(*element);
     }
 
     fn read_challenge(&mut self) -> Challenge<E> {
-        // Notice `from_bases` and `from_limbs` have the same behavior but
-        // `from_bases` has a sanity check for length of input slices
-        // while `from_limbs` use the first two elements silently.
-        // We select `from_base` here to make it more clear that
-        // we only use the first 2 fields here to construct the
-        // challenge as an extension field element.
-        let elements = E::from_bases(&self.permutation.squeeze()[..2]);
-
-        Challenge { elements }
+        Challenge {
+            elements: self.challenger.sample_ext_element(),
+        }
     }
 
     fn read_field_element_exts(&self) -> Vec<E> {
@@ -67,7 +51,4 @@ where
     }
 }
 
-impl<E: ExtensionField, Mds> ForkableTranscript<E> for BasicTranscript<E, Mds> where
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default
-{
-}
+impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}
