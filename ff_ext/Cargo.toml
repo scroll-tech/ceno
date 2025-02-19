@@ -12,7 +12,6 @@ version.workspace = true
 [dependencies]
 p3-field.workspace = true
 p3-goldilocks.workspace = true
-p3-poseidon.workspace = true
 p3-poseidon2.workspace = true
 p3-symmetric.workspace = true
 rand_core.workspace = true
