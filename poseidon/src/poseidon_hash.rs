@@ -1,135 +1,120 @@
 use std::marker::PhantomData;
 
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::PrimeField;
-use p3_mds::MdsPermutation;
-use p3_symmetric::CryptographicPermutation;
 
 use crate::{
-    challenger::DefaultChallenger,
-    constants::{DIGEST_WIDTH, SPONGE_RATE, SPONGE_WIDTH},
-    digest::Digest,
-    poseidon::PoseidonField,
-    poseidon_permutation::PoseidonPermutation,
+    challenger::DefaultChallenger, constants::DIGEST_WIDTH, digest::Digest, poseidon::PoseidonField,
 };
 
-pub struct PoseidonHash<F, C> {
-    _phantom: PhantomData<(F, C)>,
+pub struct PoseidonHash<F> {
+    _phantom: PhantomData<F>,
 }
 
-impl<F: PoseidonField, P> PoseidonHash<F, P>
-where
-    P: CryptographicPermutation<[F; 8]>,
-{
+impl<F: PoseidonField> PoseidonHash<F> {}
+
+impl<F: PoseidonField> PoseidonHash<F> {
     pub fn two_to_one(left: &Digest<F>, right: &Digest<F>) -> Digest<F> {
-        compress::<F, P>(left, right)
+        compress::<F>(left, right)
     }
 
     pub fn hash_or_noop(inputs: &[F]) -> Digest<F> {
         if inputs.len() <= DIGEST_WIDTH {
             Digest::from_partial(inputs)
         } else {
-            hash_n_to_hash_no_pad::<F, Mds>(inputs)
+            hash_n_to_hash_no_pad::<F>(inputs)
         }
     }
 
-    pub fn hash_or_noop_iter<'a, I: Iterator<Item = &'a F>>(mut input_iter: I) -> Digest<F> {
-        let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
+    // pub fn hash_or_noop_iter<'a, I: Iterator<Item = &'a F>>(mut input_iter: I) -> Digest<F> {
+    //     let mut initial_elements = Vec::with_capacity(DIGEST_WIDTH);
 
-        for _ in 0..DIGEST_WIDTH + 1 {
-            match input_iter.next() {
-                Some(value) => initial_elements.push(value),
-                None => break,
-            }
-        }
+    //     for _ in 0..DIGEST_WIDTH + 1 {
+    //         match input_iter.next() {
+    //             Some(value) => initial_elements.push(value),
+    //             None => break,
+    //         }
+    //     }
 
-        if initial_elements.len() <= DIGEST_WIDTH {
-            Digest::from_partial(
-                initial_elements
-                    .into_iter()
-                    .copied()
-                    .collect::<Vec<F>>()
-                    .as_slice(),
-            )
-        } else {
-            let iter = initial_elements.into_iter().chain(input_iter);
-            hash_n_to_m_no_pad_iter::<'_, F, _, Mds>(iter, DIGEST_WIDTH)
-                .try_into()
-                .unwrap()
-        }
-    }
+    //     if initial_elements.len() <= DIGEST_WIDTH {
+    //         Digest::from_partial(
+    //             initial_elements
+    //                 .into_iter()
+    //                 .copied()
+    //                 .collect::<Vec<F>>()
+    //                 .as_slice(),
+    //         )
+    //     } else {
+    //         let iter = initial_elements.into_iter().chain(input_iter);
+    //         hash_n_to_m_no_pad_iter::<'_, F, _>(iter, DIGEST_WIDTH)
+    //             .try_into()
+    //             .unwrap()
+    //     }
+    // }
 }
 
-pub fn hash_n_to_m_no_pad<F: PrimeField, Mds>(inputs: &[F], num_outputs: usize) -> Vec<F>
-where
-    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
-{
-    let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
+pub fn hash_n_to_m_no_pad<F: PoseidonField>(inputs: &[F], num_outputs: usize) -> Vec<F> {
+    let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
+    challenger.observe_slice(inputs);
+    challenger.sample_vec(num_outputs)
+    // let mut perm = PoseidonPermutation::<F>::new(core::iter::repeat(F::ZERO));
 
     // Absorb all input chunks.
-    for input_chunk in inputs.chunks(SPONGE_RATE) {
-        // Overwrite the first r elements with the inputs. This differs from a standard sponge,
-        // where we would xor or add in the inputs. This is a well-known variant, though,
-        // sometimes called "overwrite mode".
-        perm.set_from_slice(input_chunk, 0);
-        perm.permute();
-    }
+    // for input_chunk in inputs.chunks(SPONGE_RATE) {
+    //     // Overwrite the first r elements with the inputs. This differs from a standard sponge,
+    //     // where we would xor or add in the inputs. This is a well-known variant, though,
+    //     // sometimes called "overwrite mode".
+    //     perm.set_from_slice(input_chunk, 0);
+    //     perm.permute();
+    // }
 
     // Squeeze until we have the desired number of outputs
-    let mut outputs = Vec::with_capacity(num_outputs);
-    loop {
-        for &item in perm.squeeze() {
-            outputs.push(item);
-            if outputs.len() == num_outputs {
-                return outputs;
-            }
-        }
-        perm.permute();
-    }
+    // let mut outputs = Vec::with_capacity(num_outputs);
+    // loop {
+    //     for &item in perm.squeeze() {
+    //         outputs.push(item);
+    //         if outputs.len() == num_outputs {
+    //             return outputs;
+    //         }
+    //     }
+    //     perm.permute();
+    // }
 }
 
-pub fn hash_n_to_m_no_pad_iter<'a, F: PrimeField, I: Iterator<Item = &'a F>, Mds>(
-    mut input_iter: I,
-    num_outputs: usize,
-) -> Vec<F>
-where
-    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
-{
-    let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
+// pub fn hash_n_to_m_no_pad_iter<'a, F: PrimeField, I: Iterator<Item = &'a F>>(
+//     mut input_iter: I,
+//     num_outputs: usize,
+// ) -> Vec<F> {
+//     let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
+//     let mut perm = PoseidonPermutation::<F, Mds>::new(core::iter::repeat(F::ZERO));
 
-    // Absorb all input chunks.
-    loop {
-        let chunk = input_iter.by_ref().take(SPONGE_RATE).collect::<Vec<_>>();
-        if chunk.is_empty() {
-            break;
-        }
-        // Overwrite the first r elements with the inputs. This differs from a standard sponge,
-        // where we would xor or add in the inputs. This is a well-known variant, though,
-        // sometimes called "overwrite mode".
-        perm.set_from_slice(chunk.into_iter().copied().collect::<Vec<F>>().as_slice(), 0);
-        perm.permute();
-    }
+//     // Absorb all input chunks.
+//     loop {
+//         let chunk = input_iter.by_ref().take(SPONGE_RATE).collect::<Vec<_>>();
+//         if chunk.is_empty() {
+//             break;
+//         }
+//         // Overwrite the first r elements with the inputs. This differs from a standard sponge,
+//         // where we would xor or add in the inputs. This is a well-known variant, though,
+//         // sometimes called "overwrite mode".
+//         perm.set_from_slice(chunk.into_iter().copied().collect::<Vec<F>>().as_slice(), 0);
+//         perm.permute();
+//     }
 
-    // Squeeze until we have the desired number of outputs
-    let mut outputs = Vec::with_capacity(num_outputs);
-    loop {
-        for &item in perm.squeeze() {
-            outputs.push(item);
-            if outputs.len() == num_outputs {
-                return outputs;
-            }
-        }
-        perm.permute();
-    }
-}
+//     // Squeeze until we have the desired number of outputs
+//     let mut outputs = Vec::with_capacity(num_outputs);
+//     loop {
+//         for &item in perm.squeeze() {
+//             outputs.push(item);
+//             if outputs.len() == num_outputs {
+//                 return outputs;
+//             }
+//         }
+//         perm.permute();
+//     }
+// }
 
-pub fn hash_n_to_hash_no_pad<F: PrimeField, Mds>(inputs: &[F]) -> Digest<F>
-where
-    Mds: MdsPermutation<F, SPONGE_WIDTH> + Default,
-{
-    hash_n_to_m_no_pad::<F, Mds>(inputs, DIGEST_WIDTH)
-        .try_into()
-        .unwrap()
+pub fn hash_n_to_hash_no_pad<F: PoseidonField>(inputs: &[F]) -> Digest<F> {
+    hash_n_to_m_no_pad(inputs, DIGEST_WIDTH).try_into().unwrap()
 }
 
 pub fn compress<F: PoseidonField>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
@@ -144,101 +129,4 @@ pub fn compress<F: PoseidonField>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
     // perm.permute();
 
     // Digest(perm.squeeze()[..DIGEST_WIDTH].try_into().unwrap())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{P2MdsMatrixGoldilocks, digest::Digest, poseidon_hash::PoseidonHash};
-    use p3_field::FieldAlgebra;
-    use p3_goldilocks::Goldilocks;
-    use plonky2::{
-        field::{
-            goldilocks_field::GoldilocksField,
-            types::{PrimeField64, Sample},
-        },
-        hash::{hash_types::HashOut, poseidon::PoseidonHash as PlonkyPoseidonHash},
-        plonk::config::{GenericHashOut, Hasher},
-    };
-    use rand::{Rng, thread_rng};
-
-    type PlonkyFieldElements = Vec<GoldilocksField>;
-    type CenoFieldElements = Vec<Goldilocks>;
-
-    const N_ITERATIONS: usize = 100;
-
-    fn ceno_goldy_from_plonky_goldy(values: &[GoldilocksField]) -> Vec<Goldilocks> {
-        values
-            .iter()
-            .map(|value| Goldilocks::from_canonical_u64(value.to_canonical_u64()))
-            .collect()
-    }
-
-    fn test_vector_pair(n: usize) -> (PlonkyFieldElements, CenoFieldElements) {
-        let plonky_elems = GoldilocksField::rand_vec(n);
-        let ceno_elems = ceno_goldy_from_plonky_goldy(plonky_elems.as_slice());
-        (plonky_elems, ceno_elems)
-    }
-
-    fn random_hash_pair() -> (HashOut<GoldilocksField>, Digest<Goldilocks>) {
-        let plonky_random_hash = HashOut::<GoldilocksField>::rand();
-        let ceno_equivalent_hash = Digest(
-            ceno_goldy_from_plonky_goldy(plonky_random_hash.elements.as_slice())
-                .try_into()
-                .unwrap(),
-        );
-        (plonky_random_hash, ceno_equivalent_hash)
-    }
-
-    fn compare_hash_output(
-        plonky_hash: HashOut<GoldilocksField>,
-        ceno_hash: Digest<Goldilocks>,
-    ) -> bool {
-        let plonky_elems = plonky_hash.to_vec();
-        let plonky_in_ceno_field = ceno_goldy_from_plonky_goldy(plonky_elems.as_slice());
-        plonky_in_ceno_field == ceno_hash.elements()
-    }
-
-    #[test]
-    fn compare_hash() {
-        let mut rng = thread_rng();
-        for _ in 0..N_ITERATIONS {
-            let n = rng.gen_range(5..=100);
-            let (plonky_elems, ceno_elems) = test_vector_pair(n);
-            let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
-            let ceno_out =
-                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
-            let ceno_iter =
-                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
-            assert!(compare_hash_output(plonky_out, ceno_out));
-            assert!(compare_hash_output(plonky_out, ceno_iter));
-        }
-    }
-
-    #[test]
-    fn compare_noop() {
-        let mut rng = thread_rng();
-        for _ in 0..N_ITERATIONS {
-            let n = rng.gen_range(0..=4);
-            let (plonky_elems, ceno_elems) = test_vector_pair(n);
-            let plonky_out = PlonkyPoseidonHash::hash_or_noop(plonky_elems.as_slice());
-            let ceno_out =
-                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop(ceno_elems.as_slice());
-            let ceno_iter =
-                PoseidonHash::<_, P2MdsMatrixGoldilocks>::hash_or_noop_iter(ceno_elems.iter());
-            assert!(compare_hash_output(plonky_out, ceno_out));
-            assert!(compare_hash_output(plonky_out, ceno_iter));
-        }
-    }
-
-    #[test]
-    fn compare_two_to_one() {
-        for _ in 0..N_ITERATIONS {
-            let (plonky_hash_a, ceno_hash_a) = random_hash_pair();
-            let (plonky_hash_b, ceno_hash_b) = random_hash_pair();
-            let plonky_combined = PlonkyPoseidonHash::two_to_one(plonky_hash_a, plonky_hash_b);
-            let ceno_combined =
-                PoseidonHash::<_, P2MdsMatrixGoldilocks>::two_to_one(&ceno_hash_a, &ceno_hash_b);
-            assert!(compare_hash_output(plonky_combined, ceno_combined));
-        }
-    }
 }

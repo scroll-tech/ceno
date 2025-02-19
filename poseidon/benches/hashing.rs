@@ -2,7 +2,7 @@ use ark_std::test_rng;
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use ff_ext::FromUniformBytes;
 use p3_field::FieldAlgebra;
-use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
+use p3_goldilocks::Goldilocks;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Sample},
     hash::{
@@ -12,7 +12,7 @@ use plonky2::{
     },
     plonk::config::Hasher,
 };
-use poseidon::{digest::Digest, poseidon_hash::PoseidonHash};
+use poseidon::{challenger::DefaultChallenger, digest::Digest, poseidon_hash::PoseidonHash};
 
 fn random_plonky_2_goldy() -> GoldilocksField {
     GoldilocksField::rand()
@@ -35,7 +35,7 @@ fn plonky_hash_single(a: GoldilocksField) {
 }
 
 fn ceno_hash_single(a: Goldilocks) {
-    let _result = black_box(PoseidonHash::<Goldilocks, MdsMatrixGoldilocks>::hash_or_noop(&[a]));
+    let _result = black_box(PoseidonHash::<Goldilocks>::hash_or_noop(&[a]));
 }
 
 fn plonky_hash_2_to_1(left: HashOut<GoldilocksField>, right: HashOut<GoldilocksField>) {
@@ -43,9 +43,7 @@ fn plonky_hash_2_to_1(left: HashOut<GoldilocksField>, right: HashOut<GoldilocksF
 }
 
 fn ceno_hash_2_to_1(left: &Digest<Goldilocks>, right: &Digest<Goldilocks>) {
-    let _result = black_box(PoseidonHash::<Goldilocks, MdsMatrixGoldilocks>::two_to_one(
-        left, right,
-    ));
+    let _result = black_box(PoseidonHash::<Goldilocks>::two_to_one(left, right));
 }
 
 fn plonky_hash_many_to_1(values: &[GoldilocksField]) {
@@ -53,7 +51,7 @@ fn plonky_hash_many_to_1(values: &[GoldilocksField]) {
 }
 
 fn ceno_hash_many_to_1(values: &[Goldilocks]) {
-    let _result = black_box(PoseidonHash::<Goldilocks, MdsMatrixGoldilocks>::hash_or_noop(values));
+    let _result = black_box(PoseidonHash::<Goldilocks>::hash_or_noop(values));
 }
 
 pub fn hashing_benchmark(c: &mut Criterion) {
@@ -111,20 +109,26 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     });
 }
 
+use p3_symmetric::Permutation;
+
 // bench permutation
 pub fn permutation_benchmark(c: &mut Criterion) {
     let mut plonky_permutation = PoseidonPermutation::new(core::iter::repeat(GoldilocksField(0)));
-    let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::<
-        Goldilocks,
-        MdsMatrixGoldilocks,
-    >::new(core::iter::repeat(Goldilocks::ZERO));
+    let ceno_challenger = DefaultChallenger::<Goldilocks, _>::new_poseidon_default();
+    // let mut ceno_permutation = poseidon::poseidon_permutation::PoseidonPermutation::<
+    //     Goldilocks,
+    //     MdsMatrixGoldilocks,
+    // >::new(core::iter::repeat(Goldilocks::ZERO));
 
     c.bench_function("plonky permute", |bencher| {
         bencher.iter(|| plonky_permutation.permute())
     });
 
     c.bench_function("ceno permute", |bencher| {
-        bencher.iter(|| ceno_permutation.permute())
+        bencher.iter(|| {
+            let mut state = [Goldilocks::ZERO; 8];
+            ceno_challenger.permutation.permute_mut(&mut state);
+        })
     });
 }
 

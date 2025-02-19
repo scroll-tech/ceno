@@ -10,4 +10,4 @@ pub mod challenger;
 pub mod digest;
 pub mod poseidon;
 pub mod poseidon_hash;
-pub mod poseidon_permutation;
+// pub mod poseidon_permutation;
