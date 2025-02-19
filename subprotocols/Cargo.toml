@@ -1,10 +1,10 @@
 [package]
 categories.workspace = true
-description = "Multilinear extensions for the Ceno project"
+description = "Subprotocols"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "multilinear_extensions"
+name = "subprotocols"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
@@ -13,15 +13,17 @@ version.workspace = true
 ark-std.workspace = true
 ff.workspace = true
 ff_ext.workspace = true
-goldilocks.workspace = true
 itertools.workspace = true
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+rand.workspace = true
 rayon.workspace = true
-serde.workspace = true
-tracing.workspace = true
+thiserror.workspace = true
+transcript.workspace = true
 
 [dev-dependencies]
-env_logger = "0.11"
-log = "0.4"
+criterion.workspace = true
+goldilocks.workspace = true
 
-[features]
-parallel = []
+[[bench]]
+harness = false
+name = "expr_based_logup"

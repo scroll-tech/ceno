@@ -12,7 +12,7 @@ version.workspace = true
 [dependencies]
 ark-std.workspace = true
 ff.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff_ext.workspace = true
 goldilocks.workspace = true
 itertools.workspace = true
 rayon.workspace = true
@@ -22,7 +22,7 @@ tracing.workspace = true
 crossbeam-channel.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
 sumcheck_macro = { path = "../sumcheck_macro" }
-transcript = { path = "../transcript" }
+transcript.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
@@ -30,3 +30,8 @@ criterion.workspace = true
 [[bench]]
 harness = false
 name = "devirgo_sumcheck"
+
+
+[[bench]]
+harness = false
+name = "devirgo_sumcheck_logup"
