@@ -790,6 +790,7 @@ Hints:
         );
 
         let mut wit_mles = HashMap::new();
+        let mut structural_wit_mles = HashMap::new();
         let mut fixed_mles = HashMap::new();
         let mut num_instances = HashMap::new();
 
@@ -814,15 +815,17 @@ Hints:
 
             if witness.num_instances() == 0 {
                 wit_mles.insert(circuit_name.clone(), vec![]);
+                structural_wit_mles.insert(circuit_name.clone(), vec![]);
                 fixed_mles.insert(circuit_name.clone(), vec![]);
                 num_instances.insert(circuit_name.clone(), num_rows);
                 continue;
             }
-            let witness = witness
+            let mut witness = witness
                 .into_mles()
                 .into_iter()
                 .map(|w| w.into())
                 .collect_vec();
+            let structural_witness = witness.split_off(cs.num_witin as usize);
             let fixed: Vec<_> = fixed_trace
                 .circuit_fixed_traces
                 .remove(circuit_name)
@@ -875,7 +878,7 @@ Hints:
                     let lk_table = wit_infer_by_expr(
                         &fixed,
                         &witness,
-                        &[],
+                        &structural_witness,
                         &pi_mles,
                         &challenges,
                         &expr.values,
@@ -886,7 +889,7 @@ Hints:
                     let multiplicity = wit_infer_by_expr(
                         &fixed,
                         &witness,
-                        &[],
+                        &structural_witness,
                         &pi_mles,
                         &challenges,
                         &expr.multiplicity,
@@ -904,6 +907,7 @@ Hints:
                 }
             }
             wit_mles.insert(circuit_name.clone(), witness);
+            structural_wit_mles.insert(circuit_name.clone(), structural_witness);
             fixed_mles.insert(circuit_name.clone(), fixed);
             num_instances.insert(circuit_name.clone(), num_rows);
         }

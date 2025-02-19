@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{Change, InsnKind, KECCAK_WORDS, StepRecord, WORD_SIZE};
+use ceno_emul::{Change, InsnKind, StepRecord, SyscallSpec, WORD_SIZE};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
@@ -19,29 +19,13 @@ use crate::{
 };
 use ff_ext::FieldInto;
 
-trait EcallSpec {
-    const NAME: &'static str;
-
-    const REG_OPS_COUNT: usize;
-    const MEM_OPS_COUNT: usize;
-}
-
-pub struct KeccakSpec;
-
-impl EcallSpec for KeccakSpec {
-    const NAME: &'static str = "KECCAK";
-
-    const REG_OPS_COUNT: usize = 1;
-    const MEM_OPS_COUNT: usize = KECCAK_WORDS;
-}
-
 /// LargeEcallDummy can handle any instruction and produce its effects,
 /// including multiple memory operations.
 ///
 /// Unsafe: The content is not constrained.
 pub struct LargeEcallDummy<E, S>(PhantomData<(E, S)>);
 
-impl<E: ExtensionField, S: EcallSpec> Instruction<E> for LargeEcallDummy<E, S> {
+impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S> {
     type InstructionConfig = LargeEcallConfig<E>;
 
     fn name() -> String {

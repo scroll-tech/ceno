@@ -964,12 +964,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(tower_span);
 
-        // same point sumcheck is optional when all witin + fixed are in same num_vars
-        let is_skip_same_point_sumcheck = witnesses
-            .iter()
-            .chain(fixed.iter())
-            .map(|v| v.num_vars())
-            .all_equal();
+        // In table proof, we always skip same point sumcheck for now
+        // as tower sumcheck batch product argument/logup in same length
+        let is_skip_same_point_sumcheck = true;
 
         let (input_open_point, same_r_sumcheck_proofs, rw_in_evals, lk_in_evals) =
             if is_skip_same_point_sumcheck {

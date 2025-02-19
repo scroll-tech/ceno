@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::InstancePaddingStrategy,
@@ -115,7 +115,10 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         cb.lk_table_record(
             || "prog table",
-            cb.params.program_size.next_power_of_two(),
+            SetTableSpec {
+                len: Some(cb.params.program_size.next_power_of_two()),
+                structural_witins: vec![],
+            },
             ROMType::Instruction,
             record_exprs,
             mlt.expr(),

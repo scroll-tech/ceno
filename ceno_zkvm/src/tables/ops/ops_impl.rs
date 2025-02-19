@@ -6,7 +6,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use std::collections::HashMap;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::InstancePaddingStrategy,
@@ -37,7 +37,16 @@ impl OpTableConfig {
 
         let record_exprs = abc.into_iter().map(|f| Expression::Fixed(f)).collect_vec();
 
-        cb.lk_table_record(|| "record", table_len, rom_type, record_exprs, mlt.expr())?;
+        cb.lk_table_record(
+            || "record",
+            SetTableSpec {
+                len: Some(table_len),
+                structural_witins: vec![],
+            },
+            rom_type,
+            record_exprs,
+            mlt.expr(),
+        )?;
 
         Ok(Self { abc, mlt })
     }
