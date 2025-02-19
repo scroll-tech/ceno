@@ -16,8 +16,6 @@ use crate::util::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use p3_mds::MdsPermutation;
-use poseidon::SPONGE_WIDTH;
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -32,17 +30,16 @@ use rayon::prelude::{
 use super::structure::BasefoldCommitmentWithWitness;
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, Mds>(
+pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
-    comm: &BasefoldCommitmentWithWitness<E, Mds>,
+    comm: &BasefoldCommitmentWithWitness<E>,
     transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
-) -> (Vec<MerkleTree<E, Mds>>, BasefoldCommitPhaseProof<E>)
+) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let timer = start_timer!(|| "Commit phase");
     #[cfg(feature = "sanity-check")]
@@ -101,7 +98,7 @@ where
         );
 
         if i > 0 {
-            let running_tree = MerkleTree::<E, Mds>::from_inner_leaves(
+            let running_tree = MerkleTree::<E>::from_inner_leaves(
                 running_tree_inner,
                 FieldType::Ext(running_oracle),
             );
@@ -119,8 +116,8 @@ where
             // Then the oracle will be used to fold to the next oracle in the next
             // round. After that, this oracle is free to be moved to build the
             // complete Merkle tree.
-            running_tree_inner = MerkleTree::<E, Mds>::compute_inner_ext(&new_running_oracle);
-            let running_root = MerkleTree::<E, Mds>::root_from_inner(&running_tree_inner);
+            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
+            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root.clone());
 
@@ -179,18 +176,17 @@ where
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
-pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, Mds>(
+pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
-    comms: &[BasefoldCommitmentWithWitness<E, Mds>],
+    comms: &[BasefoldCommitmentWithWitness<E>],
     transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
     coeffs: &[E],
-) -> (Vec<MerkleTree<E, Mds>>, BasefoldCommitPhaseProof<E>)
+) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let timer = start_timer!(|| "Batch Commit phase");
     assert_eq!(point.len(), num_vars);
@@ -270,7 +266,7 @@ where
         );
 
         if i > 0 {
-            let running_tree = MerkleTree::<E, Mds>::from_inner_leaves(
+            let running_tree = MerkleTree::<E>::from_inner_leaves(
                 running_tree_inner,
                 FieldType::Ext(running_oracle),
             );
@@ -281,8 +277,8 @@ where
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
             sumcheck_messages.push(last_sumcheck_message.clone());
-            running_tree_inner = MerkleTree::<E, Mds>::compute_inner_ext(&new_running_oracle);
-            let running_root = MerkleTree::<E, Mds>::root_from_inner(&running_tree_inner);
+            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
+            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
 
@@ -350,18 +346,17 @@ where
 
 // outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
-pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>, Mds>(
+pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[E],
     batch_coeffs: &[E],
-    comm: &BasefoldCommitmentWithWitness<E, Mds>,
+    comm: &BasefoldCommitmentWithWitness<E>,
     transcript: &mut impl Transcript<E>,
     num_vars: usize,
     num_rounds: usize,
-) -> (Vec<MerkleTree<E, Mds>>, BasefoldCommitPhaseProof<E>)
+) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
-    Mds: MdsPermutation<E::BaseField, SPONGE_WIDTH> + Default,
 {
     let timer = start_timer!(|| "Simple batch commit phase");
     assert_eq!(point.len(), num_vars);
@@ -421,7 +416,7 @@ where
         );
 
         if i > 0 {
-            let running_tree = MerkleTree::<E, Mds>::from_inner_leaves(
+            let running_tree = MerkleTree::<E>::from_inner_leaves(
                 running_tree_inner,
                 FieldType::Ext(running_oracle),
             );
@@ -431,8 +426,8 @@ where
         if i < num_rounds - 1 {
             last_sumcheck_message =
                 sum_check_challenge_round(&mut eq, &mut running_evals, challenge);
-            running_tree_inner = MerkleTree::<E, Mds>::compute_inner_ext(&new_running_oracle);
-            let running_root = MerkleTree::<E, Mds>::root_from_inner(&running_tree_inner);
+            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
+            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
             running_oracle = new_running_oracle;

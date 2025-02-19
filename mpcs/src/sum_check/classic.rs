@@ -325,7 +325,7 @@ mod tests {
 
     use super::*;
     use ff_ext::GoldilocksExt2 as E;
-    use p3_goldilocks::{Goldilocks as Fr, MdsMatrixGoldilocks};
+    use p3_goldilocks::Goldilocks as Fr;
 
     #[test]
     fn test_sum_check_protocol() {
@@ -375,7 +375,7 @@ mod tests {
                 &build_eq_x_r_vec(&points[1]),
             ) * Fr::from_canonical_u64(4)
                 * Fr::from_canonical_u64(2); // The third polynomial is summed twice because the hypercube is larger
-        let mut transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"sumcheck");
+        let mut transcript = BasicTranscript::new(b"sumcheck");
         let (challenges, evals, proof) =
             <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::prove(
                 &(),
@@ -390,7 +390,7 @@ mod tests {
         assert_eq!(polys[1].evaluate(&challenges), evals[1]);
         assert_eq!(polys[2].evaluate(&challenges[..1]), evals[2]);
 
-        let mut transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"sumcheck");
+        let mut transcript = BasicTranscript::new(b"sumcheck");
 
         let (new_sum, verifier_challenges) = <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<
             E,
@@ -407,7 +407,7 @@ mod tests {
                 + evals[2] * eq_xy_eval(&points[1], &challenges[..1]) * Fr::from_canonical_u64(4)
         );
 
-        let mut transcript = BasicTranscript::<E, MdsMatrixGoldilocks>::new(b"sumcheck");
+        let mut transcript = BasicTranscript::new(b"sumcheck");
 
         <ClassicSumCheck<CoefficientsProver<E>> as SumCheck<E>>::verify(
             &(),

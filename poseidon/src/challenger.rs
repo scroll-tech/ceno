@@ -6,20 +6,7 @@ use std::ops::{Deref, DerefMut};
 
 pub use p3_challenger::*;
 
-use crate::poseidon::PoseidonField;
-
-// pub trait FieldChallengerExt<F: Field>: FieldChallenger<F> {
-//     fn observe_ext_slice<EF: FieldExtensionAlgebra<F>>(&mut self, exts: &[EF]) {
-//         exts.iter()
-//             .for_each(|ext| self.observe_slice(ext.as_base_slice()));
-//     }
-
-//     fn sample_ext_vec<EF: FieldExtensionAlgebra<F>>(&mut self, n: usize) -> Vec<EF> {
-//         (0..n).map(|_| self.sample_ext_element()).collect()
-//     }
-// }
-
-// impl<F: Field, T: FieldChallenger<F>> FieldChallengerExt<F> for T {}
+use ff_ext::PoseidonField;
 
 #[derive(Clone, Debug)]
 pub struct DefaultChallenger<F, P>

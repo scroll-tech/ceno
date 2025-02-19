@@ -1,14 +1,12 @@
 use std::marker::PhantomData;
 
-use ff_ext::ExtensionField;
-use p3_challenger::{CanObserve, CanSample};
-
 use crate::{
     challenger::{DefaultChallenger, FieldChallengerExt},
     constants::DIGEST_WIDTH,
     digest::Digest,
-    poseidon::PoseidonField,
 };
+use ff_ext::{ExtensionField, PoseidonField};
+use p3_challenger::{CanObserve, CanSample};
 
 pub struct PoseidonHash<F> {
     _phantom: PhantomData<F>,

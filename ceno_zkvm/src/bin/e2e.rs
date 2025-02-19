@@ -8,7 +8,7 @@ use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
 use p3_field::FieldAlgebra;
-use p3_goldilocks::{Goldilocks, MdsMatrixGoldilocks};
+use p3_goldilocks::Goldilocks;
 use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -133,9 +133,9 @@ fn main() {
 
     type E = GoldilocksExt2;
     type B = Goldilocks;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams, MdsMatrixGoldilocks>;
+    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
-    let (state, _) = run_e2e_with_checkpoint::<E, Pcs, MdsMatrixGoldilocks>(
+    let (state, _) = run_e2e_with_checkpoint::<E, Pcs>(
         program,
         platform,
         hints,
@@ -148,7 +148,7 @@ fn main() {
     // do statistics
     let serialize_size = bincode::serialize(&zkvm_proof).unwrap().len();
     let stat_recorder = StatisticRecorder::default();
-    let transcript = TranscriptWithStat::<E, MdsMatrixGoldilocks>::new(&stat_recorder, b"riscv");
+    let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
     verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
     println!(
         "e2e proof stat: proof size = {}, hashes count = {}",
@@ -157,7 +157,7 @@ fn main() {
     );
 
     // do sanity check
-    let transcript = Transcript::<E, MdsMatrixGoldilocks>::new(b"riscv");
+    let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
     zkvm_proof.raw_pi[0] = vec![B::ONE];
     zkvm_proof.raw_pi[1] = vec![B::ONE];

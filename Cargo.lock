@@ -712,6 +712,8 @@ dependencies = [
  "p3-field",
  "p3-goldilocks",
  "p3-poseidon",
+ "p3-poseidon2",
+ "p3-symmetric",
  "rand_core",
  "serde",
 ]
