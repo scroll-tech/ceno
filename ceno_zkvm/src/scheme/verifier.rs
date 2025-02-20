@@ -225,8 +225,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .copied()
                 .product::<E>();
         }
-        logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
-            * dummy_table_item.inverse();
+        logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
 
         // check logup relation across all proofs
         if logup_sum != E::ZERO {

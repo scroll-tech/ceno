@@ -16,7 +16,7 @@ use crate::{
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 
 pub struct HaltConfig {
@@ -51,7 +51,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         // read exit_code from arg0 (X10 register)
         let (_, lt_x10_cfg) = cb.register_read(
             || "read x10",
-            E::BaseField::from_canonical_u64(ceno_emul::Platform::reg_arg0() as u64),
+            E::BaseField::from_u64(ceno_emul::Platform::reg_arg0() as u64),
             prev_x10_ts.expr(),
             ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,

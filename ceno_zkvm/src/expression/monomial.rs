@@ -82,7 +82,7 @@ mod tests {
 
     use super::*;
     use ff_ext::{FieldInto, FromUniformBytes, GoldilocksExt2 as E};
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks as F;
     use rand_chacha::{ChaChaRng, rand_core::SeedableRng};
 
@@ -99,7 +99,7 @@ mod tests {
         let y = || WitIn(1);
         let z = || WitIn(2);
         let n = || Constant(104u64.into_f());
-        let m = || Constant(-F::from_canonical_u64(599));
+        let m = || Constant(-F::from_u64(599));
         let r = || Challenge(0, 1, E::ONE, E::ZERO);
 
         let test_exprs: &[Expression<E>] = &[

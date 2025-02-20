@@ -33,13 +33,13 @@ crossbeam-channel = "0.5"
 itertools = "0.13"
 num-derive = "0.4"
 num-traits = "0.2"
-p3-challenger = { git = "https://github.com/plonky3/plonky3", rev = "b0591e9b" }
-p3-field = { git = "https://github.com/plonky3/plonky3", rev = "b0591e9b" }
-p3-goldilocks = { git = "https://github.com/plonky3/plonky3", rev = "b0591e9b" }
-p3-mds = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b0591e9b" }
-p3-poseidon = { git = "https://github.com/plonky3/plonky3", rev = "b0591e9b" }
-p3-poseidon2 = { git = "https://github.com/plonky3/plonky3", rev = "b0591e9b" }
-p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b0591e9b" }
+p3-challenger = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
+p3-field = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
+p3-goldilocks = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
+p3-mds = { git = "https://github.com/Plonky3/Plonky3.git", rev = "00da91c" }
+p3-poseidon = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
+p3-poseidon2 = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "00da91c" }
 paste = "1"
 plonky2 = "0.2"
 poseidon = { path = "./poseidon" }

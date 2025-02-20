@@ -9,7 +9,7 @@ use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod merkle_tree;
 use crate::{Error, util::parallel::parallelize};
-use p3_field::{FieldAlgebra, PrimeField};
+use p3_field::{PrimeCharacteristicRing, PrimeField};
 pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
@@ -22,7 +22,7 @@ pub fn base_to_usize<E: ExtensionField>(x: &E::BaseField) -> usize {
 }
 
 pub fn u32_to_field<E: ExtensionField>(x: u32) -> E::BaseField {
-    E::BaseField::from_canonical_u32(x)
+    E::BaseField::from_u32(x)
 }
 
 pub trait BitIndex {
@@ -320,7 +320,7 @@ pub mod test {
     #[cfg(test)]
     use crate::util::{base_to_usize, u32_to_field};
     use ff_ext::FromUniformBytes;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     #[cfg(test)]
     type E = ff_ext::GoldilocksExt2;
     #[cfg(test)]
@@ -353,10 +353,7 @@ pub mod test {
 
     #[test]
     pub fn test_field_transform() {
-        assert_eq!(
-            F::from_canonical_u64(2) * F::from_canonical_u64(3),
-            F::from_canonical_u64(6)
-        );
+        assert_eq!(F::from_u64(2) * F::from_u64(3), F::from_u64(6));
         assert_eq!(base_to_usize::<E>(&u32_to_field::<E>(1u32)), 1);
         assert_eq!(base_to_usize::<E>(&u32_to_field::<E>(10u32)), 10);
     }

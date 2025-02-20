@@ -135,8 +135,5 @@ pub fn eq_xy_eval<F: Field>(x: &[F], y: &[F]) -> F {
 }
 
 fn identity_eval<F: Field>(x: &[F]) -> F {
-    inner_product(
-        x,
-        &powers(F::from_canonical_u64(2)).take(x.len()).collect_vec(),
-    )
+    inner_product(x, &powers(F::from_u64(2)).take(x.len()).collect_vec())
 }

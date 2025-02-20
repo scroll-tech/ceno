@@ -25,12 +25,12 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 
     fn append_field_element_ext(&mut self, element: &E) {
-        self.challenger.observe_ext_element(*element);
+        self.challenger.observe_algebra_element(*element);
     }
 
     fn read_challenge(&mut self) -> Challenge<E> {
         Challenge {
-            elements: self.challenger.sample_ext_element(),
+            elements: self.challenger.sample_algebra_element(),
         }
     }
 

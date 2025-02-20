@@ -26,7 +26,7 @@ use crate::{
         merge_sumcheck_polys, serial_extrapolate,
     },
 };
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
@@ -72,9 +72,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         // extrapolation_aux only need to init once
         let extrapolation_aux = (1..max_degree)
             .map(|degree| {
-                let points = (0..1 + degree as u64)
-                    .map(E::from_canonical_u64)
-                    .collect::<Vec<_>>();
+                let points = (0..1 + degree as u64).map(E::from_u64).collect::<Vec<_>>();
                 let weights = barycentric_weights(&points);
                 (points, weights)
             })
@@ -447,7 +445,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
                     .map(|i| {
                         let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                        let at = E::from_canonical_u64((products.len() + 1 + i) as u64);
+                        let at = E::from_u64((products.len() + 1 + i) as u64);
                         serial_extrapolate(points, weights, &sum, &at)
                     })
                     .collect::<Vec<_>>();
@@ -595,9 +593,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             poly: polynomial,
             extrapolation_aux: (1..max_degree)
                 .map(|degree| {
-                    let points = (0..1 + degree as u64)
-                        .map(E::from_canonical_u64)
-                        .collect::<Vec<_>>();
+                    let points = (0..1 + degree as u64).map(E::from_u64).collect::<Vec<_>>();
                     let weights = barycentric_weights(&points);
                     (points, weights)
                 })
@@ -709,7 +705,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         .into_par_iter()
                         .map(|i| {
                             let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                            let at = E::from_canonical_u64((products.len() + 1 + i) as u64);
+                            let at = E::from_u64((products.len() + 1 + i) as u64);
                             extrapolate(points, weights, &sum, &at)
                         })
                         .collect::<Vec<_>>();

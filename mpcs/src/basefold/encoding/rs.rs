@@ -9,7 +9,7 @@ use crate::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use p3_field::{Field, FieldAlgebra, PrimeField, TwoAdicField};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField, TwoAdicField};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -317,7 +317,7 @@ where
             gamma_powers.push(gamma_powers[i - 1].square());
             gamma_powers_inv.push(gamma_powers_inv[i - 1].square());
         }
-        let inv_of_two = E::BaseField::from_canonical_u64(2).inverse();
+        let inv_of_two = E::BaseField::from_u64(2).inverse();
         gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
         pp.fft_root_table
             .truncate(max_message_size_log + Spec::get_rate_log());
@@ -559,9 +559,8 @@ mod tests {
     fn test_naive_fft() {
         let num_vars = 5;
 
-        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
-            .map(GoldilocksExt2::from_canonical_u64)
-            .collect();
+        let poly: Vec<GoldilocksExt2> =
+            (0..(1 << num_vars)).map(GoldilocksExt2::from_u64).collect();
         let mut poly2 = FieldType::Ext(poly.clone());
 
         let naive = naive_fft::<GoldilocksExt2>(&poly, 1, Goldilocks::ONE);
@@ -627,9 +626,8 @@ mod tests {
     fn test_ifft() {
         let num_vars = 5;
 
-        let poly: Vec<GoldilocksExt2> = (0..(1 << num_vars))
-            .map(GoldilocksExt2::from_canonical_u64)
-            .collect();
+        let poly: Vec<GoldilocksExt2> =
+            (0..(1 << num_vars)).map(GoldilocksExt2::from_u64).collect();
         let mut poly = FieldType::Ext(poly);
         let original = poly.clone();
 
@@ -677,14 +675,14 @@ mod tests {
     pub fn test_colinearity() {
         let num_vars = 10;
 
-        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_canonical_u64).collect();
+        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_u64).collect();
         let poly = FieldType::Ext(poly);
 
         let pp = <Code as EncodingScheme<E>>::setup(num_vars);
         let (pp, _) = Code::trim(pp, num_vars).unwrap();
         let mut codeword = Code::encode(&pp, &poly);
         reverse_index_bits_in_place_field_type(&mut codeword);
-        let challenge = E::from_canonical_u64(2);
+        let challenge = E::from_u64(2);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
         let codeword = match codeword {
             FieldType::Ext(coeffs) => coeffs,
@@ -715,7 +713,7 @@ mod tests {
     pub fn test_low_degree() {
         let num_vars = 10;
 
-        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_canonical_u64).collect();
+        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_u64).collect();
         let poly = FieldType::Ext(poly);
 
         let pp = <Code as EncodingScheme<E>>::setup(num_vars);
@@ -781,7 +779,7 @@ mod tests {
             "check low degree of (left-right)*omega^(-i)",
         );
 
-        let challenge = E::from_canonical_u64(2);
+        let challenge = E::from_u64(2);
         let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
         let c_fold = folded_codeword[0];
         let c_fold1 = folded_codeword[folded_codeword.len() >> 1];
@@ -807,15 +805,15 @@ mod tests {
         // So the folded value should be equal to
         // (gamma^{-1} * alpha * (c0 - c_mid) + (c0 + c_mid)) / 2
         assert_eq!(
-            c_fold * F::GENERATOR * F::from_canonical_u64(2),
+            c_fold * F::GENERATOR * F::from_u64(2),
             challenge * (c0 - c_mid) + (c0 + c_mid) * F::GENERATOR
         );
         assert_eq!(
-            c_fold * F::GENERATOR * F::from_canonical_u64(2),
+            c_fold * F::GENERATOR * F::from_u64(2),
             challenge * left_right_diff[0] + left_right_sum[0] * F::GENERATOR
         );
         assert_eq!(
-            c_fold * F::from_canonical_u64(2),
+            c_fold * F::from_u64(2),
             challenge * left_right_diff[0] * F::GENERATOR.inverse() + left_right_sum[0]
         );
 
@@ -845,7 +843,7 @@ mod tests {
             _ => panic!("Wrong field type"),
         };
         assert_eq!(
-            c_fold * F::from_canonical_u64(2),
+            c_fold * F::from_u64(2),
             left_right_diff[0] * b + left_right_sum[0]
         );
         for (i, (c, (diff, sum))) in folded_codeword_vec

@@ -9,7 +9,7 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,

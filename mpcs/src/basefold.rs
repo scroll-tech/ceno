@@ -594,7 +594,7 @@ where
             evals.iter().map(Evaluation::value),
             &evals
                 .iter()
-                .map(|eval| E::from_canonical_u64(1 << (num_vars - points[eval.point()].len())))
+                .map(|eval| E::from_u64(1 << (num_vars - points[eval.point()].len())))
                 .collect_vec(),
             &poly_iter_ext(&eq_xt).take(evals.len()).collect_vec(),
         );
@@ -646,7 +646,7 @@ where
                         &poly_iter_ext(poly).collect_vec(),
                         build_eq_x_r_vec(point).iter(),
                     ) * *scalar
-                        * E::from_canonical_u64(1 << (num_vars - poly.num_vars))
+                        * E::from_u64(1 << (num_vars - poly.num_vars))
                     // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
                 })
                 .sum::<E>();
@@ -977,7 +977,7 @@ where
             evals.iter().map(Evaluation::value),
             &evals
                 .iter()
-                .map(|eval| E::from_canonical_u64(1 << (num_vars - points[eval.point()].len())))
+                .map(|eval| E::from_u64(1 << (num_vars - points[eval.point()].len())))
                 .collect_vec(),
             &poly_iter_ext(&eq_xt).take(evals.len()).collect_vec(),
         );

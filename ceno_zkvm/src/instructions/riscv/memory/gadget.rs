@@ -10,7 +10,7 @@ use crate::{
 use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 
 pub struct MemWordChange<const N_ZEROS: usize> {
     prev_limb_bytes: Vec<WitIn>,
@@ -76,7 +76,7 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
 
                 // extract the least significant byte from u16 limb
                 let rs2_limb_bytes = alloc_bytes(cb, "rs2_limb[0]", 1)?;
-                let u8_base_inv = E::BaseField::from_canonical_u64(1 << 8).inverse();
+                let u8_base_inv = E::BaseField::from_u64(1 << 8).inverse();
                 cb.assert_ux::<_, _, 8>(
                     || "rs2_limb[0].le_bytes[1]",
                     u8_base_inv.expr() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
@@ -162,41 +162,40 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
         match N_ZEROS {
             0 => {
                 for (&col, byte) in izip!(&self.prev_limb_bytes, prev_limb.to_le_bytes()) {
-                    set_val!(instance, col, E::BaseField::from_canonical_u8(byte));
+                    set_val!(instance, col, E::BaseField::from_u8(byte));
                     lk_multiplicity.assert_ux::<8>(byte as u64);
                 }
 
                 set_val!(
                     instance,
                     self.rs2_limb_bytes[0],
-                    E::BaseField::from_canonical_u8(rs2_limb.to_le_bytes()[0])
+                    E::BaseField::from_u8(rs2_limb.to_le_bytes()[0])
                 );
 
                 rs2_limb.to_le_bytes().into_iter().for_each(|byte| {
                     lk_multiplicity.assert_ux::<8>(byte as u64);
                 });
                 let change = if low_bits[0] == 0 {
-                    E::BaseField::from_canonical_u8(rs2_limb.to_le_bytes()[0])
-                        - E::BaseField::from_canonical_u8(prev_limb.to_le_bytes()[0])
+                    E::BaseField::from_u8(rs2_limb.to_le_bytes()[0])
+                        - E::BaseField::from_u8(prev_limb.to_le_bytes()[0])
                 } else {
-                    E::BaseField::from_canonical_u64((rs2_limb.to_le_bytes()[0] as u64) << 8)
-                        - E::BaseField::from_canonical_u64((prev_limb.to_le_bytes()[1] as u64) << 8)
+                    E::BaseField::from_u64((rs2_limb.to_le_bytes()[0] as u64) << 8)
+                        - E::BaseField::from_u64((prev_limb.to_le_bytes()[1] as u64) << 8)
                 };
                 let final_change = if low_bits[1] == 0 {
                     change
                 } else {
-                    E::BaseField::from_canonical_u64(1u64 << 16) * change
+                    E::BaseField::from_u64(1u64 << 16) * change
                 };
                 set_val!(instance, self.expected_changes[0], change);
                 set_val!(instance, self.expected_changes[1], final_change);
             }
             1 => {
                 let final_change = if low_bits[1] == 0 {
-                    E::BaseField::from_canonical_u16(rs2_limb)
-                        - E::BaseField::from_canonical_u16(prev_limb)
+                    E::BaseField::from_u16(rs2_limb) - E::BaseField::from_u16(prev_limb)
                 } else {
-                    E::BaseField::from_canonical_u64((rs2_limb as u64) << 16)
-                        - E::BaseField::from_canonical_u64((prev_limb as u64) << 16)
+                    E::BaseField::from_u64((rs2_limb as u64) << 16)
+                        - E::BaseField::from_u64((prev_limb as u64) << 16)
                 };
                 set_val!(instance, self.expected_changes[0], final_change);
             }
