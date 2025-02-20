@@ -454,7 +454,7 @@ mod tests {
     use ceno_emul::WORD_SIZE;
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks as F;
 
     #[test]
@@ -494,7 +494,7 @@ mod tests {
         let addr_padded_view = wit.column_padded(addr_column + cb.cs.num_witin as usize);
         // Expect addresses to proceed consecutively inside the padding as well
         let expected = successors(Some(addr_padded_view[0]), |idx| {
-            Some(*idx + F::from_canonical_u64(WORD_SIZE as u64))
+            Some(*idx + F::from_u64(WORD_SIZE as u64))
         })
         .take(next_pow2_instance_padding(wit.num_instances()))
         .collect::<Vec<_>>();

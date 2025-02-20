@@ -198,7 +198,7 @@ impl<E: ExtensionField> ClassicSumCheckProver<E> for CoefficientsProver<E> {
         // Initialize h(X) to zero
         let mut coeffs = Coefficients(FieldType::Ext(vec![E::ZERO; state.expression.degree() + 1]));
         // First, sum the constant over the hypercube and add to h(X)
-        coeffs += &(E::from_canonical_u64(state.size() as u64) * self.0);
+        coeffs += &(E::from_u64(state.size() as u64) * self.0);
         // Next, for every product of polynomials, where each product is assumed to be exactly 2
         // put this into h(X).
         if self.1.iter().all(|(_, products)| products.len() == 2) {
