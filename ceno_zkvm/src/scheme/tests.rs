@@ -28,7 +28,7 @@ use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentSche
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 
 use super::{

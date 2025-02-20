@@ -12,7 +12,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 pub struct EcallInstructionConfig {
     pub pc: WitIn,
@@ -51,7 +51,7 @@ impl EcallInstructionConfig {
         // read syscall_id from x5 and write return value to x5
         let (_, lt_x5_cfg) = cb.register_write(
             || "write x5",
-            E::BaseField::from_canonical_u64(Platform::reg_ecall() as u64),
+            E::BaseField::from_u64(Platform::reg_ecall() as u64),
             prev_x5_ts.expr(),
             ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),
