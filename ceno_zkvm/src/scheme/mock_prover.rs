@@ -36,6 +36,7 @@ use std::{
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
+use tiny_keccak::{Hasher, Keccak};
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -406,9 +407,14 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
         let mut rng = test_rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
-        let base64_encoded =
-            STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
-        let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
+        let mut keccak = Keccak::v256();
+        let mut filename_digest = [0u8; 32];
+        keccak.update(serde_json::to_string(&challenge).unwrap().as_bytes());
+        keccak.finalize(&mut filename_digest);
+        let file_path = format!(
+            "table_cache_dev_{:?}.json",
+            STANDARD_NO_PAD.encode(filename_digest)
+        );
         let table = match File::open(&file_path) {
             Ok(file) => {
                 let reader = BufReader::new(file);
