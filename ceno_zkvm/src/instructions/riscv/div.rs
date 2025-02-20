@@ -63,8 +63,8 @@
 //! booleans is equal to 1.
 
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, FieldInto, SmallField};
+use p3_goldilocks::Goldilocks;
 
 use super::{
     RIVInstruction,
@@ -149,7 +149,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
+        assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
 
         // 32-bit value from rs1
         let dividend = UInt::new_unchecked(|| "dividend", cb)?;
@@ -388,13 +388,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 is_dividend_signed_min.assign_instance(
                     instance,
-                    (dividend as u32 as u64).into(),
-                    (i32::MIN as u32 as u64).into(),
+                    (dividend as u32 as u64).into_f(),
+                    (i32::MIN as u32 as u64).into_f(),
                 )?;
                 is_divisor_neg_one.assign_instance(
                     instance,
-                    (divisor as u32 as u64).into(),
-                    (-1i32 as u32 as u64).into(),
+                    (divisor as u32 as u64).into_f(),
+                    (-1i32 as u32 as u64).into_f(),
                 )?;
 
                 let signed_div_overflow_b = dividend == i32::MIN && divisor == -1i32;
@@ -429,7 +429,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         config
             .is_divisor_zero
-            .assign_instance(instance, (divisor as u64).into())?;
+            .assign_instance(instance, (divisor as u64).into_f())?;
 
         config.is_remainder_lt_divisor.assign_instance(
             instance,
@@ -461,8 +461,7 @@ mod test {
         scheme::mock_prover::{MOCK_PC_START, MockProver},
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use ff_ext::ExtensionField;
-    use goldilocks::GoldilocksExt2 as GE;
+    use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
     use itertools::Itertools;
     use rand::Rng;
 

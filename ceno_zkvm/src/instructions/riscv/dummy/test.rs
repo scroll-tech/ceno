@@ -1,5 +1,5 @@
 use ceno_emul::{Change, InsnKind, KeccakSpec, StepRecord, encode_rv32};
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 
 use super::*;
 use crate::{

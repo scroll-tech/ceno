@@ -17,6 +17,7 @@ use crate::{
     set_val,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 /// LargeEcallDummy can handle any instruction and produce its effects,
 /// including multiple memory operations.

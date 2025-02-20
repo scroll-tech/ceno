@@ -1,6 +1,6 @@
-use ff::Field;
 use itertools::izip;
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
+use p3_field::{Field, FieldAlgebra};
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -27,7 +27,7 @@ use crate::{
 #[macro_export]
 macro_rules! set_val {
     ($ins:ident, $field:expr, $val:expr) => {
-        $ins[$field.id as usize] = $val.into();
+        $ins[$field.id as usize] = $val.into_f();
     };
 }
 
@@ -46,7 +46,7 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     padding_strategy: InstancePaddingStrategy,
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> RowMajorMatrix<T> {
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {
         RowMajorMatrix {
             values: (0..num_rows * num_col)
@@ -89,7 +89,9 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix
 
         let padding_iter = (num_instances..num_instances + num_padding_instances).map(|i| {
             match &self.padding_strategy {
-                InstancePaddingStrategy::Custom(fun) => T::from(fun(i as u64, column as u64)),
+                InstancePaddingStrategy::Custom(fun) => {
+                    T::from_canonical_u64(fun(i as u64, column as u64))
+                }
                 InstancePaddingStrategy::RepeatLast if num_instances > 0 => {
                     self[num_instances - 1][column]
                 }
@@ -107,7 +109,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + From<u64>> RowMajorMatrix
     }
 }
 
-impl<F: Field + From<u64>> RowMajorMatrix<F> {
+impl<F: Field + FieldAlgebra> RowMajorMatrix<F> {
     pub fn into_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         self,
     ) -> Vec<DenseMultilinearExtension<E>> {
