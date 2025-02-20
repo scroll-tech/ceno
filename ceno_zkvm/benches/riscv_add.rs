@@ -10,11 +10,11 @@ use ceno_zkvm::{
 use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
-use ff_ext::ff::Field;
-use goldilocks::{Goldilocks, GoldilocksExt2};
+use ff_ext::{FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
+use p3_goldilocks::Goldilocks;
 use transcript::{BasicTranscript, Transcript};
 
 cfg_if::cfg_if! {

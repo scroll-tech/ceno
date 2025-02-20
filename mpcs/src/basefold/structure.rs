@@ -285,6 +285,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -321,6 +325,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -356,6 +364,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct BasefoldCommitPhaseProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,

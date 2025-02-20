@@ -4,10 +4,11 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
-use ff_ext::ff::Field;
-use goldilocks::{Goldilocks, GoldilocksExt2};
+use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
+use p3_field::FieldAlgebra;
+use p3_goldilocks::Goldilocks;
 use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;

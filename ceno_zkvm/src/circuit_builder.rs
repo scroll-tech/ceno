@@ -12,6 +12,7 @@ use crate::{
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
+use p3_field::FieldAlgebra;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -268,9 +269,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
-            std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
-                .chain(record.clone())
-                .collect(),
+            std::iter::once(Expression::Constant(E::BaseField::from_canonical_u64(
+                rom_type as u64,
+            )))
+            .chain(record.clone())
+            .collect(),
         );
         assert_eq!(
             rlc_record.degree(),

@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use ff::Field;
 use ff_ext::ExtensionField;
 
 use crate::{
@@ -18,6 +17,8 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
+use ff_ext::FieldInto;
+use p3_field::FieldAlgebra;
 
 pub struct JalrConfig<E: ExtensionField> {
     pub i_insn: IInstructionConfig<E>,

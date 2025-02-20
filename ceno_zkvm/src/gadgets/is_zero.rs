@@ -1,5 +1,4 @@
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -65,10 +64,10 @@ impl IsZeroConfig {
         instance: &mut [F],
         x: F,
     ) -> Result<(), ZKVMError> {
-        let (is_zero, inverse) = if x.is_zero_vartime() {
+        let (is_zero, inverse) = if x.is_zero() {
             (F::ONE, F::ZERO)
         } else {
-            (F::ZERO, x.invert().expect("not zero"))
+            (F::ZERO, x.try_inverse().expect("not zero"))
         };
 
         if let Some(wit) = self.is_zero {

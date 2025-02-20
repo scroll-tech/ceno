@@ -110,7 +110,7 @@ mod tests {
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         tables::TableCircuit,
     };
-    use goldilocks::{GoldilocksExt2 as E, SmallField};
+    use ff_ext::{GoldilocksExt2 as E, SmallField};
 
     #[test]
     fn test_ops_pow_table_assign() {

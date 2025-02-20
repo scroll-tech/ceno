@@ -17,8 +17,7 @@ use crate::{
     scheme::mock_prover::{MOCK_PC_START, MockProver},
 };
 use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32};
-use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
+use ff_ext::{ExtensionField, GoldilocksExt2};
 use std::hash::Hash;
 
 fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
