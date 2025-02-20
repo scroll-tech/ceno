@@ -16,7 +16,7 @@ use crate::{
     witness::{LkMultiplicity, LkMultiplicityRaw, RowMajorMatrix},
 };
 use ark_std::test_rng;
-use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
@@ -412,7 +412,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
         keccak.finalize(&mut filename_digest);
         let file_path = format!(
             "table_cache_dev_{:?}.json",
-            STANDARD_NO_PAD.encode(filename_digest)
+            URL_SAFE_NO_PAD.encode(filename_digest)
         );
         let table = match File::open(&file_path) {
             Ok(file) => {
