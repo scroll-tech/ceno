@@ -116,7 +116,7 @@ fn main() {
     );
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
-        "Stack: {} bytes. Heap: {} bytes.",
+        "Stack: {:#x?} bytes. Heap: {:#x?} bytes.",
         args.stack_size,
         args.heap_size
     );
