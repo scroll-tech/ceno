@@ -74,4 +74,21 @@ mod macros {
             let _ = core::writeln!($crate::info_out(), $($arg)*);
         };
     }
+
+    #[macro_export]
+    macro_rules! debug_print {
+        ($($arg:tt)*) => {
+
+            // compiles only in debug mode
+            #[cfg(debug_assertions)]
+            {
+                let _ = core::writeln!($crate::info_out(), $($arg)*);
+            }
+            //compiles only in production mode
+            #[cfg(not(debug_assertions))]
+            {
+
+            }
+        }
+    }
 }
