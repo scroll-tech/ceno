@@ -99,14 +99,19 @@ impl Items {
     }
 }
 
-impl From<&CenoStdin> for Vec<u32> {
-    fn from(stdin: &CenoStdin) -> Vec<u32> {
+impl From<&CenoStdin> for Vec<u8> {
+    fn from(stdin: &CenoStdin) -> Vec<u8> {
         let mut items = Items::default();
         for item in &stdin.items {
             items.append(Item::from(item));
         }
-        items
-            .finalise()
+        items.finalise()
+    }
+}
+
+impl From<&CenoStdin> for Vec<u32> {
+    fn from(stdin: &CenoStdin) -> Vec<u32> {
+        Vec::<u8>::from(stdin)
             .into_iter()
             .tuples()
             .map(|(a, b, c, d)| u32::from_le_bytes([a, b, c, d]))
@@ -115,14 +120,15 @@ impl From<&CenoStdin> for Vec<u32> {
 }
 
 impl CenoStdin {
-    pub fn write_slice(&mut self, bytes: AlignedVec) {
+    pub fn write_slice(&mut self, bytes: AlignedVec) -> &mut Self {
         self.items.push(bytes);
+        self
     }
 
     pub fn write(
         &mut self,
         item: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
-    ) -> Result<(), Error> {
+    ) -> Result<&mut Self, Error> {
         to_bytes::<Error>(item).map(|bytes| self.write_slice(bytes))
     }
 }

@@ -3,7 +3,7 @@
 //! Iterate multiple times and log the state after each iteration.
 
 extern crate ceno_rt;
-use ceno_rt::{info_out, syscall_keccak_permute};
+use ceno_rt::{info_out, syscalls::syscall_keccak_permute};
 use core::slice;
 
 const ITERATIONS: usize = 3;

@@ -4,7 +4,7 @@ use ark_std::{rand::RngCore, test_rng};
 use ff::Field;
 use ff_ext::ExtensionField;
 use goldilocks::GoldilocksExt2;
-use multilinear_extensions::virtual_poly::VirtualPolynomial;
+use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
@@ -81,9 +81,22 @@ fn test_sumcheck_internal<E: ExtensionField>(
             .flattened_ml_extensions
             .par_iter_mut()
             .for_each(|mle| {
-                Arc::get_mut(mle)
-                    .unwrap()
-                    .fix_variables_in_place(&[p.elements]);
+                if num_variables == 1 {
+                    // first time fix variable should be create new instance
+                    if mle.num_vars() > 0 {
+                        *mle = mle.fix_variables(&[p.elements]).into();
+                    } else {
+                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                            0,
+                            mle.get_base_field_vec().to_vec(),
+                        ))
+                    }
+                } else {
+                    let mle = Arc::get_mut(mle).unwrap();
+                    if mle.num_vars() > 0 {
+                        mle.fix_variables_in_place(&[p.elements]);
+                    }
+                }
             });
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);
@@ -101,14 +114,13 @@ fn test_sumcheck_internal<E: ExtensionField>(
 }
 
 #[test]
-#[ignore = "temporarily not supporting degree > 2"]
 fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
 }
 
 fn test_trivial_polynomial_helper<E: ExtensionField>() {
     let nv = 1;
-    let num_multiplicands_range = (4, 13);
+    let num_multiplicands_range = (3, 5);
     let num_products = 5;
 
     test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
@@ -116,14 +128,13 @@ fn test_trivial_polynomial_helper<E: ExtensionField>() {
 }
 
 #[test]
-#[ignore = "temporarily not supporting degree > 2"]
 fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
 fn test_normal_polynomial_helper<E: ExtensionField>() {
     let nv = 12;
-    let num_multiplicands_range = (4, 9);
+    let num_multiplicands_range = (3, 5);
     let num_products = 5;
 
     test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
