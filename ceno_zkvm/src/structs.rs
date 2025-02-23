@@ -14,7 +14,7 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
@@ -22,6 +22,10 @@ use sumcheck::structs::IOPProverMessage;
 pub struct TowerProver;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct TowerProofs<E: ExtensionField> {
     pub proofs: Vec<Vec<IOPProverMessage<E>>>,
     // specs -> layers -> evals

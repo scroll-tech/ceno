@@ -124,7 +124,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use crate::{
         chip_handler::test::DebugIndex,

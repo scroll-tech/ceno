@@ -1,8 +1,7 @@
 use std::fmt::Display;
 
 use ceno_emul::{SWord, Word};
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::izip;
 
 use crate::{
@@ -16,6 +15,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 use super::SignedExtendConfig;
 
@@ -242,7 +242,13 @@ impl InnerLtConfig {
         lhs: u64,
         rhs: u64,
     ) -> Result<(), ZKVMError> {
-        self.assign_instance_field(instance, lkm, lhs.into(), rhs.into(), lhs < rhs)
+        self.assign_instance_field(
+            instance,
+            lkm,
+            F::from_canonical_u64(lhs),
+            F::from_canonical_u64(rhs),
+            lhs < rhs,
+        )
     }
 
     /// Assign instance values to this configuration where the ordering is
@@ -271,7 +277,7 @@ impl InnerLtConfig {
         is_lt: bool,
     ) -> Result<(), ZKVMError> {
         let range_offset: F = if is_lt {
-            Self::range(self.max_num_u16_limbs).into()
+            Self::range(self.max_num_u16_limbs).into_f()
         } else {
             F::ZERO
         };

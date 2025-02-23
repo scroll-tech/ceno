@@ -1,5 +1,5 @@
 use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
-use goldilocks::SmallField;
+use ff_ext::{FieldInto, SmallField};
 use itertools::Itertools;
 
 #[derive(Clone)]
@@ -106,7 +106,7 @@ impl UIntLtuInput<'_> {
         set_val!(instance, config.rhs_ne_byte, rhs_ne_byte);
         set_val!(instance, config.byte_diff_inv, {
             if flag {
-                (lhs_ne_byte - rhs_ne_byte).invert().unwrap()
+                (lhs_ne_byte - rhs_ne_byte).inverse()
             } else {
                 F::ONE
             }
