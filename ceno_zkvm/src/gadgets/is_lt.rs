@@ -242,13 +242,7 @@ impl InnerLtConfig {
         lhs: u64,
         rhs: u64,
     ) -> Result<(), ZKVMError> {
-        self.assign_instance_field(
-            instance,
-            lkm,
-            F::from_canonical_u64(lhs),
-            F::from_canonical_u64(rhs),
-            lhs < rhs,
-        )
+        self.assign_instance_field(instance, lkm, F::from_u64(lhs), F::from_u64(rhs), lhs < rhs)
     }
 
     /// Assign instance values to this configuration where the ordering is

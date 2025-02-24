@@ -1,7 +1,7 @@
 use ark_std::test_rng;
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use ff_ext::FromUniformBytes;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_goldilocks::Goldilocks;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Sample},

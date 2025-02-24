@@ -3,7 +3,7 @@ use std::iter::successors;
 use crate::expression::Expression;
 use ff_ext::ExtensionField;
 use itertools::izip;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 pub fn rlc_chip_record<E: ExtensionField>(
     records: Vec<Expression<E>>,
