@@ -37,8 +37,10 @@ pub fn polys2whir<E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
-    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::{FieldType, MultilinearExtension};
+    use p3_field::FieldAlgebra;
+    use p3_goldilocks::Goldilocks;
     use rand::rngs::OsRng;
 
     use crate::whir::field_wrapper::ExtensionFieldWrapper;
@@ -46,20 +48,19 @@ mod tests {
     use super::*;
 
     type E = GoldilocksExt2;
-    use ff::Field;
 
     #[test]
     fn test_evaluation_after_conversion() {
         let poly: DenseMultilinearExtension<E> =
             DenseMultilinearExtension::from_evaluations_vec(3, vec![
-                Goldilocks::from(1),
-                Goldilocks::from(2),
-                Goldilocks::from(3),
-                Goldilocks::from(4),
-                Goldilocks::from(1),
-                Goldilocks::from(2),
-                Goldilocks::from(3),
-                Goldilocks::from(4),
+                Goldilocks::from_canonical_u16(1),
+                Goldilocks::from_canonical_u16(2),
+                Goldilocks::from_canonical_u16(3),
+                Goldilocks::from_canonical_u16(4),
+                Goldilocks::from_canonical_u16(1),
+                Goldilocks::from_canonical_u16(2),
+                Goldilocks::from_canonical_u16(3),
+                Goldilocks::from_canonical_u16(4),
             ]);
         let mut coeffs = poly.clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs.evaluations);
@@ -68,19 +69,23 @@ mod tests {
             coeffs.evaluations,
             // 1 + X0 + 2X1
             FieldType::Base(vec![
-                Goldilocks::from(1),
-                Goldilocks::from(1),
-                Goldilocks::from(2),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
-                Goldilocks::from(0),
+                Goldilocks::from_canonical_u16(1),
+                Goldilocks::from_canonical_u16(1),
+                Goldilocks::from_canonical_u16(2),
+                Goldilocks::from_canonical_u16(0),
+                Goldilocks::from_canonical_u16(0),
+                Goldilocks::from_canonical_u16(0),
+                Goldilocks::from_canonical_u16(0),
+                Goldilocks::from_canonical_u16(0),
             ])
         );
 
         let whir_poly = poly2whir(&poly);
-        let point = [E::from(1), E::from(2), E::from(3)];
+        let point = [
+            E::from_canonical_u16(1),
+            E::from_canonical_u16(2),
+            E::from_canonical_u16(3),
+        ];
         let whir_point = point
             .iter()
             .map(|x| ExtensionFieldWrapper(*x))

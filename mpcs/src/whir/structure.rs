@@ -52,7 +52,7 @@ pub fn digest_to_bytes<Spec: WhirSpec<E>, E: ExtensionField>(
 
 pub(crate) type WhirInnerT<E, Spec> = WhirInner<FieldWrapper<E>, <Spec as WhirSpec<E>>::Spec>;
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize)]
 pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
     inner: WhirInnerT<E, Spec>,
 }
@@ -63,7 +63,7 @@ pub type WhirDefault<E> = Whir<E, WhirDefaultSpec>;
 mod tests {
     use super::*;
     use ark_ff::Field;
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
     use rand::Rng;
     use whir::{
         ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner},

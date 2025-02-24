@@ -103,6 +103,8 @@ pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
 pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord {
     const DEGREE: usize;
     const MULTIPLICATIVE_GENERATOR: Self;
+    const TWO_ADICITY: usize;
+    const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField;
     const TWO_ADIC_ROOT_OF_UNITY: Self;
     const NONRESIDUE: Self::BaseField;
 
@@ -124,7 +126,10 @@ mod impl_goldilocks {
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
         poseidon::{PoseidonField, new_array},
     };
-    use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField64};
+    use p3_field::{
+        Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField64, extension::BinomiallyExtendable,
+        field_to_array,
+    };
     use p3_goldilocks::{
         Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
         HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
@@ -212,10 +217,16 @@ mod impl_goldilocks {
 
     impl ExtensionField for GoldilocksExt2 {
         const DEGREE: usize = 2;
-        const MULTIPLICATIVE_GENERATOR: Self =
-            <GoldilocksExt2 as PrimeField>::MULTIPLICATIVE_GENERATOR;
-        const TWO_ADIC_ROOT_OF_UNITY: Self = <GoldilocksExt2 as PrimeField>::ROOT_OF_UNITY;
-        const NONRESIDUE: Self::BaseField = Goldilocks(7);
+        const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
+        const TWO_ADICITY: usize = 32;
+        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
+            Goldilocks::new(1_753_635_133_440_165_772);
+        const TWO_ADIC_ROOT_OF_UNITY: Self = GoldilocksExt2 {
+            value: field_to_array(Goldilocks::new(1_753_635_133_440_165_772)),
+        };
+        // non-residue is the value w such that the extension field is
+        // F[X]/(X^2 - w)
+        const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
 
         type BaseField = Goldilocks;
 

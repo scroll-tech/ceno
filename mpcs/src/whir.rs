@@ -180,7 +180,7 @@ mod tests {
     use crate::test_util::{
         gen_rand_poly_base, run_commit_open_verify, run_simple_batch_commit_open_verify,
     };
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
     use spec::WhirDefaultSpec;
 
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
