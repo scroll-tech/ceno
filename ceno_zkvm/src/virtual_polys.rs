@@ -176,7 +176,7 @@ mod tests {
         mle::IntoMLE,
         virtual_poly::{ArcMultilinearExtension, VPAuxInfo, VirtualPolynomial},
     };
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks;
     use sumcheck::structs::{IOPProverState, IOPVerifierState};
     use transcript::BasicTranscript as Transcript;
@@ -196,7 +196,7 @@ mod tests {
         let y = cb.create_witin(|| "y");
 
         let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
-            .map(|_| vec![Goldilocks::from_canonical_u64(1)].into_mle().into())
+            .map(|_| vec![Goldilocks::from_u64(1)].into_mle().into())
             .collect();
 
         let mut virtual_polys = VirtualPolynomials::new(1, 0);
@@ -231,7 +231,7 @@ mod tests {
     fn test_sumcheck_different_degree() {
         let max_num_vars = 3;
         let fn_eval = |fs: &[ArcMultilinearExtension<E>]| -> E {
-            let base_2 = Goldilocks::from_canonical_u64(2);
+            let base_2 = Goldilocks::from_u64(2);
 
             let evals = fs.iter().fold(
                 vec![Goldilocks::ONE; 1 << fs[0].num_vars()],

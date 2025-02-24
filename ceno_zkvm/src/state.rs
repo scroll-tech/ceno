@@ -6,7 +6,7 @@ use crate::{
     expression::{Expression, ToExpr},
     structs::RAMType,
 };
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 pub trait StateCircuit<E: ExtensionField> {
     fn initial_global_state(
@@ -24,9 +24,7 @@ impl<E: ExtensionField> StateCircuit<E> for GlobalState {
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Expression<E>, ZKVMError> {
         let states: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from_canonical_u64(
-                RAMType::GlobalState as u64,
-            )),
+            Expression::Constant(E::BaseField::from_u64(RAMType::GlobalState as u64)),
             circuit_builder.query_init_pc()?.expr(),
             circuit_builder.query_init_cycle()?.expr(),
         ];
@@ -38,9 +36,7 @@ impl<E: ExtensionField> StateCircuit<E> for GlobalState {
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<crate::expression::Expression<E>, crate::error::ZKVMError> {
         let states: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from_canonical_u64(
-                RAMType::GlobalState as u64,
-            )),
+            Expression::Constant(E::BaseField::from_u64(RAMType::GlobalState as u64)),
             circuit_builder.query_end_pc()?.expr(),
             circuit_builder.query_end_cycle()?.expr(),
         ];

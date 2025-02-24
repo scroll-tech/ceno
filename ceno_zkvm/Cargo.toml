@@ -46,6 +46,7 @@ parse-size = "1.1"
 rand.workspace = true
 tempfile = "3.14"
 thread_local = "1.1"
+tiny-keccak.workspace = true
 
 [dev-dependencies]
 cfg-if.workspace = true

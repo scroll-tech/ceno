@@ -56,7 +56,7 @@ macro_rules! impl_from_uniform_bytes_for_binomial_extension {
             type Bytes = [u8; <$base as FromUniformBytes>::Bytes::WIDTH * $degree];
 
             fn try_from_uniform_bytes(bytes: Self::Bytes) -> Option<Self> {
-                Some(p3_field::FieldExtensionAlgebra::from_base_slice(
+                Some(p3_field::BasedVectorSpace::from_basis_coefficients_slice(
                     &array_try_from_uniform_bytes::<
                         $base,
                         { <$base as FromUniformBytes>::Bytes::WIDTH },
@@ -122,13 +122,15 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
 }
 
 mod impl_goldilocks {
+    use std::marker::PhantomData;
+
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
         poseidon::{PoseidonField, new_array},
     };
     use p3_field::{
-        Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField64, extension::BinomiallyExtendable,
-        field_to_array,
+        BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64,
+        extension::BinomiallyExtendable, field_to_array,
     };
     use p3_goldilocks::{
         Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
@@ -138,13 +140,13 @@ mod impl_goldilocks {
 
     impl FieldFrom<u64> for Goldilocks {
         fn from_v(v: u64) -> Self {
-            Self::from_canonical_u64(v)
+            Self::from_u64(v)
         }
     }
 
     impl FieldFrom<u64> for GoldilocksExt2 {
         fn from_v(v: u64) -> Self {
-            Self::from_canonical_u64(v)
+            Self::from_u64(v)
         }
     }
 
@@ -182,7 +184,7 @@ mod impl_goldilocks {
         fn try_from_uniform_bytes(bytes: [u8; 8]) -> Option<Self> {
             let value = u64::from_le_bytes(bytes);
             let is_canonical = value < Self::ORDER_U64;
-            is_canonical.then(|| Self::from_canonical_u64(value))
+            is_canonical.then(|| Self::from_u64(value))
         }
     }
 
@@ -200,7 +202,7 @@ mod impl_goldilocks {
                     array[..chunk.len()].copy_from_slice(chunk);
                     unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u64) }
                 })
-                .map(Self::from_canonical_u64)
+                .map(Self::from_u64)
                 .collect::<Vec<_>>()
         }
 
@@ -223,6 +225,7 @@ mod impl_goldilocks {
             Goldilocks::new(1_753_635_133_440_165_772);
         const TWO_ADIC_ROOT_OF_UNITY: Self = GoldilocksExt2 {
             value: field_to_array(Goldilocks::new(1_753_635_133_440_165_772)),
+            _phantom: PhantomData,
         };
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
@@ -232,20 +235,20 @@ mod impl_goldilocks {
 
         fn from_bases(bases: &[Goldilocks]) -> Self {
             debug_assert_eq!(bases.len(), 2);
-            Self::from_base_slice(bases)
+            Self::from_basis_coefficients_slice(bases)
         }
 
         fn as_bases(&self) -> &[Goldilocks] {
-            self.as_base_slice()
+            self.as_basis_coefficients_slice()
         }
 
         /// Convert limbs into self
         fn from_limbs(limbs: &[Self::BaseField]) -> Self {
-            Self::from_base_slice(&limbs[0..2])
+            Self::from_bases(&limbs[0..2])
         }
 
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
-            self.as_base_slice()
+            self.as_basis_coefficients_slice()
                 .iter()
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()

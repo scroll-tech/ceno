@@ -7,7 +7,7 @@ use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use ff_ext::{ExtensionField as FfExtField, SmallField};
 use num_bigint::BigUint;
-use p3_field::{Field as FfField, FieldAlgebra};
+use p3_field::{Field as FfField, PrimeCharacteristicRing};
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -73,7 +73,7 @@ impl<E: FfExtField> Display for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> Distribution<BaseFieldWrapper<E>> for Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BaseFieldWrapper<E> {
-        BaseFieldWrapper(E::BaseField::from_canonical_u64(rng.gen::<u64>()))
+        BaseFieldWrapper(E::BaseField::from_u64(rng.gen::<u64>()))
     }
 }
 
@@ -121,7 +121,7 @@ impl<'a, E: FfExtField> DivAssign<&'a mut Self> for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> From<usize> for BaseFieldWrapper<E> {
     fn from(b: usize) -> Self {
-        Self(E::BaseField::from_canonical_usize(b.into()))
+        Self(E::BaseField::from_usize(b.into()))
     }
 }
 
@@ -174,7 +174,7 @@ impl<E: FfExtField> From<i128> for BaseFieldWrapper<E> {
 impl<E: FfExtField> AdditiveGroup for BaseFieldWrapper<E> {
     type Scalar = Self;
 
-    const ZERO: Self = Self(<E::BaseField as FieldAlgebra>::ZERO);
+    const ZERO: Self = Self(<E::BaseField as PrimeCharacteristicRing>::ZERO);
 
     fn double(&self) -> Self {
         self.double()
@@ -251,7 +251,7 @@ impl<E: FfExtField> ark_ff::PrimeField for BaseFieldWrapper<E> {
 impl<E: FfExtField> Field for BaseFieldWrapper<E> {
     type BasePrimeField = Self;
     const SQRT_PRECOMP: Option<ark_ff::SqrtPrecomputation<Self>> = None;
-    const ONE: Self = Self(<E::BaseField as FieldAlgebra>::ONE);
+    const ONE: Self = Self(<E::BaseField as PrimeCharacteristicRing>::ONE);
 
     fn extension_degree() -> u64 {
         1
@@ -600,7 +600,7 @@ impl<E: FfExtField> CanonicalDeserialize for BaseFieldWrapper<E> {
         compress: ark_serialize::Compress,
         validate: ark_serialize::Validate,
     ) -> Result<Self, ark_serialize::SerializationError> {
-        Ok(Self(E::BaseField::from_canonical_u64(
+        Ok(Self(E::BaseField::from_u64(
             <u64 as CanonicalDeserialize>::deserialize_with_mode(reader, compress, validate)
                 .unwrap(),
         )))
@@ -650,7 +650,7 @@ impl<E: FfExtField> CanonicalDeserializeWithFlags for BaseFieldWrapper<E> {
             .ok_or(ark_serialize::SerializationError::UnexpectedFlags)?;
 
         Ok((
-            Self(E::BaseField::from_canonical_u64(u64::from_le_bytes(
+            Self(E::BaseField::from_u64(u64::from_le_bytes(
                 masked_bytes[0..8]
                     .try_into()
                     .map_err(|_| ark_serialize::SerializationError::InvalidData)?,

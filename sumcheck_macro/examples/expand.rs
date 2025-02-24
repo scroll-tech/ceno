@@ -7,7 +7,7 @@ use ff_ext::GoldilocksExt2;
 use multilinear_extensions::{
     mle::FieldType, util::largest_even_below, virtual_poly::VirtualPolynomial,
 };
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use sumcheck::util::{AdditiveArray, ceil_log2};
 
 #[derive(Default)]

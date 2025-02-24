@@ -16,13 +16,13 @@ use crate::{
     witness::{LkMultiplicity, LkMultiplicityRaw, RowMajorMatrix},
 };
 use ark_std::test_rng;
-use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -35,6 +35,7 @@ use std::{
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
+use tiny_keccak::{Hasher, Keccak};
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -405,9 +406,14 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
         let mut rng = test_rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
-        let base64_encoded =
-            STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
-        let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
+        let mut keccak = Keccak::v256();
+        let mut filename_digest = [0u8; 32];
+        keccak.update(serde_json::to_string(&challenge).unwrap().as_bytes());
+        keccak.finalize(&mut filename_digest);
+        let file_path = format!(
+            "table_cache_dev_{:?}.json",
+            URL_SAFE_NO_PAD.encode(filename_digest)
+        );
         let table = match File::open(&file_path) {
             Ok(file) => {
                 let reader = BufReader::new(file);
@@ -1328,12 +1334,9 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![
-                Goldilocks::from_canonical_u64(3u64),
-                Goldilocks::from_canonical_u64(5u64),
-            ]
-            .into_mle()
-            .into(),
+            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
+                .into_mle()
+                .into(),
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
@@ -1365,9 +1368,7 @@ mod tests {
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                    Box::new(Expression::Constant(Goldilocks::from_canonical_u64(
-                        U5 as u64
-                    ))),
+                    Box::new(Expression::Constant(Goldilocks::from_u64(U5 as u64))),
                 )),
                 Box::new(Expression::Challenge(
                     0,

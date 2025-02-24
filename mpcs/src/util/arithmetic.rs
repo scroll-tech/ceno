@@ -10,7 +10,7 @@ pub use bh::BooleanHypercube;
 pub use hypercube::{
     interpolate_field_type_over_boolean_hypercube, interpolate_over_boolean_hypercube,
 };
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 use itertools::Itertools;
 
@@ -159,7 +159,7 @@ pub fn degree_2_eval<F: Field>(poly: &[F], point: F) -> F {
 pub fn base_from_raw_bytes<E: ExtensionField>(bytes: &[u8]) -> E::BaseField {
     let mut res = E::BaseField::ZERO;
     bytes.iter().for_each(|b| {
-        res += E::BaseField::from_canonical_u8(*b);
+        res += E::BaseField::from_u8(*b);
     });
     res
 }

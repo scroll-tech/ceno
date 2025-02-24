@@ -6,7 +6,7 @@ use ark_serialize::{
 use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use ff_ext::ExtensionField as FfExtField;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -165,7 +165,7 @@ impl<'a, E: FfExtField> DivAssign<&'a mut Self> for ExtensionFieldWrapper<E> {
 
 impl<E: FfExtField> From<usize> for ExtensionFieldWrapper<E> {
     fn from(b: usize) -> Self {
-        Self(E::from_canonical_usize(b.into()))
+        Self(E::from_usize(b.into()))
     }
 }
 
@@ -218,7 +218,7 @@ impl<E: FfExtField> From<i128> for ExtensionFieldWrapper<E> {
 impl<E: FfExtField> AdditiveGroup for ExtensionFieldWrapper<E> {
     type Scalar = Self;
 
-    const ZERO: Self = Self(<E as FieldAlgebra>::ZERO);
+    const ZERO: Self = Self(<E as PrimeCharacteristicRing>::ZERO);
 
     fn double(&self) -> Self {
         self.double()
@@ -238,7 +238,7 @@ impl<E: FfExtField> AdditiveGroup for ExtensionFieldWrapper<E> {
 impl<E: FfExtField> Field for ExtensionFieldWrapper<E> {
     type BasePrimeField = BaseFieldWrapper<E>;
     const SQRT_PRECOMP: Option<ark_ff::SqrtPrecomputation<Self>> = None;
-    const ONE: Self = Self(<E as FieldAlgebra>::ONE);
+    const ONE: Self = Self(<E as PrimeCharacteristicRing>::ONE);
 
     fn extension_degree() -> u64 {
         E::DEGREE as u64

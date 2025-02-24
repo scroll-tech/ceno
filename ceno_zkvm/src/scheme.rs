@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, fmt::Debug};
 use sumcheck::structs::IOPProverMessage;
@@ -103,19 +103,17 @@ impl PublicValues<u32> {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from_canonical_u64(
-                (self.exit_code & 0xffff) as u64,
-            )],
-            vec![E::BaseField::from_canonical_u64(
+            vec![E::BaseField::from_u64((self.exit_code & 0xffff) as u64)],
+            vec![E::BaseField::from_u64(
                 ((self.exit_code >> 16) & 0xffff) as u64,
             )],
-            vec![E::BaseField::from_canonical_u64(self.init_pc as u64)],
-            vec![E::BaseField::from_canonical_u64(self.init_cycle as u64)],
-            vec![E::BaseField::from_canonical_u64(self.end_pc as u64)],
-            vec![E::BaseField::from_canonical_u64(self.end_cycle as u64)],
+            vec![E::BaseField::from_u64(self.init_pc as u64)],
+            vec![E::BaseField::from_u64(self.init_cycle as u64)],
+            vec![E::BaseField::from_u64(self.end_pc as u64)],
+            vec![E::BaseField::from_u64(self.end_cycle as u64)],
             self.public_io
                 .iter()
-                .map(|e| E::BaseField::from_canonical_u64(*e as u64))
+                .map(|e| E::BaseField::from_u64(*e as u64))
                 .collect(),
         ]
     }
