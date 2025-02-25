@@ -10,7 +10,6 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-ark-std.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 p3-field.workspace = true
@@ -18,6 +17,7 @@ p3-goldilocks.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 env_logger = "0.11"

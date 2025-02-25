@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -169,7 +168,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 #[cfg(test)]
 mod tests {
 
-    use ark_std::test_rng;
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
@@ -178,6 +176,7 @@ mod tests {
     };
     use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks;
+    use rand::rng;
     use sumcheck::structs::{IOPProverState, IOPVerifierState};
     use transcript::BasicTranscript as Transcript;
 
@@ -254,7 +253,7 @@ mod tests {
         let num_threads = 1;
         let mut transcript = Transcript::new(b"test");
 
-        let mut rng = test_rng();
+        let mut rng = rng();
 
         let f1: [ArcMultilinearExtension<E>; 2] = std::array::from_fn(|_| {
             (0..1 << (max_num_vars - 2))

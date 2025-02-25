@@ -1,4 +1,3 @@
-use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::virtual_poly::VPAuxInfo;
 use transcript::{Challenge, Transcript};
@@ -21,7 +20,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                 expected_evaluation: claimed_sum,
             };
         }
-        let start = start_timer!(|| "sum check verify");
 
         transcript.append_message(&aux_info.max_num_variables.to_le_bytes());
         transcript.append_message(&aux_info.max_degree.to_le_bytes());
@@ -38,13 +36,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
         let res = Self::check_and_generate_subclaim(&verifier_state, &claimed_sum);
 
-        end_timer!(start);
         res
     }
 
     /// Initialize the verifier's state.
     pub fn verifier_init(index_info: &VPAuxInfo<E>) -> Self {
-        let start = start_timer!(|| "sum check verifier init");
         let verifier_state = Self {
             round: 1,
             num_vars: index_info.max_num_variables,
@@ -53,7 +49,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             polynomials_received: Vec::with_capacity(index_info.max_num_variables),
             challenges: Vec::with_capacity(index_info.max_num_variables),
         };
-        end_timer!(start);
+
         verifier_state
     }
 
@@ -68,9 +64,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         prover_msg: &IOPProverMessage<E>,
         transcript: &mut impl Transcript<E>,
     ) -> Challenge<E> {
-        let start =
-            start_timer!(|| format!("sum check verify {}-th round and update state", self.round));
-
         assert!(
             !self.finished,
             "Incorrect verifier state: Verifier is already finished."
@@ -97,7 +90,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
             self.round += 1;
         }
 
-        end_timer!(start);
         challenge
     }
 
@@ -110,7 +102,6 @@ impl<E: ExtensionField> IOPVerifierState<E> {
     /// Otherwise, it is highly unlikely that those two will be equal.
     /// Larger field size guarantees smaller soundness error.
     pub(crate) fn check_and_generate_subclaim(&self, asserted_sum: &E) -> SumCheckSubClaim<E> {
-        let start = start_timer!(|| "sum check check and generate subclaim");
         if !self.finished {
             panic!("Incorrect verifier state: Verifier has not finished.",);
         }
@@ -158,7 +149,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                 );
             }
         }
-        end_timer!(start);
+
         SumCheckSubClaim {
             point: self.challenges.clone(),
             // the last expected value (not checked within this function) will be included in the

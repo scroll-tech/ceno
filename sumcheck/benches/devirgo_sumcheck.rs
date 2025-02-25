@@ -3,10 +3,10 @@
 
 use std::{array, time::Duration};
 
-use ark_std::test_rng;
 use criterion::*;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::Itertools;
+use rand::rng;
 use sumcheck::{structs::IOPProverState, util::ceil_log2};
 
 use multilinear_extensions::{
@@ -42,7 +42,7 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
 fn prepare_input<'a, E: ExtensionField>(
     nv: usize,
 ) -> (E, VirtualPolynomial<'a, E>, Vec<VirtualPolynomial<'a, E>>) {
-    let mut rng = test_rng();
+    let mut rng = rng();
     let max_thread_id = max_usable_threads();
     let size_log2 = ceil_log2(max_thread_id);
     let fs: [ArcMultilinearExtension<'a, E>; NUM_DEGREE] = array::from_fn(|_| {

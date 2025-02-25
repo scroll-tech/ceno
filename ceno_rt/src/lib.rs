@@ -1,7 +1,7 @@
 #![deny(clippy::cargo)]
 #![feature(strict_overflow_ops)]
 #![feature(linkage)]
-use getrandom::{Error, register_custom_getrandom};
+use getrandom::Error;
 
 #[cfg(target_arch = "riscv32")]
 use core::arch::{asm, global_asm};
@@ -80,7 +80,17 @@ pub fn my_get_random(buf: &mut [u8]) -> Result<(), Error> {
     unsafe { sys_rand(buf.as_mut_ptr(), buf.len()) };
     Ok(())
 }
-register_custom_getrandom!(my_get_random);
+
+#[no_mangle]
+unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), Error> {
+    let buf = unsafe {
+        // fill the buffer with zeros
+        core::ptr::write_bytes(dest, 0, len);
+        // create mutable byte slice
+        core::slice::from_raw_parts_mut(dest, len)
+    };
+    my_get_random(buf)
+}
 
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]

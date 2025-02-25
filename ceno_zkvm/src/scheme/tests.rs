@@ -16,7 +16,6 @@ use crate::{
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
-use ark_std::test_rng;
 use ceno_emul::{
     CENO_PLATFORM,
     InsnKind::{ADD, ECALL},
@@ -29,6 +28,7 @@ use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
 use p3_field::PrimeCharacteristicRing;
+use rand::rng;
 use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 
 use super::{
@@ -315,7 +315,7 @@ fn test_single_add_instance_e2e() {
 fn test_tower_proof_various_prod_size() {
     fn _test_tower_proof_prod_size_2(leaf_layer_size: usize) {
         let num_vars = ceil_log2(leaf_layer_size);
-        let mut rng = test_rng();
+        let mut rng = rng();
         type E = GoldilocksExt2;
         let mut transcript = BasicTranscript::new(b"test_tower_proof");
         let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)

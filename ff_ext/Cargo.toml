@@ -14,5 +14,5 @@ p3-field.workspace = true
 p3-goldilocks.workspace = true
 p3-poseidon2.workspace = true
 p3-symmetric.workspace = true
-rand_core.workspace = true
+rand.workspace = true
 serde.workspace = true

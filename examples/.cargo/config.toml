@@ -25,5 +25,7 @@ rustflags = [
   "-Zlocation-detail=none",
   "-C",
   "passes=lower-atomic",
+  "--cfg",
+  "getrandom_backend=\"custom\""
 ]
 target = "../ceno_rt/riscv32im-ceno-zkvm-elf.json"

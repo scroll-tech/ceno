@@ -10,7 +10,6 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-ark-std.workspace = true
 rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true

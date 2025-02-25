@@ -13,7 +13,7 @@ use crate::{
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
-use ark_std::iterable::Iterable;
+
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, enumerate};
 use p3_field::PrimeCharacteristicRing;

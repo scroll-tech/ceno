@@ -1,10 +1,10 @@
 use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 
 use crate::{op_mle, util::ceil_log2};
-use ark_std::{end_timer, rand::RngCore, start_timer};
 use core::hash::Hash;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3_field::{Field, PrimeCharacteristicRing};
+use rand::Rng;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -267,7 +267,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     }
 
     /// Generate a random evaluation of a multilinear poly
-    pub fn random(nv: usize, mut rng: &mut impl RngCore) -> Self {
+    pub fn random(nv: usize, mut rng: &mut impl Rng) -> Self {
         let eval = (0..1 << nv)
             .map(|_| E::BaseField::random(&mut rng))
             .collect();
@@ -281,9 +281,8 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     pub fn random_mle_list(
         nv: usize,
         degree: usize,
-        mut rng: &mut impl RngCore,
+        mut rng: &mut impl Rng,
     ) -> (Vec<ArcDenseMultilinearExtension<E>>, E) {
-        let start = start_timer!(|| "sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
             multiplicands.push(Vec::with_capacity(1 << nv))
@@ -306,7 +305,6 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
             .collect();
 
-        end_timer!(start);
         (list, sum)
     }
 
@@ -314,10 +312,8 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     pub fn random_zero_mle_list(
         nv: usize,
         degree: usize,
-        mut rng: impl RngCore,
+        mut rng: impl Rng,
     ) -> Vec<ArcDenseMultilinearExtension<E>> {
-        let start = start_timer!(|| "sample random zero mle list");
-
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
             multiplicands.push(Vec::with_capacity(1 << nv))
@@ -334,7 +330,6 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
             .collect();
 
-        end_timer!(start);
         list
     }
 }

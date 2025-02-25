@@ -18,8 +18,6 @@ use crate::util::{
 };
 use transcript::Transcript;
 
-use ark_std::{end_timer, start_timer};
-
 use super::hash::write_digest_to_transcript;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -258,7 +256,6 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
     }
-    let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
     let log_v = log2_strict(values[0].len());
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
@@ -317,7 +314,7 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
 
         tree.push(oracle);
     }
-    end_timer!(timer);
+
     tree
 }
 
@@ -326,7 +323,6 @@ fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Dige
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
     }
-    let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
     let log_v = log2_strict(values[0].len());
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
@@ -362,7 +358,6 @@ fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Dige
 
         tree.push(oracle);
     }
-    end_timer!(timer);
     tree
 }
 
@@ -371,7 +366,7 @@ fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseFi
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
     }
-    let timer = start_timer!(|| format!("merkelize {} values", values[0].len() * values.len()));
+
     let log_v = log2_strict(values[0].len());
     let mut tree = Vec::with_capacity(log_v);
     // The first layer of hashes, half the number of leaves
@@ -407,7 +402,6 @@ fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseFi
 
         tree.push(oracle);
     }
-    end_timer!(timer);
     tree
 }
 

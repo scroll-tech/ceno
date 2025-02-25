@@ -6,7 +6,6 @@ use crate::{
     util::{field_type_index_mul_base, log2_strict, plonky2_util::reverse_bits},
     vec_mut,
 };
-use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField, TwoAdicField};
@@ -522,7 +521,6 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
 
 #[allow(unused)]
 fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) -> Vec<E> {
-    let timer = start_timer!(|| "Encode RSCode");
     let message_size = poly.len();
     let domain_size_bit = log2_strict(message_size * rate);
     let root = E::BaseField::two_adic_generator(domain_size_bit);
@@ -537,7 +535,6 @@ fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) ->
     res.iter_mut()
         .enumerate()
         .for_each(|(i, target)| *target = horner(poly, &E::from(domain[i])));
-    end_timer!(timer);
 
     res
 }

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{

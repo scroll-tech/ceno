@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use ark_std::test_rng;
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
@@ -8,6 +7,7 @@ use ceno_zkvm::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 use criterion::*;
+use rand::rng;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::{FromUniformBytes, GoldilocksExt2};
@@ -74,7 +74,7 @@ fn bench_add(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
                         // generate mock witness
-                        let mut rng = test_rng();
+                        let mut rng = rng();
                         let num_instances = 1 << instance_num_vars;
                         let wits_in = (0..num_witin as usize)
                             .map(|_| {

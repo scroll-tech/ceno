@@ -26,30 +26,28 @@ version = "0.1.0"
 
 [workspace.dependencies]
 anyhow = { version = "1.0", default-features = false }
-ark-std = "0.4"
 cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 itertools = "0.13"
 num-derive = "0.4"
 num-traits = "0.2"
-p3-challenger = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
-p3-field = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
-p3-goldilocks = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
-p3-mds = { git = "https://github.com/Plonky3/Plonky3.git", rev = "00da91c" }
-p3-poseidon = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
-p3-poseidon2 = { git = "https://github.com/plonky3/plonky3", rev = "00da91c" }
-p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "00da91c" }
+num-bigint = { version = "0.4", default-features = false }
+p3-challenger = { git = "https://github.com/plonky3/plonky3", rev = "973088b" }
+p3-field = { git = "https://github.com/plonky3/plonky3", rev = "973088b" }
+p3-goldilocks = { git = "https://github.com/plonky3/plonky3", rev = "973088b" }
+p3-mds = { git = "https://github.com/Plonky3/Plonky3.git", rev = "973088b" }
+p3-poseidon = { git = "https://github.com/plonky3/plonky3", rev = "973088b" }
+p3-poseidon2 = { git = "https://github.com/plonky3/plonky3", rev = "973088b" }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "973088b" }
 paste = "1"
-plonky2 = "0.2"
 poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
 proptest = "1"
-rand = "0.8"
-rand_chacha = { version = "0.3", features = ["serde1"] }
-rand_core = "0.6"
 rand_xorshift = "0.3"
+rand = "0.9"
+rand_chacha = "0.9"
 rayon = "1.10"
 secp = "0.4.1"
 serde = { version = "1.0", features = ["derive"] }

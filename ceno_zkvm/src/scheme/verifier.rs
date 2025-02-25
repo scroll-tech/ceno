@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 
 use itertools::{Itertools, chain, interleave, izip};
@@ -458,6 +457,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             },
         ]
         .iter()
+        .copied()
         .sum::<E>();
         if computed_evals != expected_evaluation {
             return Err(ZKVMError::VerifyError(
@@ -704,6 +704,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .sum::<E>(),
             ]
             .iter()
+            .copied()
             .sum::<E>();
             if computed_evals != expected_evaluation {
                 return Err(ZKVMError::VerifyError(

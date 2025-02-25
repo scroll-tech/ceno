@@ -8,7 +8,6 @@ use crate::{
         poly_index_ext,
     },
 };
-use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use num_integer::Integer;
@@ -236,11 +235,6 @@ where
         sum: E,
         transcript: &mut impl Transcript<E>,
     ) -> Result<(Vec<E>, Vec<E>, SumcheckProof<E, Self::RoundMessage>), Error> {
-        let _timer = start_timer!(|| {
-            let degree = virtual_poly.expression.degree();
-            format!("sum_check_prove-{num_vars}-{degree}")
-        });
-
         let mut state = ProverState::new(num_vars, sum, virtual_poly);
         let mut challenges = Vec::with_capacity(num_vars);
         let prover = P::new(&state);
@@ -254,9 +248,7 @@ where
         let mut prover_messages = Vec::with_capacity(num_vars);
 
         for _round in 0..num_vars {
-            let timer = start_timer!(|| format!("sum_check_prove_round-{_round}"));
             let msg = prover.prove_round(&state);
-            end_timer!(timer);
             msg.write(transcript)?;
 
             if cfg!(feature = "sanity-check") {
@@ -271,9 +263,7 @@ where
                 .elements;
             challenges.push(challenge);
 
-            let timer = start_timer!(|| format!("sum_check_next_round-{_round}"));
             state.next_round(msg.evaluate(&aux, &challenge), &challenge);
-            end_timer!(timer);
             prover_messages.push(msg);
         }
 

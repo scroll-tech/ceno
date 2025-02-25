@@ -7,7 +7,6 @@ mod basecode;
 pub use basecode::{Basecode, BasecodeDefaultSpec};
 
 mod rs;
-use plonky2::util::log2_strict;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -16,7 +15,10 @@ pub use rs::{RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table};
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{Error, util::arithmetic::interpolate2_weights};
+use crate::{
+    Error,
+    util::{arithmetic::interpolate2_weights, log2_strict},
+};
 
 pub trait EncodingProverParameters {
     fn get_max_message_size_log(&self) -> usize;

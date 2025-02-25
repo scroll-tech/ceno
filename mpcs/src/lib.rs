@@ -379,7 +379,7 @@ pub mod test_util {
     use multilinear_extensions::{
         mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
-    use rand::rngs::OsRng;
+    use rand::rng;
     #[cfg(test)]
     use transcript::BasicTranscript;
     use transcript::Transcript;
@@ -393,14 +393,16 @@ pub mod test_util {
     }
 
     pub fn gen_rand_poly_base<E: ExtensionField>(num_vars: usize) -> DenseMultilinearExtension<E> {
-        DenseMultilinearExtension::random(num_vars, &mut OsRng)
+        let mut rng = rng();
+        DenseMultilinearExtension::random(num_vars, &mut rng)
     }
 
     pub fn gen_rand_poly_ext<E: ExtensionField>(num_vars: usize) -> DenseMultilinearExtension<E> {
+        let mut rng = rng();
         DenseMultilinearExtension::from_evaluations_ext_vec(
             num_vars,
             (0..(1 << num_vars))
-                .map(|_| E::random(&mut OsRng))
+                .map(|_| E::random(&mut rng))
                 .collect_vec(),
         )
     }

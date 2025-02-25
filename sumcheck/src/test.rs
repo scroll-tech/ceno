@@ -18,7 +18,7 @@ fn test_sumcheck<E: ExtensionField>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) {
-    let mut rng = test_rng();
+    let mut rng = rng();
     let mut transcript = BasicTranscript::new(b"test");
 
     let (poly, asserted_sum) =
@@ -47,7 +47,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) {
-    let mut rng = test_rng();
+    let mut rng = rng();
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
     let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.max_num_variables);
@@ -155,7 +155,7 @@ fn test_extract_sum() {
 }
 
 fn test_extract_sum_helper<E: ExtensionField>() {
-    let mut rng = test_rng();
+    let mut rng = rng();
     let mut transcript = BasicTranscript::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
     #[allow(deprecated)]
@@ -187,7 +187,7 @@ impl DensePolynomial {
 
 #[test]
 fn test_interpolation() {
-    let mut prng = ark_std::test_rng();
+    let mut prng = ark_std::rng();
 
     // test a polynomial with 20 known points, i.e., with degree 19
     let poly = DensePolynomial::rand(20 - 1, &mut prng);

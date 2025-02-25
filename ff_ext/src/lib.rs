@@ -5,7 +5,7 @@ use p3_field::{
     extension::BinomialExtensionField,
 };
 use p3_goldilocks::Goldilocks;
-use rand_core::RngCore;
+use rand::Rng;
 use serde::Serialize;
 use std::{array::from_fn, iter::repeat_with};
 mod poseidon;
@@ -41,11 +41,11 @@ pub trait FromUniformBytes: Sized {
 
     fn try_from_uniform_bytes(bytes: Self::Bytes) -> Option<Self>;
 
-    fn random(mut rng: impl RngCore) -> Self {
+    fn random(mut rng: impl Rng) -> Self {
         Self::from_uniform_bytes(|bytes| rng.fill_bytes(bytes.as_mut()))
     }
 
-    fn random_vec(n: usize, mut rng: impl RngCore) -> Vec<Self> {
+    fn random_vec(n: usize, mut rng: impl Rng) -> Vec<Self> {
         repeat_with(|| Self::random(&mut rng)).take(n).collect()
     }
 }

@@ -15,7 +15,6 @@ use crate::{
     },
     witness::{LkMultiplicity, LkMultiplicityRaw, RowMajorMatrix},
 };
-use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
@@ -23,7 +22,7 @@ use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
 use p3_field::PrimeCharacteristicRing;
-use rand::thread_rng;
+use rand::rng;
 use std::{
     cmp::max,
     collections::{BTreeSet, HashMap, HashSet},
@@ -404,7 +403,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
-        let mut rng = test_rng();
+        let mut rng = rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
         let mut keccak = Keccak::v256();
         let mut filename_digest = [0u8; 32];
@@ -785,7 +784,7 @@ Hints:
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let challenges = [0u8; 2].map(|_| E::random(&mut rng));
 
         // Load lookup table.

@@ -4,10 +4,10 @@ use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
     util::{bit_decompose, create_uninit_vec, max_usable_threads},
 };
-use ark_std::{end_timer, rand::Rng, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use p3_field::Field;
+use rand::Rng;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -145,7 +145,6 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
 
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &VirtualPolynomial<'a, E>) {
-        let start = start_timer!(|| "virtual poly add");
         for (coeffient, products) in other.products.iter() {
             let cur: Vec<_> = products
                 .iter()
@@ -154,14 +153,11 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
 
             self.add_mle_list(cur, *coeffient);
         }
-        end_timer!(start);
     }
 
     /// Evaluate the virtual polynomial at point `point`.
     /// Returns an error is point.len() does not match `num_variables`.
     pub fn evaluate(&self, point: &[E]) -> E {
-        let start = start_timer!(|| "evaluation");
-
         assert_eq!(
             self.aux_info.max_num_variables,
             point.len(),
@@ -182,7 +178,6 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
             .map(|(c, p)| p.iter().map(|&i| evals[i]).product::<E>() * *c)
             .sum();
 
-        end_timer!(start);
         res
     }
 
@@ -193,13 +188,11 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         num_products: usize,
         mut rng: &mut impl Rng,
     ) -> (Self, E) {
-        let start = start_timer!(|| "sample random virtual polynomial");
-
         let mut sum = E::ZERO;
         let mut poly = VirtualPolynomial::new(nv);
         for _ in 0..num_products {
             let num_multiplicands =
-                rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
+                rng.random_range(num_multiplicands_range.0..num_multiplicands_range.1);
             let (product, product_sum) =
                 DenseMultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
             let product: Vec<ArcMultilinearExtension<E>> =
@@ -209,7 +202,6 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
             sum += product_sum * coefficient;
         }
 
-        end_timer!(start);
         (poly, sum)
     }
 
@@ -231,13 +223,11 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
 pub fn eq_eval<F: Field>(x: &[F], y: &[F]) -> F {
     assert_eq!(x.len(), y.len(), "x and y have different length");
 
-    let start = start_timer!(|| "eq_eval");
     let mut res = F::ONE;
     for (&xi, &yi) in x.iter().zip(y.iter()) {
         let xi_yi = xi * yi;
         res *= xi_yi + xi_yi - xi - yi + F::ONE;
     }
-    end_timer!(start);
     res
 }
 
@@ -370,13 +360,13 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
 #[cfg(test)]
 mod tests {
     use crate::virtual_poly::{build_eq_x_r_vec, build_eq_x_r_vec_sequential};
-    use ark_std::rand::thread_rng;
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
+    use rand::rng;
 
     #[test]
     fn test_build_eq() {
         env_logger::init();
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         for num_vars in 10..24 {
             let r = (0..num_vars)
