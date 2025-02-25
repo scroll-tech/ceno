@@ -14,7 +14,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use std::marker::PhantomData;
 
 pub struct ShiftImmConfig<E: ExtensionField> {
@@ -189,7 +189,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use super::{ShiftImmInstruction, SlliOp, SraiOp, SrliOp};
     use crate::{

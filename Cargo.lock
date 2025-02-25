@@ -433,9 +433,9 @@ dependencies = [
 
 [[package]]
 name = "blake2b_simd"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23285ad32269793932e830392f2fe2f83e26488fd3ec778883a93c8323735780"
+checksum = "06e903a20b159e944f91ec8499fe1e55651480c541ea0a584f5d967c49ad9d99"
 dependencies = [
  "arrayref",
  "arrayvec",
@@ -444,15 +444,16 @@ dependencies = [
 
 [[package]]
 name = "blake3"
-version = "1.5.5"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8ee0c1824c4dea5b5f81736aff91bae041d2c07ee1192bec91054e10e3e601e"
+checksum = "1230237285e3e10cde447185e8975408ae24deaa67205ce684805c25bc0c7937"
 dependencies = [
  "arrayref",
  "arrayvec",
  "cc",
  "cfg-if",
  "constant_time_eq",
+ "memmap2",
 ]
 
 [[package]]
@@ -583,17 +584,19 @@ dependencies = [
  "cfg-if",
  "clap",
  "criterion",
- "ff",
  "ff_ext",
  "generic_static",
  "glob",
- "goldilocks",
  "itertools 0.13.0",
  "mpcs",
  "multilinear_extensions",
  "num-traits",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-mds",
  "parse-size",
  "paste",
+ "poseidon",
  "pprof2",
  "prettytable-rs",
  "proptest",
@@ -607,6 +610,7 @@ dependencies = [
  "sumcheck",
  "tempfile",
  "thread_local",
+ "tiny-keccak",
  "tracing",
  "tracing-forest",
  "tracing-subscriber 0.3.19",
@@ -1069,9 +1073,11 @@ dependencies = [
 name = "ff_ext"
 version = "0.1.0"
 dependencies = [
- "ff",
- "goldilocks",
- "poseidon",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "rand_core",
  "serde",
 ]
 
@@ -1103,10 +1109,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "forward_ref"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8cbd1169bd7b4a0a20d92b9af7a7e0422888bd38a6f5ec29c1fd8c1558a272e"
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
+
+[[package]]
+name = "gcd"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d758ba1b47b00caf47f24925c0074ecb20d6dfcffe7f6d53395c0465674841a"
 
 [[package]]
 name = "generic-array"
@@ -1498,14 +1516,16 @@ dependencies = [
  "bitvec",
  "criterion",
  "ctr",
- "ff",
  "ff_ext",
  "generic-array",
- "goldilocks",
  "itertools 0.13.0",
  "multilinear_extensions",
  "num-bigint",
  "num-integer",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-mds",
+ "p3-symmetric",
  "plonky2",
  "poseidon",
  "rand",
@@ -1523,11 +1543,11 @@ version = "0.1.0"
 dependencies = [
  "ark-std 0.4.0",
  "env_logger",
- "ff",
  "ff_ext",
- "goldilocks",
  "itertools 0.13.0",
  "log",
+ "p3-field",
+ "p3-goldilocks",
  "rayon",
  "serde",
  "tracing",
@@ -1721,6 +1741,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nums"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf3c74f925fb8cfc49a8022f2afce48a0683b70f9e439885594e84c5edbf5b01"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "rand",
+]
+
+[[package]]
 name = "object"
 version = "0.36.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1746,6 +1778,143 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
+
+[[package]]
+name = "p3-challenger"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
+ "tracing",
+]
+
+[[package]]
+name = "p3-dft"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+ "tracing",
+]
+
+[[package]]
+name = "p3-field"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "forward_ref",
+ "itertools 0.14.0",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "nums",
+ "p3-maybe-rayon",
+ "p3-util",
+ "paste",
+ "rand",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-goldilocks"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "num-bigint",
+ "p3-dft",
+ "p3-field",
+ "p3-mds",
+ "p3-poseidon",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
+ "paste",
+ "rand",
+ "serde",
+]
+
+[[package]]
+name = "p3-matrix"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-util",
+ "rand",
+ "serde",
+ "tracing",
+ "transpose",
+]
+
+[[package]]
+name = "p3-maybe-rayon"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+
+[[package]]
+name = "p3-mds"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+]
+
+[[package]]
+name = "p3-poseidon"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "p3-field",
+ "p3-mds",
+ "p3-symmetric",
+ "rand",
+]
+
+[[package]]
+name = "p3-poseidon2"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "gcd",
+ "p3-field",
+ "p3-mds",
+ "p3-symmetric",
+ "rand",
+]
+
+[[package]]
+name = "p3-symmetric"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field",
+ "serde",
+]
+
+[[package]]
+name = "p3-util"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "parking_lot"
@@ -1893,8 +2062,13 @@ version = "0.1.0"
 dependencies = [
  "ark-std 0.4.0",
  "criterion",
- "ff",
- "goldilocks",
+ "ff_ext",
+ "p3-challenger",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-mds",
+ "p3-poseidon2",
+ "p3-symmetric",
  "plonky2",
  "rand",
  "serde",
@@ -2475,11 +2649,13 @@ dependencies = [
  "ark-std 0.4.0",
  "criterion",
  "crossbeam-channel",
- "ff",
  "ff_ext",
- "goldilocks",
  "itertools 0.13.0",
  "multilinear_extensions",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-mds",
+ "poseidon",
  "rayon",
  "serde",
  "sumcheck_macro",
@@ -2492,14 +2668,14 @@ name = "sumcheck_macro"
 version = "0.1.0"
 dependencies = [
  "ff_ext",
- "goldilocks",
  "itertools 0.13.0",
  "multilinear_extensions",
+ "p3-field",
  "proc-macro2",
  "quote",
  "rayon",
  "sumcheck",
- "syn 2.0.90",
+ "syn 2.0.96",
 ]
 
 [[package]]
@@ -2766,9 +2942,11 @@ name = "transcript"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "ff",
  "ff_ext",
- "goldilocks",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-mds",
+ "p3-symmetric",
  "poseidon",
  "serde",
 ]

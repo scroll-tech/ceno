@@ -100,7 +100,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             &|scalar| vec![(E::from(scalar), { vec![] })],
             &|challenge_id, pow, scalar, offset| {
                 let challenge = challenges[challenge_id as usize];
-                vec![(challenge.pow([pow as u64]) * scalar + offset, vec![])]
+                vec![(challenge.exp_u64(pow as u64) * scalar + offset, vec![])]
             },
             &|mut a, b| {
                 a.extend(b);
@@ -170,12 +170,14 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 mod tests {
 
     use ark_std::test_rng;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         mle::IntoMLE,
         virtual_poly::{ArcMultilinearExtension, VPAuxInfo, VirtualPolynomial},
     };
+    use p3_field::PrimeCharacteristicRing;
+    use p3_goldilocks::Goldilocks;
     use sumcheck::structs::{IOPProverState, IOPVerifierState};
     use transcript::BasicTranscript as Transcript;
 
@@ -184,7 +186,6 @@ mod tests {
         expression::{Expression, ToExpr},
         virtual_polys::VirtualPolynomials,
     };
-    use ff::Field;
     type E = GoldilocksExt2;
 
     #[test]
@@ -195,7 +196,7 @@ mod tests {
         let y = cb.create_witin(|| "y");
 
         let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
-            .map(|_| vec![Goldilocks::from(1)].into_mle().into())
+            .map(|_| vec![Goldilocks::from_u64(1)].into_mle().into())
             .collect();
 
         let mut virtual_polys = VirtualPolynomials::new(1, 0);
@@ -208,7 +209,7 @@ mod tests {
             wits_in.iter().collect_vec(),
             &expr,
             &[],
-            1.into(),
+            GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 2);
         assert!(virtual_polys.degree() == 2);
@@ -220,7 +221,7 @@ mod tests {
             wits_in.iter().collect_vec(),
             &expr,
             &[],
-            1.into(),
+            GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 1);
         assert!(virtual_polys.degree() == 3);
@@ -230,7 +231,7 @@ mod tests {
     fn test_sumcheck_different_degree() {
         let max_num_vars = 3;
         let fn_eval = |fs: &[ArcMultilinearExtension<E>]| -> E {
-            let base_2 = Goldilocks::from(2);
+            let base_2 = Goldilocks::from_u64(2);
 
             let evals = fs.iter().fold(
                 vec![Goldilocks::ONE; 1 << fs[0].num_vars()],
@@ -239,15 +240,15 @@ mod tests {
                         .iter_mut()
                         .zip(f.get_base_field_vec())
                         .for_each(|(e, v)| {
-                            *e *= v;
+                            *e *= *v;
                         });
                     evals
                 },
             );
 
             GoldilocksExt2::from(
-                evals.iter().sum::<Goldilocks>()
-                    * base_2.pow([(max_num_vars - fs[0].num_vars()) as u64]),
+                evals.iter().copied().sum::<Goldilocks>()
+                    * base_2.exp_u64((max_num_vars - fs[0].num_vars()) as u64),
             )
         };
         let num_threads = 1;

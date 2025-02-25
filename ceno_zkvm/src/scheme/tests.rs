@@ -1,21 +1,3 @@
-use std::marker::PhantomData;
-
-use ark_std::test_rng;
-use ceno_emul::{
-    CENO_PLATFORM,
-    InsnKind::{ADD, ECALL},
-    Platform, Program, StepRecord, VMState, encode_rv32,
-};
-use ff::Field;
-use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, WhirDefault};
-use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
-};
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
-
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -32,6 +14,21 @@ use crate::{
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
+use ark_std::test_rng;
+use ceno_emul::{
+    CENO_PLATFORM,
+    InsnKind::{ADD, ECALL},
+    Platform, Program, StepRecord, VMState, encode_rv32,
+};
+use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+use itertools::Itertools;
+use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use multilinear_extensions::{
+    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
+};
+use p3_field::PrimeCharacteristicRing;
+use std::marker::PhantomData;
+use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 
 use super::{
     PublicValues,
