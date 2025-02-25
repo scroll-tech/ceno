@@ -129,7 +129,7 @@ mod impl_goldilocks {
         poseidon::{PoseidonField, new_array},
     };
     use p3_field::{
-        BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64,
+        BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
         extension::BinomiallyExtendable, field_to_array,
     };
     use p3_goldilocks::{
@@ -220,13 +220,13 @@ mod impl_goldilocks {
     impl ExtensionField for GoldilocksExt2 {
         const DEGREE: usize = 2;
         const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
-        const TWO_ADICITY: usize = 32;
+        const TWO_ADICITY: usize = Goldilocks::TWO_ADICITY;
+        // Passing two-adacity itself to this function will get the root of unity
+        // with the largest order, i.e., order = 2^two-adacity.
         const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
-            Goldilocks::new(1_753_635_133_440_165_772);
-        const TWO_ADIC_ROOT_OF_UNITY: Self = GoldilocksExt2 {
-            value: field_to_array(Goldilocks::new(1_753_635_133_440_165_772)),
-            _phantom: PhantomData,
-        };
+            Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
+        const TWO_ADIC_ROOT_OF_UNITY: Self =
+            Goldilocks::ext_two_adic_generator_const(Goldilocks::TWO_ADICITY);
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
