@@ -129,7 +129,7 @@ mod impl_goldilocks {
     };
     use p3_field::{
         BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
-        extension::{BinomialExtensionField, BinomiallyExtendable, HasTwoAdicBinomialExtension},
+        extension::{BinomialExtensionField, BinomiallyExtendable},
     };
     use p3_goldilocks::{
         Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,

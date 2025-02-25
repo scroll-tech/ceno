@@ -24,7 +24,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, WhirDefault};
+use mpcs::{PolynomialCommitmentScheme, WhirDefault};
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
