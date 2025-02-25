@@ -13,6 +13,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 // Opcode: 1100011
 // Funct3:

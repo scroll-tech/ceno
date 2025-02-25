@@ -29,22 +29,23 @@ where
     type CommitmentChunk = WhirDigest<E, Spec>;
 
     fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
-        Ok(WhirInnerT::<E, Spec>::setup(poly_size))
+        WhirInnerT::<E, Spec>::setup(poly_size);
+        Ok(())
     }
 
     fn trim(
         param: Self::Param,
         _poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        Ok((param.clone(), param))
+        Ok((param, param))
     }
 
     fn commit(
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let witness = WhirInnerT::<E, Spec>::commit(&pp, &poly2whir(&poly))
-            .map_err(crate::Error::WhirError)?;
+        let witness =
+            WhirInnerT::<E, Spec>::commit(pp, &poly2whir(poly)).map_err(crate::Error::WhirError)?;
 
         Ok(witness)
     }
@@ -66,7 +67,7 @@ where
         _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         WhirInnerT::<E, Spec>::open(
-            &pp,
+            pp,
             comm,
             point
                 .iter()
@@ -106,7 +107,7 @@ where
         pp: &Self::ProverParam,
         polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let witness = WhirInnerT::<E, Spec>::batch_commit(&pp, &polys2whir(polys))
+        let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(polys))
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness)
@@ -132,7 +133,7 @@ where
         _transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         WhirInnerT::<E, Spec>::simple_batch_open(
-            &pp,
+            pp,
             comm,
             point
                 .iter()
@@ -180,7 +181,7 @@ mod tests {
     use crate::test_util::{
         gen_rand_poly_base, run_commit_open_verify, run_simple_batch_commit_open_verify,
     };
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
     use spec::WhirDefaultSpec;
 
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
@@ -188,7 +189,8 @@ mod tests {
     #[test]
     fn whir_commit_open_verify_goldilocks() {
         // TODO: Only support committing to base field polynomial now
-        for gen_rand_poly in [gen_rand_poly_base] {
+        {
+            let gen_rand_poly = gen_rand_poly_base;
             // Challenge is over extension field, poly over the base field
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 10, 11);
             // Test trivial proof with small num vars
@@ -199,7 +201,8 @@ mod tests {
     #[test]
     #[ignore = "For benchmarking and profiling only"]
     fn bench_whir_simple_batch_commit_open_verify_goldilocks() {
-        for gen_rand_poly in [gen_rand_poly_base] {
+        {
+            let gen_rand_poly = gen_rand_poly_base;
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 20, 21);
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
                 gen_rand_poly,
@@ -212,7 +215,8 @@ mod tests {
 
     #[test]
     fn whir_simple_batch_commit_open_verify_goldilocks() {
-        for gen_rand_poly in [gen_rand_poly_base] {
+        {
+            let gen_rand_poly = gen_rand_poly_base;
             // Both challenge and poly are over base field
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
                 gen_rand_poly,

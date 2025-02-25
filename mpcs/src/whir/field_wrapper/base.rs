@@ -5,10 +5,9 @@ use ark_serialize::{
 };
 use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use ff::{Field as FfField, PrimeField};
-use ff_ext::ExtensionField as FfExtField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField as FfExtField, SmallField};
 use num_bigint::BigUint;
+use p3_field::{Field as FfField, PrimeCharacteristicRing};
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -30,7 +29,7 @@ impl<E: FfExtField> BaseFieldWrapper<E> {
     }
 
     fn is_zero(&self) -> bool {
-        self.inner().is_zero_vartime()
+        self.inner().is_zero()
     }
 
     fn double(&self) -> Self {
@@ -74,31 +73,34 @@ impl<E: FfExtField> Display for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> Distribution<BaseFieldWrapper<E>> for Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BaseFieldWrapper<E> {
-        BaseFieldWrapper(E::BaseField::from(rng.gen::<u64>()))
+        BaseFieldWrapper(E::BaseField::from_u64(rng.gen::<u64>()))
     }
 }
 
 impl<E: FfExtField> Div for BaseFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, other: Self) -> Self {
-        Self(self.0 * other.0.invert().unwrap())
+        Self(self.0 * other.0.inverse())
     }
 }
 
 impl<'a, E: FfExtField> Div<&'a Self> for BaseFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: &'a Self) -> Self::Output {
-        Self(self.0 * rhs.0.invert().unwrap())
+        Self(self.0 * rhs.0.inverse())
     }
 }
 
 impl<'a, E: FfExtField> Div<&'a mut Self> for BaseFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: &'a mut Self) -> Self::Output {
-        Self(self.0 * rhs.0.invert().unwrap())
+        Self(self.0 * rhs.0.inverse())
     }
 }
 
@@ -120,11 +122,17 @@ impl<'a, E: FfExtField> DivAssign<&'a mut Self> for BaseFieldWrapper<E> {
     }
 }
 
+impl<E: FfExtField> From<usize> for BaseFieldWrapper<E> {
+    fn from(b: usize) -> Self {
+        Self(E::BaseField::from_usize(b))
+    }
+}
+
 macro_rules! impl_from_u_for_extension_field_wrapper {
     ($type: ty) => {
         impl<E: FfExtField> From<$type> for BaseFieldWrapper<E> {
             fn from(b: $type) -> Self {
-                Self(E::BaseField::from(b.into()))
+                Self::from(b as usize)
             }
         }
     };
@@ -147,9 +155,9 @@ macro_rules! impl_from_i_for_extension_field_wrapper {
         impl<E: FfExtField> From<$type> for BaseFieldWrapper<E> {
             fn from(b: $type) -> Self {
                 if b >= 0 {
-                    Self(E::BaseField::from(b as u64))
+                    Self::from(b as usize)
                 } else {
-                    -Self(E::BaseField::from(-b as u64))
+                    -Self::from((-b) as usize)
                 }
             }
         }
@@ -169,7 +177,7 @@ impl<E: FfExtField> From<i128> for BaseFieldWrapper<E> {
 impl<E: FfExtField> AdditiveGroup for BaseFieldWrapper<E> {
     type Scalar = Self;
 
-    const ZERO: Self = Self(<E::BaseField as FfField>::ZERO);
+    const ZERO: Self = Self(<E::BaseField as PrimeCharacteristicRing>::ZERO);
 
     fn double(&self) -> Self {
         self.double()
@@ -196,25 +204,25 @@ impl<E: FfExtField> FromStr for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> From<BigUint> for BaseFieldWrapper<E> {
     fn from(b: BigUint) -> Self {
-        Self(E::BaseField::from(b.to_u64_digits()[0]))
+        Self::from(b.to_u64_digits()[0])
     }
 }
 
-impl<E: FfExtField> Into<BigUint> for BaseFieldWrapper<E> {
-    fn into(self) -> BigUint {
-        BigUint::from(self.0.to_canonical_u64())
+impl<E: FfExtField> From<BaseFieldWrapper<E>> for BigUint {
+    fn from(val: BaseFieldWrapper<E>) -> Self {
+        BigUint::from(val.0.to_canonical_u64())
     }
 }
 
 impl<E: FfExtField> From<BigInt<1>> for BaseFieldWrapper<E> {
     fn from(b: BigInt<1>) -> Self {
-        Self(E::BaseField::from(b.0[0]))
+        Self::from(b.0[0])
     }
 }
 
-impl<E: FfExtField> Into<BigInt<1>> for BaseFieldWrapper<E> {
-    fn into(self) -> BigInt<1> {
-        BigInt([self.0.to_canonical_u64()])
+impl<E: FfExtField> From<BaseFieldWrapper<E>> for BigInt<1> {
+    fn from(val: BaseFieldWrapper<E>) -> Self {
+        BigInt([val.0.to_canonical_u64()])
     }
 }
 
@@ -229,10 +237,10 @@ impl<E: FfExtField> ark_ff::PrimeField for BaseFieldWrapper<E> {
     const MODULUS_BIT_SIZE: u32 = 64;
 
     const TRACE: Self::BigInt =
-        Self::BigInt::new([(E::BaseField::MODULUS_U64 - 1) / (1 << E::BaseField::S)]);
+        Self::BigInt::new([(E::BaseField::MODULUS_U64 - 1) / (1 << E::TWO_ADICITY)]);
 
     const TRACE_MINUS_ONE_DIV_TWO: Self::BigInt =
-        Self::BigInt::new([((E::BaseField::MODULUS_U64 - 1) / (1 << E::BaseField::S) - 1) / 2]);
+        Self::BigInt::new([((E::BaseField::MODULUS_U64 - 1) / (1 << E::TWO_ADICITY) - 1) / 2]);
 
     fn from_bigint(repr: Self::BigInt) -> Option<Self> {
         Some(Self::from(repr))
@@ -246,7 +254,7 @@ impl<E: FfExtField> ark_ff::PrimeField for BaseFieldWrapper<E> {
 impl<E: FfExtField> Field for BaseFieldWrapper<E> {
     type BasePrimeField = Self;
     const SQRT_PRECOMP: Option<ark_ff::SqrtPrecomputation<Self>> = None;
-    const ONE: Self = Self(<E::BaseField as FfField>::ONE);
+    const ONE: Self = Self(<E::BaseField as PrimeCharacteristicRing>::ONE);
 
     fn extension_degree() -> u64 {
         1
@@ -293,16 +301,12 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
     }
 
     fn inverse(&self) -> Option<Self> {
-        self.0.invert().map(Self).into_option()
+        Some(Self(self.0.inverse()))
     }
 
     fn inverse_in_place(&mut self) -> Option<&mut Self> {
-        if let Some(v) = self.0.invert().into_option() {
-            self.0 = v;
-            Some(self)
-        } else {
-            None
-        }
+        self.0 = self.0.inverse();
+        Some(self)
     }
 
     /// The Frobenius map has no effect in a prime field.
@@ -395,10 +399,6 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
         this
     }
 
-    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self {
-        Self(self.0.pow(exp))
-    }
-
     fn pow_with_table<S: AsRef<[u64]>>(powers_of_2: &[Self], exp: S) -> Option<Self> {
         let mut res = E::BaseField::ONE;
         for (pow, bit) in ark_ff::BitIteratorLE::without_trailing_zeros(exp).enumerate() {
@@ -411,9 +411,9 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
 }
 
 impl<E: FfExtField> ark_ff::FftField for BaseFieldWrapper<E> {
-    const GENERATOR: Self = Self(<E::BaseField as PrimeField>::MULTIPLICATIVE_GENERATOR);
-    const TWO_ADICITY: u32 = <E::BaseField as PrimeField>::S;
-    const TWO_ADIC_ROOT_OF_UNITY: Self = Self(<E::BaseField as PrimeField>::ROOT_OF_UNITY);
+    const GENERATOR: Self = Self(<E::BaseField as p3_field::Field>::GENERATOR);
+    const TWO_ADICITY: u32 = E::TWO_ADICITY as u32;
+    const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::BASE_TWO_ADIC_ROOT_OF_UNITY);
     const SMALL_SUBGROUP_BASE: Option<u32> = None;
     const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> = None;
     const LARGE_SUBGROUP_ROOT_OF_UNITY: Option<Self> = None;
@@ -603,7 +603,7 @@ impl<E: FfExtField> CanonicalDeserialize for BaseFieldWrapper<E> {
         compress: ark_serialize::Compress,
         validate: ark_serialize::Validate,
     ) -> Result<Self, ark_serialize::SerializationError> {
-        Ok(Self(E::BaseField::from(
+        Ok(Self(E::BaseField::from_u64(
             <u64 as CanonicalDeserialize>::deserialize_with_mode(reader, compress, validate)
                 .unwrap(),
         )))
@@ -630,7 +630,7 @@ impl<E: FfExtField> CanonicalSerializeWithFlags for BaseFieldWrapper<E> {
     }
 
     fn serialized_size_with_flags<F: Flags>(&self) -> usize {
-        ark_serialize::buffer_byte_size(64 as usize + F::BIT_SIZE)
+        ark_serialize::buffer_byte_size(64_usize + F::BIT_SIZE)
     }
 }
 
@@ -653,7 +653,7 @@ impl<E: FfExtField> CanonicalDeserializeWithFlags for BaseFieldWrapper<E> {
             .ok_or(ark_serialize::SerializationError::UnexpectedFlags)?;
 
         Ok((
-            Self(E::BaseField::from(u64::from_le_bytes(
+            Self(E::BaseField::from_u64(u64::from_le_bytes(
                 masked_bytes[0..8]
                     .try_into()
                     .map_err(|_| ark_serialize::SerializationError::InvalidData)?,

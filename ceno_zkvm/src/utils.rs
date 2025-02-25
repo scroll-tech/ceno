@@ -5,18 +5,17 @@ use std::{
     panic::{self, PanicHookInfo},
 };
 
-use ff::Field;
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::util::max_usable_threads;
+use p3_field::Field;
 use transcript::Transcript;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
-        F::from(x as u64)
+        F::from_u64(x as u64)
     } else {
-        -F::from((-x) as u64)
+        -F::from_u64((-x) as u64)
     }
 }
 
@@ -125,7 +124,7 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
         let mut running_product = vec![E::ZERO; b.len() + 1];
         running_product[b.len()] = E::ONE;
         for i in (0..b.len()).rev() {
-            let bit = E::from(((max_idx >> i) & 1) as u64);
+            let bit = E::from_u64(((max_idx >> i) & 1) as u64);
             running_product[i] = running_product[i + 1]
                 * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
         }
@@ -146,7 +145,7 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
         ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
     }
     for v in a.iter().skip(b.len()) {
-        ans *= E::ONE - v;
+        ans *= E::ONE - *v;
     }
     ans
 }
@@ -156,13 +155,13 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
 /// a, b, is constant
 /// the result M(r0, r1,... rn) = r0 + r1 * 2 + r2 * 2^2 + .... rn * 2^n
 pub fn eval_wellform_address_vec<E: ExtensionField>(offset: u64, scaled: u64, r: &[E]) -> E {
-    let (offset, scaled) = (E::from(offset), E::from(scaled));
+    let (offset, scaled) = (E::from_u64(offset), E::from_u64(scaled));
     offset
         + scaled
             * r.iter()
                 .scan(E::ONE, |state, x| {
                     let result = *x * *state;
-                    *state *= E::from(2); // Update the state for the next power of 2
+                    *state *= E::from_u64(2); // Update the state for the next power of 2
                     Some(result)
                 })
                 .sum::<E>()

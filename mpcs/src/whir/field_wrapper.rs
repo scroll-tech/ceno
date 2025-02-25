@@ -5,8 +5,8 @@ use ark_serialize::{
 };
 use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use ff::{Field as FfField, PrimeField};
 use ff_ext::ExtensionField as FfExtField;
+use p3_field::PrimeCharacteristicRing;
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -23,7 +23,7 @@ pub use base::BaseFieldWrapper;
 #[derive(
     PartialEq, PartialOrd, Eq, Ord, Default, Copy, Clone, Debug, Hash, Serialize, Deserialize,
 )]
-pub struct ExtensionFieldWrapper<E: FfExtField>(pub(crate) E);
+pub struct ExtensionFieldWrapper<E>(pub(crate) E);
 
 impl<E: FfExtField> ExtensionFieldWrapper<E> {
     pub fn inner(&self) -> &E {
@@ -31,7 +31,7 @@ impl<E: FfExtField> ExtensionFieldWrapper<E> {
     }
 
     fn is_zero(&self) -> bool {
-        self.inner().is_zero_vartime()
+        self.inner().is_zero()
     }
 
     fn double(&self) -> Self {
@@ -64,7 +64,7 @@ impl<E: FfExtField> ExtensionFieldWrapper<E> {
     /// and in complex squaring.
     #[inline(always)]
     fn mul_base_field_by_nonresidue_in_place(fe: &mut E::BaseField) -> &mut E::BaseField {
-        *fe *= &E::NONRESIDUE;
+        *fe *= E::NONRESIDUE;
         fe
     }
 
@@ -75,7 +75,7 @@ impl<E: FfExtField> ExtensionFieldWrapper<E> {
     fn sub_and_mul_base_field_by_nonresidue(y: &mut E::BaseField, x: &E::BaseField) {
         Self::mul_base_field_by_nonresidue_in_place(y);
         let mut result = *x;
-        result -= &*y;
+        result -= *y;
         *y = result;
     }
 }
@@ -124,24 +124,27 @@ impl<E: FfExtField> Distribution<ExtensionFieldWrapper<E>> for Standard {
 impl<E: FfExtField> Div for ExtensionFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, other: Self) -> Self {
-        Self(self.0 * other.0.invert().unwrap())
+        Self(self.0 * other.0.inverse())
     }
 }
 
 impl<'a, E: FfExtField> Div<&'a Self> for ExtensionFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: &'a Self) -> Self::Output {
-        Self(self.0 * rhs.0.invert().unwrap())
+        Self(self.0 * rhs.0.inverse())
     }
 }
 
 impl<'a, E: FfExtField> Div<&'a mut Self> for ExtensionFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: &'a mut Self) -> Self::Output {
-        Self(self.0 * rhs.0.invert().unwrap())
+        Self(self.0 * rhs.0.inverse())
     }
 }
 
@@ -163,11 +166,17 @@ impl<'a, E: FfExtField> DivAssign<&'a mut Self> for ExtensionFieldWrapper<E> {
     }
 }
 
+impl<E: FfExtField> From<usize> for ExtensionFieldWrapper<E> {
+    fn from(b: usize) -> Self {
+        Self(E::from_usize(b))
+    }
+}
+
 macro_rules! impl_from_u_for_extension_field_wrapper {
     ($type: ty) => {
         impl<E: FfExtField> From<$type> for ExtensionFieldWrapper<E> {
             fn from(b: $type) -> Self {
-                Self(E::from(E::BaseField::from(b.into())))
+                Self::from(b as usize)
             }
         }
     };
@@ -190,9 +199,9 @@ macro_rules! impl_from_i_for_extension_field_wrapper {
         impl<E: FfExtField> From<$type> for ExtensionFieldWrapper<E> {
             fn from(b: $type) -> Self {
                 if b >= 0 {
-                    Self(E::from(E::BaseField::from(b as u64)))
+                    Self::from(b as u64)
                 } else {
-                    -Self(E::from(E::BaseField::from(-b as u64)))
+                    -Self::from(-b as u64)
                 }
             }
         }
@@ -212,7 +221,7 @@ impl<E: FfExtField> From<i128> for ExtensionFieldWrapper<E> {
 impl<E: FfExtField> AdditiveGroup for ExtensionFieldWrapper<E> {
     type Scalar = Self;
 
-    const ZERO: Self = Self(<E as FfField>::ZERO);
+    const ZERO: Self = Self(<E as PrimeCharacteristicRing>::ZERO);
 
     fn double(&self) -> Self {
         self.double()
@@ -232,7 +241,7 @@ impl<E: FfExtField> AdditiveGroup for ExtensionFieldWrapper<E> {
 impl<E: FfExtField> Field for ExtensionFieldWrapper<E> {
     type BasePrimeField = BaseFieldWrapper<E>;
     const SQRT_PRECOMP: Option<ark_ff::SqrtPrecomputation<Self>> = None;
-    const ONE: Self = Self(<E as FfField>::ONE);
+    const ONE: Self = Self(<E as PrimeCharacteristicRing>::ONE);
 
     fn extension_degree() -> u64 {
         E::DEGREE as u64
@@ -284,20 +293,16 @@ impl<E: FfExtField> Field for ExtensionFieldWrapper<E> {
     }
 
     fn inverse(&self) -> Option<Self> {
-        self.0.invert().map(Self).into_option()
+        Some(Self(self.0.inverse()))
     }
 
     fn inverse_in_place(&mut self) -> Option<&mut Self> {
-        if let Some(v) = self.0.invert().into_option() {
-            self.0 = v;
-            Some(self)
-        } else {
-            None
-        }
+        self.0 = self.0.inverse();
+        Some(self)
     }
 
     fn frobenius_map_in_place(&mut self, power: usize) {
-        self.0 = self.0.pow([power as u64])
+        self.0 = self.0.exp_u64(power as u64)
     }
 
     fn mul_by_base_prime_field(&self, elem: &Self::BasePrimeField) -> Self {
@@ -344,10 +349,6 @@ impl<E: FfExtField> Field for ExtensionFieldWrapper<E> {
         this
     }
 
-    fn pow<S: AsRef<[u64]>>(&self, exp: S) -> Self {
-        Self(self.0.pow(exp))
-    }
-
     fn pow_with_table<S: AsRef<[u64]>>(powers_of_2: &[Self], exp: S) -> Option<Self> {
         let mut res = E::ONE;
         for (pow, bit) in ark_ff::BitIteratorLE::without_trailing_zeros(exp).enumerate() {
@@ -361,7 +362,7 @@ impl<E: FfExtField> Field for ExtensionFieldWrapper<E> {
 
 impl<E: FfExtField> ark_ff::FftField for ExtensionFieldWrapper<E> {
     const GENERATOR: Self = Self(<E as FfExtField>::MULTIPLICATIVE_GENERATOR);
-    const TWO_ADICITY: u32 = <E::BaseField as PrimeField>::S;
+    const TWO_ADICITY: u32 = E::TWO_ADICITY as u32;
     const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::TWO_ADIC_ROOT_OF_UNITY);
     const SMALL_SUBGROUP_BASE: Option<u32> = None;
     const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> = None;
