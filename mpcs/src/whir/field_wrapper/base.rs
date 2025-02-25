@@ -80,6 +80,7 @@ impl<E: FfExtField> Distribution<BaseFieldWrapper<E>> for Standard {
 impl<E: FfExtField> Div for BaseFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, other: Self) -> Self {
         Self(self.0 * other.0.inverse())
     }
@@ -88,6 +89,7 @@ impl<E: FfExtField> Div for BaseFieldWrapper<E> {
 impl<'a, E: FfExtField> Div<&'a Self> for BaseFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: &'a Self) -> Self::Output {
         Self(self.0 * rhs.0.inverse())
     }
@@ -96,6 +98,7 @@ impl<'a, E: FfExtField> Div<&'a Self> for BaseFieldWrapper<E> {
 impl<'a, E: FfExtField> Div<&'a mut Self> for BaseFieldWrapper<E> {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: &'a mut Self) -> Self::Output {
         Self(self.0 * rhs.0.inverse())
     }
