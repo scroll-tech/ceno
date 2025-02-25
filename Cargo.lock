@@ -1794,7 +1794,7 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -1806,7 +1806,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1819,7 +1819,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "forward_ref",
  "itertools 0.14.0",
@@ -1838,7 +1838,7 @@ dependencies = [
 [[package]]
 name = "p3-goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "num-bigint",
  "p3-dft",
@@ -1856,7 +1856,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1871,12 +1871,12 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "itertools 0.14.0",
  "p3-dft",
@@ -1890,7 +1890,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -1901,7 +1901,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "gcd",
  "p3-field",
@@ -1913,7 +1913,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1923,7 +1923,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/plonky3/plonky3?rev=00da91c#00da91ca9e6fd8a14242dd58b98294c0b828239e"
+source = "git+https://github.com/scroll-tech/plonky3?branch=feat%2Fwhir_field_wrapper#75f9243c6356dd788f54bae720e913cc87e61b0d"
 dependencies = [
  "serde",
 ]
