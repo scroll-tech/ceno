@@ -132,7 +132,7 @@ dependencies = [
  "ark-relations",
  "ark-serialize",
  "ark-snark",
- "ark-std 0.5.0",
+ "ark-std",
  "blake2",
  "derivative",
  "digest",
@@ -164,7 +164,7 @@ dependencies = [
  "ark-ff",
  "ark-poly",
  "ark-serialize",
- "ark-std 0.5.0",
+ "ark-std",
  "educe",
  "fnv",
  "hashbrown 0.15.2",
@@ -185,7 +185,7 @@ dependencies = [
  "ark-ff-asm",
  "ark-ff-macros",
  "ark-serialize",
- "ark-std 0.5.0",
+ "ark-std",
  "arrayvec",
  "digest",
  "educe",
@@ -229,7 +229,7 @@ dependencies = [
  "ahash",
  "ark-ff",
  "ark-serialize",
- "ark-std 0.5.0",
+ "ark-std",
  "educe",
  "fnv",
  "hashbrown 0.15.2",
@@ -243,7 +243,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec46ddc93e7af44bcab5230937635b06fb5744464dd6a7e7b083e80ebd274384"
 dependencies = [
  "ark-ff",
- "ark-std 0.5.0",
+ "ark-std",
  "tracing",
  "tracing-subscriber 0.2.25",
 ]
@@ -255,7 +255,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f4d068aaf107ebcd7dfb52bc748f8030e0fc930ac8e360146ca54c1203088f7"
 dependencies = [
  "ark-serialize-derive",
- "ark-std 0.5.0",
+ "ark-std",
  "arrayvec",
  "digest",
  "num-bigint",
@@ -282,18 +282,7 @@ dependencies = [
  "ark-ff",
  "ark-relations",
  "ark-serialize",
- "ark-std 0.5.0",
-]
-
-[[package]]
-name = "ark-std"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
-dependencies = [
- "colored",
- "num-traits",
- "rand",
+ "ark-std",
 ]
 
 [[package]]
@@ -316,7 +305,7 @@ checksum = "5cc137bb3271671a597ae79157030f88affe9fa7975207c3b781a01cb9ed0372"
 dependencies = [
  "ark-ec",
  "ark-ff",
- "ark-std 0.5.0",
+ "ark-std",
 ]
 
 [[package]]
@@ -577,7 +566,7 @@ dependencies = [
 name = "ceno_zkvm"
 version = "0.1.0"
 dependencies = [
- "ark-std 0.4.0",
+ "ark-std",
  "base64",
  "bincode",
  "ceno_emul",
@@ -1523,7 +1512,7 @@ dependencies = [
  "aes",
  "ark-ff",
  "ark-serialize",
- "ark-std 0.4.0",
+ "ark-std",
  "bincode",
  "bitvec",
  "criterion",
@@ -1553,7 +1542,7 @@ dependencies = [
 name = "multilinear_extensions"
 version = "0.1.0"
 dependencies = [
- "ark-std 0.4.0",
+ "ark-std",
  "env_logger",
  "ff_ext",
  "itertools 0.13.0",
@@ -2072,7 +2061,7 @@ dependencies = [
 name = "poseidon"
 version = "0.1.0"
 dependencies = [
- "ark-std 0.4.0",
+ "ark-std",
  "criterion",
  "ff_ext",
  "p3-challenger",
@@ -2658,7 +2647,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "sumcheck"
 version = "0.1.0"
 dependencies = [
- "ark-std 0.4.0",
+ "ark-std",
  "criterion",
  "crossbeam-channel",
  "ff_ext",
@@ -3170,7 +3159,7 @@ dependencies = [
  "ark-ff",
  "ark-poly",
  "ark-serialize",
- "ark-std 0.5.0",
+ "ark-std",
  "ark-test-curves",
  "blake2",
  "blake3",
