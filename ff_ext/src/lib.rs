@@ -122,7 +122,6 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
 }
 
 mod impl_goldilocks {
-    use std::marker::PhantomData;
 
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
@@ -130,7 +129,7 @@ mod impl_goldilocks {
     };
     use p3_field::{
         BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
-        extension::BinomiallyExtendable, field_to_array,
+        extension::{BinomialExtensionField, BinomiallyExtendable, HasTwoAdicBinomialExtension},
     };
     use p3_goldilocks::{
         Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
@@ -226,7 +225,9 @@ mod impl_goldilocks {
         const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
             Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
         const TWO_ADIC_ROOT_OF_UNITY: Self =
-            Goldilocks::ext_two_adic_generator_const(Goldilocks::TWO_ADICITY);
+            BinomialExtensionField::new_unchecked(Goldilocks::ext_two_adic_generator_const(
+                <Goldilocks as HasTwoAdicBinomialExtension<{ Self::DEGREE }>>::EXT_TWO_ADICITY,
+            ));
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
