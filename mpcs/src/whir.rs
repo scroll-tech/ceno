@@ -44,8 +44,8 @@ where
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let witness = WhirInnerT::<E, Spec>::commit(pp, &poly2whir(poly))
-            .map_err(crate::Error::WhirError)?;
+        let witness =
+            WhirInnerT::<E, Spec>::commit(pp, &poly2whir(poly)).map_err(crate::Error::WhirError)?;
 
         Ok(witness)
     }
