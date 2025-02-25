@@ -127,8 +127,8 @@ mod impl_goldilocks {
         poseidon::{PoseidonField, new_array},
     };
     use p3_field::{
-        BasedVectorSpace, PrimeCharacteristicRing, PrimeField64,
-        extension::{BinomiallyExtendable, HasTwoAdicBinomialExtension},
+        BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64,
+        extension::{BinomialExtensionField, BinomiallyExtendable, HasTwoAdicBinomialExtension},
     };
     use p3_goldilocks::{
         Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
@@ -217,10 +217,12 @@ mod impl_goldilocks {
 
     impl ExtensionField for GoldilocksExt2 {
         const DEGREE: usize = 2;
-        const MULTIPLICATIVE_GENERATOR: Self =
-            Self::from_basis_coefficients_fnGoldilocks::ext_two_adic_generator_const(0).into();
-        const TWO_ADIC_ROOT_OF_UNITY: Self = Goldilocks::EXT_TWO_ADICITY;
-        const NONRESIDUE: Self::BaseField = 7.into_f();
+        const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
+        const TWO_ADIC_ROOT_OF_UNITY: Self =
+            BinomialExtensionField::new_unchecked(Goldilocks::ext_two_adic_generator_const(
+                <Goldilocks as HasTwoAdicBinomialExtension<{ Self::DEGREE }>>::EXT_TWO_ADICITY,
+            ));
+        const NONRESIDUE: Self::BaseField = Goldilocks::W;
 
         type BaseField = Goldilocks;
 
