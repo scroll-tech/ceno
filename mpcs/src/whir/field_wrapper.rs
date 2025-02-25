@@ -165,7 +165,7 @@ impl<'a, E: FfExtField> DivAssign<&'a mut Self> for ExtensionFieldWrapper<E> {
 
 impl<E: FfExtField> From<usize> for ExtensionFieldWrapper<E> {
     fn from(b: usize) -> Self {
-        Self(E::from_usize(b.into()))
+        Self(E::from_usize(b))
     }
 }
 

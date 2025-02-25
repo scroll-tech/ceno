@@ -23,7 +23,7 @@ const BATCH_SIZE_LOG_START: usize = 6;
 const BATCH_SIZE_LOG_END: usize = 6;
 
 fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(c: &mut Criterion) {
-    let mut group = c.benchmark_group(format!("commit_open_verify_goldilocks",));
+    let mut group = c.benchmark_group("commit_open_verify_goldilocks".to_string());
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
@@ -87,7 +87,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(c: &m
 fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
     c: &mut Criterion,
 ) {
-    let mut group = c.benchmark_group(format!("simple_batch_commit_open_verify_goldilocks",));
+    let mut group = c.benchmark_group("simple_batch_commit_open_verify_goldilocks".to_string());
     group.sample_size(NUM_SAMPLES);
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {

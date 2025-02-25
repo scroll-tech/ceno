@@ -76,7 +76,7 @@ mod tests {
     fn whir_inner_commit_prove_verify() {
         let poly_size = 10;
         let num_coeffs = 1 << poly_size;
-        let pp = WhirInner::<F, WhirDefaultSpecInner>::setup(num_coeffs as usize);
+        WhirInner::<F, WhirDefaultSpecInner>::setup(num_coeffs as usize);
 
         let poly = CoefficientList::new(
             (0..num_coeffs)
@@ -84,7 +84,7 @@ mod tests {
                 .collect(),
         );
 
-        let witness = WhirInner::<F, WhirDefaultSpecInner>::commit(&pp, &poly).unwrap();
+        let witness = WhirInner::<F, WhirDefaultSpecInner>::commit(&(), &poly).unwrap();
         let comm = witness.commitment;
 
         let mut rng = rand::thread_rng();
@@ -92,7 +92,7 @@ mod tests {
         let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
 
         let proof =
-            WhirInner::<F, WhirDefaultSpecInner>::open(&pp, &witness, &point, &eval).unwrap();
-        WhirInner::<F, WhirDefaultSpecInner>::verify(&pp, &comm, &point, &eval, &proof).unwrap();
+            WhirInner::<F, WhirDefaultSpecInner>::open(&(), &witness, &point, &eval).unwrap();
+        WhirInner::<F, WhirDefaultSpecInner>::verify(&(), &comm, &point, &eval, &proof).unwrap();
     }
 }

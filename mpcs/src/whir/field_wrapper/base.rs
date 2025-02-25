@@ -121,7 +121,7 @@ impl<'a, E: FfExtField> DivAssign<&'a mut Self> for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> From<usize> for BaseFieldWrapper<E> {
     fn from(b: usize) -> Self {
-        Self(E::BaseField::from_usize(b.into()))
+        Self(E::BaseField::from_usize(b))
     }
 }
 
@@ -205,9 +205,9 @@ impl<E: FfExtField> From<BigUint> for BaseFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> Into<BigUint> for BaseFieldWrapper<E> {
-    fn into(self) -> BigUint {
-        BigUint::from(self.0.to_canonical_u64())
+impl<E: FfExtField> From<BaseFieldWrapper<E>> for BigUint {
+    fn from(val: BaseFieldWrapper<E>) -> Self {
+        BigUint::from(val.0.to_canonical_u64())
     }
 }
 
@@ -217,9 +217,9 @@ impl<E: FfExtField> From<BigInt<1>> for BaseFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> Into<BigInt<1>> for BaseFieldWrapper<E> {
-    fn into(self) -> BigInt<1> {
-        BigInt([self.0.to_canonical_u64()])
+impl<E: FfExtField> From<BaseFieldWrapper<E>> for BigInt<1> {
+    fn from(val: BaseFieldWrapper<E>) -> Self {
+        BigInt([val.0.to_canonical_u64()])
     }
 }
 
@@ -627,7 +627,7 @@ impl<E: FfExtField> CanonicalSerializeWithFlags for BaseFieldWrapper<E> {
     }
 
     fn serialized_size_with_flags<F: Flags>(&self) -> usize {
-        ark_serialize::buffer_byte_size(64 as usize + F::BIT_SIZE)
+        ark_serialize::buffer_byte_size(64_usize + F::BIT_SIZE)
     }
 }
 
