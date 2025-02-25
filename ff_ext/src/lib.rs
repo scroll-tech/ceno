@@ -122,7 +122,6 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
 }
 
 mod impl_goldilocks {
-
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
         poseidon::{PoseidonField, new_array},
