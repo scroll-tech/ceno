@@ -1250,6 +1250,21 @@ mod test {
     }
 
     #[test]
+    #[ignore = "For benchmarking and profiling only"]
+    fn bench_basefold_simple_batch_commit_open_verify_goldilocks() {
+        {
+            let gen_rand_poly = gen_rand_poly_base;
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 20, 21);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
+                gen_rand_poly,
+                20,
+                21,
+                64,
+            );
+        }
+    }
+
+    #[test]
     fn batch_commit_open_verify() {
         for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
             // Both challenge and poly are over base field

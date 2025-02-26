@@ -102,6 +102,11 @@ pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
 
 pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord {
     const DEGREE: usize;
+    const MULTIPLICATIVE_GENERATOR: Self;
+    const TWO_ADICITY: usize;
+    const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField;
+    const TWO_ADIC_ROOT_OF_UNITY: Self;
+    const NONRESIDUE: Self::BaseField;
 
     type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField + PoseidonField;
 
@@ -121,7 +126,10 @@ mod impl_goldilocks {
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
         poseidon::{PoseidonField, new_array},
     };
-    use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64};
+    use p3_field::{
+        BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
+        extension::{BinomialExtensionField, BinomiallyExtendable},
+    };
     use p3_goldilocks::{
         Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
         HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
@@ -209,6 +217,18 @@ mod impl_goldilocks {
 
     impl ExtensionField for GoldilocksExt2 {
         const DEGREE: usize = 2;
+        const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
+        const TWO_ADICITY: usize = Goldilocks::TWO_ADICITY;
+        // Passing two-adacity itself to this function will get the root of unity
+        // with the largest order, i.e., order = 2^two-adacity.
+        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
+            Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
+        const TWO_ADIC_ROOT_OF_UNITY: Self = BinomialExtensionField::new_unchecked(
+            Goldilocks::ext_two_adic_generator_const(Goldilocks::TWO_ADICITY),
+        );
+        // non-residue is the value w such that the extension field is
+        // F[X]/(X^2 - w)
+        const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
 
         type BaseField = Goldilocks;
 

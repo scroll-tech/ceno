@@ -24,7 +24,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{PolynomialCommitmentScheme, WhirDefault};
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
@@ -88,11 +88,11 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
         type E = GoldilocksExt2;
-        type Pcs = BasefoldDefault<E>;
+        type Pcs = WhirDefault<E>;
 
         // pcs setup
-        let param = Pcs::setup(1 << 13).unwrap();
-        let (pp, vp) = Pcs::trim(param, 1 << 13).unwrap();
+        Pcs::setup(1 << 8).unwrap();
+        let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
 
         // configure
         let name = TestCircuit::<E, RW, L>::name();
@@ -200,7 +200,7 @@ const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type Pcs = WhirDefault<E>;
 
     // set up program
     let program = Program::new(
@@ -210,8 +210,8 @@ fn test_single_add_instance_e2e() {
         Default::default(),
     );
 
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
