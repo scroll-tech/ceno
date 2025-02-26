@@ -1,7 +1,8 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use serde::{Deserialize, Serialize};
+use p3_field::PrimeCharacteristicRing;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, fmt::Debug};
 use sumcheck::structs::IOPProverMessage;
 
@@ -45,6 +46,10 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // tower evaluation at layer 1
     pub r_out_evals: Vec<[E; 2]>,
@@ -98,15 +103,17 @@ impl PublicValues<u32> {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from((self.exit_code & 0xffff) as u64)],
-            vec![E::BaseField::from(((self.exit_code >> 16) & 0xffff) as u64)],
-            vec![E::BaseField::from(self.init_pc as u64)],
-            vec![E::BaseField::from(self.init_cycle as u64)],
-            vec![E::BaseField::from(self.end_pc as u64)],
-            vec![E::BaseField::from(self.end_cycle as u64)],
+            vec![E::BaseField::from_u64((self.exit_code & 0xffff) as u64)],
+            vec![E::BaseField::from_u64(
+                ((self.exit_code >> 16) & 0xffff) as u64,
+            )],
+            vec![E::BaseField::from_u64(self.init_pc as u64)],
+            vec![E::BaseField::from_u64(self.init_cycle as u64)],
+            vec![E::BaseField::from_u64(self.end_pc as u64)],
+            vec![E::BaseField::from_u64(self.end_cycle as u64)],
             self.public_io
                 .iter()
-                .map(|e| E::BaseField::from(*e as u64))
+                .map(|e| E::BaseField::from_u64(*e as u64))
                 .collect(),
         ]
     }

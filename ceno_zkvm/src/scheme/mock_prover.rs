@@ -16,14 +16,13 @@ use crate::{
     witness::{LkMultiplicity, LkMultiplicityRaw, RowMajorMatrix},
 };
 use ark_std::test_rng;
-use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
-use ff::Field;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
-use goldilocks::{GoldilocksExt2, SmallField};
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
+use p3_field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -36,6 +35,7 @@ use std::{
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
+use tiny_keccak::{Hasher, Keccak};
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -406,9 +406,14 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
         let mut rng = test_rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
-        let base64_encoded =
-            STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
-        let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
+        let mut keccak = Keccak::v256();
+        let mut filename_digest = [0u8; 32];
+        keccak.update(serde_json::to_string(&challenge).unwrap().as_bytes());
+        keccak.finalize(&mut filename_digest);
+        let file_path = format!(
+            "table_cache_dev_{:?}.json",
+            URL_SAFE_NO_PAD.encode(filename_digest)
+        );
         let table = match File::open(&file_path) {
             Ok(file) => {
                 let reader = BufReader::new(file);
@@ -1248,9 +1253,9 @@ mod tests {
         set_val,
         witness::{LkMultiplicity, RowMajorMatrix},
     };
-    use ff::Field;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::mle::IntoMLE;
+    use p3_goldilocks::Goldilocks;
 
     #[derive(Debug)]
     struct AssertZeroCircuit {
@@ -1293,19 +1298,14 @@ mod tests {
         let _ = AssertZeroCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![Goldilocks::from(3), Goldilocks::from(500)]
-                .into_mle()
-                .into(),
-            vec![Goldilocks::from(4), Goldilocks::from(501)]
-                .into_mle()
-                .into(),
-            vec![Goldilocks::from(2), Goldilocks::from(2)]
-                .into_mle()
-                .into(),
-            vec![Goldilocks::from(3), Goldilocks::from(3)]
-                .into_mle()
-                .into(),
-        ];
+            (vec![3u64.into_f(), 500u64.into_f()] as Vec<Goldilocks>),
+            vec![4u64.into_f(), 501.into_f()],
+            vec![2.into_f(), 2.into_f()],
+            vec![3.into_f(), 3.into_f()],
+        ]
+        .into_iter()
+        .map(|f| f.into_mle().into())
+        .collect_vec();
 
         MockProver::assert_satisfied(&builder, &wits_in, &[], None, None);
     }
@@ -1334,12 +1334,12 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![Goldilocks::from(3u64), Goldilocks::from(5u64)]
+            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
                 .into_mle()
                 .into(),
         ];
 
-        let challenge = [1.into(), 1000.into()];
+        let challenge = [1.into_f(), 1000.into_f()];
         MockProver::assert_satisfied(&builder, &wits_in, &[], Some(challenge), None);
     }
 
@@ -1351,9 +1351,9 @@ mod tests {
 
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
-        let wits_in = vec![vec![Goldilocks::from(123)].into_mle().into()];
+        let wits_in = vec![(vec![123u64.into_f()] as Vec<Goldilocks>).into_mle().into()];
 
-        let challenge = [2.into(), 1000.into()];
+        let challenge = [2.into_f(), 1000.into_f()];
         let result = MockProver::run_with_challenge(&builder, &wits_in, challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
@@ -1368,7 +1368,7 @@ mod tests {
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                    Box::new(Expression::Constant(Goldilocks::from(U5 as u64))),
+                    Box::new(Expression::Constant(Goldilocks::from_u64(U5 as u64))),
                 )),
                 Box::new(Expression::Challenge(
                     0,
@@ -1377,7 +1377,7 @@ mod tests {
                     GoldilocksExt2::ZERO,
                 )),
             ),
-            evaluated: 123002.into(), // 123 * 1000 + 2
+            evaluated: 123002.into_f(), // 123 * 1000 + 2
             name: "test_lookup_error/assert_u5/assert u5".to_string(),
             inst_id: 0,
         }]);
@@ -1465,7 +1465,7 @@ mod tests {
             &builder,
             raw_witin,
             &[],
-            Some([1.into(), 1000.into()]),
+            Some([1.into_f(), 1000.into_f()]),
             None,
         );
     }
@@ -1498,7 +1498,7 @@ mod tests {
             &builder,
             raw_witin,
             &[],
-            Some([1.into(), 1000.into()]),
+            Some([1.into_f(), 1000.into_f()]),
             None,
         );
     }
@@ -1583,7 +1583,7 @@ mod tests {
             &builder,
             raw_witin,
             &[],
-            Some([1.into(), 1000.into()]),
+            Some([1.into_f(), 1000.into_f()]),
             None,
         );
     }
@@ -1617,7 +1617,7 @@ mod tests {
             &builder,
             raw_witin,
             &[],
-            Some([1.into(), 1000.into()]),
+            Some([1.into_f(), 1000.into_f()]),
             None,
         );
     }
