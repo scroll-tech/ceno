@@ -1,27 +1,36 @@
-use super::merkle_config::{Blake3ConfigWrapper, WhirMerkleConfigWrapper};
-use super::{Error, PolynomialCommitmentScheme};
-use crate::crypto::merkle_tree::blake3::{self as mt};
-use crate::parameters::{
-    default_max_pow, FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
+use super::{
+    Error, PolynomialCommitmentScheme,
+    merkle_config::{Blake3ConfigWrapper, WhirMerkleConfigWrapper},
 };
-use crate::poly_utils::{coeffs::CoefficientList, MultilinearPoint};
-use crate::whir::{
-    batch::Witnesses, committer::Committer, parameters::WhirConfig, prover::Prover,
-    verifier::Verifier, Statement, WhirProof,
+use crate::{
+    crypto::merkle_tree::blake3::{self as mt},
+    parameters::{
+        FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
+        default_max_pow,
+    },
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+    whir::{
+        Statement, WhirProof, batch::Witnesses, committer::Committer, parameters::WhirConfig,
+        prover::Prover, verifier::Verifier,
+    },
 };
 
 use ark_crypto_primitives::merkle_tree::Config;
 use ark_ff::FftField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use nimue::plugins::ark::{FieldChallenges, FieldWriter};
 pub use nimue::DefaultHash;
-use nimue::IOPattern;
+use nimue::{
+    IOPattern,
+    plugins::ark::{FieldChallenges, FieldWriter},
+};
 use nimue_pow::blake3::Blake3PoW;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::fmt::{self, Debug, Formatter};
-use std::marker::PhantomData;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::{
+    fmt::{self, Debug, Formatter},
+    marker::PhantomData,
+};
 
 pub trait WhirSpec<E: FftField>: Default + std::fmt::Debug + Clone {
     type MerkleConfigWrapper: WhirMerkleConfigWrapper<E>;
@@ -166,7 +175,7 @@ where
         let proof_size_bytes = &data[0..8];
         let proof_size = u64::from_le_bytes(proof_size_bytes.try_into().unwrap());
         let proof_bytes = &data[8..8 + proof_size as usize];
-        let proof = WhirProof::deserialize_compressed(&proof_bytes[..]).unwrap();
+        let proof = WhirProof::deserialize_compressed(&proof_bytes).unwrap();
         let transcript = data[8 + proof_size as usize..].to_vec();
         Ok(WhirProofWrapper { proof, transcript })
     }
@@ -299,7 +308,7 @@ where
         )
         .map_err(Error::ProofError)?;
         let ood_answers = witness.ood_answers();
-        if ood_answers.len() > 0 {
+        if !ood_answers.is_empty() {
             let mut ood_points = vec![<E as ark_ff::AdditiveGroup>::ZERO; ood_answers.len()];
             merlin
                 .fill_challenge_scalars(&mut ood_points)
@@ -313,7 +322,7 @@ where
         let prover = Prover(params);
         let statement = Statement {
             points: vec![MultilinearPoint(point.to_vec())],
-            evaluations: vec![eval.clone()],
+            evaluations: vec![*eval],
         };
 
         let proof = Spec::MerkleConfigWrapper::prove_with_merlin(
@@ -352,7 +361,7 @@ where
         )
         .map_err(Error::ProofError)?;
         let ood_answers = witness.ood_answers();
-        if ood_answers.len() > 0 {
+        if !ood_answers.is_empty() {
             let mut ood_points =
                 vec![<E as ark_ff::AdditiveGroup>::ZERO; ood_answers.len() / evals.len()];
             merlin
@@ -394,7 +403,7 @@ where
 
         let statement = Statement {
             points: vec![MultilinearPoint(point.to_vec())],
-            evaluations: vec![eval.clone()],
+            evaluations: vec![*eval],
         };
 
         let digest = Spec::MerkleConfigWrapper::verify_with_arthur(

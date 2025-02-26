@@ -1,8 +1,10 @@
 use std::{borrow::Borrow, marker::PhantomData};
 
 use super::{HashCounter, IdentityDigestConverter};
-use crate::whir::fs_utils::{DigestReader, DigestWriter};
-use crate::whir::iopattern::DigestIOPattern;
+use crate::whir::{
+    fs_utils::{DigestReader, DigestWriter},
+    iopattern::DigestIOPattern,
+};
 use ark_crypto_primitives::{
     crh::{CRHScheme, TwoToOneCRHScheme},
     merkle_tree::Config,
@@ -10,7 +12,9 @@ use ark_crypto_primitives::{
 };
 use ark_ff::Field;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use nimue::{Arthur, ByteIOPattern, ByteReader, ByteWriter, IOPattern, Merlin, ProofError, ProofResult};
+use nimue::{
+    Arthur, ByteIOPattern, ByteReader, ByteWriter, IOPattern, Merlin, ProofError, ProofResult,
+};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -139,13 +143,13 @@ impl<F: Field> DigestIOPattern<MerkleTreeParams<F>> for IOPattern {
     }
 }
 
-impl <F: Field> DigestWriter<MerkleTreeParams<F>> for Merlin {
+impl<F: Field> DigestWriter<MerkleTreeParams<F>> for Merlin {
     fn add_digest(&mut self, digest: Blake3Digest) -> ProofResult<()> {
         self.add_bytes(&digest.0).map_err(ProofError::InvalidIO)
     }
 }
 
-impl<'a, F: Field> DigestReader<MerkleTreeParams<F>> for Arthur<'a> {
+impl<F: Field> DigestReader<MerkleTreeParams<F>> for Arthur<'_> {
     fn read_digest(&mut self) -> ProofResult<Blake3Digest> {
         let mut digest = [0; 32];
         self.fill_next_bytes(&mut digest)?;
