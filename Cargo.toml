@@ -12,6 +12,7 @@ members = [
   "poseidon",
   "sumcheck",
   "transcript",
+  "whir",
 ]
 resolver = "2"
 
