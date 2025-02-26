@@ -2,6 +2,16 @@
 use core::arch::asm;
 
 pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
+pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;
+pub const SECP256K1_DOUBLE: u32 = 0x00_00_01_0B;
+pub const SECP256K1_DECOMPRESS: u32 = 0x00_00_01_0C;
+pub const SHA_EXTEND: u32 = 0x00_30_01_05;
+pub const BN254_ADD: u32 = 0x00_01_01_0E;
+pub const BN254_DOUBLE: u32 = 0x00_00_01_0F;
+pub const BN254_FP_ADD: u32 = 0x00_01_01_26;
+pub const BN254_FP_MUL: u32 = 0x00_01_01_28;
+pub const BN254_FP2_ADD: u32 = 0x00_01_01_29;
+pub const BN254_FP2_MUL: u32 = 0x00_01_01_2B;
 
 /// Based on https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/zkvm/entrypoint/src/syscalls/keccak_permute.rs
 /// Executes the Keccak256 permutation on the given state.
@@ -25,7 +35,6 @@ pub fn syscall_keccak_permute(state: &mut [u64; 25]) {
     unreachable!()
 }
 
-pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;
 /// Based on https://github.com/succinctlabs/sp1/blob/dbe622aa4a6a33c88d76298c2a29a1d7ef7e90df/crates/zkvm/entrypoint/src/syscalls/secp256k1.rs
 /// Adds two Secp256k1 points.
 ///
@@ -53,8 +62,6 @@ pub fn syscall_secp256k1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
     unreachable!()
 }
 
-pub const SECP256K1_DOUBLE: u32 = 0x00_00_01_0B;
-
 /// Based on: https://github.com/succinctlabs/sp1/blob/dbe622aa4a6a33c88d76298c2a29a1d7ef7e90df/crates/zkvm/entrypoint/src/syscalls/secp256k1.rs
 /// Double a Secp256k1 point.
 ///
@@ -79,8 +86,6 @@ pub fn syscall_secp256k1_double(p: *mut [u32; 16]) {
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
 }
-
-pub const SECP256K1_DECOMPRESS: u32 = 0x00_00_01_0C;
 
 /// Decompresses a compressed Secp256k1 point.
 ///
@@ -111,7 +116,6 @@ pub fn syscall_secp256k1_decompress(point: &mut [u8; 64], is_odd: bool) {
     unreachable!()
 }
 
-pub const SHA_EXTEND: u32 = 0x00_30_01_05;
 /// Based on: https://github.com/succinctlabs/sp1/blob/2aed8fea16a67a5b2983ffc471b2942c2f2512c8/crates/zkvm/entrypoint/src/syscalls/sha_extend.rs#L12
 /// Executes the SHA256 extend operation on the given word array.
 ///
@@ -128,6 +132,136 @@ pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
             in("t0") SHA_EXTEND,
             in("a0") w,
             in("a1") 0
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Adds two Bn254 points.
+///
+/// The result is stored in the first point.
+///
+/// ### Safety
+///
+/// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
+/// byte boundary.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_ADD,
+            in("a0") p,
+            in("a1") q,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Double a Bn254 point.
+///
+/// The result is stored in the first point.
+///
+/// ### Safety
+///
+/// The caller must ensure that `p` is valid pointer to data that is aligned along a four byte
+/// boundary.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_DOUBLE,
+            in("a0") p,
+            in("a1") 0,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Fp addition operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP_ADD,
+            in("a0") x,
+            in("a1") y,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Fp multiplication operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP_MUL,
+            in("a0") x,
+            in("a1") y,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// BN254 Fp2 addition operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP2_ADD,
+            in("a0") x,
+            in("a1") y,
+        );
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// BN254 Fp2 multiplication operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[no_mangle]
+pub extern "C" fn syscall_bn254_fp2_mulmod(x: *mut u32, y: *const u32) {
+    #[cfg(target_os = "zkvm")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("t0") BN254_FP2_MUL,
+            in("a0") x,
+            in("a1") y,
         );
     }
 
