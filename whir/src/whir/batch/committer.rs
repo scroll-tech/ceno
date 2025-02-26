@@ -1,6 +1,6 @@
 use crate::{
     ntt::expand_from_coeff,
-    poly_utils::{coeffs::CoefficientList, fold::restructure_evaluations, MultilinearPoint},
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList, fold::restructure_evaluations},
     utils,
     whir::committer::{Committer, Witness},
 };
@@ -10,8 +10,8 @@ use ark_poly::EvaluationDomain;
 use ark_std::{end_timer, start_timer};
 use derive_more::Debug;
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldWriter},
     ByteWriter, ProofResult,
+    plugins::ark::{FieldChallenges, FieldWriter},
 };
 
 use crate::whir::fs_utils::DigestWriter;
@@ -109,7 +109,9 @@ where
         end_timer!(stack_evaluations_timer);
 
         let allocate_timer = start_timer!(|| "Allocate buffer.");
+
         let mut buffer = Vec::with_capacity(folded_evals.len());
+        #[allow(clippy::uninit_vec)]
         unsafe {
             buffer.set_len(folded_evals.len());
         }
