@@ -8,7 +8,7 @@ use ceno_zkvm::{
 };
 use criterion::*;
 
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
