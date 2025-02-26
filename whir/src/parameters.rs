@@ -16,15 +16,11 @@ pub enum SoundnessType {
 
 impl Display for SoundnessType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match &self {
-                SoundnessType::ProvableList => "ProvableList",
-                SoundnessType::ConjectureList => "ConjectureList",
-                SoundnessType::UniqueDecoding => "UniqueDecoding",
-            }
-        )
+        write!(f, "{}", match &self {
+            SoundnessType::ProvableList => "ProvableList",
+            SoundnessType::ConjectureList => "ConjectureList",
+            SoundnessType::UniqueDecoding => "UniqueDecoding",
+        })
     }
 }
 
@@ -85,21 +81,17 @@ impl FromStr for FoldType {
 
 impl Display for FoldType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                FoldType::Naive => "Naive",
-                FoldType::ProverHelps => "ProverHelps",
-            }
-        )
+        write!(f, "{}", match self {
+            FoldType::Naive => "Naive",
+            FoldType::ProverHelps => "ProverHelps",
+        })
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum FoldingFactor {
     Constant(usize),                       // Use the same folding factor for all rounds
-    ConstantFromSecondRound(usize, usize), // Use the same folding factor for all rounds, but the first round uses a different folding factor
+    ConstantFromSecondRound(usize, usize), /* Use the same folding factor for all rounds, but the first round uses a different folding factor */
 }
 
 impl FoldingFactor {
@@ -121,7 +113,7 @@ impl FoldingFactor {
             FoldingFactor::Constant(factor) => {
                 if *factor == 0 {
                     // We should at least fold some time
-                    Err(format!("Folding factor shouldn't be zero."))
+                    Err("Folding factor shouldn't be zero.".to_string())
                 } else {
                     Ok(())
                 }
@@ -129,7 +121,7 @@ impl FoldingFactor {
             FoldingFactor::ConstantFromSecondRound(first_round_factor, factor) => {
                 if *factor == 0 || *first_round_factor == 0 {
                     // We should at least fold some time
-                    Err(format!("Folding factor shouldn't be zero."))
+                    Err("Folding factor shouldn't be zero.".to_string())
                 } else {
                     Ok(())
                 }

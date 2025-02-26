@@ -5,11 +5,13 @@ pub use pcs::{DefaultHash, InnerDigestOf, Whir, WhirDefaultSpec, WhirSpec};
 
 use ark_ff::FftField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 
-pub use nimue::plugins::ark::{FieldChallenges, FieldWriter};
-pub use nimue::ProofResult;
+pub use nimue::{
+    ProofResult,
+    plugins::ark::{FieldChallenges, FieldWriter},
+};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {

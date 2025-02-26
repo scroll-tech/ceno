@@ -25,8 +25,10 @@ use whir::{
 use serde::Serialize;
 
 use clap::Parser;
-use whir::whir::fs_utils::{DigestReader, DigestWriter};
-use whir::whir::iopattern::DigestIOPattern;
+use whir::whir::{
+    fs_utils::{DigestReader, DigestWriter},
+    iopattern::DigestIOPattern,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -337,10 +339,12 @@ fn run_whir<F, MerkleConfig>(
         whir_verifier_hashes,
     ) = {
         // Run PCS
-        use whir::poly_utils::MultilinearPoint;
-        use whir::whir::{
-            committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig, prover::Prover,
-            verifier::Verifier, whir_proof_size,
+        use whir::{
+            poly_utils::MultilinearPoint,
+            whir::{
+                committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig,
+                prover::Prover, verifier::Verifier, whir_proof_size,
+            },
         };
 
         let params = WhirConfig::<F, MerkleConfig, PowStrategy>::new(mv_params, whir_params);

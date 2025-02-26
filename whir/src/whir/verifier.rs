@@ -4,18 +4,18 @@ use ark_crypto_primitives::merkle_tree::Config;
 use ark_ff::FftField;
 use ark_poly::EvaluationDomain;
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldReader},
     ByteChallenges, ByteReader, ProofError, ProofResult,
+    plugins::ark::{FieldChallenges, FieldReader},
 };
 use nimue_pow::{self, PoWChallenge};
 
-use super::{parameters::WhirConfig, Statement, WhirProof};
-use crate::whir::fs_utils::{get_challenge_stir_queries, DigestReader};
+use super::{Statement, WhirProof, parameters::WhirConfig};
 use crate::{
     parameters::FoldType,
-    poly_utils::{coeffs::CoefficientList, eq_poly_outside, fold::compute_fold, MultilinearPoint},
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList, eq_poly_outside, fold::compute_fold},
     sumcheck::proof::SumcheckPolynomial,
     utils::expand_randomness,
+    whir::fs_utils::{DigestReader, get_challenge_stir_queries},
 };
 
 pub struct Verifier<F, MerkleConfig, PowStrategy>
@@ -397,7 +397,7 @@ where
         for (round_index, round) in parsed.rounds.iter().enumerate() {
             let coset_domain_size = 1 << self.params.folding_factor.at_round(round_index);
             // This is such that coset_generator^coset_domain_size = F::ONE
-            //let _coset_generator = domain_gen.pow(&[(domain_size / coset_domain_size) as u64]);
+            // let _coset_generator = domain_gen.pow(&[(domain_size / coset_domain_size) as u64]);
             let coset_generator_inv = round
                 .domain_gen_inv
                 .pow([(domain_size / coset_domain_size) as u64]);
@@ -408,7 +408,7 @@ where
                 .zip(&round.stir_challenges_answers)
                 .map(|(index, answers)| {
                     // The coset is w^index * <w_coset_generator>
-                    //let _coset_offset = domain_gen.pow(&[*index as u64]);
+                    // let _coset_offset = domain_gen.pow(&[*index as u64]);
                     let coset_offset_inv = round.domain_gen_inv.pow([*index as u64]);
 
                     compute_fold(
@@ -436,7 +436,7 @@ where
             .zip(&parsed.final_randomness_answers)
             .map(|(index, answers)| {
                 // The coset is w^index * <w_coset_generator>
-                //let _coset_offset = domain_gen.pow(&[*index as u64]);
+                // let _coset_offset = domain_gen.pow(&[*index as u64]);
                 let coset_offset_inv = domain_gen_inv.pow([*index as u64]);
 
                 compute_fold(

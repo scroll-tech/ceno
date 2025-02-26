@@ -1,17 +1,21 @@
 use super::committer::Witnesses;
-use crate::sumcheck::prover_not_skipping_batched::SumcheckProverNotSkippingBatched;
-use crate::whir::prover::RoundState;
-use crate::whir::{prover::Prover, WhirProof};
 use crate::{
     ntt::expand_from_coeff,
     parameters::FoldType,
     poly_utils::{
+        MultilinearPoint,
         coeffs::CoefficientList,
         fold::{compute_fold, restructure_evaluations},
-        MultilinearPoint,
     },
-    sumcheck::prover_not_skipping::SumcheckProverNotSkipping,
+    sumcheck::{
+        prover_not_skipping::SumcheckProverNotSkipping,
+        prover_not_skipping_batched::SumcheckProverNotSkippingBatched,
+    },
     utils::{self, expand_randomness},
+    whir::{
+        WhirProof,
+        prover::{Prover, RoundState},
+    },
 };
 use ark_crypto_primitives::merkle_tree::{Config, MerkleTree};
 use ark_ff::FftField;
@@ -19,12 +23,12 @@ use ark_poly::EvaluationDomain;
 use ark_std::{end_timer, start_timer};
 use itertools::zip_eq;
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldWriter},
     ByteChallenges, ByteWriter, ProofResult,
+    plugins::ark::{FieldChallenges, FieldWriter},
 };
 use nimue_pow::{self, PoWChallenge};
 
-use crate::whir::fs_utils::{get_challenge_stir_queries, DigestWriter};
+use crate::whir::fs_utils::{DigestWriter, get_challenge_stir_queries};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -84,7 +88,7 @@ where
         let initial_timer = start_timer!(|| "init");
         assert!(self.0.initial_statement, "must be true for pcs");
         assert!(self.validate_parameters());
-        assert!(self.validate_witnesses(&witness));
+        assert!(self.validate_witnesses(witness));
         for point in points {
             assert_eq!(
                 point.0.len(),
@@ -120,7 +124,8 @@ where
                     self.0.mv_parameters.num_variables,
                 )
             })
-            .chain(points.to_vec()).collect();
+            .chain(points.to_vec())
+            .collect();
         end_timer!(initial_claims_timer);
 
         let ood_answers_timer = start_timer!(|| "ood answers");
@@ -132,14 +137,14 @@ where
         end_timer!(ood_answers_timer);
 
         let eval_timer = start_timer!(|| "eval");
-        let eval_per_point: Vec<F> = evals_per_point.par_iter().map(|evals| compute_dot_product(evals, &random_coeff)).collect();
+        let eval_per_point: Vec<F> = evals_per_point
+            .par_iter()
+            .map(|evals| compute_dot_product(evals, &random_coeff))
+            .collect();
         end_timer!(eval_timer);
 
         let combine_timer = start_timer!(|| "Combine polynomial");
-        let initial_answers: Vec<_> = ood_answers
-            .into_iter()
-            .chain(eval_per_point)
-            .collect();
+        let initial_answers: Vec<_> = ood_answers.into_iter().chain(eval_per_point).collect();
 
         let polynomial = CoefficientList::combine(&witness.polys, &random_coeff);
         end_timer!(combine_timer);
@@ -379,7 +384,7 @@ where
                 stir_evaluations.extend(stir_challenges_indexes.iter().zip(&batched_answers).map(
                     |(index, batched_answers)| {
                         // The coset is w^index * <w_coset_generator>
-                        //let _coset_offset = domain_gen.pow(&[*index as u64]);
+                        // let _coset_offset = domain_gen.pow(&[*index as u64]);
                         let coset_offset_inv = domain_gen_inv.pow([*index as u64]);
 
                         compute_fold(
@@ -444,7 +449,7 @@ where
             domain: new_domain,
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
-            coefficients: folded_coefficients, // TODO: Is this redundant with `sumcheck_prover.coeff` ?
+            coefficients: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
             prev_merkle: merkle_tree,
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
@@ -464,8 +469,8 @@ where
     pub fn same_size_batch_prove<Merlin>(
         &self,
         merlin: &mut Merlin,
-        point_per_poly: &Vec<MultilinearPoint<F>>,
-        eval_per_poly: &Vec<F>,
+        point_per_poly: &[MultilinearPoint<F>],
+        eval_per_poly: &[F],
         witness: &Witnesses<F, MerkleConfig>,
     ) -> ProofResult<WhirProof<MerkleConfig, F>>
     where
@@ -480,7 +485,7 @@ where
         let initial_timer = start_timer!(|| "init");
         assert!(self.0.initial_statement, "must be true for pcs");
         assert!(self.validate_parameters());
-        assert!(self.validate_witnesses(&witness));
+        assert!(self.validate_witnesses(witness));
         for point in point_per_poly {
             assert_eq!(
                 point.0.len(),
@@ -502,24 +507,23 @@ where
         end_timer!(poly_comb_randomness_timer);
 
         let initial_claims_timer = start_timer!(|| "initial claims");
-        let initial_eval_claims = point_per_poly.clone();
+        let initial_eval_claims = point_per_poly;
         end_timer!(initial_claims_timer);
 
         let sumcheck_timer = start_timer!(|| "unifying sumcheck");
         let mut sumcheck_prover = SumcheckProverNotSkippingBatched::new(
             witness.polys.clone(),
-            &initial_eval_claims,
+            initial_eval_claims,
             &poly_comb_randomness,
-            &eval_per_poly,
+            eval_per_poly,
         );
 
         // Perform the entire sumcheck
-        let folded_point = sumcheck_prover
-            .compute_sumcheck_polynomials::<PowStrategy, Merlin>(
-                merlin,
-                self.0.mv_parameters.num_variables,
-                0.,
-            )?;
+        let folded_point = sumcheck_prover.compute_sumcheck_polynomials::<PowStrategy, Merlin>(
+            merlin,
+            self.0.mv_parameters.num_variables,
+            0.,
+        )?;
         let folded_evals = sumcheck_prover.get_folded_polys();
         merlin.add_scalars(&folded_evals)?;
         end_timer!(sumcheck_timer);
@@ -527,7 +531,7 @@ where
 
         let timer = start_timer!(|| "simple_batch");
         // perform simple_batch on folded_point and folded_evals
-        let result = self.simple_batch_prove(merlin, &vec![folded_point], &vec![folded_evals], witness)?;
+        let result = self.simple_batch_prove(merlin, &[folded_point], &[folded_evals], witness)?;
         end_timer!(timer);
         end_timer!(prove_timer);
 

@@ -2,11 +2,9 @@
 
 use ark_ff::Field;
 
-use super::{hypercube::BinaryHypercubePoint, MultilinearPoint};
+use super::{MultilinearPoint, hypercube::BinaryHypercubePoint};
 
 /// There is an alternative (possibly more efficient) implementation that iterates over the x in Gray code ordering.
-
-///
 /// LagrangePolynomialIterator for a given multilinear n-dimensional `point` iterates over pairs (x, y)
 /// where x ranges over all possible {0,1}^n
 /// and y equals the product y_1 * ... * y_n where
@@ -16,9 +14,9 @@ use super::{hypercube::BinaryHypercubePoint, MultilinearPoint};
 ///
 /// This means that y == eq_poly(point, x)
 pub struct LagrangePolynomialIterator<F: Field> {
-    last_position: Option<usize>, // the previously output BinaryHypercubePoint (encoded as usize). None before the first output.
-    point: Vec<F>, // stores a copy of the `point` given when creating the iterator. For easier(?) bit-fiddling, we store in in reverse order.
-    point_negated: Vec<F>, // stores the precomputed values 1-point[i] in the same ordering as point.
+    last_position: Option<usize>, /* the previously output BinaryHypercubePoint (encoded as usize). None before the first output. */
+    point: Vec<F>, /* stores a copy of the `point` given when creating the iterator. For easier(?) bit-fiddling, we store in in reverse order. */
+    point_negated: Vec<F>, /* stores the precomputed values 1-point[i] in the same ordering as point. */
     /// stack Stores the n+1 values (in order) 1, y_1, y_1*y_2, y_1*y_2*y_3, ..., y_1*...*y_n for the previously output y.
     /// Before the first iteration (if last_position == None), it stores the values for the next (i.e. first) output instead.
     stack: Vec<F>,
@@ -109,7 +107,7 @@ impl<F: Field> Iterator for LagrangePolynomialIterator<F> {
 mod tests {
     use crate::{
         crypto::fields::Field64,
-        poly_utils::{eq_poly, hypercube::BinaryHypercubePoint, MultilinearPoint},
+        poly_utils::{MultilinearPoint, eq_poly, hypercube::BinaryHypercubePoint},
     };
 
     use super::LagrangePolynomialIterator;
@@ -161,9 +159,9 @@ mod tests {
         let point = MultilinearPoint(vec![
             F::from(414151),
             F::from(109849018),
-            F::from(033184190),
-            F::from(033184190),
-            F::from(033184190),
+            F::from(33184190),
+            F::from(33184190),
+            F::from(33184190),
         ]);
 
         let mut last_b = None;

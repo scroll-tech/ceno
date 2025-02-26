@@ -3,23 +3,23 @@ use std::iter;
 use ark_crypto_primitives::merkle_tree::Config;
 use ark_ff::FftField;
 use ark_poly::EvaluationDomain;
-use ark_std::log2;
+use ark_std::{iterable::Iterable, log2};
 use itertools::zip_eq;
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldReader},
     ByteChallenges, ByteReader, ProofError, ProofResult,
+    plugins::ark::{FieldChallenges, FieldReader},
 };
 use nimue_pow::{self, PoWChallenge};
 
-use crate::whir::fs_utils::{get_challenge_stir_queries, DigestReader};
-use crate::whir::{
-    verifier::{ParsedCommitment, ParsedProof, ParsedRound, Verifier},
-    Statement, WhirProof,
-};
 use crate::{
-    poly_utils::{coeffs::CoefficientList, eq_poly_outside, MultilinearPoint},
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList, eq_poly_outside},
     sumcheck::proof::SumcheckPolynomial,
     utils::expand_randomness,
+    whir::{
+        Statement, WhirProof,
+        fs_utils::{DigestReader, get_challenge_stir_queries},
+        verifier::{ParsedCommitment, ParsedProof, ParsedRound, Verifier},
+    },
 };
 
 impl<F, MerkleConfig, PowStrategy> Verifier<F, MerkleConfig, PowStrategy>
@@ -52,7 +52,14 @@ where
         // We first do a pass in which we rederive all the FS challenges
         // Then we will check the algebraic part (so to optimise inversions)
         let parsed_commitment = self.parse_commitment_batch(arthur, num_polys)?;
-        self.batch_verify_internal(arthur, num_polys, points, evals_per_point, parsed_commitment, whir_proof)
+        self.batch_verify_internal(
+            arthur,
+            num_polys,
+            points,
+            evals_per_point,
+            parsed_commitment,
+            whir_proof,
+        )
     }
 
     // Different points on each polynomial
@@ -60,8 +67,8 @@ where
         &self,
         arthur: &mut Arthur,
         num_polys: usize,
-        point_per_poly: &Vec<MultilinearPoint<F>>,
-        eval_per_poly: &Vec<F>, // evaluations of the polys on individual points
+        point_per_poly: &[MultilinearPoint<F>],
+        eval_per_poly: &[F], // evaluations of the polys on individual points
         whir_proof: &WhirProof<MerkleConfig, F>,
     ) -> ProofResult<MerkleConfig::InnerDigest>
     where
@@ -80,10 +87,19 @@ where
         let parsed_commitment = self.parse_commitment_batch(arthur, num_polys)?;
 
         // parse proof
-        let poly_comb_randomness = super::utils::generate_random_vector_batch_verify(arthur, num_polys)?;
-        let (folded_points, folded_evals) = self.parse_unify_sumcheck(arthur, point_per_poly, poly_comb_randomness)?;
+        let poly_comb_randomness =
+            super::utils::generate_random_vector_batch_verify(arthur, num_polys)?;
+        let (folded_points, folded_evals) =
+            self.parse_unify_sumcheck(arthur, point_per_poly, poly_comb_randomness)?;
 
-        self.batch_verify_internal(arthur, num_polys, &vec![folded_points], &vec![folded_evals.clone()], parsed_commitment, whir_proof)
+        self.batch_verify_internal(
+            arthur,
+            num_polys,
+            &[folded_points],
+            &[folded_evals.clone()],
+            parsed_commitment,
+            whir_proof,
+        )
     }
 
     fn batch_verify_internal<Arthur>(
@@ -127,12 +143,11 @@ where
             .chunks_exact(num_polys)
             .map(|answer| compute_dot_product(answer, &random_coeff))
             .collect::<Vec<_>>();
-        let eval_per_point = evals_per_point.iter().map(|evals| compute_dot_product(evals, &random_coeff));
+        let eval_per_point = evals_per_point
+            .iter()
+            .map(|evals| compute_dot_product(evals, &random_coeff));
 
-        let initial_answers: Vec<_> = ood_answers
-            .into_iter()
-            .chain(eval_per_point)
-            .collect();
+        let initial_answers: Vec<_> = ood_answers.into_iter().chain(eval_per_point).collect();
 
         let statement = Statement {
             points: initial_claims,
@@ -302,7 +317,7 @@ where
     fn parse_unify_sumcheck<Arthur>(
         &self,
         arthur: &mut Arthur,
-        point_per_poly: &Vec<MultilinearPoint<F>>,
+        point_per_poly: &[MultilinearPoint<F>],
         poly_comb_randomness: Vec<F>,
     ) -> ProofResult<(MultilinearPoint<F>, Vec<F>)>
     where
@@ -332,16 +347,26 @@ where
                 arthur.challenge_pow::<PowStrategy>(self.params.starting_folding_pow_bits)?;
             }
         }
-        let folded_point = MultilinearPoint(sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect());
+        let folded_point =
+            MultilinearPoint(sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect());
         let folded_eqs: Vec<F> = point_per_poly
             .iter()
             .zip(&poly_comb_randomness)
-            .map(|(point, randomness)| *randomness * eq_poly_outside(&point, &folded_point))
+            .map(|(point, randomness)| *randomness * eq_poly_outside(point, &folded_point))
             .collect();
         let mut folded_evals = vec![F::ZERO; point_per_poly.len()];
         arthur.fill_next_scalars(&mut folded_evals)?;
-        let sumcheck_claim = sumcheck_rounds[num_variables - 1].0.evaluate_at_point(&MultilinearPoint(vec![sumcheck_rounds[num_variables - 1].1]));
-        let sumcheck_expected: F = folded_evals.iter().zip(&folded_eqs).map(|(eval, eq)| *eval * *eq).sum();
+        let sumcheck_claim =
+            sumcheck_rounds[num_variables - 1]
+                .0
+                .evaluate_at_point(&MultilinearPoint(vec![
+                    sumcheck_rounds[num_variables - 1].1,
+                ]));
+        let sumcheck_expected: F = folded_evals
+            .iter()
+            .zip(&folded_eqs)
+            .map(|(eval, eq)| *eval * *eq)
+            .sum();
         if sumcheck_claim != sumcheck_expected {
             return Err(ProofError::InvalidProof);
         }
@@ -484,9 +509,9 @@ where
 
             let answers: Vec<_> = if r == 0 {
                 answers
-                    .into_iter()
+                    .iter()
                     .map(|raw_answer| {
-                        if batched_randomness.len() > 0 {
+                        if !batched_randomness.is_empty() {
                             let chunk_size = 1 << self.params.folding_factor.at_round(r);
                             let mut res = vec![F::ZERO; chunk_size];
                             for i in 0..chunk_size {
@@ -589,9 +614,9 @@ where
 
         let final_randomness_answers: Vec<_> = if self.params.n_rounds() == 0 {
             final_randomness_answers
-                .into_iter()
+                .iter()
                 .map(|raw_answer| {
-                    if batched_randomness.len() > 0 {
+                    if !batched_randomness.is_empty() {
                         let chunk_size =
                             1 << self.params.folding_factor.at_round(self.params.n_rounds());
                         let mut res = vec![F::ZERO; chunk_size];
@@ -666,7 +691,7 @@ where
             .points
             .iter()
             .zip(&proof.initial_combination_randomness)
-            .map(|(point, randomness)| *randomness * eq_poly_outside(&point, &folding_randomness))
+            .map(|(point, randomness)| *randomness * eq_poly_outside(point, &folding_randomness))
             .sum();
 
         for (round, round_proof) in proof.rounds.iter().enumerate() {

@@ -235,7 +235,7 @@ impl<F: Field> NttEngine<F> {
         transpose(values, n2, n1);
         // TODO: When (n1, n2) are coprime we can use the
         // Good-Thomas NTT algorithm and avoid the twiddle loop.
-        self.apply_twiddles(values, roots, n1, n2);
+        Self::apply_twiddles(values, roots, n1, n2);
         self.ntt_dispatch(values, roots, n2);
         transpose(values, n1, n2);
     }
@@ -258,14 +258,14 @@ impl<F: Field> NttEngine<F> {
     }
 
     #[cfg(feature = "parallel")]
-    fn apply_twiddles(&self, values: &mut [F], roots: &[F], rows: usize, cols: usize) {
+    fn apply_twiddles(values: &mut [F], roots: &[F], rows: usize, cols: usize) {
         debug_assert_eq!(values.len() % (rows * cols), 0);
         if values.len() > workload_size::<F>() {
             let size = rows * cols;
             if values.len() != size {
                 let workload_size = size * max(1, workload_size::<F>() / size);
                 values.par_chunks_mut(workload_size).for_each(|values| {
-                    self.apply_twiddles(values, roots, rows, cols);
+                    Self::apply_twiddles(values, roots, rows, cols);
                 });
             } else {
                 let step = roots.len() / (rows * cols);

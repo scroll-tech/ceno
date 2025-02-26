@@ -1,7 +1,7 @@
-use super::{evals::EvaluationsList, hypercube::BinaryHypercubePoint, MultilinearPoint};
+use super::{MultilinearPoint, evals::EvaluationsList, hypercube::BinaryHypercubePoint};
 use crate::ntt::wavelet_transform;
 use ark_ff::Field;
-use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial};
+use ark_poly::{DenseUVPolynomial, Polynomial, univariate::DensePolynomial};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "parallel")]
 use {
@@ -22,7 +22,7 @@ use {
 ///  - coeffs[4] is the coefficient of X_0
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoefficientList<F> {
-    coeffs: Vec<F>, // list of coefficients. For multilinear polynomials, we have coeffs.len() == 1 << num_variables.
+    coeffs: Vec<F>, /* list of coefficients. For multilinear polynomials, we have coeffs.len() == 1 << num_variables. */
     num_variables: usize, // number of variables
 }
 
@@ -316,70 +316,69 @@ where
     }
 }
 
-/* Previous recursive version
-impl<F> From<CoefficientList<F>> for EvaluationsList<F>
-where
-    F: Field,
-{
-    fn from(value: CoefficientList<F>) -> Self {
-        let num_coeffs = value.num_coeffs();
-        // Base case
-        if num_coeffs == 1 {
-            return EvaluationsList::new(value.coeffs);
-        }
-
-        let half_coeffs = num_coeffs / 2;
-
-        // Left is polynomial with last variable set to 0
-        let mut left = Vec::with_capacity(half_coeffs);
-
-        // Right is polynomial with last variable set to 1
-        let mut right = Vec::with_capacity(half_coeffs);
-
-        for i in 0..half_coeffs {
-            left.push(value.coeffs[2 * i]);
-            right.push(value.coeffs[2 * i] + value.coeffs[2 * i + 1]);
-        }
-
-        let left_poly = CoefficientList {
-            coeffs: left,
-            num_variables: value.num_variables - 1,
-        };
-        let right_poly = CoefficientList {
-            coeffs: right,
-            num_variables: value.num_variables - 1,
-        };
-
-        // Compute evaluation of right and left
-        let left_eval = EvaluationsList::from(left_poly);
-        let right_eval = EvaluationsList::from(right_poly);
-
-        // Combine
-        let mut evaluation_list = Vec::with_capacity(num_coeffs);
-        for i in 0..half_coeffs {
-            evaluation_list.push(left_eval[i]);
-            evaluation_list.push(right_eval[i]);
-        }
-
-        EvaluationsList::new(evaluation_list)
-    }
-}
-*/
+// Previous recursive version
+// impl<F> From<CoefficientList<F>> for EvaluationsList<F>
+// where
+// F: Field,
+// {
+// fn from(value: CoefficientList<F>) -> Self {
+// let num_coeffs = value.num_coeffs();
+// Base case
+// if num_coeffs == 1 {
+// return EvaluationsList::new(value.coeffs);
+// }
+//
+// let half_coeffs = num_coeffs / 2;
+//
+// Left is polynomial with last variable set to 0
+// let mut left = Vec::with_capacity(half_coeffs);
+//
+// Right is polynomial with last variable set to 1
+// let mut right = Vec::with_capacity(half_coeffs);
+//
+// for i in 0..half_coeffs {
+// left.push(value.coeffs[2 * i]);
+// right.push(value.coeffs[2 * i] + value.coeffs[2 * i + 1]);
+// }
+//
+// let left_poly = CoefficientList {
+// coeffs: left,
+// num_variables: value.num_variables - 1,
+// };
+// let right_poly = CoefficientList {
+// coeffs: right,
+// num_variables: value.num_variables - 1,
+// };
+//
+// Compute evaluation of right and left
+// let left_eval = EvaluationsList::from(left_poly);
+// let right_eval = EvaluationsList::from(right_poly);
+//
+// Combine
+// let mut evaluation_list = Vec::with_capacity(num_coeffs);
+// for i in 0..half_coeffs {
+// evaluation_list.push(left_eval[i]);
+// evaluation_list.push(right_eval[i]);
+// }
+//
+// EvaluationsList::new(evaluation_list)
+// }
+// }
 
 #[cfg(test)]
 mod tests {
-    use ark_poly::{univariate::DensePolynomial, Polynomial};
+    use ark_poly::{Polynomial, univariate::DensePolynomial};
 
     use crate::{
         crypto::fields::Field64,
-        poly_utils::{coeffs::CoefficientList, evals::EvaluationsList, MultilinearPoint},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList, evals::EvaluationsList},
     };
 
     type F = Field64;
 
     #[test]
     fn test_evaluation_conversion() {
-        let coeffs = vec![F::from(22), F::from(05), F::from(10), F::from(97)];
+        let coeffs = vec![F::from(22), F::from(5), F::from(10), F::from(97)];
         let coeffs_list = CoefficientList::new(coeffs.clone());
 
         let evaluations = EvaluationsList::from(coeffs_list);
@@ -395,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_folding() {
-        let coeffs = vec![F::from(22), F::from(05), F::from(00), F::from(00)];
+        let coeffs = vec![F::from(22), F::from(5), F::from(00), F::from(00)];
         let coeffs_list = CoefficientList::new(coeffs);
 
         let alpha = F::from(100);

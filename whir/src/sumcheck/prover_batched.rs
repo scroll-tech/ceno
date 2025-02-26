@@ -1,5 +1,8 @@
 use super::proof::SumcheckPolynomial;
-use crate::{poly_utils::{coeffs::CoefficientList, evals::EvaluationsList, MultilinearPoint}, sumcheck::prover_single::SumcheckSingle};
+use crate::{
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList, evals::EvaluationsList},
+    sumcheck::prover_single::SumcheckSingle,
+};
 use ark_ff::Field;
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
@@ -37,7 +40,10 @@ where
 
         let mut prover = SumcheckBatched {
             evaluations_of_p: coeffs.into_iter().map(|c| c.into()).collect(),
-            evaluations_of_equality: vec![EvaluationsList::new(vec![F::ZERO; 1 << num_variables]); num_polys],
+            evaluations_of_equality: vec![
+                EvaluationsList::new(vec![F::ZERO; 1 << num_variables]);
+                num_polys
+            ],
             comb_coeff: poly_comb_coeff.to_vec(),
             num_polys,
             num_variables,
@@ -46,24 +52,34 @@ where
 
         // Eval points
         for (i, point) in points.iter().enumerate() {
-            SumcheckSingle::eval_eq(&point.0, prover.evaluations_of_equality[i].evals_mut(), F::from(1));
+            SumcheckSingle::eval_eq(
+                &point.0,
+                prover.evaluations_of_equality[i].evals_mut(),
+                F::from(1),
+            );
             prover.sum += poly_comb_coeff[i] * evals[i];
         }
         prover
     }
 
     pub fn get_folded_polys(&self) -> Vec<F> {
-        self.evaluations_of_p.iter().map(|e| {
-            assert_eq!(e.num_variables(), 0);
-            e.evals()[0]
-        }).collect()
+        self.evaluations_of_p
+            .iter()
+            .map(|e| {
+                assert_eq!(e.num_variables(), 0);
+                e.evals()[0]
+            })
+            .collect()
     }
 
     pub fn get_folded_eqs(&self) -> Vec<F> {
-        self.evaluations_of_equality.iter().map(|e| {
-            assert_eq!(e.num_variables(), 0);
-            e.evals()[0]
-        }).collect()
+        self.evaluations_of_equality
+            .iter()
+            .map(|e| {
+                assert_eq!(e.num_variables(), 0);
+                e.evals()[0]
+            })
+            .collect()
     }
 
     #[cfg(not(feature = "parallel"))]
@@ -101,30 +117,36 @@ where
     #[cfg(feature = "parallel")]
     pub fn compute_sumcheck_polynomial(&self) -> SumcheckPolynomial<F> {
         assert!(self.num_variables >= 1);
-        
-        // Compute coefficients of the quadratic result polynomial
-        let (_, c0, c2) = self.comb_coeff.par_iter().zip(&self.evaluations_of_p).zip(&self.evaluations_of_equality).map(|((rand, eval_p), eval_eq)| {
-            let eval_p_iter = eval_p.evals().par_chunks_exact(2);
-            let eval_eq_iter = eval_eq.evals().par_chunks_exact(2);
-            let (c0, c2) = eval_p_iter
-                .zip(eval_eq_iter)
-                .map(|(p_at, eq_at)| {
-                    // Convert evaluations to coefficients for the linear fns p and eq.
-                    let (p_0, p_1) = (p_at[0], p_at[1] - p_at[0]);
-                    let (eq_0, eq_1) = (eq_at[0], eq_at[1] - eq_at[0]);
 
-                    // Now we need to add the contribution of p(x) * eq(x)
-                    (p_0 * eq_0, p_1 * eq_1)
-                })
-                .reduce(
-                    || (F::ZERO, F::ZERO),
-                    |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
-                );
-            (rand.clone(), c0, c2)
-        }).reduce(
-            || (F::ONE, F::ZERO, F::ZERO),
-            |(r0, a0, a2), (r1, b0, b2)| (F::ONE, r0 * a0 + r1 * b0, r0 * a2 + r1 * b2),
-        );
+        // Compute coefficients of the quadratic result polynomial
+        let (_, c0, c2) = self
+            .comb_coeff
+            .par_iter()
+            .zip(&self.evaluations_of_p)
+            .zip(&self.evaluations_of_equality)
+            .map(|((rand, eval_p), eval_eq)| {
+                let eval_p_iter = eval_p.evals().par_chunks_exact(2);
+                let eval_eq_iter = eval_eq.evals().par_chunks_exact(2);
+                let (c0, c2) = eval_p_iter
+                    .zip(eval_eq_iter)
+                    .map(|(p_at, eq_at)| {
+                        // Convert evaluations to coefficients for the linear fns p and eq.
+                        let (p_0, p_1) = (p_at[0], p_at[1] - p_at[0]);
+                        let (eq_0, eq_1) = (eq_at[0], eq_at[1] - eq_at[0]);
+
+                        // Now we need to add the contribution of p(x) * eq(x)
+                        (p_0 * eq_0, p_1 * eq_1)
+                    })
+                    .reduce(
+                        || (F::ZERO, F::ZERO),
+                        |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
+                    );
+                (*rand, c0, c2)
+            })
+            .reduce(
+                || (F::ONE, F::ZERO, F::ZERO),
+                |(r0, a0, a2), (r1, b0, b2)| (F::ONE, r0 * a0 + r1 * b0, r0 * a2 + r1 * b2),
+            );
 
         // Use the fact that self.sum = p(0) + p(1) = 2 * coeff_0 + coeff_1 + coeff_2
         let c1 = self.sum - c0.double() - c2;
@@ -181,26 +203,34 @@ where
         assert!(self.num_variables >= 1);
 
         let randomness = folding_randomness.0[0];
-        let evaluations: Vec<_> = self.evaluations_of_p.par_iter().zip(&self.evaluations_of_equality).map(|(eval_p, eval_eq)| {
-            let (evaluation_of_p, evaluation_of_eq) = join(
-                || {
-                    eval_p
-                        .evals()
-                        .par_chunks_exact(2)
-                        .map(|at| (at[1] - at[0]) * randomness + at[0])
-                        .collect()
-                },
-                || {
-                    eval_eq
-                        .evals()
-                        .par_chunks_exact(2)
-                        .map(|at| (at[1] - at[0]) * randomness + at[0])
-                        .collect()
-                },
-            );
-            (EvaluationsList::new(evaluation_of_p), EvaluationsList::new(evaluation_of_eq))
-        }).collect();
-        let (evaluations_of_p, evaluations_of_eq)= evaluations.into_iter().unzip();
+        let evaluations: Vec<_> = self
+            .evaluations_of_p
+            .par_iter()
+            .zip(&self.evaluations_of_equality)
+            .map(|(eval_p, eval_eq)| {
+                let (evaluation_of_p, evaluation_of_eq) = join(
+                    || {
+                        eval_p
+                            .evals()
+                            .par_chunks_exact(2)
+                            .map(|at| (at[1] - at[0]) * randomness + at[0])
+                            .collect()
+                    },
+                    || {
+                        eval_eq
+                            .evals()
+                            .par_chunks_exact(2)
+                            .map(|at| (at[1] - at[0]) * randomness + at[0])
+                            .collect()
+                    },
+                );
+                (
+                    EvaluationsList::new(evaluation_of_p),
+                    EvaluationsList::new(evaluation_of_eq),
+                )
+            })
+            .collect();
+        let (evaluations_of_p, evaluations_of_eq) = evaluations.into_iter().unzip();
 
         // Update
         self.num_variables -= 1;
@@ -214,7 +244,7 @@ where
 mod tests {
     use crate::{
         crypto::fields::Field64,
-        poly_utils::{coeffs::CoefficientList, MultilinearPoint},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
     };
 
     use super::SumcheckBatched;
@@ -234,22 +264,18 @@ mod tests {
         ];
         let poly_comb_coeffs = vec![F::from(2), F::from(3)];
 
-        let evals: Vec<F> = polynomials.iter().zip(&eval_points).map(|(poly, point)| 
-            poly.evaluate(point)
-        ).collect();
+        let evals: Vec<F> = polynomials
+            .iter()
+            .zip(&eval_points)
+            .map(|(poly, point)| poly.evaluate(point))
+            .collect();
         let mut claimed_value: F = evals
             .iter()
             .zip(&poly_comb_coeffs)
-            .fold(F::from(0), |sum, (eval, poly_rand)| 
-                eval * poly_rand + sum
-            );
-        
-        let mut prover = SumcheckBatched::new(
-            polynomials.clone(), 
-            &eval_points, 
-            &poly_comb_coeffs,
-            &evals,
-        );
+            .fold(F::from(0), |sum, (eval, poly_rand)| eval * poly_rand + sum);
+
+        let mut prover =
+            SumcheckBatched::new(polynomials.clone(), &eval_points, &poly_comb_coeffs, &evals);
         let mut comb_randomness_list = Vec::new();
         let mut fold_randomness_list = Vec::new();
 

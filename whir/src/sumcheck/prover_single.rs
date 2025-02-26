@@ -1,5 +1,5 @@
 use super::proof::SumcheckPolynomial;
-use crate::poly_utils::{coeffs::CoefficientList, evals::EvaluationsList, MultilinearPoint};
+use crate::poly_utils::{MultilinearPoint, coeffs::CoefficientList, evals::EvaluationsList};
 use ark_ff::Field;
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
@@ -239,7 +239,7 @@ where
 mod tests {
     use crate::{
         crypto::fields::Field64,
-        poly_utils::{coeffs::CoefficientList, MultilinearPoint},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
     };
 
     use super::SumcheckSingle;
@@ -278,8 +278,9 @@ mod tests {
 
 #[test]
 fn test_eval_eq() {
-    use crate::crypto::fields::Field64 as F;
-    use crate::poly_utils::sequential_lag_poly::LagrangePolynomialIterator;
+    use crate::{
+        crypto::fields::Field64 as F, poly_utils::sequential_lag_poly::LagrangePolynomialIterator,
+    };
     use ark_ff::AdditiveGroup;
 
     let eval = vec![F::from(3), F::from(5)];

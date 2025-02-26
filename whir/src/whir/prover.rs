@@ -1,12 +1,12 @@
-use super::{committer::Witness, parameters::WhirConfig, Statement, WhirProof};
+use super::{Statement, WhirProof, committer::Witness, parameters::WhirConfig};
 use crate::{
     domain::Domain,
     ntt::expand_from_coeff,
     parameters::FoldType,
     poly_utils::{
+        MultilinearPoint,
         coeffs::CoefficientList,
         fold::{compute_fold, restructure_evaluations},
-        MultilinearPoint,
     },
     sumcheck::prover_not_skipping::SumcheckProverNotSkipping,
     utils::{self, expand_randomness},
@@ -16,12 +16,12 @@ use ark_ff::FftField;
 use ark_poly::EvaluationDomain;
 use ark_std::{end_timer, start_timer};
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldWriter},
     ByteChallenges, ByteWriter, ProofResult,
+    plugins::ark::{FieldChallenges, FieldWriter},
 };
 use nimue_pow::{self, PoWChallenge};
 
-use crate::whir::fs_utils::{get_challenge_stir_queries, DigestWriter};
+use crate::whir::fs_utils::{DigestWriter, get_challenge_stir_queries};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -206,7 +206,7 @@ where
             // *folded* domain.
             let final_challenge_indexes = get_challenge_stir_queries(
                 round_state.domain.size(), // The size of the *original* domain before folding
-                self.0.folding_factor.at_round(round_state.round), // The folding factor we used to fold the previous polynomial
+                self.0.folding_factor.at_round(round_state.round), /* The folding factor we used to fold the previous polynomial */
                 self.0.final_queries,
                 merlin,
             )?;
@@ -359,7 +359,7 @@ where
                 stir_evaluations.extend(stir_challenges_indexes.iter().zip(&answers).map(
                     |(index, answers)| {
                         // The coset is w^index * <w_coset_generator>
-                        //let _coset_offset = domain_gen.pow(&[*index as u64]);
+                        // let _coset_offset = domain_gen.pow(&[*index as u64]);
                         let coset_offset_inv = domain_gen_inv.pow([*index as u64]);
 
                         // In the Naive mode, the oracle consists directly of the
@@ -430,7 +430,7 @@ where
             domain: new_domain,
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
-            coefficients: folded_coefficients, // TODO: Is this redundant with `sumcheck_prover.coeff` ?
+            coefficients: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
             prev_merkle: merkle_tree,
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,

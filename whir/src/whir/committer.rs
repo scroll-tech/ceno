@@ -1,7 +1,7 @@
 use super::parameters::WhirConfig;
 use crate::{
     ntt::expand_from_coeff,
-    poly_utils::{coeffs::CoefficientList, fold::restructure_evaluations, MultilinearPoint},
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList, fold::restructure_evaluations},
     utils,
 };
 use ark_crypto_primitives::merkle_tree::{Config, MerkleTree};
@@ -10,8 +10,8 @@ use ark_poly::EvaluationDomain;
 use ark_std::{end_timer, start_timer};
 use derive_more::Debug;
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldWriter},
     ByteWriter, ProofResult,
+    plugins::ark::{FieldChallenges, FieldWriter},
 };
 
 use crate::whir::fs_utils::DigestWriter;

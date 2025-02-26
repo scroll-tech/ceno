@@ -14,15 +14,17 @@ use whir::{
         merkle_tree::{self, HashCounter},
     },
     parameters::*,
-    poly_utils::{coeffs::CoefficientList, MultilinearPoint},
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList},
     whir::Statement,
 };
 
 use nimue_pow::blake3::Blake3PoW;
 
 use clap::Parser;
-use whir::whir::fs_utils::{DigestReader, DigestWriter};
-use whir::whir::iopattern::DigestIOPattern;
+use whir::whir::{
+    fs_utils::{DigestReader, DigestWriter},
+    iopattern::DigestIOPattern,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -323,8 +325,8 @@ fn run_whir_pcs<F, MerkleConfig>(
     for<'a> Arthur<'a>: DigestReader<MerkleConfig>,
 {
     use whir::whir::{
-        committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig, prover::Prover,
-        verifier::Verifier, whir_proof_size, Statement,
+        Statement, committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig,
+        prover::Prover, verifier::Verifier, whir_proof_size,
     };
 
     // Runs as a PCS

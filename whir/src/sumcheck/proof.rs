@@ -1,7 +1,7 @@
 use ark_ff::Field;
 
 use crate::{
-    poly_utils::{eq_poly3, MultilinearPoint},
+    poly_utils::{MultilinearPoint, eq_poly3},
     utils::base_decomposition,
 };
 
@@ -14,8 +14,8 @@ pub struct SumcheckPolynomial<F> {
     // corresponds to the evaluation at utils::base_decomposition(i, 3, n_variables),
     // which performs (big-endian) ternary decomposition.
     // (in other words, the ordering is lexicographic wrt the evaluation point)
-    evaluations: Vec<F>, // Each of our polynomials will be in F^{<3}[X_1, \dots, X_k],
-                         // so it us uniquely determined by it's evaluations over {0, 1, 2}^k
+    evaluations: Vec<F>, /* Each of our polynomials will be in F^{<3}[X_1, \dots, X_k],
+                          * so it us uniquely determined by it's evaluations over {0, 1, 2}^k */
 }
 
 impl<F> SumcheckPolynomial<F>

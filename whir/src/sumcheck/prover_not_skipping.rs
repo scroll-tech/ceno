@@ -1,13 +1,13 @@
 use ark_ff::Field;
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldIOPattern, FieldWriter},
     ProofResult,
+    plugins::ark::{FieldChallenges, FieldIOPattern, FieldWriter},
 };
 use nimue_pow::{PoWChallenge, PowStrategy};
 
 use crate::{
     fs_utils::WhirPoWIOPattern,
-    poly_utils::{coeffs::CoefficientList, MultilinearPoint},
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList},
 };
 
 use super::prover_single::SumcheckSingle;
@@ -105,14 +105,14 @@ where
 mod tests {
     use ark_ff::Field;
     use nimue::{
-        plugins::ark::{FieldChallenges, FieldIOPattern, FieldReader},
         IOPattern, Merlin, ProofResult,
+        plugins::ark::{FieldChallenges, FieldIOPattern, FieldReader},
     };
     use nimue_pow::blake3::Blake3PoW;
 
     use crate::{
         crypto::fields::Field64,
-        poly_utils::{coeffs::CoefficientList, eq_poly_outside, MultilinearPoint},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList, eq_poly_outside},
         sumcheck::{proof::SumcheckPolynomial, prover_not_skipping::SumcheckProverNotSkipping},
     };
 

@@ -7,8 +7,8 @@ use ark_crypto_primitives::merkle_tree::Config;
 use ark_ff::Field;
 use ark_std::{end_timer, start_timer};
 use nimue::{
-    plugins::ark::{FieldChallenges, FieldReader, FieldWriter},
     ByteReader, ByteWriter, ProofResult,
+    plugins::ark::{FieldChallenges, FieldReader, FieldWriter},
 };
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;

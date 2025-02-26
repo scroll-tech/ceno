@@ -1,5 +1,4 @@
-use super::super::utils::is_power_of_two;
-use super::{utils::workload_size, MatrixMut};
+use super::{super::utils::is_power_of_two, MatrixMut, utils::workload_size};
 use std::mem::swap;
 
 use ark_std::{end_timer, start_timer};
@@ -30,6 +29,7 @@ pub fn transpose<F: Sized + Copy + Send>(matrix: &mut [F], rows: usize, cols: us
         // TODO: Special case for rows = 2 * cols and cols = 2 * rows.
         // TODO: Special case for very wide matrices (e.g. n x 16).
         let mut scratch = Vec::with_capacity(rows * cols);
+        #[allow(clippy::uninit_vec)]
         unsafe {
             scratch.set_len(rows * cols);
         }
@@ -64,6 +64,7 @@ pub fn transpose_bench_allocate<F: Sized + Copy + Send>(
         // TODO: Special case for very wide matrices (e.g. n x 16).
         let allocate_timer = start_timer!(|| "Allocate scratch.");
         let mut scratch = Vec::with_capacity(rows * cols);
+        #[allow(clippy::uninit_vec)]
         unsafe {
             scratch.set_len(rows * cols);
         }
@@ -343,8 +344,7 @@ fn transpose_square_swap_non_parallel<F: Sized>(mut a: MatrixMut<F>, mut b: Matr
 
 #[cfg(test)]
 mod tests {
-    use super::super::utils::workload_size;
-    use super::*;
+    use super::{super::utils::workload_size, *};
 
     type Pair = (usize, usize);
     type Triple = (usize, usize, usize);
@@ -385,6 +385,7 @@ mod tests {
     fn test_transpose_copy() {
         // iterate over both parallel and non-parallel implementation.
         // Needs HRTB, otherwise it won't work.
+        #[allow(clippy::type_complexity)]
         let mut funs: Vec<&dyn for<'a, 'b> Fn(MatrixMut<'a, Pair>, MatrixMut<'b, Pair>)> = vec![
             &transpose_copy_not_parallel::<Pair>,
             &transpose_copy::<Pair>,
@@ -415,6 +416,7 @@ mod tests {
     #[test]
     fn test_transpose_square_swap() {
         // iterate over parallel and non-parallel variants:
+        #[allow(clippy::type_complexity)]
         let mut funs: Vec<&dyn for<'a> Fn(MatrixMut<'a, Triple>, MatrixMut<'a, Triple>)> = vec![
             &transpose_square_swap::<Triple>,
             &transpose_square_swap_non_parallel::<Triple>,

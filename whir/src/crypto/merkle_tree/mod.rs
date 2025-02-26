@@ -4,7 +4,7 @@ pub mod mock;
 
 use std::{borrow::Borrow, marker::PhantomData, sync::atomic::AtomicUsize};
 
-use ark_crypto_primitives::{crh::CRHScheme, merkle_tree::DigestConverter, Error};
+use ark_crypto_primitives::{Error, crh::CRHScheme, merkle_tree::DigestConverter};
 use ark_serialize::CanonicalSerialize;
 use lazy_static::lazy_static;
 use rand::RngCore;

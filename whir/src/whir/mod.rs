@@ -40,18 +40,16 @@ mod tests {
     use nimue::{DefaultHash, IOPattern};
     use nimue_pow::blake3::Blake3PoW;
 
-    use crate::crypto::fields::Field64;
-    use crate::crypto::merkle_tree::blake3 as merkle_tree;
-    use crate::parameters::{
-        FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
-    };
-    use crate::poly_utils::coeffs::CoefficientList;
-    use crate::poly_utils::MultilinearPoint;
-    use crate::whir::batch::WhirBatchIOPattern;
-    use crate::whir::Statement;
-    use crate::whir::{
-        committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig, prover::Prover,
-        verifier::Verifier,
+    use crate::{
+        crypto::{fields::Field64, merkle_tree::blake3 as merkle_tree},
+        parameters::{
+            FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
+        },
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+        whir::{
+            Statement, batch::WhirBatchIOPattern, committer::Committer, iopattern::WhirIOPattern,
+            parameters::WhirConfig, prover::Prover, verifier::Verifier,
+        },
     };
 
     type MerkleConfig = merkle_tree::MerkleTreeParams<F>;
@@ -162,11 +160,18 @@ mod tests {
             .map(|i| CoefficientList::new(vec![F::from((i + 1) as i32); num_coeffs]))
             .collect();
 
-        let points: Vec<MultilinearPoint<F>> = (0..num_points).map(|_| MultilinearPoint::rand(&mut rng, num_variables)).collect();
-        let evals_per_point: Vec<Vec<F>> = points.iter().map(|point| polynomials
+        let points: Vec<MultilinearPoint<F>> = (0..num_points)
+            .map(|_| MultilinearPoint::rand(&mut rng, num_variables))
+            .collect();
+        let evals_per_point: Vec<Vec<F>> = points
             .iter()
-            .map(|poly| poly.evaluate(point))
-            .collect()).collect();
+            .map(|point| {
+                polynomials
+                    .iter()
+                    .map(|poly| poly.evaluate(point))
+                    .collect()
+            })
+            .collect();
 
         let io = IOPattern::<DefaultHash>::new("🌪️")
             .commit_batch_statement(&params, num_polynomials)
@@ -185,9 +190,17 @@ mod tests {
 
         let verifier = Verifier::new(params);
         let mut arthur = io.to_arthur(merlin.transcript());
-        assert!(verifier
-            .simple_batch_verify(&mut arthur, num_polynomials, &points, &evals_per_point, &proof)
-            .is_ok());
+        assert!(
+            verifier
+                .simple_batch_verify(
+                    &mut arthur,
+                    num_polynomials,
+                    &points,
+                    &evals_per_point,
+                    &proof
+                )
+                .is_ok()
+        );
         println!("PASSED!");
     }
 
@@ -229,10 +242,14 @@ mod tests {
             .map(|i| CoefficientList::new(vec![F::from((i + 1) as i32); num_coeffs]))
             .collect();
 
-        let point_per_poly: Vec<MultilinearPoint<F>> = (0..num_polynomials).map(|_| MultilinearPoint::rand(&mut rng, num_variables)).collect();
-        let eval_per_poly: Vec<F> = polynomials.iter().zip(&point_per_poly).map(|(poly, point)|
-            poly.evaluate(point)
-        ).collect();
+        let point_per_poly: Vec<MultilinearPoint<F>> = (0..num_polynomials)
+            .map(|_| MultilinearPoint::rand(&mut rng, num_variables))
+            .collect();
+        let eval_per_poly: Vec<F> = polynomials
+            .iter()
+            .zip(&point_per_poly)
+            .map(|(poly, point)| poly.evaluate(point))
+            .collect();
 
         let io = IOPattern::<DefaultHash>::new("🌪️")
             .commit_batch_statement(&params, num_polynomials)
@@ -253,7 +270,13 @@ mod tests {
         let verifier = Verifier::new(params);
         let mut arthur = io.to_arthur(merlin.transcript());
         verifier
-            .same_size_batch_verify(&mut arthur, num_polynomials, &point_per_poly, &eval_per_poly, &proof)
+            .same_size_batch_verify(
+                &mut arthur,
+                num_polynomials,
+                &point_per_poly,
+                &eval_per_poly,
+                &proof,
+            )
             .unwrap();
         // assert!(verifier
         //     .same_size_batch_verify(&mut arthur, num_polynomials, &point_per_poly, &eval_per_poly, &proof)

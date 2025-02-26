@@ -1,5 +1,5 @@
 use ark_ff::{
-    Field, Fp128, Fp192, Fp2, Fp256, Fp2Config, Fp3, Fp3Config, Fp64, MontBackend, MontConfig,
+    Field, Fp2, Fp2Config, Fp3, Fp3Config, Fp64, Fp128, Fp192, Fp256, MontBackend, MontConfig,
     MontFp, PrimeField,
 };
 

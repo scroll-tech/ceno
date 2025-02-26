@@ -22,9 +22,9 @@ pub struct MatrixMut<'a, T> {
     _lifetime: PhantomData<&'a mut T>,
 }
 
-unsafe impl<'a, T: Send> Send for MatrixMut<'_, T> {}
+unsafe impl<T: Send> Send for MatrixMut<'_, T> {}
 
-unsafe impl<'a, T: Sync> Sync for MatrixMut<'_, T> {}
+unsafe impl<T: Sync> Sync for MatrixMut<'_, T> {}
 
 impl<'a, T> MatrixMut<'a, T> {
     /// creates a MatrixMut from `slice`, where slice is the concatenations of `rows` rows, each consisting of `cols` many entries.

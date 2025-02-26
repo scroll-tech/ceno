@@ -1,8 +1,8 @@
 // NOTE: This is the one from Ron's
 
-use ark_ff::{batch_inversion, Field};
+use ark_ff::{Field, batch_inversion};
 
-use super::{hypercube::BinaryHypercubePoint, MultilinearPoint};
+use super::{MultilinearPoint, hypercube::BinaryHypercubePoint};
 
 pub struct LagrangePolynomialGray<F: Field> {
     position_bin: usize,
@@ -89,10 +89,9 @@ mod tests {
     use crate::{
         crypto::fields::Field64,
         poly_utils::{
-            eq_poly,
-            gray_lag_poly::{gray_decode, LagrangePolynomialGray},
+            MultilinearPoint, eq_poly,
+            gray_lag_poly::{LagrangePolynomialGray, gray_decode},
             hypercube::BinaryHypercubePoint,
-            MultilinearPoint,
         },
     };
 

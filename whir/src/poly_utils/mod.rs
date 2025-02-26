@@ -1,7 +1,7 @@
 use ark_ff::Field;
 use rand::{
-    distributions::{Distribution, Standard},
     Rng, RngCore,
+    distributions::{Distribution, Standard},
 };
 
 use crate::utils::to_binary;
@@ -182,13 +182,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::poly_utils::eq_poly3;
-    use crate::poly_utils::hypercube::BinaryHypercube;
-    use crate::{crypto::fields::Field64, poly_utils::eq_poly};
+    use crate::{
+        crypto::fields::Field64,
+        poly_utils::{eq_poly, eq_poly3, hypercube::BinaryHypercube},
+    };
 
-    use super::coeffs::CoefficientList;
-    use super::BinaryHypercubePoint;
-    use super::MultilinearPoint;
+    use super::{BinaryHypercubePoint, MultilinearPoint, coeffs::CoefficientList};
 
     type F = Field64;
 

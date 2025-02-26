@@ -55,12 +55,9 @@ pub trait WhirSpec<E: FftField>: Default + std::fmt::Debug + Clone {
         let io = <Self::MerkleConfigWrapper as WhirMerkleConfigWrapper<E>>::commit_statement_to_io_pattern(
             io, &params,
         );
-        let io =
-            <Self::MerkleConfigWrapper as WhirMerkleConfigWrapper<E>>::add_whir_proof_to_io_pattern(
-                io, &params,
-            );
-
-        io
+        <Self::MerkleConfigWrapper as WhirMerkleConfigWrapper<E>>::add_whir_proof_to_io_pattern(
+            io, &params,
+        )
     }
 
     fn prepare_batch_io_pattern(num_variables: usize, batch_size: usize) -> IOPattern {
@@ -70,12 +67,10 @@ pub trait WhirSpec<E: FftField>: Default + std::fmt::Debug + Clone {
         let io = <Self::MerkleConfigWrapper as WhirMerkleConfigWrapper<E>>::commit_batch_statement_to_io_pattern(
             io, &params, batch_size
         );
-        let io =
-            <Self::MerkleConfigWrapper as WhirMerkleConfigWrapper<E>>::add_whir_batch_proof_to_io_pattern(
-                io, &params, batch_size
-            );
 
-        io
+        <Self::MerkleConfigWrapper as WhirMerkleConfigWrapper<E>>::add_whir_batch_proof_to_io_pattern(
+                io, &params, batch_size
+        )
     }
 }
 
@@ -175,7 +170,7 @@ where
         let proof_size_bytes = &data[0..8];
         let proof_size = u64::from_le_bytes(proof_size_bytes.try_into().unwrap());
         let proof_bytes = &data[8..8 + proof_size as usize];
-        let proof = WhirProof::deserialize_compressed(&proof_bytes).unwrap();
+        let proof = WhirProof::deserialize_compressed(proof_bytes).unwrap();
         let transcript = data[8 + proof_size as usize..].to_vec();
         Ok(WhirProofWrapper { proof, transcript })
     }
@@ -229,9 +224,7 @@ where
     type Proof = WhirProofWrapper<MerkleConfigOf<Spec, E>, E>;
     type Poly = CoefficientList<E::BasePrimeField>;
 
-    fn setup(_poly_size: usize) -> Self::Param {
-        ()
-    }
+    fn setup(_poly_size: usize) -> Self::Param {}
 
     fn commit(_pp: &Self::Param, poly: &Self::Poly) -> Result<Self::CommitmentWithWitness, Error> {
         let params = Spec::prepare_whir_config(poly.num_variables(), false);

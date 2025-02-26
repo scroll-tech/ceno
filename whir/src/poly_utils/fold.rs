@@ -1,5 +1,4 @@
-use crate::ntt::intt_batch;
-use crate::parameters::FoldType;
+use crate::{ntt::intt_batch, parameters::FoldType};
 use ark_ff::{FftField, Field};
 
 #[cfg(feature = "parallel")]
@@ -105,7 +104,7 @@ mod tests {
 
     use crate::{
         crypto::fields::Field64,
-        poly_utils::{coeffs::CoefficientList, MultilinearPoint},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
         utils::stack_evaluations,
     };
 

@@ -19,7 +19,7 @@ pub trait WhirIOPattern<F: FftField, MerkleConfig: Config> {
         params: &WhirConfig<F, MerkleConfig, PowStrategy>,
     ) -> Self;
     fn add_whir_proof<PowStrategy>(self, params: &WhirConfig<F, MerkleConfig, PowStrategy>)
-        -> Self;
+    -> Self;
 }
 
 impl<F, MerkleConfig, IOPattern> WhirIOPattern<F, MerkleConfig> for IOPattern
@@ -60,17 +60,13 @@ where
                 );
         } else {
             self = self
-                .challenge_scalars(
-                    params.folding_factor.at_round(0),
-                    "folding_randomness",
-                )
+                .challenge_scalars(params.folding_factor.at_round(0), "folding_randomness")
                 .pow(params.starting_folding_pow_bits);
         }
 
         let mut domain_size = params.starting_domain.size();
         for (round, r) in params.round_parameters.iter().enumerate() {
-            let folded_domain_size =
-                domain_size >> params.folding_factor.at_round(round);
+            let folded_domain_size = domain_size >> params.folding_factor.at_round(round);
             let domain_size_bytes = ((folded_domain_size * 2 - 1).ilog2() as usize + 7) / 8;
             self = self
                 .add_digest("merkle_digest")

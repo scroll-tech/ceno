@@ -1,15 +1,15 @@
 pub mod proof;
+pub mod prover_batched;
 pub mod prover_core;
 pub mod prover_not_skipping;
 pub mod prover_not_skipping_batched;
 pub mod prover_single;
-pub mod prover_batched;
 
 #[cfg(test)]
 mod tests {
     use crate::{
         crypto::fields::Field64,
-        poly_utils::{coeffs::CoefficientList, eq_poly_outside, MultilinearPoint},
+        poly_utils::{MultilinearPoint, coeffs::CoefficientList, eq_poly_outside},
     };
 
     use super::prover_core::SumcheckCore;

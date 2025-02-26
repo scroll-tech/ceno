@@ -115,31 +115,26 @@ mod tests {
     #[test]
     fn test_as_chunks_exact_mut() {
         let v = &mut [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-        assert_eq!(
-            as_chunks_exact_mut::<_, 12>(v),
-            &[[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
-        );
-        assert_eq!(
-            as_chunks_exact_mut::<_, 6>(v),
-            &[[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
-        );
-        assert_eq!(
-            as_chunks_exact_mut::<_, 1>(v),
-            &[
-                [1],
-                [2],
-                [3],
-                [4],
-                [5],
-                [6],
-                [7],
-                [8],
-                [9],
-                [10],
-                [11],
-                [12]
-            ]
-        );
+        assert_eq!(as_chunks_exact_mut::<_, 12>(v), &[[
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+        ]]);
+        assert_eq!(as_chunks_exact_mut::<_, 6>(v), &[[1, 2, 3, 4, 5, 6], [
+            7, 8, 9, 10, 11, 12
+        ]]);
+        assert_eq!(as_chunks_exact_mut::<_, 1>(v), &[
+            [1],
+            [2],
+            [3],
+            [4],
+            [5],
+            [6],
+            [7],
+            [8],
+            [9],
+            [10],
+            [11],
+            [12]
+        ]);
         let should_not_work = std::panic::catch_unwind(|| {
             as_chunks_exact_mut::<_, 2>(&mut [1, 2, 3]);
         });

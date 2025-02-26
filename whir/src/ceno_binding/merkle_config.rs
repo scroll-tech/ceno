@@ -3,18 +3,22 @@ use ark_ff::FftField;
 use nimue::{Arthur, DefaultHash, IOPattern, Merlin, ProofResult};
 use nimue_pow::PowStrategy;
 
-use crate::crypto::merkle_tree::blake3::MerkleTreeParams as Blake3Params;
-use crate::crypto::merkle_tree::keccak::MerkleTreeParams as KeccakParams;
-use crate::poly_utils::coeffs::CoefficientList;
-use crate::poly_utils::MultilinearPoint;
-use crate::whir::batch::{WhirBatchIOPattern, Witnesses};
-use crate::whir::committer::{Committer, Witness};
-use crate::whir::fs_utils::DigestWriter;
-use crate::whir::iopattern::WhirIOPattern;
-use crate::whir::parameters::WhirConfig;
-use crate::whir::prover::Prover;
-use crate::whir::verifier::Verifier;
-use crate::whir::{Statement, WhirProof};
+use crate::{
+    crypto::merkle_tree::{
+        blake3::MerkleTreeParams as Blake3Params, keccak::MerkleTreeParams as KeccakParams,
+    },
+    poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+    whir::{
+        Statement, WhirProof,
+        batch::{WhirBatchIOPattern, Witnesses},
+        committer::{Committer, Witness},
+        fs_utils::DigestWriter,
+        iopattern::WhirIOPattern,
+        parameters::WhirConfig,
+        prover::Prover,
+        verifier::Verifier,
+    },
+};
 
 pub trait WhirMerkleConfigWrapper<F: FftField> {
     type MerkleConfig: Config<Leaf = [F]> + Clone;
