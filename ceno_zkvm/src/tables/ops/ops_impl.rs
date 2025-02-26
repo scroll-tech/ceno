@@ -1,13 +1,12 @@
 //! The implementation of ops tables. No generics.
 
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::collections::HashMap;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
     instructions::InstancePaddingStrategy,
@@ -38,7 +37,16 @@ impl OpTableConfig {
 
         let record_exprs = abc.into_iter().map(|f| Expression::Fixed(f)).collect_vec();
 
-        cb.lk_table_record(|| "record", table_len, rom_type, record_exprs, mlt.expr())?;
+        cb.lk_table_record(
+            || "record",
+            SetTableSpec {
+                len: Some(table_len),
+                structural_witins: vec![],
+            },
+            rom_type,
+            record_exprs,
+            mlt.expr(),
+        )?;
 
         Ok(Self { abc, mlt })
     }
@@ -57,7 +65,7 @@ impl OpTableConfig {
             .zip(content.into_par_iter())
             .for_each(|(row, abc)| {
                 for (col, val) in self.abc.iter().zip(abc.iter()) {
-                    set_fixed_val!(row, *col, F::from(*val));
+                    set_fixed_val!(row, *col, F::from_v(*val));
                 }
             });
 
@@ -87,7 +95,7 @@ impl OpTableConfig {
             .with_min_len(MIN_PAR_SIZE)
             .zip(mlts.into_par_iter())
             .for_each(|(row, mlt)| {
-                set_val!(row, self.mlt, F::from(mlt as u64));
+                set_val!(row, self.mlt, F::from_v(mlt as u64));
             });
 
         Ok(witness)

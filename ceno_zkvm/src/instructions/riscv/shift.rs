@@ -11,6 +11,7 @@ use crate::{
     instructions::Instruction,
     set_val,
 };
+use ff_ext::FieldInto;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 
@@ -232,7 +233,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 #[cfg(test)]
 mod tests {
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use crate::{
         Value,
@@ -251,7 +252,7 @@ mod tests {
         verify::<SllOp>("basic", 0b_0001, 3, 0b_1000);
         // 33 << 33 === 33 << 1
         verify::<SllOp>("rs2 over 5-bits", 0b_0001, 33, 0b_0010);
-        verify::<SllOp>("bit loss", 1 << 31 | 1, 1, 0b_0010);
+        verify::<SllOp>("bit loss", (1 << 31) | 1, 1, 0b_0010);
         verify::<SllOp>("zero shift", 0b_0001, 0, 0b_0001);
         verify::<SllOp>("all zeros", 0b_0000, 0, 0b_0000);
         verify::<SllOp>("base is zero", 0b_0000, 1, 0b_0000);

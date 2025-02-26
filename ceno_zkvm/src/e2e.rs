@@ -421,7 +421,7 @@ pub fn run_e2e_with_checkpoint<
         return (
             None,
             Box::new(move || {
-                _ = run_e2e_proof(
+                _ = run_e2e_proof::<E, _>(
                     program,
                     max_steps,
                     init_full_mem,
@@ -474,7 +474,7 @@ pub fn run_e2e_with_checkpoint<
 
     let verifier = ZKVMVerifier::new(vk);
 
-    run_e2e_verify(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+    run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
 
     if let Checkpoint::PrepSanityCheck = checkpoint {
         return (Some((zkvm_proof, verifier)), Box::new(|| ()));

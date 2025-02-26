@@ -20,6 +20,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {
@@ -137,7 +138,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, PC_STEP_SIZE, StepRecord, encode_rv32};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use proptest::proptest;
 

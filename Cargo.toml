@@ -8,9 +8,11 @@ members = [
   "examples",
   "mpcs",
   "multilinear_extensions",
+  "sumcheck_macro",
   "poseidon",
   "sumcheck",
   "transcript",
+  "whir",
 ]
 resolver = "2"
 
@@ -25,15 +27,20 @@ version = "0.1.0"
 
 [workspace.dependencies]
 anyhow = { version = "1.0", default-features = false }
-ark-std = "0.4"
+ark-std = "0.5"
 cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
-ff = "0.13"
-goldilocks = { git = "https://github.com/scroll-tech/ceno-Goldilocks" }
 itertools = "0.13"
 num-derive = "0.4"
 num-traits = "0.2"
+p3-challenger = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
+p3-field = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
+p3-goldilocks = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
+p3-mds = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
+p3-poseidon = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
+p3-poseidon2 = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
+p3-symmetric = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 paste = "1"
 plonky2 = "0.2"
 poseidon = { path = "./poseidon" }
@@ -45,6 +52,7 @@ rand_chacha = { version = "0.3", features = ["serde1"] }
 rand_core = "0.6"
 rand_xorshift = "0.3"
 rayon = "1.10"
+secp = "0.4.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = "0.26"

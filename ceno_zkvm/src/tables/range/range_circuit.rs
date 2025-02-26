@@ -5,8 +5,8 @@ use super::range_impl::RangeTableConfig;
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ROMType, tables::TableCircuit,
-    witness::RowMajorMatrix,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::InstancePaddingStrategy,
+    structs::ROMType, tables::TableCircuit, witness::RowMajorMatrix,
 };
 use ff_ext::ExtensionField;
 
@@ -40,11 +40,11 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     }
 
     fn generate_fixed_traces(
-        config: &RangeTableConfig,
-        num_fixed: usize,
+        _config: &RangeTableConfig,
+        _num_fixed: usize,
         _input: &(),
     ) -> RowMajorMatrix<E::BaseField> {
-        config.generate_fixed_traces(num_fixed, RANGE::content())
+        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
     }
 
     fn assign_instances(
@@ -55,6 +55,12 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
-        config.assign_instances(num_witin, num_structural_witin, multiplicity, RANGE::len())
+        config.assign_instances(
+            num_witin,
+            num_structural_witin,
+            multiplicity,
+            RANGE::content(),
+            RANGE::len(),
+        )
     }
 }

@@ -1,13 +1,12 @@
-use std::{array, mem, sync::Arc};
+use std::{mem, sync::Arc};
 
 use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    commutative_op_mle_pair,
-    mle::{DenseMultilinearExtension, MultilinearExtension},
-    op_mle, op_mle_product_3, op_mle3_range,
+    mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
+    op_mle,
     util::largest_even_below,
     virtual_poly::VirtualPolynomial,
 };
@@ -16,6 +15,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
 };
+use sumcheck_macro::sumcheck_code_gen;
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
 use crate::{
@@ -26,6 +26,7 @@ use crate::{
         merge_sumcheck_polys, serial_extrapolate,
     },
 };
+use p3_field::PrimeCharacteristicRing;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
@@ -71,7 +72,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         // extrapolation_aux only need to init once
         let extrapolation_aux = (1..max_degree)
             .map(|degree| {
-                let points = (0..1 + degree as u64).map(E::from).collect::<Vec<_>>();
+                let points = (0..1 + degree as u64).map(E::from_u64).collect::<Vec<_>>();
                 let weights = barycentric_weights(&points);
                 (points, weights)
             })
@@ -428,119 +429,23 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             |mut products_sum, (coefficient, products)| {
                 let span = entered_span!("sum");
 
-                let mut sum = match products.len() {
-                    1 => {
-                        let f = &self.poly.flattened_ml_extensions[products[0]];
-                        op_mle! {
-                            |f| {
-                                let res = (0..largest_even_below(f.len()))
-                                    .step_by(2)
-                                    .rev()
-                                    .fold(AdditiveArray::<_, 2>(array::from_fn(|_| 0.into())), |mut acc, b| {
-                                            acc.0[0] += f[b];
-                                            acc.0[1] += f[b+1];
-                                            acc
-                                });
-                                let res = if f.len() == 1 {
-                                    AdditiveArray::<_, 2>([f[0]; 2])
-                                } else {
-                                    res
-                                };
-                                let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
-                                if num_vars_multiplicity > 0 {
-                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
-                                } else {
-                                    res
-                                }
-                            },
-                            |sum| AdditiveArray(sum.0.map(E::from))
-                        }
-                        .to_vec()
-                    }
-                    2 => {
-                        let (f, g) = (
-                            &self.poly.flattened_ml_extensions[products[0]],
-                            &self.poly.flattened_ml_extensions[products[1]],
-                        );
-                        commutative_op_mle_pair!(
-                            |f, g| {
-                                let res = (0..largest_even_below(f.len())).step_by(2).rev().fold(
-                                    AdditiveArray::<_, 3>(array::from_fn(|_| 0.into())),
-                                    |mut acc, b| {
-                                        acc.0[0] += f[b] * g[b];
-                                        acc.0[1] += f[b + 1] * g[b + 1];
-                                        acc.0[2] +=
-                                            (f[b + 1] + f[b + 1] - f[b]) * (g[b + 1] + g[b + 1] - g[b]);
-                                        acc
-                                });
-                                let res = if f.len() == 1 {
-                                    AdditiveArray::<_, 3>([f[0] * g[0]; 3])
-                                } else {
-                                    res
-                                };
-                                let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
-                                if num_vars_multiplicity > 0 {
-                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
-                                } else {
-                                    res
-                                }
-                            },
-                            |sum| AdditiveArray(sum.0.map(E::from))
-                        )
-                        .to_vec()
-                    }
-                    3 => {
-                        let (f1, f2, f3) = (
-                            &self.poly.flattened_ml_extensions[products[0]],
-                            &self.poly.flattened_ml_extensions[products[1]],
-                            &self.poly.flattened_ml_extensions[products[2]],
-                        );
-                        op_mle_product_3!(
-                            |f1, f2, f3| {
-                                let res = (0..largest_even_below(f1.len()))
-                                    .step_by(2)
-                                    .rev()
-                                    .map(|b| {
-                                        // f = c x + d
-                                        let c1 = f1[b + 1] - f1[b];
-                                        let c2 = f2[b + 1] - f2[b];
-                                        let c3 = f3[b + 1] - f3[b];
-                                        AdditiveArray([
-                                            f1[b] * (f2[b] * f3[b]),
-                                            f1[b + 1] * (f2[b + 1] * f3[b + 1]),
-                                            (c1 + f1[b + 1])
-                                                * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
-                                            (c1 + c1 + f1[b + 1])
-                                                * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
-                                        ])
-                                    })
-                                    .sum::<AdditiveArray<_, 4>>();
-                                let res = if f1.len() == 1 {
-                                    AdditiveArray::<_, 4>([f1[0] * f2[0] * f3[0]; 4])
-                                } else {
-                                    res
-                                };
-                                let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f1.len()).max(1) + self.round - 1);
-                                if num_vars_multiplicity > 0 {
-                                    AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
-                                } else {
-                                    res
-                                }
-                            },
-                            |sum| AdditiveArray(sum.0.map(E::from))
-                        )
-                        .to_vec()
-                    }
-                    _ => unimplemented!("do not support degree > 3"),
+                let f = &self.poly.flattened_ml_extensions;
+                let mut sum: Vec<E> = match products.len() {
+                    1 => sumcheck_code_gen!(1, false, |i| &f[products[i]]).to_vec(),
+                    2 => sumcheck_code_gen!(2, false, |i| &f[products[i]]).to_vec(),
+                    3 => sumcheck_code_gen!(3, false, |i| &f[products[i]]).to_vec(),
+                    4 => sumcheck_code_gen!(4, false, |i| &f[products[i]]).to_vec(),
+                    5 => sumcheck_code_gen!(5, false, |i| &f[products[i]]).to_vec(),
+                    _ => unimplemented!("do not support degree {} > 5", products.len()),
                 };
                 exit_span!(span);
-                sum.iter_mut().for_each(|sum| *sum *= coefficient);
+                sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                 let span = entered_span!("extrapolation");
                 let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
                     .map(|i| {
                         let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                        let at = E::from((products.len() + 1 + i) as u64);
+                        let at = E::from_u64((products.len() + 1 + i) as u64);
                         serial_extrapolate(points, weights, &sum, &at)
                     })
                     .collect::<Vec<_>>();
@@ -637,15 +542,21 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 .flattened_ml_extensions
                 .par_iter_mut()
                 .for_each(|mle| {
-                    if let Some(mle) = Arc::get_mut(mle) {
+                    if num_variables == 1 {
+                        // first time fix variable should be create new instance
                         if mle.num_vars() > 0 {
-                            mle.fix_variables_in_place(&[p.elements])
+                            *mle = mle.fix_variables(&[p.elements]).into();
+                        } else {
+                            *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                                0,
+                                mle.get_base_field_vec().to_vec(),
+                            ))
                         }
                     } else {
-                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            0,
-                            mle.get_base_field_vec().to_vec(),
-                        ))
+                        let mle = Arc::get_mut(mle).unwrap();
+                        if mle.num_vars() > 0 {
+                            mle.fix_variables_in_place(&[p.elements]);
+                        }
                     }
                 });
         };
@@ -682,7 +593,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             poly: polynomial,
             extrapolation_aux: (1..max_degree)
                 .map(|degree| {
-                    let points = (0..1 + degree as u64).map(E::from).collect::<Vec<_>>();
+                    let points = (0..1 + degree as u64).map(E::from_u64).collect::<Vec<_>>();
                     let weights = barycentric_weights(&points);
                     (points, weights)
                 })
@@ -777,126 +688,24 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 |mut products_sum, (coefficient, products)| {
                     let span = entered_span!("sum");
 
-                    let mut sum = match products.len() {
-                        1 => {
-                            let f = &self.poly.flattened_ml_extensions[products[0]];
-                            op_mle! {
-                                |f| {
-                                    let res = (0..largest_even_below(f.len()))
-                                        .into_par_iter()
-                                        .step_by(2)
-                                        .with_min_len(64)
-                                        .map(|b| {
-                                            AdditiveArray([
-                                                f[b],
-                                                f[b + 1]
-                                            ])
-                                        })
-                                        .sum::<AdditiveArray<_, 2>>();
-                                    let res = if f.len() == 1 {
-                                        AdditiveArray::<_, 2>([f[0]; 2])
-                                    } else {
-                                        res
-                                    };
-                                    let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
-                                    if num_vars_multiplicity > 0 {
-                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
-                                    } else {
-                                        res
-                                    }
-                                },
-                                |sum| AdditiveArray(sum.0.map(E::from))
-                            }
-                            .to_vec()
-                        }
-                        2 => {
-                            let (f, g) = (
-                                &self.poly.flattened_ml_extensions[products[0]],
-                                &self.poly.flattened_ml_extensions[products[1]],
-                            );
-                            commutative_op_mle_pair!(
-                                |f, g| {
-                                    let res = (0..largest_even_below(f.len()))
-                                    .into_par_iter()
-                                    .step_by(2)
-                                    .with_min_len(64)
-                                    .map(|b| {
-                                        AdditiveArray([
-                                            f[b] * g[b],
-                                            f[b + 1] * g[b + 1],
-                                            (f[b + 1] + f[b + 1] - f[b])
-                                                * (g[b + 1] + g[b + 1] - g[b]),
-                                        ])
-                                    })
-                                    .sum::<AdditiveArray<_, 3>>();
-                                    let res = if f.len() == 1 {
-                                        AdditiveArray::<_, 3>([f[0] * g[0]; 3])
-                                    } else {
-                                        res
-                                    };
-                                    let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f.len()).max(1) + self.round - 1);
-                                    if num_vars_multiplicity > 0 {
-                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
-                                    } else {
-                                        res
-                                    }
-                                },
-                                |sum| AdditiveArray(sum.0.map(E::from))
-                            )
-                            .to_vec()
-                        }
-                        3 => {
-                            let (f1, f2, f3) = (
-                                &self.poly.flattened_ml_extensions[products[0]],
-                                &self.poly.flattened_ml_extensions[products[1]],
-                                &self.poly.flattened_ml_extensions[products[2]],
-                            );
-                            op_mle_product_3!(
-                                |f1, f2, f3| {
-                                    let res = (0..largest_even_below(f1.len()))
-                                    .step_by(2)
-                                    .map(|b| {
-                                        // f = c x + d
-                                        let c1 = f1[b + 1] - f1[b];
-                                        let c2 = f2[b + 1] - f2[b];
-                                        let c3 = f3[b + 1] - f3[b];
-                                        AdditiveArray([
-                                            f1[b] * (f2[b] * f3[b]),
-                                            f1[b + 1] * (f2[b + 1] * f3[b + 1]),
-                                            (c1 + f1[b + 1])
-                                                * ((c2 + f2[b + 1]) * (c3 + f3[b + 1])),
-                                            (c1 + c1 + f1[b + 1])
-                                                * ((c2 + c2 + f2[b + 1]) * (c3 + c3 + f3[b + 1])),
-                                        ])
-                                    })
-                                    .sum::<AdditiveArray<_, 4>>();
-                                    let res = if f1.len() == 1 {
-                                        AdditiveArray::<_, 4>([f1[0] * f2[0] * f3[0]; 4])
-                                    } else {
-                                        res
-                                    };
-                                    let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(f1.len()).max(1) + self.round - 1);
-                                    if num_vars_multiplicity > 0 {
-                                        AdditiveArray(res.0.map(|e| e * E::BaseField::from(1 << num_vars_multiplicity)))
-                                    } else {
-                                        res
-                                    }
-                                },
-                                |sum| AdditiveArray(sum.0.map(E::from))
-                            )
-                            .to_vec()
-                        }
-                        _ => unimplemented!("do not support degree > 3"),
+                    let f = &self.poly.flattened_ml_extensions;
+                    let mut sum: Vec<E> = match products.len() {
+                        1 => sumcheck_code_gen!(1, true, |i| &f[products[i]]).to_vec(),
+                        2 => sumcheck_code_gen!(2, true, |i| &f[products[i]]).to_vec(),
+                        3 => sumcheck_code_gen!(3, true, |i| &f[products[i]]).to_vec(),
+                        4 => sumcheck_code_gen!(4, true, |i| &f[products[i]]).to_vec(),
+                        5 => sumcheck_code_gen!(5, true, |i| &f[products[i]]).to_vec(),
+                        _ => unimplemented!("do not support degree {} > 5", products.len()),
                     };
                     exit_span!(span);
-                    sum.iter_mut().for_each(|sum| *sum *= coefficient);
+                    sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                     let span = entered_span!("extrapolation");
                     let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
                         .into_par_iter()
                         .map(|i| {
                             let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                            let at = E::from((products.len() + 1 + i) as u64);
+                            let at = E::from_u64((products.len() + 1 + i) as u64);
                             extrapolate(points, weights, &sum, &at)
                         })
                         .collect::<Vec<_>>();

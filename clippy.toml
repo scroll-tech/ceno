@@ -8,4 +8,7 @@ allowed-duplicate-crates = [
   "regex-syntax",
   "syn",
   "windows-sys",
+  "tracing-subscriber",
+  "wasi",
+  "getrandom",
 ]

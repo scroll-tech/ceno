@@ -168,13 +168,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 * opcode_proof.num_instances
                 + num_lks.next_power_of_two() * num_padded_instance;
 
-            prod_r *= opcode_proof.record_r_out_evals.iter().product::<E>();
-            prod_w *= opcode_proof.record_w_out_evals.iter().product::<E>();
+            prod_r *= opcode_proof
+                .record_r_out_evals
+                .iter()
+                .copied()
+                .product::<E>();
+            prod_w *= opcode_proof
+                .record_w_out_evals
+                .iter()
+                .copied()
+                .product::<E>();
 
-            logup_sum +=
-                opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.invert().unwrap();
-            logup_sum +=
-                opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.invert().unwrap();
+            logup_sum += opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.inverse();
+            logup_sum += opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.inverse();
         }
 
         for (name, (i, table_proof)) in vm_proof.table_proofs {
@@ -203,14 +209,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .lk_out_evals
                 .iter()
                 .fold(logup_sum, |acc, [p1, p2, q1, q2]| {
-                    acc - *p1 * q1.invert().unwrap() - *p2 * q2.invert().unwrap()
+                    acc - *p1 * q1.inverse() - *p2 * q2.inverse()
                 });
 
-            prod_w *= table_proof.w_out_evals.iter().flatten().product::<E>();
-            prod_r *= table_proof.r_out_evals.iter().flatten().product::<E>();
+            prod_w *= table_proof
+                .w_out_evals
+                .iter()
+                .flatten()
+                .copied()
+                .product::<E>();
+            prod_r *= table_proof
+                .r_out_evals
+                .iter()
+                .flatten()
+                .copied()
+                .product::<E>();
         }
-        logup_sum -=
-            E::from(dummy_table_item_multiplicity as u64) * dummy_table_item.invert().unwrap();
+        logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
 
         // check logup relation across all proofs
         if logup_sum != E::ZERO {
@@ -402,7 +417,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 * ((0..r_counts_per_instance)
                     .map(|i| proof.r_records_in_evals[i] * eq_r[i])
                     .sum::<E>()
-                    + eq_r[r_counts_per_instance..].iter().sum::<E>()
+                    + eq_r[r_counts_per_instance..].iter().copied().sum::<E>()
                     - E::ONE),
             // write
             *alpha_write
@@ -410,7 +425,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 * ((0..w_counts_per_instance)
                     .map(|i| proof.w_records_in_evals[i] * eq_w[i])
                     .sum::<E>()
-                    + eq_w[w_counts_per_instance..].iter().sum::<E>()
+                    + eq_w[w_counts_per_instance..].iter().copied().sum::<E>()
                     - E::ONE),
             // lookup
             *alpha_lk
@@ -419,7 +434,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .map(|i| proof.lk_records_in_evals[i] * eq_lk[i])
                     .sum::<E>()
                     + chip_record_alpha
-                        * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE)),
+                        * (eq_lk[lk_counts_per_instance..].iter().copied().sum::<E>() - E::ONE)),
             // degree > 1 zero exp sumcheck
             {
                 // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
@@ -522,6 +537,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let tower_proofs = &proof.tower_proof;
 
         let expected_rounds = cs
+            // only iterate r set, as read/write set round should match
             .r_table_expressions
             .iter()
             .flat_map(|r| {
@@ -538,13 +554,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .max()
                         .unwrap()
                 });
-                [num_vars, num_vars]
+                [num_vars, num_vars] // format: [read_round, write_round]
             })
-            .chain(
-                cs.lk_table_expressions
-                    .iter()
-                    .map(|l| ceil_log2(l.table_len)),
-            )
+            .chain(cs.lk_table_expressions.iter().map(|l| {
+                // iterate through structural witins and collect max round.
+                let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
+                    l.table_spec
+                        .structural_witins
+                        .iter()
+                        .map(|StructuralWitIn { id, max_len, .. }| {
+                            let hint_num_vars = proof.rw_hints_num_vars[*id as usize];
+                            assert!((1 << hint_num_vars) <= *max_len);
+                            hint_num_vars
+                        })
+                        .max()
+                        .unwrap()
+                });
+                num_vars
+            }))
             .collect_vec();
 
         for var in proof.rw_hints_num_vars.iter() {
@@ -656,7 +683,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             &input_opening_point[0..point_and_eval.point.len()],
                         );
                         // TODO times multiplication factor
-                        *alpha * eq * in_eval
+                        *alpha * eq * *in_eval
                     })
                     .sum::<E>(),
                 interleave(logup_p_point_and_eval, logup_q_point_and_eval)
@@ -672,7 +699,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             &input_opening_point[0..point_and_eval.point.len()],
                         );
                         // TODO times multiplication factor
-                        *alpha * eq * in_eval
+                        *alpha * eq * *in_eval
                     })
                     .sum::<E>(),
             ]
@@ -693,9 +720,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let structural_witnesses = cs
             .r_table_expressions
             .iter()
-            .flat_map(|set_table_expression| {
-                set_table_expression
-                    .table_spec
+            .map(|r| &r.table_spec)
+            .chain(cs.lk_table_expressions.iter().map(|r| &r.table_spec))
+            .flat_map(|table_spec| {
+                table_spec
                     .structural_witins
                     .iter()
                     .map(
@@ -875,13 +903,13 @@ impl TowerVerify {
             })
             .unzip::<_, _, Vec<_>, Vec<_>>();
         let initial_claim = izip!(&prod_spec_point_n_eval, &alpha_pows)
-            .map(|(point_n_eval, alpha)| point_n_eval.eval * alpha)
+            .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>()
             + izip!(
                 interleave(&logup_spec_p_point_n_eval, &logup_spec_q_point_n_eval),
                 &alpha_pows[num_prod_spec..]
             )
-            .map(|(point_n_eval, alpha)| point_n_eval.eval * alpha)
+            .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>();
 
         let max_num_variables = num_variables.iter().max().unwrap();
@@ -917,8 +945,8 @@ impl TowerVerify {
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         eq_eval(out_rt, &rt)
-                            * alpha
-                            * if round < *max_round-1 {tower_proofs.prod_specs_eval[spec_index][round].iter().product()} else {
+                            * *alpha
+                            * if round < *max_round-1 {tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product()} else {
                                 E::ZERO
                             }
                     })
@@ -969,7 +997,7 @@ impl TowerVerify {
                                 tower_proofs.prod_specs_eval[spec_index][round].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * b)
+                            .map(|(a, b)| *a * *b)
                             .sum::<E>();
                             // this will keep update until round > evaluation
                             prod_spec_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), evals);
@@ -994,14 +1022,14 @@ impl TowerVerify {
                                 tower_proofs.logup_specs_eval[spec_index][round][0..2].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * b)
+                            .map(|(a, b)| *a * *b)
                             .sum::<E>();
 
                             let q_evals = izip!(
                                 tower_proofs.logup_specs_eval[spec_index][round][2..4].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * b)
+                            .map(|(a, b)| *a * *b)
                             .sum::<E>();
 
                             // this will keep update until round > evaluation

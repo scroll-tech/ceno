@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use ff::Field;
 use itertools::{Itertools, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
@@ -12,6 +11,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
 };
+use p3_field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -506,38 +506,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // rt_r := rt || rs
         for i in 0..r_counts_per_instance {
             // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t] ))
-            virtual_polys.add_mle_list(vec![&sel_r, &r_records_wit[i]], eq_r[i] * alpha_read);
+            virtual_polys.add_mle_list(vec![&sel_r, &r_records_wit[i]], eq_r[i] * *alpha_read);
         }
         // \sum_t alpha_read * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_r],
-            *alpha_read * eq_r[r_counts_per_instance..].iter().sum::<E>() - *alpha_read,
+            *alpha_read * eq_r[r_counts_per_instance..].iter().copied().sum::<E>() - *alpha_read,
         );
 
         // write
         // rt := rt || rs
         for i in 0..w_counts_per_instance {
             // \sum_t (sel(rt, t) * (\sum_i alpha_write * eq(rs, i) * record_w[i] ))
-            virtual_polys.add_mle_list(vec![&sel_w, &w_records_wit[i]], eq_w[i] * alpha_write);
+            virtual_polys.add_mle_list(vec![&sel_w, &w_records_wit[i]], eq_w[i] * *alpha_write);
         }
         // \sum_t alpha_write * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_w],
-            *alpha_write * eq_w[w_counts_per_instance..].iter().sum::<E>() - *alpha_write,
+            *alpha_write * eq_w[w_counts_per_instance..].iter().copied().sum::<E>() - *alpha_write,
         );
 
         // lk denominator
         // rt := rt || rs
         for i in 0..lk_counts_per_instance {
             // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i]))
-            virtual_polys.add_mle_list(vec![&sel_lk, &lk_records_wit[i]], eq_lk[i] * alpha_lk);
+            virtual_polys.add_mle_list(vec![&sel_lk, &lk_records_wit[i]], eq_lk[i] * *alpha_lk);
         }
         // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_lk],
             *alpha_lk
                 * chip_record_alpha
-                * (eq_lk[lk_counts_per_instance..].iter().sum::<E>() - E::ONE),
+                * (eq_lk[lk_counts_per_instance..].iter().copied().sum::<E>() - E::ONE),
         );
 
         let mut distrinct_zerocheck_terms_set = BTreeSet::new();
@@ -964,12 +964,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         exit_span!(tower_span);
 
-        // same point sumcheck is optional when all witin + fixed are in same num_vars
-        let is_skip_same_point_sumcheck = witnesses
-            .iter()
-            .chain(fixed.iter())
-            .map(|v| v.num_vars())
-            .all_equal();
+        // In table proof, we always skip same point sumcheck for now
+        // as tower sumcheck batch product argument/logup in same length
+        let is_skip_same_point_sumcheck = true;
 
         let (input_open_point, same_r_sumcheck_proofs, rw_in_evals, lk_in_evals) =
             if is_skip_same_point_sumcheck {
