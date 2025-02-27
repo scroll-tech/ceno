@@ -4,13 +4,10 @@ use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
-    instructions::InstancePaddingStrategy,
-    scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
     utils::i64_to_base,
-    witness::RowMajorMatrix,
 };
 use ceno_emul::{
     InsnFormat, InsnFormat::*, InsnKind::*, Instruction, PC_STEP_SIZE, Program, WORD_SIZE,
@@ -18,7 +15,7 @@ use ceno_emul::{
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
@@ -147,9 +144,8 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         );
 
         fixed
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .zip((0..num_instructions).into_par_iter())
+            .par_rows_mut()
+            .zip(0..num_instructions)
             .for_each(|(row, i)| {
                 let pc = pc_base + (i * PC_STEP_SIZE) as u32;
                 let insn = program.instructions[i];
@@ -170,7 +166,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         program: &Program,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
         let mut prog_mlt = vec![0_usize; program.instructions.len()];
@@ -184,15 +180,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             num_witin + num_structural_witin,
             InstancePaddingStrategy::Default,
         );
-        witness
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .zip(prog_mlt.into_par_iter())
-            .for_each(|(row, mlt)| {
-                set_val!(row, config.mlt, E::BaseField::from_u64(mlt as u64));
-            });
+        witness.par_rows_mut().zip(prog_mlt).for_each(|(row, mlt)| {
+            set_val!(row, config.mlt, E::BaseField::from_u64(mlt as u64));
+        });
 
-        Ok(witness)
+        Ok([witness, RowMajorMatrix::empty()])
     }
 }
 
@@ -242,6 +234,6 @@ mod tests {
             &program,
         )
         .unwrap();
-        check(&witness);
+        check(&witness[0]);
     }
 }

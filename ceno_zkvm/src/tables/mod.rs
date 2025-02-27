@@ -1,6 +1,7 @@
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::RowMajorMatrix};
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError};
 use ff_ext::ExtensionField;
 use std::collections::HashMap;
+use witness::RowMajorMatrix;
 mod range;
 pub use range::*;
 
@@ -36,5 +37,5 @@ pub trait TableCircuit<E: ExtensionField> {
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         input: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
+    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError>;
 }

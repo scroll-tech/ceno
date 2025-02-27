@@ -6,6 +6,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::{BasicTranscript, Transcript};
 use util::hash::Digest;
+use witness::RowMajorMatrix;
 
 pub mod sum_check;
 pub mod util;
@@ -49,17 +50,17 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit(pp, polys)
+    Pcs::batch_commit(pp, rmm)
 }
 
 pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit_and_write(pp, polys, transcript)
+    Pcs::batch_commit_and_write(pp, rmm, transcript)
 }
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -149,15 +150,15 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: RowMajorMatrix<E::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
-        let comm = Self::batch_commit(pp, polys)?;
+        let comm = Self::batch_commit(pp, rmm)?;
         Self::write_commitment(&Self::get_pure_commitment(&comm), transcript)?;
         Ok(comm)
     }
@@ -383,10 +384,14 @@ pub mod test_util {
         mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
     use rand::rngs::OsRng;
+    #[cfg(test)]
+    use rand::{distributions::Standard, prelude::Distribution};
     use rayon::iter::{IntoParallelIterator, ParallelIterator};
     #[cfg(test)]
     use transcript::BasicTranscript;
     use transcript::Transcript;
+    #[cfg(test)]
+    use witness::RowMajorMatrix;
 
     pub fn setup_pcs<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         num_vars: usize,
@@ -584,22 +589,24 @@ pub mod test_util {
 
     #[cfg(test)]
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs>(
-        gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
+        _gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
         batch_size: usize,
     ) where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
+        Standard: Distribution<E::BaseField>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
-                let polys = gen_rand_polys(|_| num_vars, batch_size, gen_rand_poly);
-                let comm =
-                    Pcs::batch_commit_and_write(&pp, polys.as_slice(), &mut transcript).unwrap();
+                let rmm =
+                    RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
+                let polys = rmm.to_mles();
+                let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);

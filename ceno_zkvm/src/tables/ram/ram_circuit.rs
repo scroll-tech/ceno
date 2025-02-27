@@ -2,14 +2,13 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    instructions::InstancePaddingStrategy,
     structs::{ProgramParams, RAMType},
     tables::TableCircuit,
-    witness::RowMajorMatrix,
 };
 
 use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileTableConfig, PubIOTableConfig};
@@ -96,7 +95,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError> {
         // assume returned table is well-formed include padding
         config.assign_instances(num_witin, num_structural_witin, final_v)
     }
@@ -144,7 +143,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_cycles: &[Cycle],
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError> {
         // assume returned table is well-formed including padding
         config.assign_instances(num_witin, num_structural_witin, final_cycles)
     }
@@ -216,7 +215,7 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
         final_v: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError> {
         // assume returned table is well-formed include padding
         config.assign_instances(num_witin, num_structural_witin, final_v)
     }

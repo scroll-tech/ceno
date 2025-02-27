@@ -486,15 +486,15 @@ impl<E: ExtensionField> MemAddr<E> {
 mod test {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
+    use witness::{InstancePaddingStrategy, RowMajorMatrix};
     use p3_goldilocks::Goldilocks as F;
 
     use crate::{
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
-        instructions::InstancePaddingStrategy,
         scheme::mock_prover::MockProver,
-        witness::{LkMultiplicity, RowMajorMatrix},
+        witness::LkMultiplicity,
     };
 
     use super::MemAddr;
@@ -562,7 +562,7 @@ mod test {
         MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
-                .into_mles()
+                .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
