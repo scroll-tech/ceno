@@ -7,7 +7,7 @@
 //!
 //! where `remainder` is constrained to be between 0 and the divisor in a way
 //! that suitably respects signed values, except for the case of division by 0.
-//! Of particular note for this implememntation is the fact that in the
+//! Of particular note for this implementation is the fact that in the
 //! Goldilocks field, the right hand side of (1) does not wrap around under
 //! modular arithmetic for either unsigned or signed 32-bit range-checked
 //! values of `divisor`, `quotient`, and `remainder`, taking values between `0`

@@ -365,7 +365,7 @@ pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 //
 // The return type is a pair of:
 // 1. Explicit state
-// 2. A no-input-no-ouptut closure
+// 2. A no-input-no-output closure
 //
 // (2.) is useful when you want to setup a certain action and run it
 // elsewhere (i.e, in a benchmark)

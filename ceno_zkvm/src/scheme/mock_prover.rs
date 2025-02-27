@@ -619,7 +619,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     })
                     .collect();
 
-                // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
+                // Count lookups inferred from ConstraintSystem from all instances into lkm_from_cs.
                 for inst_id in 0..num_instances {
                     match rom_type {
                         ROMType::U5 => lkm_from_cs.assert_ux::<5>(args_eval[0][inst_id]),

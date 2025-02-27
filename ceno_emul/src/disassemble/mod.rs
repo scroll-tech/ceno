@@ -272,7 +272,7 @@ impl InstructionProcessor for InstructionTranspiler {
 
     /// Convert AUIPC to ADDI.
     ///
-    /// RiscV's instructions are designed to be (mosty) position-independent.  AUIPC is used
+    /// RiscV's instructions are designed to be (mostly) position-independent.  AUIPC is used
     /// to get access to the current program counter, even if the code has been moved around
     /// by the linker.
     ///
