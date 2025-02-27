@@ -1,6 +1,7 @@
 pub mod blake3;
 pub mod keccak;
 pub mod mock;
+pub mod poseidon;
 
 use std::{borrow::Borrow, marker::PhantomData, sync::atomic::AtomicUsize};
 
