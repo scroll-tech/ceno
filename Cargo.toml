@@ -33,6 +33,7 @@ cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 itertools = "0.13"
+num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
 p3-challenger = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
@@ -59,12 +60,14 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"
+substrate-bn = { version = "0.6.0" }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing = { version = "0.1", features = [
   "attributes",
 ] }
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uint = "0.8"
 
 [profile.dev]
 lto = "thin"

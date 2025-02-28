@@ -810,7 +810,7 @@ Hints:
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
-            let [witness, _] = if is_opcode {
+            let [witness, structural_witness] = if is_opcode {
                 &[
                     witnesses
                         .get_opcode_witness(circuit_name)
@@ -837,6 +837,7 @@ Hints:
             let mut witness = witness
                 .to_mles()
                 .into_iter()
+                .chain(structural_witness.to_mles())
                 .map(|w| w.into())
                 .collect_vec();
             let structural_witness = witness.split_off(cs.num_witin as usize);

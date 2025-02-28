@@ -2,8 +2,10 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
-    CENO_PLATFORM, COORDINATE_WORDS, EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS,
-    SHA_EXTEND_WORDS, StepRecord, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
+    BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, COORDINATE_WORDS,
+    EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS, SHA_EXTEND_WORDS, StepRecord,
+    VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
@@ -470,6 +472,88 @@ fn test_sha256_extend() -> Result<()> {
 }
 
 #[test]
+fn test_bn254_fptower_syscalls() -> Result<()> {
+    let program_elf = ceno_examples::bn254_fptower_syscalls;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    const RUNS: usize = 10;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 4 * RUNS);
+
+    for witness in syscalls.iter() {
+        assert_eq!(witness.reg_ops.len(), 2);
+        assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+        assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+    }
+
+    let messages = read_all_messages_as_words(&state);
+    let mut m_iter = messages.iter();
+
+    // just Fp syscalls
+    for witness in syscalls.iter().take(2 * RUNS) {
+        assert_eq!(witness.mem_ops.len(), 2 * BN254_FP_WORDS);
+        let [a_before, b, a_after] = [
+            m_iter.next().unwrap(),
+            m_iter.next().unwrap(),
+            m_iter.next().unwrap(),
+        ];
+        check_writes(&witness.mem_ops[0..BN254_FP_WORDS], a_before, a_after);
+        check_reads(&witness.mem_ops[BN254_FP_WORDS..], b);
+    }
+
+    // just Fp2 syscalls
+    for witness in syscalls.iter().skip(2 * RUNS) {
+        assert_eq!(witness.mem_ops.len(), 2 * BN254_FP2_WORDS);
+        let [a_before, b, a_after] = [
+            m_iter.next().unwrap(),
+            m_iter.next().unwrap(),
+            m_iter.next().unwrap(),
+        ];
+        check_writes(&witness.mem_ops[0..BN254_FP2_WORDS], a_before, a_after);
+        check_reads(&witness.mem_ops[BN254_FP2_WORDS..], b);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_bn254_curve() -> Result<()> {
+    let program_elf = ceno_examples::bn254_curve_syscalls;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 3);
+
+    for witness in syscalls.iter() {
+        assert_eq!(witness.reg_ops.len(), 2);
+        assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+        assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+    }
+
+    let messages = read_all_messages_as_words(&state);
+    let [a1, b, a2, c1, c2, one, c3]: [Vec<u32>; 7] = messages.try_into().unwrap();
+
+    {
+        assert_eq!(syscalls[0].mem_ops.len(), 2 * BN254_POINT_WORDS);
+        check_writes(&syscalls[0].mem_ops[..BN254_POINT_WORDS], &a1, &a2);
+        check_reads(&syscalls[0].mem_ops[BN254_POINT_WORDS..], &b);
+    }
+    {
+        assert_eq!(syscalls[1].mem_ops.len(), BN254_POINT_WORDS);
+        check_writes(&syscalls[1].mem_ops, &c1, &c2);
+    }
+    {
+        assert_eq!(syscalls[2].mem_ops.len(), 2 * BN254_POINT_WORDS);
+        check_writes(&syscalls[2].mem_ops[..BN254_POINT_WORDS], &c2, &c3);
+        check_reads(&syscalls[2].mem_ops[BN254_POINT_WORDS..], &one);
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_syscalls_compatibility() -> Result<()> {
     let program_elf = ceno_examples::syscalls;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
@@ -482,6 +566,19 @@ fn unsafe_platform() -> Platform {
     let mut platform = CENO_PLATFORM;
     platform.unsafe_ecall_nop = true;
     platform
+}
+
+fn check_writes(ops: &[WriteOp], before: &[Word], after: &[Word]) {
+    assert!(ops.len() == before.len() && ops.len() == after.len());
+    for (i, _) in ops.iter().enumerate() {
+        assert_eq!(ops[0].addr + i, ops[i].addr);
+        assert_eq!(ops[i].value.before, before[i]);
+        assert_eq!(ops[i].value.after, after[i]);
+    }
+}
+
+fn check_reads(ops: &[WriteOp], before: &[Word]) {
+    check_writes(ops, before, before);
 }
 
 fn sample_keccak_f(count: usize) -> Vec<Vec<u64>> {

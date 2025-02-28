@@ -1,6 +1,7 @@
 use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
 
+pub mod bn254;
 pub mod keccak_permute;
 pub mod secp256k1;
 pub mod sha256;
@@ -9,6 +10,7 @@ pub mod sha256;
 // https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/code.rs
 
 pub use ceno_rt::syscalls::{
+    BN254_ADD, BN254_DOUBLE, BN254_FP_ADD, BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL,
     KECCAK_PERMUTE, SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SHA_EXTEND,
 };
 
@@ -28,12 +30,19 @@ pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects
         SECP256K1_DOUBLE => Ok(secp256k1::secp256k1_double(vm)),
         SECP256K1_DECOMPRESS => Ok(secp256k1::secp256k1_decompress(vm)),
         SHA_EXTEND => Ok(sha256::extend(vm)),
+        BN254_ADD => Ok(bn254::bn254_add(vm)),
+        BN254_DOUBLE => Ok(bn254::bn254_double(vm)),
+        BN254_FP_ADD => Ok(bn254::bn254_fp_add(vm)),
+        BN254_FP_MUL => Ok(bn254::bn254_fp_mul(vm)),
+        BN254_FP2_ADD => Ok(bn254::bn254_fp2_add(vm)),
+        BN254_FP2_MUL => Ok(bn254::bn254_fp2_mul(vm)),
         // TODO: introduce error types.
         _ => Err(anyhow::anyhow!("Unknown syscall: {}", function_code)),
     }
 }
 
 /// A syscall event, available to the circuit witness generators.
+/// TODO: separate mem_ops into two stages: reads-and-writes
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyscallWitness {
     pub mem_ops: Vec<WriteOp>,
@@ -43,13 +52,6 @@ pub struct SyscallWitness {
 
 impl SyscallWitness {
     fn new(mem_ops: Vec<WriteOp>, reg_ops: Vec<WriteOp>) -> SyscallWitness {
-        for (i, op) in mem_ops.iter().enumerate() {
-            assert_eq!(
-                op.addr,
-                mem_ops[0].addr + i,
-                "Dummy circuit expects that mem_ops addresses are consecutive."
-            );
-        }
         SyscallWitness {
             mem_ops,
             reg_ops,

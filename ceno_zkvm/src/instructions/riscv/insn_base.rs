@@ -486,8 +486,8 @@ impl<E: ExtensionField> MemAddr<E> {
 mod test {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
-    use witness::{InstancePaddingStrategy, RowMajorMatrix};
     use p3_goldilocks::Goldilocks as F;
+    use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
     use crate::{
         ROMType,

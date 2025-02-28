@@ -531,12 +531,14 @@ dependencies = [
  "ceno_rt",
  "elf",
  "itertools 0.13.0",
+ "num-bigint",
  "num-derive",
  "num-traits",
  "rrs-succinct",
  "secp",
  "strum",
  "strum_macros",
+ "substrate-bn",
  "tiny-keccak",
  "tracing",
 ]
@@ -551,6 +553,7 @@ dependencies = [
  "itertools 0.13.0",
  "rand",
  "rkyv",
+ "substrate-bn",
  "tiny-keccak",
 ]
 
@@ -1040,7 +1043,9 @@ name = "examples"
 version = "0.1.0"
 dependencies = [
  "ceno_rt",
+ "rand",
  "rkyv",
+ "substrate-bn",
 ]
 
 [[package]]
@@ -2423,6 +2428,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
+name = "rustc-hex"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e75f6a532d0fd9f7f13144f392b6ad56a32696bfcd9c78f797f16bbb6f072d6"
+
+[[package]]
 name = "rustix"
 version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2639,6 +2650,19 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 2.0.98",
+]
+
+[[package]]
+name = "substrate-bn"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b5bbfa79abbae15dd642ea8176a21a635ff3c00059961d1ea27ad04e5b441c"
+dependencies = [
+ "byteorder",
+ "crunchy",
+ "lazy_static",
+ "rand",
+ "rustc-hex",
 ]
 
 [[package]]
