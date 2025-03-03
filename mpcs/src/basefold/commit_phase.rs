@@ -1,3 +1,5 @@
+use std::{mem, sync::Arc};
+
 use super::{
     encoding::EncodingScheme,
     structure::{BasefoldCommitPhaseProof, BasefoldSpec},
@@ -46,7 +48,11 @@ where
     assert_eq!(point.len(), num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = field_type_iter_ext(&comm.get_codewords()[0]).collect_vec();
-    let mut running_evals = comm.polynomials_bh_evals[0].clone();
+    let running_evals = match Arc::try_unwrap(comm.polynomials_bh_evals[0]) {
+        Ok(mle) => mle.evaluations_to_owned(),
+        Err(arc) => panic!("arc still has multiple owners"),
+    };
+    let mut running_evals = comm.polynomials_bh_evals[0].into().evaluations_to_owned();
 
     #[cfg(feature = "sanity-check")]
     assert_eq!(

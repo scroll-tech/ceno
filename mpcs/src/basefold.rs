@@ -38,6 +38,7 @@ use std::{borrow::BorrowMut, ops::Deref};
 pub use structure::BasefoldSpec;
 use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
 use transcript::Transcript;
+use witness::RowMajorMatrix;
 
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
@@ -298,22 +299,18 @@ where
 
     fn commit(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        rmm: RowMajorMatrix<E::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
+        let poly = rmm.to_mles().remove(0);
+        let num_vars = poly.num_vars();
         let timer = start_timer!(|| "Basefold::commit");
-
-        let is_base = match poly.evaluations {
-            FieldType::Ext(_) => false,
-            FieldType::Base(_) => true,
-            _ => unreachable!(),
-        };
 
         // 2. Compute and store all the layers of the Merkle tree
 
         // 1. Encode the polynomials. Simultaneously get:
         //  (1) The evaluations over the hypercube (just a clone of the input)
         //  (2) The encoding of the coefficient vector (need an interpolation)
-        let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
+        let ret = match Self::get_poly_bh_evals_and_codeword(pp, &poly) {
             PolyEvalsCodeword::Normal(codeword) => {
                 let codeword_tree = MerkleTree::<E>::from_leaves(*codeword);
 
@@ -321,9 +318,9 @@ where
                 // they are useful in opening, and we don't want to recompute them.
                 Ok(Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: None,
-                    num_vars: poly.num_vars,
-                    is_base,
+                    polynomials_bh_evals: vec![poly.into()],
+                    num_vars,
+                    is_base: true,
                     num_polys: 1,
                 })
             }
@@ -334,11 +331,11 @@ where
                 // they are useful in opening, and we don't want to recompute them.
                 Ok(Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: Some(vec![
+                    polynomials_bh_evals: vec![
                         DenseMultilinearExtension::from_field_type(poly.num_vars, *evals).into(),
-                    ]),
-                    num_vars: poly.num_vars,
-                    is_base,
+                    ],
+                    num_vars,
+                    is_base: true,
                     num_polys: 1,
                 })
             }
@@ -411,7 +408,7 @@ where
                     polys.into_iter().map(|poly| poly.into()).collect_vec();
                 Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: Some(polys),
+                    polynomials_bh_evals: polys,
                     num_vars,
                     is_base,
                     num_polys,
@@ -431,15 +428,13 @@ where
                 let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
                 Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: Some(
-                        bh_evals
-                            .into_iter()
-                            .map(|bh_evals| {
-                                DenseMultilinearExtension::from_field_type(num_vars, bh_evals)
-                                    .into()
-                            })
-                            .collect_vec(),
-                    ),
+                    polynomials_bh_evals: bh_evals
+                        .into_iter()
+                        .map(|bh_evals| {
+                            DenseMultilinearExtension::from_field_type(num_vars, bh_evals).into()
+                        })
+                        .collect_vec(),
+
                     num_vars,
                     is_base,
                     num_polys: polys.len(),
@@ -784,8 +779,6 @@ where
         if comm.is_trivial::<Spec>() {
             return Ok(Self::Proof::trivial(
                 comm.polynomials_bh_evals
-                    .as_ref()
-                    .unwrap()
                     .iter()
                     .map(|mle| mle.evaluations().clone())
                     .collect_vec(),
@@ -1190,8 +1183,8 @@ mod test {
     use crate::{
         basefold::Basefold,
         test_util::{
-            gen_rand_poly_base, gen_rand_poly_ext, run_batch_commit_open_verify,
-            run_commit_open_verify, run_simple_batch_commit_open_verify,
+            run_batch_commit_open_verify, run_commit_open_verify,
+            run_simple_batch_commit_open_verify,
         },
     };
 
@@ -1202,93 +1195,39 @@ mod test {
 
     #[test]
     fn commit_open_verify_goldilocks() {
-        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
-            // Challenge is over extension field, poly over the base field
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(gen_rand_poly, 10, 11);
-            // Test trivial proof with small num vars
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(gen_rand_poly, 4, 6);
-            // Challenge is over extension field, poly over the base field
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 10, 11);
-            // Test trivial proof with small num vars
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 4, 6);
-        }
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(4, 6);
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks() {
-        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
-            // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                10,
-                11,
-                1,
-            );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                10,
-                11,
-                4,
-            );
-            // Test trivial proof with small num vars
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                4,
-                6,
-                4,
-            );
-            // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                10,
-                11,
-                1,
-            );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                10,
-                11,
-                4,
-            );
-            // Test trivial proof with small num vars
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                4,
-                6,
-                4,
-            );
-        }
+        // Both challenge and poly are over base field
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 1);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 4);
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(4, 6, 4);
+        // Both challenge and poly are over base field
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6, 4);
     }
 
     #[test]
     #[ignore = "For benchmarking and profiling only"]
     fn bench_basefold_simple_batch_commit_open_verify_goldilocks() {
         {
-            let gen_rand_poly = gen_rand_poly_base;
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 20, 21);
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                20,
-                21,
-                64,
-            );
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21, 64);
         }
     }
 
     #[test]
     fn batch_commit_open_verify() {
-        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
-            // Both challenge and poly are over base field
-            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                10,
-                11,
-            );
-            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                10,
-                11,
-            );
-        }
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11);
     }
 }

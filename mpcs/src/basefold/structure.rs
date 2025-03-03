@@ -65,7 +65,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) codeword_tree: MerkleTree<E>,
-    pub(crate) polynomials_bh_evals: Option<Vec<ArcMultilinearExtension<'static, E>>>,
+    pub(crate) polynomials_bh_evals: Vec<ArcMultilinearExtension<'static, E>>,
     pub(crate) num_vars: usize,
     pub(crate) is_base: bool,
     pub(crate) num_polys: usize,
@@ -200,16 +200,9 @@ where
 {
     fn eq(&self, other: &Self) -> bool {
         self.get_codewords().eq(other.get_codewords())
-            && self
-                .polynomials_bh_evals
-                .as_ref()
-                .zip(other.polynomials_bh_evals.as_ref())
-                .map(|(bh_evals_a, bh_evals_b)| {
-                    izip!(bh_evals_a, bh_evals_b).all(|(bh_evals_a, bh_evals_b)| {
-                        bh_evals_a.evaluations() == bh_evals_b.evaluations()
-                    })
-                })
-                .unwrap_or_default()
+            && izip!(&self.polynomials_bh_evals, &other.polynomials_bh_evals).all(
+                |(bh_evals_a, bh_evals_b)| bh_evals_a.evaluations() == bh_evals_b.evaluations(),
+            )
     }
 }
 
