@@ -5,10 +5,13 @@ use super::range_impl::RangeTableConfig;
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::InstancePaddingStrategy,
-    structs::ROMType, tables::TableCircuit, witness::RowMajorMatrix,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    structs::ROMType,
+    tables::{RMMCollections, TableCircuit},
 };
 use ff_ext::ExtensionField;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// Use this trait as parameter to RangeTableCircuit.
 pub trait RangeTable {
@@ -53,8 +56,9 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
+
         config.assign_instances(
             num_witin,
             num_structural_witin,
