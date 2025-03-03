@@ -17,6 +17,8 @@ use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
+use super::RMMCollections;
+
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 6]);
@@ -166,7 +168,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         program: &Program,
-    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError> {
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
         let mut prog_mlt = vec![0_usize; program.instructions.len()];

@@ -5,7 +5,10 @@ use super::ops_impl::OpTableConfig;
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ROMType, tables::TableCircuit,
+    circuit_builder::CircuitBuilder,
+    error::ZKVMError,
+    structs::ROMType,
+    tables::{RMMCollections, TableCircuit},
 };
 use ff_ext::ExtensionField;
 use witness::RowMajorMatrix;
@@ -60,7 +63,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
-    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError> {
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
         config.assign_instances(num_witin, num_structural_witin, multiplicity, OP::len())
     }

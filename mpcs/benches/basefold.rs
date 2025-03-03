@@ -258,8 +258,9 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
                         for _ in 0..iters {
-                            let instant = std::time::Instant::now();
                             let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+
+                            let instant = std::time::Instant::now();
                             Pcs::batch_commit(&pp, rmm).unwrap();
                             let elapsed = instant.elapsed();
                             time += elapsed;

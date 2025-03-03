@@ -4,7 +4,7 @@ use crate::{
     expression::Expression,
     instructions::Instruction,
     state::StateCircuit,
-    tables::TableCircuit,
+    tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
@@ -245,8 +245,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
-    /// table witness format: [witness, structural_witness]
-    witnesses_tables: BTreeMap<String, [RowMajorMatrix<E::BaseField>; 2]>,
+    witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
@@ -256,7 +255,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses_opcodes.get(name)
     }
 
-    pub fn get_table_witness(&self, name: &String) -> Option<&[RowMajorMatrix<E::BaseField>; 2]> {
+    pub fn get_table_witness(&self, name: &String) -> Option<&RMMCollections<E::BaseField>> {
         self.witnesses_tables.get(name)
     }
 

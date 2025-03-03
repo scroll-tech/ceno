@@ -98,6 +98,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, mut rmm) in witnesses.into_iter_sorted() {
             let witness_rmm = rmm.remove(0);
+            // only table got structural witness
             let structural_witness_rmm = if !rmm.is_empty() {
                 rmm.remove(0)
             } else {

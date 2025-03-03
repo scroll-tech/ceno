@@ -14,6 +14,9 @@ pub use program::{InsnRecord, ProgramTableCircuit, ProgramTableConfig};
 mod ram;
 pub use ram::*;
 
+/// format: [witness, structural_witness]
+pub type RMMCollections<F> = [RowMajorMatrix<F>; 2];
+
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
     type FixedInput: Send + Sync + ?Sized;
@@ -37,5 +40,5 @@ pub trait TableCircuit<E: ExtensionField> {
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         input: &Self::WitnessInput,
-    ) -> Result<[RowMajorMatrix<E::BaseField>; 2], ZKVMError>;
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError>;
 }
