@@ -74,8 +74,8 @@ mod query_phase;
 mod sumcheck;
 
 enum PolyEvalsCodeword<E: ExtensionField> {
-    Normal((FieldType<E>, FieldType<E>)),
-    TooSmall(FieldType<E>), // The polynomial is too small to apply FRI
+    Normal(Box<FieldType<E>>),
+    TooSmall(Box<FieldType<E>>), // The polynomial is too small to apply FRI
     TooBig(usize),
 }
 
@@ -93,8 +93,7 @@ where
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
-        let mut bh_evals = poly.evaluations.clone();
-        let num_vars = poly.num_vars;
+        let num_vars = poly.num_vars();
         if num_vars > pp.encoding_params.get_max_message_size_log() {
             return PolyEvalsCodeword::TooBig(num_vars);
         }
@@ -103,12 +102,13 @@ where
         // So we just build the Merkle tree over the polynomial evaluations.
         // No codeword is needed.
         if num_vars <= Spec::get_basecode_msg_size_log() {
-            return PolyEvalsCodeword::TooSmall(bh_evals);
+            let bh_evals = poly.evaluations().clone();
+            return PolyEvalsCodeword::TooSmall(Box::new(bh_evals));
         }
 
         // Switch to coefficient form
-        let mut coeffs = bh_evals.clone();
-        // TODO: directly return bit-reversed version if needed.
+        // TODO optimize as this operation is heavily
+        let mut coeffs = poly.evaluations().clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
         // The coefficients are originally stored in little endian,
@@ -122,28 +122,20 @@ where
         // encode(left_right_fold(msg)) = left_right_fold(encode(msg))
         // or
         // encode(even_odd_fold(msg)) = left_right_fold(encode(msg))
-        // If the message is left-right folded, then we don't need to do
-        // anything. But if the message is even-odd folded for this encoding
-        // scheme, we need to bit-reverse it before we encode the message,
-        // such that the folding of the message is consistent with the
-        // evaluation of the first variable of the polynomial.
-        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+
+        // since `coeffs` are already in little-endian order, we aim to retain the encoding scheme
+        // that provides the left-right fold property.
+        // this ensures compatibility with the conventional sumcheck protocol implementation,
+        // which also follows a left-right folding pattern.
+        // consequently, if the natural encoding scheme follows `left_right_fold(msg)`,
+        // we must apply a **bit-reversal** **before** encoding.
+        // this is because:
+        // `left_right_fold(bit_reverse(msg)) == even_odd_fold(msg)`
+        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
             reverse_index_bits_in_place_field_type(&mut coeffs);
         }
         let mut codeword = Spec::EncodingScheme::encode(&pp.encoding_params, &coeffs);
 
-        // The evaluations over the hypercube are used in sum-check.
-        // They are bit-reversed because the hypercube is ordered in little
-        // endian, so the left half of the evaluation vector are evaluated
-        // at 0 for the first variable, and the right half are evaluated at
-        // 1 for the first variable.
-        // In each step of sum-check, we subsitute the first variable of the
-        // current polynomial with the random challenge, which is equivalent
-        // to a left-right folding of the evaluation vector.
-        // However, the algorithms that we will use are applying even-odd
-        // fold in each sum-check round (easier to program using `par_chunks`)
-        // so we bit-reverse it to store the evaluations in big-endian.
-        reverse_index_bits_in_place_field_type(&mut bh_evals);
         // The encoding scheme always folds the codeword in left-and-right
         // manner. However, in query phase the two folded positions are
         // always opened together, so it will be more efficient if the
@@ -153,7 +145,7 @@ where
         // positions are folded.
         reverse_index_bits_in_place_field_type(&mut codeword);
 
-        PolyEvalsCodeword::Normal((bh_evals, codeword))
+        PolyEvalsCodeword::Normal(Box::new(codeword))
     }
 
     /// Transpose a matrix of field elements, generic over the type of field element
@@ -322,27 +314,29 @@ where
         //  (1) The evaluations over the hypercube (just a clone of the input)
         //  (2) The encoding of the coefficient vector (need an interpolation)
         let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
-            PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword);
+            PolyEvalsCodeword::Normal(codeword) => {
+                let codeword_tree = MerkleTree::<E>::from_leaves(*codeword);
 
                 // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
                 Ok(Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: vec![bh_evals],
+                    polynomials_bh_evals: None,
                     num_vars: poly.num_vars,
                     is_base,
                     num_polys: 1,
                 })
             }
             PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone());
+                let codeword_tree = MerkleTree::<E>::from_leaves((*evals).clone());
 
                 // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
                 Ok(Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: vec![evals],
+                    polynomials_bh_evals: Some(vec![
+                        DenseMultilinearExtension::from_field_type(poly.num_vars, *evals).into(),
+                    ]),
                     num_vars: poly.num_vars,
                     is_base,
                     num_polys: 1,
@@ -374,24 +368,23 @@ where
             ));
         }
 
-        let is_base = match polys[0].evaluations {
+        let num_vars = polys[0].num_vars();
+        let num_polys = polys.len();
+
+        let is_base = match polys[0].evaluations() {
             FieldType::Ext(_) => false,
             FieldType::Base(_) => true,
             _ => unreachable!(),
         };
 
-        for i in 1..polys.len() {
-            if polys[i].num_vars != polys[0].num_vars {
-                return Err(Error::InvalidPcsParam(
-                    "cannot batch commit to polynomials with different number of variables"
-                        .to_string(),
-                ));
-            }
+        if !polys.iter().map(|poly| poly.num_vars()).all_equal() {
+            return Err(Error::InvalidPcsParam(
+                "cannot batch commit to polynomials with different number of variables".to_string(),
+            ));
         }
         let timer = start_timer!(|| "Basefold::batch commit");
 
         let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
-        // convert each polynomial to a code word
         let evals_codewords = polys
             .par_iter()
             .map(|poly| Self::get_poly_bh_evals_and_codeword(pp, poly))
@@ -401,10 +394,10 @@ where
         // build merkle tree from leaves
         let ret = match evals_codewords[0] {
             PolyEvalsCodeword::Normal(_) => {
-                let (bh_evals, codewords) = evals_codewords
+                let codewords = evals_codewords
                     .into_iter()
                     .map(|evals_codeword| match evals_codeword {
-                        PolyEvalsCodeword::Normal((bh_evals, codeword)) => (bh_evals, codeword),
+                        PolyEvalsCodeword::Normal(codeword) => *codeword,
                         PolyEvalsCodeword::TooSmall(_) => {
                             unreachable!();
                         }
@@ -412,14 +405,16 @@ where
                             unreachable!();
                         }
                     })
-                    .collect::<(Vec<_>, Vec<_>)>();
+                    .collect::<Vec<_>>();
                 let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
+                let polys: Vec<ArcMultilinearExtension<E>> =
+                    polys.into_iter().map(|poly| poly.into()).collect_vec();
                 Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: bh_evals,
-                    num_vars: polys[0].num_vars,
+                    polynomials_bh_evals: Some(polys),
+                    num_vars,
                     is_base,
-                    num_polys: polys.len(),
+                    num_polys,
                 }
             }
             PolyEvalsCodeword::TooSmall(_) => {
@@ -427,7 +422,7 @@ where
                     .into_iter()
                     .map(|bh_evals| match bh_evals {
                         PolyEvalsCodeword::Normal(_) => unreachable!(),
-                        PolyEvalsCodeword::TooSmall(evals) => evals,
+                        PolyEvalsCodeword::TooSmall(evals) => *evals,
                         PolyEvalsCodeword::TooBig(_) => {
                             unreachable!();
                         }
@@ -436,8 +431,16 @@ where
                 let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
                 Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: bh_evals,
-                    num_vars: polys[0].num_vars,
+                    polynomials_bh_evals: Some(
+                        bh_evals
+                            .into_iter()
+                            .map(|bh_evals| {
+                                DenseMultilinearExtension::from_field_type(num_vars, bh_evals)
+                                    .into()
+                            })
+                            .collect_vec(),
+                    ),
+                    num_vars,
                     is_base,
                     num_polys: polys.len(),
                 }
@@ -779,7 +782,14 @@ where
         let num_vars = polys[0].num_vars();
 
         if comm.is_trivial::<Spec>() {
-            return Ok(Self::Proof::trivial(comm.polynomials_bh_evals.clone()));
+            return Ok(Self::Proof::trivial(
+                comm.polynomials_bh_evals
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(|mle| mle.evaluations().clone())
+                    .collect_vec(),
+            ));
         }
 
         polys
