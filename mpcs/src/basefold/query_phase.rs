@@ -159,7 +159,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
     interpolate_over_boolean_hypercube(&mut message);
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     let final_codeword =
@@ -230,7 +230,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     interpolate_over_boolean_hypercube(&mut message);
@@ -307,7 +307,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     interpolate_over_boolean_hypercube(&mut message);
