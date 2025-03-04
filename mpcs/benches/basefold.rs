@@ -47,8 +47,8 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
 
         let mut transcript = T::new(b"BaseFold");
         let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
-        let poly = rmm.to_mles().remove(0);
         let comm = Pcs::commit_and_write(&pp, rmm, &mut transcript).unwrap();
+        let poly = Pcs::get_arcmle_witness_from_commitment(&comm).remove(0);
 
         group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
             b.iter_custom(|iters| {

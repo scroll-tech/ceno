@@ -67,7 +67,6 @@ where
     let build_eq_timer = start_timer!(|| "Basefold::open");
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
-    reverse_index_bits_in_place(&mut eq);
 
     let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round_field_type(&mut eq, &mut running_evals);
@@ -139,9 +138,6 @@ where
             // running_evals is exactly the evaluation representation of the
             // folded polynomial so far.
             sum_check_last_round(&mut eq, &mut running_evals, challenge.elements);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut running_evals);
             transcript.append_field_element_exts(&running_evals);
             final_message = running_evals;
             // To prevent the compiler from complaining that the value is moved
@@ -165,6 +161,9 @@ where
                     FieldType::Ext(b) => b,
                     _ => panic!("Should be ext field"),
                 };
+
+                let mut new_running_oracle = new_running_oracle;
+                reverse_index_bits_in_place(&mut new_running_oracle);
                 assert_eq!(basecode, new_running_oracle);
             }
         }
@@ -314,6 +313,9 @@ where
                     FieldType::Ext(basecode) => basecode,
                     _ => panic!("Should be ext field"),
                 };
+
+                let mut new_running_oracle = new_running_oracle;
+                reverse_index_bits_in_place(&mut new_running_oracle);
                 assert_eq!(basecode, new_running_oracle);
             }
         }

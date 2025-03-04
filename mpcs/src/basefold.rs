@@ -88,7 +88,7 @@ where
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
-        let num_vars = poly.num_vars();
+        let num_vars = poly.num_vars;
         if num_vars > pp.encoding_params.get_max_message_size_log() {
             return PolyEvalsCodeword::TooBig(num_vars);
         }
@@ -459,7 +459,7 @@ where
     /// will panic.
     fn open(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         _eval: &E, // Opening does not need eval, except for sanity check
@@ -473,7 +473,7 @@ where
         // the protocol won't work, and saves no verifier work anyway.
         // In this case, simply return the evaluations as trivial proof.
         if comm.is_trivial::<Spec>() {
-            return Ok(Self::Proof::trivial(vec![poly.evaluations.clone()]));
+            return Ok(Self::Proof::trivial(vec![poly.evaluations().clone()]));
         }
 
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
@@ -492,8 +492,8 @@ where
             point,
             comm,
             transcript,
-            poly.num_vars,
-            poly.num_vars - Spec::get_basecode_msg_size_log(),
+            poly.num_vars(),
+            poly.num_vars() - Spec::get_basecode_msg_size_log(),
         );
 
         // 2. Query phase. ---------------------------------------
@@ -539,7 +539,7 @@ where
     /// not very useful in ceno.
     fn batch_open(
         _pp: &Self::ProverParam,
-        _polys: &[DenseMultilinearExtension<E>],
+        _polys: &[ArcMultilinearExtension<E>],
         _comms: &[Self::CommitmentWithWitness],
         _points: &[Vec<E>],
         _evals: &[Evaluation<E>],
@@ -700,15 +700,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
+        let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         verifier_query_phase::<E, Spec>(
@@ -823,17 +818,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &verify_point.as_slice()[verify_point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&verify_point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(
-            &verify_point.as_slice()[..verify_point.len() - fold_challenges.len()],
-        );
+        let mut eq = build_eq_x_r_vec(&verify_point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         batch_verifier_query_phase::<E, Spec>(
@@ -925,15 +913,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
+        let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         simple_batch_verifier_query_phase::<E, Spec>(
@@ -997,15 +980,15 @@ mod test {
     #[test]
     fn simple_batch_commit_open_verify_goldilocks() {
         // Both challenge and poly are over base field
-        // run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 1);
-        // run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 1);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 4);
         // Test trivial proof with small num vars
-        // run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(4, 6, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(4, 6, 4);
         // Both challenge and poly are over base field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
-        // run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
         // Test trivial proof with small num vars
-        // run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6, 4);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6, 4);
     }
 
     #[test]

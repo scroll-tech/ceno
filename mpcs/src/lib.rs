@@ -65,7 +65,7 @@ pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentSc
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    poly: &DenseMultilinearExtension<E>,
+    poly: &ArcMultilinearExtension<E>,
     comm: &Pcs::CommitmentWithWitness,
     point: &[E],
     eval: &E,
@@ -76,7 +76,7 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    polys: &[ArcMultilinearExtension<E>],
     comms: &[Pcs::CommitmentWithWitness],
     points: &[Vec<E>],
     evals: &[Evaluation<E>],
@@ -165,7 +165,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn open(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
@@ -174,7 +174,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn batch_open(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         comms: &[Self::CommitmentWithWitness],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
@@ -233,7 +233,7 @@ where
 {
     fn ni_open(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
@@ -244,7 +244,7 @@ where
 
     fn ni_batch_open(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         comms: &[Self::CommitmentWithWitness],
         points: &[Vec<E>],
         evals: &[Evaluation<E>],
@@ -459,8 +459,9 @@ pub mod test_util {
             let (comm, eval, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
                 let rmm = RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, 1);
-                let poly = rmm.to_mles().remove(0);
+                let poly: ArcMultilinearExtension<E> = rmm.to_mles().remove(0).into();
                 let comm = Pcs::commit_and_write(&pp, rmm, &mut transcript).unwrap();
+
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let eval = poly.evaluate(point.as_slice());
                 transcript.append_field_element_ext(&eval);

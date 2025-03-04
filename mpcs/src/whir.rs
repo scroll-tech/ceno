@@ -63,7 +63,7 @@ where
 
     fn open(
         pp: &Self::ProverParam,
-        _poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+        _poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
@@ -119,7 +119,7 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
-        _polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
+        _polys: &[ArcMultilinearExtension<E>],
         _comms: &[Self::CommitmentWithWitness],
         _points: &[Vec<E>],
         _evals: &[crate::Evaluation<E>],

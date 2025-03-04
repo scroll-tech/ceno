@@ -123,10 +123,11 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     }
     let final_codeword =
         <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
-    let final_codeword = match final_codeword {
+    let mut final_codeword = match final_codeword {
         FieldType::Ext(final_codeword) => final_codeword,
         _ => panic!("Final codeword must be extension field"),
     };
+    reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
     let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
@@ -194,10 +195,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     interpolate_over_boolean_hypercube(&mut message);
     let final_codeword =
         <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
-    let final_codeword = match final_codeword {
+    let mut final_codeword = match final_codeword {
         FieldType::Ext(final_codeword) => final_codeword,
         _ => panic!("Final codeword must be extension field"),
     };
+    reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
     // For computing the weights on the fly, because the verifier is incapable of storing
@@ -270,10 +272,11 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     interpolate_over_boolean_hypercube(&mut message);
     let final_codeword =
         <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
-    let final_codeword = match final_codeword {
+    let mut final_codeword = match final_codeword {
         FieldType::Ext(final_codeword) => final_codeword,
         _ => panic!("Final codeword must be extension field"),
     };
+    reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
     // For computing the weights on the fly, because the verifier is incapable of storing
@@ -1299,7 +1302,6 @@ where
                 // next_index here.
                 final_codeword[next_index]
             };
-            println!("going to verify {i} round");
             assert_eq!(res, next_oracle_value, "Failed at round {}", i);
             // end_timer!(round_timer);
         }
