@@ -6,7 +6,7 @@ use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, WhirDefault,
-    test_util::{gen_rand_poly_base, get_point_from_challenge, setup_pcs},
+    test_util::{get_point_from_challenge, setup_pcs},
 };
 
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
@@ -42,12 +42,21 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(c: &m
         };
 
         let mut transcript = T::new(b"BaseFold");
-        let poly = gen_rand_poly_base(num_vars);
-        let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
+        let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
+        let poly = rmm.to_mles().remove(0);
+        let comm = Pcs::commit_and_write(&pp, rmm, &mut transcript).unwrap();
 
         group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
-            b.iter(|| {
-                Pcs::commit(&pp, &poly).unwrap();
+            b.iter_custom(|iters| {
+                let mut time = Duration::new(0, 0);
+                for _ in 0..iters {
+                    let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
+                    let instant = std::time::Instant::now();
+                    Pcs::commit(&pp, rmm).unwrap();
+                    let elapsed = instant.elapsed();
+                    time += elapsed;
+                }
+                time
             })
         });
 

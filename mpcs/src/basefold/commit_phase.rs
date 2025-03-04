@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::sync::Arc;
 
 use super::{
     encoding::EncodingScheme,
@@ -10,23 +10,27 @@ use super::{
 };
 use crate::util::{
     arithmetic::{interpolate_over_boolean_hypercube, interpolate2_weights},
-    field_type_index_ext, field_type_iter_ext,
+    field_type_iter_ext,
     hash::write_digest_to_transcript,
     log2_strict,
     merkle_tree::MerkleTree,
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
-use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
+use multilinear_extensions::{
+    commutative_op_mle_pair,
+    mle::{DenseMultilinearExtension, FieldType},
+    virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
+};
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-    ParallelSlice,
+use rayon::{
+    iter::IntoParallelRefIterator,
+    prelude::{IndexedParallelIterator, ParallelIterator, ParallelSlice},
 };
 
 use super::structure::BasefoldCommitmentWithWitness;
@@ -48,11 +52,8 @@ where
     assert_eq!(point.len(), num_vars);
     let mut trees = Vec::with_capacity(num_vars);
     let mut running_oracle = field_type_iter_ext(&comm.get_codewords()[0]).collect_vec();
-    let running_evals = match Arc::try_unwrap(comm.polynomials_bh_evals[0]) {
-        Ok(mle) => mle.evaluations_to_owned(),
-        Err(arc) => panic!("arc still has multiple owners"),
-    };
-    let mut running_evals = comm.polynomials_bh_evals[0].into().evaluations_to_owned();
+    // TODO remove clone here
+    let mut running_evals = comm.polynomials_bh_evals[0].evaluations().clone();
 
     #[cfg(feature = "sanity-check")]
     assert_eq!(
@@ -152,7 +153,8 @@ where
 
                 let mut coeffs = final_message.clone();
                 interpolate_over_boolean_hypercube(&mut coeffs);
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding()
+                {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
@@ -163,9 +165,6 @@ where
                     FieldType::Ext(b) => b,
                     _ => panic!("Should be ext field"),
                 };
-
-                let mut new_running_oracle = new_running_oracle;
-                reverse_index_bits_in_place(&mut new_running_oracle);
                 assert_eq!(basecode, new_running_oracle);
             }
         }
@@ -173,176 +172,6 @@ where
     }
     end_timer!(timer);
 
-    (trees, BasefoldCommitPhaseProof {
-        sumcheck_messages,
-        roots,
-        final_message,
-    })
-}
-
-// outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
-#[allow(clippy::too_many_arguments)]
-pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
-    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    point: &[E],
-    comms: &[BasefoldCommitmentWithWitness<E>],
-    transcript: &mut impl Transcript<E>,
-    num_vars: usize,
-    num_rounds: usize,
-    coeffs: &[E],
-) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let timer = start_timer!(|| "Batch Commit phase");
-    assert_eq!(point.len(), num_vars);
-    let mut trees = Vec::with_capacity(num_vars);
-    let mut running_oracle = vec![E::ZERO; 1 << (num_vars + Spec::get_rate_log())];
-
-    let build_oracle_timer = start_timer!(|| "Basefold build initial oracle");
-    // Before the interaction, collect all the polynomials whose num variables match the
-    // max num variables
-    let running_oracle_len = running_oracle.len();
-    comms
-        .iter()
-        .enumerate()
-        .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-        .for_each(|(index, comm)| {
-            running_oracle
-                .iter_mut()
-                .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                .for_each(|(r, a)| *r += a * coeffs[index]);
-        });
-    end_timer!(build_oracle_timer);
-
-    let build_oracle_timer = start_timer!(|| "Basefold build initial sumcheck evals");
-    // Unlike the FRI part, the sum-check part still follows the original procedure,
-    // and linearly combine all the polynomials once for all
-    let mut sum_of_all_evals_for_sumcheck = vec![E::ZERO; 1 << num_vars];
-    comms.iter().enumerate().for_each(|(index, comm)| {
-        sum_of_all_evals_for_sumcheck
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(pos, r)| {
-                // Evaluating the multilinear polynomial outside of its interpolation hypercube
-                // is equivalent to repeating each element in place.
-                // Here is the tricky part: the bh_evals are stored in big endian, but we want
-                // to align the polynomials to the variable with index 0 before adding them
-                // together. So each element is repeated by
-                // sum_of_all_evals_for_sumcheck.len() / bh_evals.len() times
-                *r += field_type_index_ext(
-                    &comm.polynomials_bh_evals[0],
-                    pos >> (num_vars - log2_strict(comm.polynomials_bh_evals[0].len())),
-                ) * coeffs[index]
-            });
-    });
-    end_timer!(build_oracle_timer);
-
-    // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
-    let mut eq = build_eq_x_r_vec(point);
-    reverse_index_bits_in_place(&mut eq);
-
-    let sumcheck_timer = start_timer!(|| "Basefold first round");
-    let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
-    let mut last_sumcheck_message =
-        sum_check_first_round(&mut eq, &mut sum_of_all_evals_for_sumcheck);
-    sumcheck_messages.push(last_sumcheck_message.clone());
-    end_timer!(sumcheck_timer);
-
-    let mut roots = Vec::with_capacity(num_rounds - 1);
-    let mut final_message = Vec::new();
-    let mut running_tree_inner = Vec::new();
-    for i in 0..num_rounds {
-        let sumcheck_timer = start_timer!(|| format!("Batch basefold round {}", i));
-        // For the first round, no need to send the running root, because this root is
-        // committing to a vector that can be recovered from linearly combining other
-        // already-committed vectors.
-        transcript.append_field_element_exts(&last_sumcheck_message);
-
-        let challenge = transcript
-            .get_and_append_challenge(b"commit round")
-            .elements;
-
-        // Fold the current oracle for FRI
-        let mut new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
-            pp,
-            log2_strict(running_oracle.len()) - 1,
-            &running_oracle,
-            challenge,
-        );
-
-        if i > 0 {
-            let running_tree = MerkleTree::<E>::from_inner_leaves(
-                running_tree_inner,
-                FieldType::Ext(running_oracle),
-            );
-            trees.push(running_tree);
-        }
-
-        if i < num_rounds - 1 {
-            last_sumcheck_message =
-                sum_check_challenge_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            sumcheck_messages.push(last_sumcheck_message.clone());
-            running_tree_inner = MerkleTree::<E>::compute_inner_ext(&new_running_oracle);
-            let running_root = MerkleTree::<E>::root_from_inner(&running_tree_inner);
-            write_digest_to_transcript(&running_root, transcript);
-            roots.push(running_root);
-
-            // Then merge the rest polynomials whose sizes match the current running oracle
-            let running_oracle_len = new_running_oracle.len();
-            comms
-                .iter()
-                .enumerate()
-                .filter(|(_, comm)| comm.codeword_size() == running_oracle_len)
-                .for_each(|(index, comm)| {
-                    new_running_oracle
-                        .iter_mut()
-                        .zip_eq(field_type_iter_ext(&comm.get_codewords()[0]))
-                        .for_each(|(r, a)| *r += a * coeffs[index]);
-                });
-            running_oracle = new_running_oracle;
-        } else {
-            // Clear the value so the compiler does not think they are moved
-            running_oracle = Vec::new();
-            running_tree_inner = Vec::new();
-            // The difference of the last round is that we don't need to compute the message,
-            // and we don't interpolate the small polynomials. So after the last round,
-            // sum_of_all_evals_for_sumcheck is exactly the evaluation representation of the
-            // folded polynomial so far.
-            sum_check_last_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
-            transcript.append_field_element_exts(&sum_of_all_evals_for_sumcheck);
-            final_message = sum_of_all_evals_for_sumcheck;
-            // To prevent the compiler from complaining that the value is moved
-            sum_of_all_evals_for_sumcheck = Vec::new();
-
-            if cfg!(feature = "sanity-check") {
-                // If the prover is honest, in the last round, the running oracle
-                // on the prover side should be exactly the encoding of the folded polynomial.
-
-                let mut coeffs = final_message.clone();
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
-                    reverse_index_bits_in_place(&mut coeffs);
-                }
-                interpolate_over_boolean_hypercube(&mut coeffs);
-                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
-                    pp,
-                    &FieldType::Ext(coeffs),
-                );
-                let basecode = match basecode {
-                    FieldType::Ext(x) => x,
-                    _ => panic!("Expected ext field"),
-                };
-
-                reverse_index_bits_in_place(&mut new_running_oracle);
-                assert_eq!(basecode, new_running_oracle);
-            }
-        }
-        end_timer!(sumcheck_timer);
-    }
-    end_timer!(timer);
     (trees, BasefoldCommitPhaseProof {
         sumcheck_messages,
         roots,
@@ -369,29 +198,53 @@ where
     assert_eq!(comm.num_polys, batch_coeffs.len());
     let prepare_timer = start_timer!(|| "Prepare");
     let mut trees = Vec::with_capacity(num_vars);
+
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
     let mut running_oracle = comm.batch_codewords(batch_coeffs);
     end_timer!(batch_codewords_timer);
-    let mut running_evals = (0..(1 << num_vars))
-        .into_par_iter()
-        .map(|i| {
-            comm.polynomials_bh_evals
-                .iter()
-                .zip(batch_coeffs)
-                .map(|(eval, coeff)| field_type_index_ext(eval, i) * *coeff)
-                .sum()
-        })
-        .collect::<Vec<_>>();
+
+    let Some((running_evals, _)): Option<(ArcMultilinearExtension<E>, E)> = izip!(
+        comm.polynomials_bh_evals.iter().cloned(),
+        batch_coeffs.iter().cloned()
+    )
+    .reduce(|(poly_a, coeff_a), (poly_b, coeff_b)| {
+        let next_poly = commutative_op_mle_pair!(|poly_a, poly_b| {
+            if coeff_a == E::ONE {
+                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    num_vars,
+                    poly_a
+                        .par_iter()
+                        .zip(poly_b.par_iter())
+                        .map(|(a, b)| coeff_b * *b + *a)
+                        .collect(),
+                ))
+            } else {
+                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    num_vars,
+                    poly_a
+                        .par_iter()
+                        .zip(poly_b.par_iter())
+                        .map(|(a, b)| coeff_a * *a + coeff_b * *b)
+                        .collect(),
+                ))
+            }
+        });
+        (next_poly, E::ONE)
+    }) else {
+        unimplemented!()
+    };
+    // TODO avoid and move clone to sumcheck later round
+    let mut running_evals = match running_evals.evaluations() {
+        FieldType::Base(items) => items.par_iter().map(|b| E::from(*b)).collect(),
+        FieldType::Ext(_) => running_evals.get_ext_field_vec().to_vec(),
+        _ => unreachable!(),
+    };
     end_timer!(prepare_timer);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_timer = start_timer!(|| "Basefold::build eq");
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
-
-    let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
-    reverse_index_bits_in_place(&mut eq);
-    end_timer!(reverse_bits_timer);
 
     let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
@@ -448,9 +301,6 @@ where
             // running_evals is exactly the evaluation representation of the
             // folded polynomial so far.
             sum_check_last_round(&mut eq, &mut running_evals, challenge);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut running_evals);
             transcript.append_field_element_exts(&running_evals);
             final_message = running_evals;
             // To avoid the compiler complaining that running_evals is moved.
@@ -461,7 +311,8 @@ where
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
                 let mut coeffs = final_message.clone();
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding()
+                {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 interpolate_over_boolean_hypercube(&mut coeffs);
@@ -473,9 +324,6 @@ where
                     FieldType::Ext(basecode) => basecode,
                     _ => panic!("Should be ext field"),
                 };
-
-                let mut new_running_oracle = new_running_oracle;
-                reverse_index_bits_in_place(&mut new_running_oracle);
                 assert_eq!(basecode, new_running_oracle);
             }
         }
