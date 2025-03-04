@@ -1,21 +1,18 @@
 use crate::{
     Error, Evaluation, NoninteractivePCS, PolynomialCommitmentScheme,
     sum_check::{
-        SumCheck as _, VirtualPolynomial,
+        SumCheck as _,
         classic::{ClassicSumCheck, CoefficientsProver},
         eq_xy_eval,
     },
     util::{
-        add_polynomial_with_coeff,
         arithmetic::{
             inner_product, inner_product_three, interpolate_field_type_over_boolean_hypercube,
         },
-        expression::{Expression, Query, Rotation},
         ext_to_usize,
         hash::{Digest, write_digest_to_transcript},
         log2_strict,
         merkle_tree::MerkleTree,
-        multiply_poly,
         plonky2_util::reverse_index_bits_in_place_field_type,
         poly_index_ext, poly_iter_ext,
     },
@@ -29,15 +26,14 @@ pub use encoding::{
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
 use query_phase::{
-    BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-    SimpleBatchQueriesResultWithMerklePath, batch_prover_query_phase, batch_verifier_query_phase,
-    prover_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
-    verifier_query_phase,
+    QueriesResultWithMerklePath, SimpleBatchQueriesResultWithMerklePath,
+    batch_verifier_query_phase, prover_query_phase, simple_batch_prover_query_phase,
+    simple_batch_verifier_query_phase, verifier_query_phase,
 };
-use std::{borrow::BorrowMut, ops::Deref};
 pub use structure::BasefoldSpec;
 use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
 use transcript::Transcript;
+use witness::RowMajorMatrix;
 
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
@@ -51,7 +47,6 @@ use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
 };
-use std::borrow::Cow;
 pub use sumcheck::{one_level_eval_hc, one_level_interp_hc};
 
 type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
@@ -63,7 +58,7 @@ pub use structure::{
     BasefoldVerifierParams,
 };
 mod commit_phase;
-use commit_phase::{batch_commit_phase, commit_phase, simple_batch_commit_phase};
+use commit_phase::{commit_phase, simple_batch_commit_phase};
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
@@ -74,8 +69,8 @@ mod query_phase;
 mod sumcheck;
 
 enum PolyEvalsCodeword<E: ExtensionField> {
-    Normal((FieldType<E>, FieldType<E>)),
-    TooSmall(FieldType<E>), // The polynomial is too small to apply FRI
+    Normal(Box<FieldType<E>>),
+    TooSmall(Box<FieldType<E>>), // The polynomial is too small to apply FRI
     TooBig(usize),
 }
 
@@ -93,7 +88,6 @@ where
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
-        let mut bh_evals = poly.evaluations.clone();
         let num_vars = poly.num_vars;
         if num_vars > pp.encoding_params.get_max_message_size_log() {
             return PolyEvalsCodeword::TooBig(num_vars);
@@ -103,12 +97,13 @@ where
         // So we just build the Merkle tree over the polynomial evaluations.
         // No codeword is needed.
         if num_vars <= Spec::get_basecode_msg_size_log() {
-            return PolyEvalsCodeword::TooSmall(bh_evals);
+            let bh_evals = poly.evaluations().clone();
+            return PolyEvalsCodeword::TooSmall(Box::new(bh_evals));
         }
 
         // Switch to coefficient form
-        let mut coeffs = bh_evals.clone();
-        // TODO: directly return bit-reversed version if needed.
+        // TODO optimize as this operation is heavily
+        let mut coeffs = poly.evaluations().clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
         // The coefficients are originally stored in little endian,
@@ -122,28 +117,20 @@ where
         // encode(left_right_fold(msg)) = left_right_fold(encode(msg))
         // or
         // encode(even_odd_fold(msg)) = left_right_fold(encode(msg))
-        // If the message is left-right folded, then we don't need to do
-        // anything. But if the message is even-odd folded for this encoding
-        // scheme, we need to bit-reverse it before we encode the message,
-        // such that the folding of the message is consistent with the
-        // evaluation of the first variable of the polynomial.
-        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+
+        // since `coeffs` are already in little-endian order, we aim to retain the encoding scheme
+        // that provides the even-odd fold property.
+        // this ensures compatibility with the conventional sumcheck protocol implementation,
+        // which also follows a even-odd folding pattern.
+        // consequently, if the natural encoding scheme follows `left_right_fold(msg)`,
+        // we must apply a **bit-reversal** **before** encoding.
+        // this is because:
+        // `left_right_fold(bit_reverse(msg)) == even_odd_fold(msg)`
+        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
             reverse_index_bits_in_place_field_type(&mut coeffs);
         }
         let mut codeword = Spec::EncodingScheme::encode(&pp.encoding_params, &coeffs);
 
-        // The evaluations over the hypercube are used in sum-check.
-        // They are bit-reversed because the hypercube is ordered in little
-        // endian, so the left half of the evaluation vector are evaluated
-        // at 0 for the first variable, and the right half are evaluated at
-        // 1 for the first variable.
-        // In each step of sum-check, we subsitute the first variable of the
-        // current polynomial with the random challenge, which is equivalent
-        // to a left-right folding of the evaluation vector.
-        // However, the algorithms that we will use are applying even-odd
-        // fold in each sum-check round (easier to program using `par_chunks`)
-        // so we bit-reverse it to store the evaluations in big-endian.
-        reverse_index_bits_in_place_field_type(&mut bh_evals);
         // The encoding scheme always folds the codeword in left-and-right
         // manner. However, in query phase the two folded positions are
         // always opened together, so it will be more efficient if the
@@ -153,7 +140,7 @@ where
         // positions are folded.
         reverse_index_bits_in_place_field_type(&mut codeword);
 
-        PolyEvalsCodeword::Normal((bh_evals, codeword))
+        PolyEvalsCodeword::Normal(Box::new(codeword))
     }
 
     /// Transpose a matrix of field elements, generic over the type of field element
@@ -306,45 +293,43 @@ where
 
     fn commit(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        rmm: RowMajorMatrix<E::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
+        let poly = rmm.to_mles().remove(0);
+        let num_vars = poly.num_vars();
         let timer = start_timer!(|| "Basefold::commit");
-
-        let is_base = match poly.evaluations {
-            FieldType::Ext(_) => false,
-            FieldType::Base(_) => true,
-            _ => unreachable!(),
-        };
 
         // 2. Compute and store all the layers of the Merkle tree
 
         // 1. Encode the polynomials. Simultaneously get:
         //  (1) The evaluations over the hypercube (just a clone of the input)
         //  (2) The encoding of the coefficient vector (need an interpolation)
-        let ret = match Self::get_poly_bh_evals_and_codeword(pp, poly) {
-            PolyEvalsCodeword::Normal((bh_evals, codeword)) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(codeword);
+        let ret = match Self::get_poly_bh_evals_and_codeword(pp, &poly) {
+            PolyEvalsCodeword::Normal(codeword) => {
+                let codeword_tree = MerkleTree::<E>::from_leaves(*codeword);
 
                 // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
                 Ok(Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: vec![bh_evals],
-                    num_vars: poly.num_vars,
-                    is_base,
+                    polynomials_bh_evals: vec![poly.into()],
+                    num_vars,
+                    is_base: true,
                     num_polys: 1,
                 })
             }
             PolyEvalsCodeword::TooSmall(evals) => {
-                let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone());
+                let codeword_tree = MerkleTree::<E>::from_leaves((*evals).clone());
 
                 // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
                 Ok(Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: vec![evals],
-                    num_vars: poly.num_vars,
-                    is_base,
+                    polynomials_bh_evals: vec![
+                        DenseMultilinearExtension::from_field_type(poly.num_vars, *evals).into(),
+                    ],
+                    num_vars,
+                    is_base: true,
                     num_polys: 1,
                 })
             }
@@ -358,8 +343,9 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        rmm: witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
+        let polys = rmm.to_mles();
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
@@ -373,24 +359,23 @@ where
             ));
         }
 
-        let is_base = match polys[0].evaluations {
+        let num_vars = polys[0].num_vars();
+        let num_polys = polys.len();
+
+        let is_base = match polys[0].evaluations() {
             FieldType::Ext(_) => false,
             FieldType::Base(_) => true,
             _ => unreachable!(),
         };
 
-        for i in 1..polys.len() {
-            if polys[i].num_vars != polys[0].num_vars {
-                return Err(Error::InvalidPcsParam(
-                    "cannot batch commit to polynomials with different number of variables"
-                        .to_string(),
-                ));
-            }
+        if !polys.iter().map(|poly| poly.num_vars()).all_equal() {
+            return Err(Error::InvalidPcsParam(
+                "cannot batch commit to polynomials with different number of variables".to_string(),
+            ));
         }
         let timer = start_timer!(|| "Basefold::batch commit");
 
         let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
-        // convert each polynomial to a code word
         let evals_codewords = polys
             .par_iter()
             .map(|poly| Self::get_poly_bh_evals_and_codeword(pp, poly))
@@ -400,10 +385,10 @@ where
         // build merkle tree from leaves
         let ret = match evals_codewords[0] {
             PolyEvalsCodeword::Normal(_) => {
-                let (bh_evals, codewords) = evals_codewords
+                let codewords = evals_codewords
                     .into_iter()
                     .map(|evals_codeword| match evals_codeword {
-                        PolyEvalsCodeword::Normal((bh_evals, codeword)) => (bh_evals, codeword),
+                        PolyEvalsCodeword::Normal(codeword) => *codeword,
                         PolyEvalsCodeword::TooSmall(_) => {
                             unreachable!();
                         }
@@ -411,14 +396,16 @@ where
                             unreachable!();
                         }
                     })
-                    .collect::<(Vec<_>, Vec<_>)>();
+                    .collect::<Vec<_>>();
                 let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
+                let polys: Vec<ArcMultilinearExtension<E>> =
+                    polys.into_iter().map(|poly| poly.into()).collect_vec();
                 Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: bh_evals,
-                    num_vars: polys[0].num_vars,
+                    polynomials_bh_evals: polys,
+                    num_vars,
                     is_base,
-                    num_polys: polys.len(),
+                    num_polys,
                 }
             }
             PolyEvalsCodeword::TooSmall(_) => {
@@ -426,7 +413,7 @@ where
                     .into_iter()
                     .map(|bh_evals| match bh_evals {
                         PolyEvalsCodeword::Normal(_) => unreachable!(),
-                        PolyEvalsCodeword::TooSmall(evals) => evals,
+                        PolyEvalsCodeword::TooSmall(evals) => *evals,
                         PolyEvalsCodeword::TooBig(_) => {
                             unreachable!();
                         }
@@ -435,8 +422,14 @@ where
                 let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
                 Self::CommitmentWithWitness {
                     codeword_tree,
-                    polynomials_bh_evals: bh_evals,
-                    num_vars: polys[0].num_vars,
+                    polynomials_bh_evals: bh_evals
+                        .into_iter()
+                        .map(|bh_evals| {
+                            DenseMultilinearExtension::from_field_type(num_vars, bh_evals).into()
+                        })
+                        .collect_vec(),
+
+                    num_vars,
                     is_base,
                     num_polys: polys.len(),
                 }
@@ -466,7 +459,7 @@ where
     /// will panic.
     fn open(
         pp: &Self::ProverParam,
-        poly: &DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         _eval: &E, // Opening does not need eval, except for sanity check
@@ -480,7 +473,7 @@ where
         // the protocol won't work, and saves no verifier work anyway.
         // In this case, simply return the evaluations as trivial proof.
         if comm.is_trivial::<Spec>() {
-            return Ok(Self::Proof::trivial(vec![poly.evaluations.clone()]));
+            return Ok(Self::Proof::trivial(vec![poly.evaluations().clone()]));
         }
 
         assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
@@ -499,8 +492,8 @@ where
             point,
             comm,
             transcript,
-            poly.num_vars,
-            poly.num_vars - Spec::get_basecode_msg_size_log(),
+            poly.num_vars(),
+            poly.num_vars() - Spec::get_basecode_msg_size_log(),
         );
 
         // 2. Query phase. ---------------------------------------
@@ -545,220 +538,14 @@ where
     /// the commitments, and because currently this high flexibility is
     /// not very useful in ceno.
     fn batch_open(
-        pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithWitness],
-        points: &[Vec<E>],
-        evals: &[Evaluation<E>],
-        transcript: &mut impl Transcript<E>,
+        _pp: &Self::ProverParam,
+        _polys: &[ArcMultilinearExtension<E>],
+        _comms: &[Self::CommitmentWithWitness],
+        _points: &[Vec<E>],
+        _evals: &[Evaluation<E>],
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let timer = start_timer!(|| "Basefold::batch_open");
-        let num_vars = polys.iter().map(|poly| poly.num_vars).max().unwrap();
-        let min_num_vars = polys.iter().map(|p| p.num_vars).min().unwrap();
-        assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
-
-        comms.iter().for_each(|comm| {
-            assert!(comm.num_polys == 1);
-            assert!(!comm.is_trivial::<Spec>());
-        });
-
-        if cfg!(feature = "sanity-check") {
-            evals.iter().for_each(|eval| {
-                assert_eq!(
-                    &polys[eval.poly()].evaluate(&points[eval.point()]),
-                    eval.value(),
-                )
-            })
-        }
-
-        validate_input("batch open", pp.get_max_message_size_log(), polys, points)?;
-
-        let sumcheck_timer = start_timer!(|| "Basefold::batch_open::initial sumcheck");
-        // evals.len() is the batch size, i.e., how many polynomials are being opened together
-        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = (0..batch_size_log)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-
-        // Use eq(X,t) where t is random to batch the different evaluation queries.
-        // Note that this is a small polynomial (only batch_size) compared to the polynomials
-        // to open.
-        let eq_xt =
-            DenseMultilinearExtension::<E>::from_evaluations_ext_vec(t.len(), build_eq_x_r_vec(&t));
-        // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
-        let target_sum = inner_product_three(
-            evals.iter().map(Evaluation::value),
-            &evals
-                .iter()
-                .map(|eval| E::from_u64(1 << (num_vars - points[eval.point()].len())))
-                .collect_vec(),
-            &poly_iter_ext(&eq_xt).take(evals.len()).collect_vec(),
-        );
-
-        // Merge the polynomials for every point. One merged polynomial for each point.
-        let merged_polys = evals.iter().zip(poly_iter_ext(&eq_xt)).fold(
-            // This folding will generate a vector of |points| pairs of (scalar, polynomial)
-            // The polynomials are initialized to zero, and the scalars are initialized to one
-            vec![(E::ONE, Cow::<DenseMultilinearExtension<E>>::default()); points.len()],
-            |mut merged_polys, (eval, eq_xt_i)| {
-                // For each polynomial to open, eval.point() specifies which point it is to be opened at.
-                if merged_polys[eval.point()].1.num_vars == 0 {
-                    // If the accumulator for this point is still the zero polynomial,
-                    // directly assign the random coefficient and the polynomial to open to
-                    // this accumulator
-                    merged_polys[eval.point()] = (eq_xt_i, Cow::Borrowed(&polys[eval.poly()]));
-                } else {
-                    // If the accumulator is unempty now, first force its scalar to 1, i.e.,
-                    // make (scalar, polynomial) to (1, scalar * polynomial)
-                    let coeff = merged_polys[eval.point()].0;
-                    if coeff != E::ONE {
-                        merged_polys[eval.point()].0 = E::ONE;
-                        multiply_poly(merged_polys[eval.point()].1.to_mut().borrow_mut(), &coeff);
-                    }
-                    // Equivalent to merged_poly += poly * batch_coeff. Note that
-                    // add_assign_mixed_with_coeff allows adding two polynomials with
-                    // different variables, and the result has the same number of vars
-                    // with the larger one of the two added polynomials.
-                    add_polynomial_with_coeff(
-                        merged_polys[eval.point()].1.to_mut().borrow_mut(),
-                        &polys[eval.poly()],
-                        &eq_xt_i,
-                    );
-
-                    // Note that once the scalar in the accumulator becomes ONE, it will remain
-                    // to be ONE forever.
-                }
-                merged_polys
-            },
-        );
-
-        let points = points.to_vec();
-        if cfg!(feature = "sanity-check") {
-            let expected_sum = merged_polys
-                .iter()
-                .zip(&points)
-                .map(|((scalar, poly), point)| {
-                    inner_product(
-                        &poly_iter_ext(poly).collect_vec(),
-                        build_eq_x_r_vec(point).iter(),
-                    ) * *scalar
-                        * E::from_u64(1 << (num_vars - poly.num_vars))
-                    // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
-                })
-                .sum::<E>();
-            assert_eq!(expected_sum, target_sum);
-
-            merged_polys.iter().enumerate().for_each(|(i, (_, poly))| {
-                assert_eq!(points[i].len(), poly.num_vars);
-            });
-        }
-
-        let expression = merged_polys
-            .iter()
-            .enumerate()
-            .map(|(idx, (scalar, _))| {
-                Expression::<E>::eq_xy(idx)
-                    * Expression::Polynomial(Query::new(idx, Rotation::cur()))
-                    * scalar
-            })
-            .sum();
-        let sumcheck_polys: Vec<&DenseMultilinearExtension<E>> = merged_polys
-            .iter()
-            .map(|(_, poly)| poly.deref())
-            .collect_vec();
-        let virtual_poly =
-            VirtualPolynomial::new(&expression, sumcheck_polys, &[], points.as_slice());
-
-        let (challenges, merged_poly_evals, sumcheck_proof) =
-            SumCheck::prove(&(), num_vars, virtual_poly, target_sum, transcript)?;
-
-        end_timer!(sumcheck_timer);
-
-        // Now the verifier has obtained the new target sum, and is able to compute the random
-        // linear coefficients, and is able to evaluate eq_xy(point) for each poly to open.
-        // The remaining tasks for the prover is to prove that
-        // sum_i coeffs[i] poly_evals[i] is equal to
-        // the new target sum, where coeffs is computed as follows
-        let eq_xy_evals = points
-            .iter()
-            .map(|point| eq_xy_eval(&challenges[..point.len()], point))
-            .collect_vec();
-        let mut coeffs = vec![E::ZERO; comms.len()];
-        evals.iter().enumerate().for_each(|(i, eval)| {
-            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&eq_xt, i);
-        });
-
-        if cfg!(feature = "sanity-check") {
-            let poly_evals = polys
-                .iter()
-                .map(|poly| poly.evaluate(&challenges[..poly.num_vars]))
-                .collect_vec();
-            let new_target_sum = inner_product(&poly_evals, &coeffs);
-            let desired_sum = merged_polys
-                .iter()
-                .zip(points)
-                .zip(merged_poly_evals)
-                .map(|(((scalar, poly), point), evals_from_sum_check)| {
-                    assert_eq!(
-                        evals_from_sum_check,
-                        poly.evaluate(&challenges[..poly.num_vars])
-                    );
-                    *scalar
-                        * evals_from_sum_check
-                        * eq_xy_eval(point.as_slice(), &challenges[0..point.len()])
-                })
-                .sum::<E>();
-            assert_eq!(new_target_sum, desired_sum);
-        }
-        // Note that the verifier can also compute these coeffs locally, so no need to pass
-        // them to the transcript.
-
-        let point = challenges;
-
-        let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
-            &pp.encoding_params,
-            &point,
-            comms,
-            transcript,
-            num_vars,
-            num_vars - Spec::get_basecode_msg_size_log(),
-            coeffs.as_slice(),
-        );
-
-        let query_timer = start_timer!(|| "Basefold::batch_open query phase");
-        let query_result = batch_prover_query_phase(
-            transcript,
-            1 << (num_vars + Spec::get_rate_log()),
-            comms,
-            &trees,
-            Spec::get_number_queries(),
-        );
-        end_timer!(query_timer);
-
-        let query_timer = start_timer!(|| "Basefold::batch_open build query result");
-        let query_result_with_merkle_path =
-            BatchedQueriesResultWithMerklePath::from_batched_query_result(
-                query_result,
-                &trees,
-                comms,
-            );
-        end_timer!(query_timer);
-        end_timer!(timer);
-
-        Ok(Self::Proof {
-            sumcheck_messages: commit_phase_proof.sumcheck_messages,
-            roots: commit_phase_proof.roots,
-            final_message: commit_phase_proof.final_message,
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Batched(
-                query_result_with_merkle_path,
-            ),
-            sumcheck_proof: Some(sumcheck_proof),
-            trivial_proof: vec![],
-        })
+        unimplemented!()
     }
 
     /// This is a simple version of batch open:
@@ -778,7 +565,12 @@ where
         let num_vars = polys[0].num_vars();
 
         if comm.is_trivial::<Spec>() {
-            return Ok(Self::Proof::trivial(comm.polynomials_bh_evals.clone()));
+            return Ok(Self::Proof::trivial(
+                comm.polynomials_bh_evals
+                    .iter()
+                    .map(|mle| mle.evaluations().clone())
+                    .collect_vec(),
+            ));
         }
 
         polys
@@ -908,15 +700,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
+        let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         verifier_query_phase::<E, Spec>(
@@ -1031,17 +818,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &verify_point.as_slice()[verify_point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&verify_point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(
-            &verify_point.as_slice()[..verify_point.len() - fold_challenges.len()],
-        );
+        let mut eq = build_eq_x_r_vec(&verify_point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         batch_verifier_query_phase::<E, Spec>(
@@ -1133,15 +913,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
+        let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         simple_batch_verifier_query_phase::<E, Spec>(
@@ -1163,6 +938,12 @@ where
 
         Ok(())
     }
+
+    fn get_arcmle_witness_from_commitment(
+        commitment: &Self::CommitmentWithWitness,
+    ) -> Vec<ArcMultilinearExtension<'static, E>> {
+        commitment.polynomials_bh_evals.clone()
+    }
 }
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold<E, Spec>
@@ -1178,10 +959,7 @@ mod test {
 
     use crate::{
         basefold::Basefold,
-        test_util::{
-            gen_rand_poly_base, gen_rand_poly_ext, run_batch_commit_open_verify,
-            run_commit_open_verify, run_simple_batch_commit_open_verify,
-        },
+        test_util::{run_commit_open_verify, run_simple_batch_commit_open_verify},
     };
 
     use super::{BasefoldRSParams, structure::BasefoldBasecodeParams};
@@ -1191,93 +969,34 @@ mod test {
 
     #[test]
     fn commit_open_verify_goldilocks() {
-        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
-            // Challenge is over extension field, poly over the base field
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(gen_rand_poly, 10, 11);
-            // Test trivial proof with small num vars
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(gen_rand_poly, 4, 6);
-            // Challenge is over extension field, poly over the base field
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 10, 11);
-            // Test trivial proof with small num vars
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 4, 6);
-        }
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(4, 6);
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11);
+        // Test trivial proof with small num vars
+        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6);
     }
 
     #[test]
     fn simple_batch_commit_open_verify_goldilocks() {
-        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
-            // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                10,
-                11,
-                1,
-            );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                10,
-                11,
-                4,
-            );
-            // Test trivial proof with small num vars
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                4,
-                6,
-                4,
-            );
-            // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                10,
-                11,
-                1,
-            );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                10,
-                11,
-                4,
-            );
-            // Test trivial proof with small num vars
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                4,
-                6,
-                4,
-            );
-        }
+        // Both challenge and poly are over base field
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 1);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(10, 11, 4);
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(4, 6, 4);
+        // Both challenge and poly are over base field
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
+        // Test trivial proof with small num vars
+        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6, 4);
     }
 
     #[test]
     #[ignore = "For benchmarking and profiling only"]
     fn bench_basefold_simple_batch_commit_open_verify_goldilocks() {
         {
-            let gen_rand_poly = gen_rand_poly_base;
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(gen_rand_poly, 20, 21);
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                20,
-                21,
-                64,
-            );
-        }
-    }
-
-    #[test]
-    fn batch_commit_open_verify() {
-        for gen_rand_poly in [gen_rand_poly_base, gen_rand_poly_ext] {
-            // Both challenge and poly are over base field
-            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
-                gen_rand_poly,
-                10,
-                11,
-            );
-            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(
-                gen_rand_poly,
-                10,
-                11,
-            );
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21, 64);
         }
     }
 }

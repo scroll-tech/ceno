@@ -182,11 +182,6 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
         .collect()
 }
 
-/// get next power of 2 instance with minimal size 2
-pub fn next_pow2_instance_padding(num_instance: usize) -> usize {
-    num_instance.next_power_of_two().max(2)
-}
-
 pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
     format!(
         "[{}]",

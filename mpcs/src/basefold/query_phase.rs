@@ -5,7 +5,6 @@ use crate::util::{
     },
     ext_to_usize, field_type_index_base, field_type_index_ext,
     hash::Digest,
-    log2_strict,
     merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
 };
 use ark_std::{end_timer, start_timer};
@@ -18,10 +17,7 @@ use transcript::Transcript;
 use multilinear_extensions::mle::FieldType;
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rayon::{
-    iter::IndexedParallelIterator,
-    prelude::{IntoParallelRefIterator, ParallelIterator},
-};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use super::{
     encoding::EncodingScheme,
@@ -58,43 +54,6 @@ where
                 (
                     *x_index,
                     basefold_get_query::<E>(&comm.get_codewords()[0], trees, *x_index),
-                )
-            })
-            .collect(),
-    }
-}
-
-pub fn batch_prover_query_phase<E: ExtensionField>(
-    transcript: &mut impl Transcript<E>,
-    codeword_size: usize,
-    comms: &[BasefoldCommitmentWithWitness<E>],
-    trees: &[MerkleTree<E>],
-    num_verifier_queries: usize,
-) -> BatchedQueriesResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let queries: Vec<_> = (0..num_verifier_queries)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"query indices")
-                .elements
-        })
-        .collect();
-
-    // Transform the challenge queries from field elements into integers
-    let queries_usize: Vec<usize> = queries
-        .iter()
-        .map(|x_index| ext_to_usize(x_index) % codeword_size)
-        .collect_vec();
-
-    BatchedQueriesResult {
-        inner: queries_usize
-            .par_iter()
-            .map(|x_index| {
-                (
-                    *x_index,
-                    batch_basefold_get_query::<E>(comms, trees, codeword_size, *x_index),
                 )
             })
             .collect(),
@@ -159,7 +118,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
     interpolate_over_boolean_hypercube(&mut message);
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     let final_codeword =
@@ -230,7 +189,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     interpolate_over_boolean_hypercube(&mut message);
@@ -307,7 +266,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     interpolate_over_boolean_hypercube(&mut message);
@@ -407,61 +366,6 @@ where
     SingleQueryResult {
         oracle_query,
         commitment_query,
-    }
-}
-
-fn batch_basefold_get_query<E: ExtensionField>(
-    comms: &[BasefoldCommitmentWithWitness<E>],
-    trees: &[MerkleTree<E>],
-    codeword_size: usize,
-    x_index: usize,
-) -> BatchedSingleQueryResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let mut oracle_list_queries = Vec::with_capacity(trees.len());
-
-    let mut index = x_index;
-    index >>= 1;
-    for tree in trees {
-        let p1 = index | 1;
-        let p0 = p1 - 1;
-        oracle_list_queries.push(CodewordSingleQueryResult::<E>::new_ext(
-            tree.get_leaf_as_extension(p0)[0],
-            tree.get_leaf_as_extension(p1)[0],
-            p0,
-        ));
-        index >>= 1;
-    }
-    let oracle_query = OracleListQueryResult {
-        inner: oracle_list_queries,
-    };
-
-    let comm_queries = comms
-        .iter()
-        .map(|comm| {
-            let x_index = x_index >> (log2_strict(codeword_size) - comm.codeword_size_log());
-            let p1 = x_index | 1;
-            let p0 = p1 - 1;
-            match &comm.get_codewords()[0] {
-                FieldType::Ext(poly_codeword) => {
-                    CodewordSingleQueryResult::new_ext(poly_codeword[p0], poly_codeword[p1], p0)
-                }
-                FieldType::Base(poly_codeword) => {
-                    CodewordSingleQueryResult::new_base(poly_codeword[p0], poly_codeword[p1], p0)
-                }
-                _ => unreachable!(),
-            }
-        })
-        .collect_vec();
-
-    let commitments_query = CommitmentsQueryResult {
-        inner: comm_queries,
-    };
-
-    BatchedSingleQueryResult {
-        oracle_query,
-        commitments_query,
     }
 }
 
@@ -1003,8 +907,10 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
     ) {
-        self.inner.par_iter().zip(indices.par_iter()).for_each(
-            |((index, query), index_in_proof)| {
+        self.inner
+            .iter()
+            .zip(indices.iter())
+            .for_each(|((index, query), index_in_proof)| {
                 assert_eq!(index_in_proof, index);
                 query.check::<Spec>(
                     vp,
@@ -1016,8 +922,7 @@ where
                     comm,
                     *index,
                 );
-            },
-        );
+            });
     }
 }
 
@@ -1051,27 +956,6 @@ impl<E: ExtensionField> BatchedSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn from_batched_single_query_result(
-        batched_single_query_result: BatchedSingleQueryResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitments: &[BasefoldCommitmentWithWitness<E>],
-    ) -> Self {
-        Self {
-            oracle_query: OracleListQueryResultWithMerklePath::from_query_and_trees(
-                batched_single_query_result.oracle_query,
-                |i, j| oracle_trees[i].merkle_path_without_leaf_sibling_or_root(j),
-            ),
-            commitments_query: CommitmentsQueryResultWithMerklePath::from_query_and_trees(
-                batched_single_query_result.commitments_query,
-                |i, j| {
-                    commitments[i]
-                        .codeword_tree
-                        .merkle_path_without_leaf_sibling_or_root(j)
-                },
-            ),
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1177,13 +1061,6 @@ where
     }
 }
 
-pub struct BatchedQueriesResult<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    inner: Vec<(usize, BatchedSingleQueryResult<E>)>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
@@ -1200,29 +1077,6 @@ impl<E: ExtensionField> BatchedQueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn from_batched_query_result(
-        batched_query_result: BatchedQueriesResult<E>,
-        oracle_trees: &[MerkleTree<E>],
-        commitments: &[BasefoldCommitmentWithWitness<E>],
-    ) -> Self {
-        Self {
-            inner: batched_query_result
-                .inner
-                .into_iter()
-                .map(|(i, q)| {
-                    (
-                        i,
-                        BatchedSingleQueryResultWithMerklePath::from_batched_single_query_result(
-                            q,
-                            oracle_trees,
-                            commitments,
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn check<Spec: BasefoldSpec<E>>(
         &self,
@@ -1237,8 +1091,10 @@ where
         coeffs: &[E],
     ) {
         let timer = start_timer!(|| "BatchedQueriesResult::check");
-        self.inner.par_iter().zip(indices.par_iter()).for_each(
-            |((index, query), index_in_proof)| {
+        self.inner
+            .iter()
+            .zip(indices.iter())
+            .for_each(|((index, query), index_in_proof)| {
                 assert_eq!(index, index_in_proof);
                 query.check::<Spec>(
                     vp,
@@ -1251,8 +1107,7 @@ where
                     coeffs,
                     *index,
                 );
-            },
-        );
+            });
         end_timer!(timer);
     }
 }
@@ -1512,8 +1367,10 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
     ) {
-        self.inner.par_iter().zip(indices.par_iter()).for_each(
-            |((index, query), index_in_proof)| {
+        self.inner
+            .iter()
+            .zip(indices.iter())
+            .for_each(|((index, query), index_in_proof)| {
                 assert_eq!(index, index_in_proof);
                 query.check::<Spec>(
                     vp,
@@ -1526,7 +1383,6 @@ where
                     comm,
                     *index,
                 );
-            },
-        );
+            });
     }
 }
