@@ -209,25 +209,15 @@ where
     )
     .reduce(|(poly_a, coeff_a), (poly_b, coeff_b)| {
         let next_poly = commutative_op_mle_pair!(|poly_a, poly_b| {
-            if coeff_a == E::ONE {
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                    num_vars,
-                    poly_a
-                        .par_iter()
-                        .zip(poly_b.par_iter())
-                        .map(|(a, b)| coeff_b * *b + *a)
-                        .collect(),
-                ))
-            } else {
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                    num_vars,
-                    poly_a
-                        .par_iter()
-                        .zip(poly_b.par_iter())
-                        .map(|(a, b)| coeff_a * *a + coeff_b * *b)
-                        .collect(),
-                ))
-            }
+            // TODO we can save a bit cost if first batch_coeffs is E::ONE so we can skip the first base * ext operation
+            Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                num_vars,
+                poly_a
+                    .par_iter()
+                    .zip(poly_b.par_iter())
+                    .map(|(a, b)| coeff_a * *a + coeff_b * *b)
+                    .collect(),
+            ))
         });
         (next_poly, E::ONE)
     }) else {

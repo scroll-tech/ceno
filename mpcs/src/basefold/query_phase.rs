@@ -907,8 +907,10 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
     ) {
-        self.inner.par_iter().zip(indices.par_iter()).for_each(
-            |((index, query), index_in_proof)| {
+        self.inner
+            .iter()
+            .zip(indices.iter())
+            .for_each(|((index, query), index_in_proof)| {
                 assert_eq!(index_in_proof, index);
                 query.check::<Spec>(
                     vp,
@@ -920,8 +922,7 @@ where
                     comm,
                     *index,
                 );
-            },
-        );
+            });
     }
 }
 
@@ -1090,8 +1091,10 @@ where
         coeffs: &[E],
     ) {
         let timer = start_timer!(|| "BatchedQueriesResult::check");
-        self.inner.par_iter().zip(indices.par_iter()).for_each(
-            |((index, query), index_in_proof)| {
+        self.inner
+            .iter()
+            .zip(indices.iter())
+            .for_each(|((index, query), index_in_proof)| {
                 assert_eq!(index, index_in_proof);
                 query.check::<Spec>(
                     vp,
@@ -1104,8 +1107,7 @@ where
                     coeffs,
                     *index,
                 );
-            },
-        );
+            });
         end_timer!(timer);
     }
 }
@@ -1300,6 +1302,7 @@ where
                 // next_index here.
                 final_codeword[next_index]
             };
+            println!("going to verify {i} round");
             assert_eq!(res, next_oracle_value, "Failed at round {}", i);
             // end_timer!(round_timer);
         }
@@ -1365,8 +1368,10 @@ where
         roots: &[Digest<E::BaseField>],
         comm: &BasefoldCommitment<E>,
     ) {
-        self.inner.par_iter().zip(indices.par_iter()).for_each(
-            |((index, query), index_in_proof)| {
+        self.inner
+            .iter()
+            .zip(indices.iter())
+            .for_each(|((index, query), index_in_proof)| {
                 assert_eq!(index, index_in_proof);
                 query.check::<Spec>(
                     vp,
@@ -1379,7 +1384,6 @@ where
                     comm,
                     *index,
                 );
-            },
-        );
+            });
     }
 }
