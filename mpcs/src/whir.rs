@@ -6,6 +6,7 @@ mod utils;
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
@@ -175,6 +176,12 @@ where
             proof,
         )
         .map_err(crate::Error::WhirError)
+    }
+
+    fn get_arcmle_witness_from_commitment(
+        _commitment: &Self::CommitmentWithWitness,
+    ) -> Vec<ArcMultilinearExtension<'static, E>> {
+        unimplemented!()
     }
 }
 

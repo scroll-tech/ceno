@@ -17,10 +17,7 @@ use transcript::Transcript;
 use multilinear_extensions::mle::FieldType;
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rayon::{
-    iter::IndexedParallelIterator,
-    prelude::{IntoParallelRefIterator, ParallelIterator},
-};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use super::{
     encoding::EncodingScheme,

@@ -955,6 +955,12 @@ where
 
         Ok(())
     }
+
+    fn get_arcmle_witness_from_commitment(
+        commitment: &Self::CommitmentWithWitness,
+    ) -> Vec<ArcMultilinearExtension<'static, E>> {
+        commitment.polynomials_bh_evals.clone()
+    }
 }
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold<E, Spec>

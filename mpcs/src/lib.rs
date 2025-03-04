@@ -220,6 +220,10 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
         proof: &Self::Proof,
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
+
+    fn get_arcmle_witness_from_commitment(
+        commitment: &Self::CommitmentWithWitness,
+    ) -> Vec<ArcMultilinearExtension<'static, E>>;
 }
 
 pub trait NoninteractivePCS<E: ExtensionField>:

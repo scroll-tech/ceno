@@ -10,7 +10,6 @@ use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
-use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 
 use rand::rngs::OsRng;
@@ -77,7 +76,6 @@ fn bench_add(c: &mut Criterion) {
                         let num_instances = 1 << instance_num_vars;
                         let rmm =
                             RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin as usize);
-                        let polys = rmm.to_mles();
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;
@@ -85,6 +83,7 @@ fn bench_add(c: &mut Criterion) {
                         let commit =
                             Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript)
                                 .unwrap();
+                        let polys = Pcs::get_arcmle_witness_from_commitment(&commit);
                         let challenges = [
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,
@@ -95,7 +94,7 @@ fn bench_add(c: &mut Criterion) {
                                 "ADD",
                                 &prover.pk.pp,
                                 &circuit_pk,
-                                polys.into_iter().map(|mle| mle.into()).collect_vec(),
+                                polys,
                                 commit,
                                 &[],
                                 num_instances,
