@@ -146,13 +146,12 @@ fn main() {
     let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
     // do statistics
-    let serialize_size = bincode::serialize(&zkvm_proof).unwrap().len();
     let stat_recorder = StatisticRecorder::default();
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
     verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
+    println!("e2e proof stat: {}", zkvm_proof);
     println!(
-        "e2e proof stat: proof size = {}, hashes count = {}",
-        serialize_size,
+        "hashes count = {}",
         stat_recorder.into_inner().field_appended_num
     );
 
