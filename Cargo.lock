@@ -1541,6 +1541,8 @@ dependencies = [
  "rand_chacha",
  "rayon",
  "serde",
+ "sumcheck",
+ "tracing",
  "transcript",
  "whir",
  "witness",

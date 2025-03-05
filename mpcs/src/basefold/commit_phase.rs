@@ -313,7 +313,6 @@ where
                     FieldType::Ext(basecode) => basecode,
                     _ => panic!("Should be ext field"),
                 };
-
                 let mut new_running_oracle = new_running_oracle;
                 reverse_index_bits_in_place(&mut new_running_oracle);
                 assert_eq!(basecode, new_running_oracle);

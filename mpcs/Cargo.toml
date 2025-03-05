@@ -33,11 +33,13 @@ plonky2.workspace = true
 poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
+tracing.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
 whir = { path = "../whir", features = ["ceno"] }
 witness = { path = "../witness" }
+ceno_sumcheck = { path = "../sumcheck", package = "sumcheck" }
 zeroize = "1.8"
 
 [dev-dependencies]

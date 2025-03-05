@@ -19,6 +19,7 @@ use crate::{
     validate_input,
 };
 use ark_std::{end_timer, start_timer};
+use ceno_sumcheck::macros::{entered_span, exit_span};
 pub use encoding::{
     Basecode, BasecodeDefaultSpec, EncodingProverParameters, EncodingScheme, RSCode,
     RSCodeDefaultSpec,
@@ -345,7 +346,9 @@ where
         pp: &Self::ProverParam,
         rmm: witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
+        let span = entered_span!("to_mles", profiling_3 = true);
         let polys = rmm.to_mles();
+        exit_span!(span);
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
@@ -376,12 +379,15 @@ where
         let timer = start_timer!(|| "Basefold::batch commit");
 
         let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
+        let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
         let evals_codewords = polys
             .par_iter()
             .map(|poly| Self::get_poly_bh_evals_and_codeword(pp, poly))
             .collect::<Vec<PolyEvalsCodeword<E>>>();
+        exit_span!(span);
         end_timer!(encode_timer);
 
+        let span = entered_span!("build mt", profiling_3 = true);
         // build merkle tree from leaves
         let ret = match evals_codewords[0] {
             PolyEvalsCodeword::Normal(_) => {
@@ -436,7 +442,7 @@ where
             }
             PolyEvalsCodeword::TooBig(num_vars) => return Err(Error::PolynomialTooLarge(num_vars)),
         };
-
+        exit_span!(span);
         end_timer!(timer);
 
         Ok(ret)
