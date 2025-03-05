@@ -19,28 +19,28 @@ ff_ext = { path = "../ff_ext" }
 ark-ff = "0.5"
 ark-serialize = { version = "0.5", features = ["derive"] }
 bincode = "1.3.3"
+ceno_sumcheck = { path = "../sumcheck", package = "sumcheck" }
 generic-array = { version = "0.14", features = ["serde"] }
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
+p3-dft.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
 p3-matrix.workspace = true
 p3-mds.workspace = true
 p3-symmetric.workspace = true
-p3-dft.workspace = true
 plonky2.workspace = true
 poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
-tracing.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
+tracing.workspace = true
 transcript = { path = "../transcript" }
 whir = { path = "../whir", features = ["ceno"] }
 witness = { path = "../witness" }
-ceno_sumcheck = { path = "../sumcheck", package = "sumcheck" }
 zeroize = "1.8"
 
 [dev-dependencies]
