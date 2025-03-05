@@ -17,7 +17,9 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::ArcMultilinearExtension,
 };
+use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
+use witness::RowMajorMatrix;
 
 type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
 type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
@@ -246,14 +248,24 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
-            let polys = gen_rand_polys(|_| num_vars, batch_size, switch.gen_rand_poly);
-            let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+            let polys = rmm.to_mles();
+            let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
                 |b| {
-                    b.iter(|| {
-                        Pcs::batch_commit(&pp, &polys).unwrap();
+                    b.iter_custom(|iters| {
+                        let mut time = Duration::new(0, 0);
+                        for _ in 0..iters {
+                            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+
+                            let instant = std::time::Instant::now();
+                            Pcs::batch_commit(&pp, rmm).unwrap();
+                            let elapsed = instant.elapsed();
+                            time += elapsed;
+                        }
+                        time
                     })
                 },
             );
