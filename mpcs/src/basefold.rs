@@ -93,7 +93,7 @@ where
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
-        let mut bh_evals = poly.evaluations.clone();
+        let bh_evals = poly.evaluations.clone();
         let num_vars = poly.num_vars;
         if num_vars > pp.encoding_params.get_max_message_size_log() {
             return PolyEvalsCodeword::TooBig(num_vars);
@@ -107,8 +107,7 @@ where
         }
 
         // Switch to coefficient form
-        let mut coeffs = bh_evals.clone();
-        // TODO: directly return bit-reversed version if needed.
+        let mut coeffs = poly.evaluations.clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs);
 
         // The coefficients are originally stored in little endian,
@@ -127,23 +126,20 @@ where
         // scheme, we need to bit-reverse it before we encode the message,
         // such that the folding of the message is consistent with the
         // evaluation of the first variable of the polynomial.
-        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+
+        // since `coeffs` are already in little-endian order, we aim to retain the encoding scheme
+        // that provides the even-odd fold property.
+        // this ensures compatibility with the conventional sumcheck protocol implementation,
+        // which also follows a even-odd folding pattern.
+        // consequently, if the natural encoding scheme follows `left_right_fold(msg)`,
+        // we must apply a **bit-reversal** **before** encoding.
+        // this is because:
+        // `left_right_fold(bit_reverse(msg)) == even_odd_fold(msg)`
+        if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
             reverse_index_bits_in_place_field_type(&mut coeffs);
         }
         let mut codeword = Spec::EncodingScheme::encode(&pp.encoding_params, &coeffs);
 
-        // The evaluations over the hypercube are used in sum-check.
-        // They are bit-reversed because the hypercube is ordered in little
-        // endian, so the left half of the evaluation vector are evaluated
-        // at 0 for the first variable, and the right half are evaluated at
-        // 1 for the first variable.
-        // In each step of sum-check, we subsitute the first variable of the
-        // current polynomial with the random challenge, which is equivalent
-        // to a left-right folding of the evaluation vector.
-        // However, the algorithms that we will use are applying even-odd
-        // fold in each sum-check round (easier to program using `par_chunks`)
-        // so we bit-reverse it to store the evaluations in big-endian.
-        reverse_index_bits_in_place_field_type(&mut bh_evals);
         // The encoding scheme always folds the codeword in left-and-right
         // manner. However, in query phase the two folded positions are
         // always opened together, so it will be more efficient if the
@@ -909,15 +905,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
+        let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         verifier_query_phase::<E, Spec>(
@@ -1032,17 +1023,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &verify_point.as_slice()[verify_point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&verify_point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(
-            &verify_point.as_slice()[..verify_point.len() - fold_challenges.len()],
-        );
+        let mut eq = build_eq_x_r_vec(&verify_point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         batch_verifier_query_phase::<E, Spec>(
@@ -1134,15 +1118,10 @@ where
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
 
-        // coeff is the eq polynomial evaluated at the last challenge.len() variables
-        // in reverse order.
-        let rev_challenges = fold_challenges.clone().into_iter().rev().collect_vec();
-        let coeff = eq_xy_eval(
-            &point[point.len() - fold_challenges.len()..],
-            &rev_challenges,
-        );
+        // coeff is the eq polynomial evaluated at the first challenge.len() variables
+        let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
-        let mut eq = build_eq_x_r_vec(&point[..point.len() - fold_challenges.len()]);
+        let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);
 
         simple_batch_verifier_query_phase::<E, Spec>(
