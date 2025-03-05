@@ -1530,6 +1530,7 @@ dependencies = [
  "multilinear_extensions",
  "num-bigint",
  "num-integer",
+ "p3-dft",
  "p3-field",
  "p3-goldilocks",
  "p3-matrix",
