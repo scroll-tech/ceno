@@ -51,7 +51,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         .0
         .expect("PrepSanityCheck do not provide proof and verifier");
 
-        let serialize_size = bincode::serialize(&proof).unwrap().len();
+        println!("e2e proof {}", proof);
         let stat_recorder = StatisticRecorder::default();
         let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
         assert!(
@@ -61,9 +61,8 @@ fn fibonacci_prove(c: &mut Criterion) {
         );
         println!();
         println!(
-            "max_steps = {}, proof size = {}, hashes count = {}",
+            "max_steps = {}, hashes count = {}",
             max_steps,
-            serialize_size,
             stat_recorder.into_inner().field_appended_num
         );
 
