@@ -598,7 +598,7 @@ mod test {
         MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
-                .into_mles()
+                .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),

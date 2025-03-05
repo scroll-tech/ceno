@@ -5,9 +5,10 @@ use crate::{
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
+use itertools::izip;
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 
-use multilinear_extensions::mle::FieldType;
+use multilinear_extensions::{mle::FieldType, virtual_poly::ArcMultilinearExtension};
 
 use std::{marker::PhantomData, slice};
 
@@ -64,7 +65,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) codeword_tree: MerkleTree<E>,
-    pub(crate) polynomials_bh_evals: Vec<FieldType<E>>,
+    pub(crate) polynomials_bh_evals: Vec<ArcMultilinearExtension<'static, E>>,
     pub(crate) num_vars: usize,
     pub(crate) is_base: bool,
     pub(crate) num_polys: usize,
@@ -199,7 +200,9 @@ where
 {
     fn eq(&self, other: &Self) -> bool {
         self.get_codewords().eq(other.get_codewords())
-            && self.polynomials_bh_evals.eq(&other.polynomials_bh_evals)
+            && izip!(&self.polynomials_bh_evals, &other.polynomials_bh_evals).all(
+                |(bh_evals_a, bh_evals_b)| bh_evals_a.evaluations() == bh_evals_b.evaluations(),
+            )
     }
 }
 
