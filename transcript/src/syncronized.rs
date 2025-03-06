@@ -86,6 +86,7 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         self.rolling_index = (self.rolling_index + 1) % 2
     }
 
+    #[cfg(feature = "ro_query_stats")]
     fn read_challenge_tracking(&mut self, _source: &'static str) -> Challenge<E> {
         unimplemented!()
     }

@@ -5,10 +5,9 @@ use p3_challenger::{
 };
 use p3_field::PrimeField;
 use p3_symmetric::CryptographicPermutation;
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
+#[cfg(feature = "ro_query_stats")]
+use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 use ff_ext::PoseidonField;
 #[cfg(feature = "ro_query_stats")]
@@ -35,6 +34,7 @@ where
     pub fn new(perm: P) -> Self {
         Self {
             inner: DuplexChallenger::<F, P, 8, 4>::new(perm),
+            #[cfg(feature = "ro_query_stats")]
             sample_tracking_map: HashMap::default(),
         }
     }
@@ -47,6 +47,7 @@ where
     pub fn new_poseidon_default() -> Self {
         Self {
             inner: DuplexChallenger::<F, F::T, 8, 4>::new(F::get_perm()),
+            #[cfg(feature = "ro_query_stats")]
             sample_tracking_map: HashMap::default(),
         }
     }
@@ -179,17 +180,12 @@ where
         (0..n).map(|_| self.sample_algebra_element()).collect()
     }
 
+    #[cfg(feature = "ro_query_stats")]
     fn sample_algebra_element_tracking<A: BasedVectorSpace<F>>(
         &mut self,
         source: &'static str,
     ) -> A {
         *self.sample_tracking_map.entry(source).or_default() += 1;
-        if source == "lookup challenge alpha" {
-            println!(
-                "gogogo total count {}",
-                self.sample_tracking_map.values().copied().sum::<usize>()
-            )
-        }
         <Self as FieldChallenger<F>>::sample_algebra_element(self)
     }
 }

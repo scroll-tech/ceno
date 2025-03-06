@@ -2067,6 +2067,7 @@ name = "poseidon"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "cfg-if",
  "criterion",
  "ff_ext",
  "p3-challenger",

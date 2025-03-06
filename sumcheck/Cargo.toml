@@ -30,8 +30,8 @@ p3-mds.workspace = true
 poseidon.workspace = true
 
 [features]
-default = ["ro_query_stats"]
-ro_query_stats = []
+default = []
+ro_query_stats = ["transcript/ro_query_stats"]
 
 [[bench]]
 harness = false

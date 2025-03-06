@@ -1,12 +1,15 @@
 use std::marker::PhantomData;
 
 use crate::{
-    challenger::{CanSample, DefaultChallenger, FieldChallengerExt},
+    challenger::{DefaultChallenger, FieldChallengerExt},
     constants::DIGEST_WIDTH,
     digest::Digest,
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use p3_challenger::{CanObserve, CanSample as P3CanSample};
+
+#[cfg(feature = "ro_query_stats")]
+use crate::challenger::CanSample;
 
 pub struct PoseidonHash<F> {
     _phantom: PhantomData<F>,
