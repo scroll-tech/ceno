@@ -7,21 +7,20 @@ pub mod prover_single;
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        crypto::fields::Field64,
-        poly_utils::{MultilinearPoint, coeffs::CoefficientList, eq_poly_outside},
-    };
+
+    use goldilocks::Goldilocks;
+    use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
 
     use super::prover_core::SumcheckCore;
 
-    type F = Field64;
+    type F = Goldilocks;
 
     #[test]
     fn test_sumcheck_folding_factor_1() {
         let folding_factor = 1;
-        let eval_point = MultilinearPoint(vec![F::from(10), F::from(11)]);
+        let eval_point = vec![F::from(10), F::from(11)];
         let polynomial =
-            CoefficientList::new(vec![F::from(1), F::from(5), F::from(10), F::from(14)]);
+            DenseMultilinearExtension::new(vec![F::from(1), F::from(5), F::from(10), F::from(14)]);
 
         let claimed_value = polynomial.evaluate(&eval_point);
 
@@ -33,7 +32,7 @@ mod tests {
         assert_eq!(poly_1.sum_over_hypercube(), claimed_value);
 
         let combination_randomness = F::from(100101);
-        let folding_randomness = MultilinearPoint(vec![F::from(4999)]);
+        let folding_randomness = vec![F::from(4999)];
 
         prover.compress(folding_factor, combination_randomness, &folding_randomness);
 
@@ -49,10 +48,11 @@ mod tests {
     fn test_single_folding() {
         let num_variables = 2;
         let folding_factor = 2;
-        let polynomial = CoefficientList::new(vec![F::from(1), F::from(2), F::from(3), F::from(4)]);
+        let polynomial =
+            DenseMultilinearExtension::new(vec![F::from(1), F::from(2), F::from(3), F::from(4)]);
 
-        let ood_point = MultilinearPoint::expand_from_univariate(F::from(2), num_variables);
-        let statement_point = MultilinearPoint::expand_from_univariate(F::from(3), num_variables);
+        let ood_point = Vec::expand_from_univariate(F::from(2), num_variables);
+        let statement_point = Vec::expand_from_univariate(F::from(3), num_variables);
 
         let ood_answer = polynomial.evaluate(&ood_point);
         let statement_answer = polynomial.evaluate(&statement_point);
@@ -73,11 +73,11 @@ mod tests {
             epsilon_1 * ood_answer + epsilon_2 * statement_answer
         );
 
-        let folding_randomness = MultilinearPoint(vec![F::from(400000), F::from(800000)]);
+        let folding_randomness = vec![F::from(400000), F::from(800000)];
 
         let poly_eval = polynomial.evaluate(&folding_randomness);
-        let v_eval = epsilon_1 * eq_poly_outside(&ood_point, &folding_randomness)
-            + epsilon_2 * eq_poly_outside(&statement_point, &folding_randomness);
+        let v_eval = epsilon_1 * eq_eval(&ood_point, &folding_randomness)
+            + epsilon_2 * eq_eval(&statement_point, &folding_randomness);
 
         assert_eq!(
             poly_1.evaluate_at_point(&folding_randomness),
@@ -89,8 +89,9 @@ mod tests {
     fn test_sumcheck_folding_factor_2() {
         let num_variables = 6;
         let folding_factor = 2;
-        let eval_point = MultilinearPoint(vec![F::from(97); num_variables]);
-        let polynomial = CoefficientList::new((0..1 << num_variables).map(F::from).collect());
+        let eval_point = vec![F::from(97); num_variables];
+        let polynomial =
+            DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect());
 
         let claimed_value = polynomial.evaluate(&eval_point);
 
@@ -102,9 +103,9 @@ mod tests {
         assert_eq!(poly_1.sum_over_hypercube(), claimed_value);
 
         let combination_randomness = [F::from(293), F::from(42)];
-        let folding_randomness = MultilinearPoint(vec![F::from(335), F::from(222)]);
+        let folding_randomness = vec![F::from(335), F::from(222)];
 
-        let new_eval_point = MultilinearPoint(vec![F::from(32); num_variables - folding_factor]);
+        let new_eval_point = vec![F::from(32); num_variables - folding_factor];
         let folded_polynomial = polynomial.fold(&folding_randomness);
         let new_fold_eval = folded_polynomial.evaluate(&new_eval_point);
 
@@ -138,18 +139,19 @@ mod tests {
     fn test_e2e() {
         let num_variables = 4;
         let folding_factor = 2;
-        let polynomial = CoefficientList::new((0..1 << num_variables).map(F::from).collect());
+        let polynomial =
+            DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect());
 
         // Initial stuff
-        let ood_point = MultilinearPoint::expand_from_univariate(F::from(42), num_variables);
-        let statement_point = MultilinearPoint::expand_from_univariate(F::from(97), num_variables);
+        let ood_point = Vec::expand_from_univariate(F::from(42), num_variables);
+        let statement_point = Vec::expand_from_univariate(F::from(97), num_variables);
 
         // All the randomness
         let [epsilon_1, epsilon_2] = [F::from(15), F::from(32)];
-        let folding_randomness_1 = MultilinearPoint(vec![F::from(11), F::from(31)]);
-        let fold_point = MultilinearPoint(vec![F::from(31), F::from(15)]);
+        let folding_randomness_1 = vec![F::from(11), F::from(31)];
+        let fold_point = vec![F::from(31), F::from(15)];
         let combination_randomness = [F::from(31), F::from(4999)];
-        let folding_randomness_2 = MultilinearPoint(vec![F::from(97), F::from(36)]);
+        let folding_randomness_2 = vec![F::from(97), F::from(36)];
 
         let mut prover = SumcheckCore::new(
             polynomial.clone(),
@@ -185,17 +187,15 @@ mod tests {
                 + combination_randomness[1] * fold_answer
         );
 
-        let full_folding =
-            MultilinearPoint([folding_randomness_2.0.clone(), folding_randomness_1.0].concat());
+        let full_folding = [folding_randomness_2.0.clone(), folding_randomness_1.0].concat();
         let eval_coeff = folded_poly_1.fold(&folding_randomness_2).coeffs()[0];
         assert_eq!(
             sumcheck_poly_2.evaluate_at_point(&folding_randomness_2),
             eval_coeff
                 * (combination_randomness[0]
-                    * (epsilon_1 * eq_poly_outside(&full_folding, &ood_point)
-                        + epsilon_2 * eq_poly_outside(&full_folding, &statement_point))
-                    + combination_randomness[1]
-                        * eq_poly_outside(&folding_randomness_2, &fold_point))
+                    * (epsilon_1 * eq_eval(&full_folding, &ood_point)
+                        + epsilon_2 * eq_eval(&full_folding, &statement_point))
+                    + combination_randomness[1] * eq_eval(&folding_randomness_2, &fold_point))
         )
     }
 
@@ -203,22 +203,21 @@ mod tests {
     fn test_e2e_larger() {
         let num_variables = 6;
         let folding_factor = 2;
-        let polynomial = CoefficientList::new((0..1 << num_variables).map(F::from).collect());
+        let polynomial =
+            DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect());
 
         // Initial stuff
-        let ood_point = MultilinearPoint::expand_from_univariate(F::from(42), num_variables);
-        let statement_point = MultilinearPoint::expand_from_univariate(F::from(97), num_variables);
+        let ood_point = Vec::expand_from_univariate(F::from(42), num_variables);
+        let statement_point = Vec::expand_from_univariate(F::from(97), num_variables);
 
         // All the randomness
         let [epsilon_1, epsilon_2] = [F::from(15), F::from(32)];
-        let folding_randomness_1 = MultilinearPoint(vec![F::from(11), F::from(31)]);
-        let folding_randomness_2 = MultilinearPoint(vec![F::from(97), F::from(36)]);
-        let folding_randomness_3 = MultilinearPoint(vec![F::from(11297), F::from(42136)]);
-        let fold_point_11 =
-            MultilinearPoint(vec![F::from(31), F::from(15), F::from(31), F::from(15)]);
-        let fold_point_12 =
-            MultilinearPoint(vec![F::from(1231), F::from(15), F::from(4231), F::from(15)]);
-        let fold_point_2 = MultilinearPoint(vec![F::from(311), F::from(115)]);
+        let folding_randomness_1 = vec![F::from(11), F::from(31)];
+        let folding_randomness_2 = vec![F::from(97), F::from(36)];
+        let folding_randomness_3 = vec![F::from(11297), F::from(42136)];
+        let fold_point_11 = vec![F::from(31), F::from(15), F::from(31), F::from(15)];
+        let fold_point_12 = vec![F::from(1231), F::from(15), F::from(4231), F::from(15)];
+        let fold_point_2 = vec![F::from(311), F::from(115)];
         let combination_randomness_1 = [F::from(1289), F::from(3281), F::from(10921)];
         let combination_randomness_2 = [F::from(3281), F::from(3232)];
 
@@ -279,43 +278,35 @@ mod tests {
                 + combination_randomness_2[1] * fold_answer_2
         );
 
-        let full_folding = MultilinearPoint(
-            [
-                folding_randomness_3.0.clone(),
-                folding_randomness_2.0.clone(),
-                folding_randomness_1.0,
-            ]
-            .concat(),
-        );
+        let full_folding = [
+            folding_randomness_3.0.clone(),
+            folding_randomness_2.0.clone(),
+            folding_randomness_1.0,
+        ]
+        .concat();
 
         assert_eq!(
             sumcheck_poly_3.evaluate_at_point(&folding_randomness_3),
             final_coeff
                 * (combination_randomness_2[0]
                     * (combination_randomness_1[0]
-                        * (epsilon_1 * eq_poly_outside(&full_folding, &ood_point)
-                            + epsilon_2 * eq_poly_outside(&full_folding, &statement_point))
+                        * (epsilon_1 * eq_eval(&full_folding, &ood_point)
+                            + epsilon_2 * eq_eval(&full_folding, &statement_point))
                         + combination_randomness_1[1]
-                            * eq_poly_outside(
+                            * eq_eval(
                                 &fold_point_11,
-                                &MultilinearPoint(
-                                    [
-                                        folding_randomness_3.0.clone(),
-                                        folding_randomness_2.0.clone()
-                                    ]
-                                    .concat()
-                                )
+                                &[
+                                    folding_randomness_3.0.clone(),
+                                    folding_randomness_2.0.clone()
+                                ]
+                                .concat()
                             )
                         + combination_randomness_1[2]
-                            * eq_poly_outside(
+                            * eq_eval(
                                 &fold_point_12,
-                                &MultilinearPoint(
-                                    [folding_randomness_3.0.clone(), folding_randomness_2.0]
-                                        .concat()
-                                )
+                                &[folding_randomness_3.0.clone(), folding_randomness_2.0].concat()
                             ))
-                    + combination_randomness_2[1]
-                        * eq_poly_outside(&folding_randomness_3, &fold_point_2))
+                    + combination_randomness_2[1] * eq_eval(&folding_randomness_3, &fold_point_2))
         )
     }
 }

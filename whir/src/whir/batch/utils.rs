@@ -1,23 +1,21 @@
 use crate::{
+    crypto::MerkleConfig as Config,
+    end_timer,
     ntt::{transpose, transpose_test},
+    start_timer,
     utils::expand_randomness,
-    whir::fs_utils::{DigestReader, DigestWriter},
+    whir::fs_utils::{MmcsCommitmentReader, MmcsCommitmentWriter},
 };
-use ark_crypto_primitives::merkle_tree::Config;
-use ark_ff::Field;
-use ark_std::{end_timer, start_timer};
-use nimue::{
-    ByteReader, ByteWriter, ProofResult,
-    plugins::ark::{FieldChallenges, FieldReader, FieldWriter},
-};
+use ff_ext::ExtensionField;
+use nimue::{ByteReader, ByteWriter, ProofResult};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-pub fn stack_evaluations<F: Field>(
-    mut evals: Vec<F>,
+pub fn stack_evaluations<E: ExtensionField>(
+    mut evals: Vec<E>,
     folding_factor: usize,
-    buffer: &mut [F],
-) -> Vec<F> {
+    buffer: &mut [E],
+) -> Vec<E> {
     assert!(evals.len() % folding_factor == 0);
     let size_of_new_domain = evals.len() / folding_factor;
 
@@ -26,10 +24,10 @@ pub fn stack_evaluations<F: Field>(
     evals
 }
 
-/// Takes the vector of evaluations (assume that evals[i] = f(omega^i))
-/// and folds them into a vector of such that folded_evals[i] = [f(omega^(i + k * j)) for j in 0..folding_factor]
+/// Takes the vector of evaluations (assume that evals[i] = E(omega^i))
+/// and folds them into a vector of such that folded_evals[i] = [E(omega^(i + k * j)) for j in 0..folding_factor]
 /// This function will mutate the function without return
-pub fn stack_evaluations_mut<F: Field>(evals: &mut [F], folding_factor: usize) {
+pub fn stack_evaluations_mut<E: ExtensionField>(evals: &mut [E], folding_factor: usize) {
     let folding_factor_exp = 1 << folding_factor;
     assert!(evals.len() % folding_factor_exp == 0);
     let size_of_new_domain = evals.len() / folding_factor_exp;
@@ -42,12 +40,12 @@ pub fn stack_evaluations_mut<F: Field>(evals: &mut [F], folding_factor: usize) {
 /// Use in-place matrix transposes to avoid data copy
 /// each matrix has domain_size elements
 /// each matrix has shape (*, 1<<folding_factor)
-pub fn horizontal_stacking<F: Field>(
-    evals: Vec<F>,
+pub fn horizontal_stacking<E: ExtensionField>(
+    evals: Vec<E>,
     domain_size: usize,
     folding_factor: usize,
-    buffer: &mut [F],
-) -> Vec<F> {
+    buffer: &mut [E],
+) -> Vec<E> {
     let fold_size = 1 << folding_factor;
     let num_polys: usize = evals.len() / domain_size;
 
@@ -65,17 +63,17 @@ pub fn horizontal_stacking<F: Field>(
 }
 
 // generate a random vector for batching open
-pub fn generate_random_vector_batch_open<F, Merlin, MerkleConfig>(
+pub fn generate_random_vector_batch_open<E, Merlin, MerkleConfig>(
     merlin: &mut Merlin,
     size: usize,
-) -> ProofResult<Vec<F>>
+) -> ProofResult<Vec<E>>
 where
-    F: Field,
-    MerkleConfig: Config,
-    Merlin: FieldChallenges<F> + FieldWriter<F> + ByteWriter + DigestWriter<MerkleConfig>,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
+    Merlin: ByteWriter + MmcsCommitmentWriter<E, MerkleConfig>,
 {
     if size == 1 {
-        return Ok(vec![F::one()]);
+        return Ok(vec![E::one()]);
     }
     let [gamma] = merlin.challenge_scalars()?;
     let res = expand_randomness(gamma, size);
@@ -83,17 +81,17 @@ where
 }
 
 // generate a random vector for batching verify
-pub fn generate_random_vector_batch_verify<F, Arthur, MerkleConfig>(
+pub fn generate_random_vector_batch_verify<E, Arthur, MerkleConfig>(
     arthur: &mut Arthur,
     size: usize,
-) -> ProofResult<Vec<F>>
+) -> ProofResult<Vec<E>>
 where
-    F: Field,
-    MerkleConfig: Config,
-    Arthur: FieldChallenges<F> + FieldReader<F> + ByteReader + DigestReader<MerkleConfig>,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
+    Arthur: ByteReader + MmcsCommitmentReader<E, MerkleConfig>,
 {
     if size == 1 {
-        return Ok(vec![F::one()]);
+        return Ok(vec![E::one()]);
     }
     let [gamma] = arthur.challenge_scalars()?;
     let res = expand_randomness(gamma, size);

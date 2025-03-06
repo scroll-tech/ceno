@@ -7,7 +7,8 @@ use super::{
     transpose,
     utils::{lcm, sqrt_factor, workload_size},
 };
-use ark_ff::{FftField, Field};
+use ff_ext::ExtensionField;
+use p3_field::Field;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -44,26 +45,26 @@ pub struct NttEngine<F: Field> {
 }
 
 /// Compute the NTT of a slice of field elements using a cached engine.
-pub fn ntt<F: FftField>(values: &mut [F]) {
+pub fn ntt<F: ExtensionField>(values: &mut [F]) {
     NttEngine::<F>::new_from_cache().ntt(values);
 }
 
 /// Compute the many NTTs of size `size` using a cached engine.
-pub fn ntt_batch<F: FftField>(values: &mut [F], size: usize) {
+pub fn ntt_batch<F: ExtensionField>(values: &mut [F], size: usize) {
     NttEngine::<F>::new_from_cache().ntt_batch(values, size);
 }
 
 /// Compute the inverse NTT of a slice of field element without the 1/n scaling factor, using a cached engine.
-pub fn intt<F: FftField>(values: &mut [F]) {
+pub fn intt<F: ExtensionField>(values: &mut [F]) {
     NttEngine::<F>::new_from_cache().intt(values);
 }
 
 /// Compute the inverse NTT of multiple slice of field elements, each of size `size`, without the 1/n scaling factor and using a cached engine.
-pub fn intt_batch<F: FftField>(values: &mut [F], size: usize) {
+pub fn intt_batch<F: ExtensionField>(values: &mut [F], size: usize) {
     NttEngine::<F>::new_from_cache().intt_batch(values, size);
 }
 
-impl<F: FftField> NttEngine<F> {
+impl<F: ExtensionField> NttEngine<F> {
     /// Get or create a cached engine for the field `F`.
     pub fn new_from_cache() -> Arc<Self> {
         let mut cache = ENGINE_CACHE.lock().unwrap();
@@ -71,14 +72,14 @@ impl<F: FftField> NttEngine<F> {
         if let Some(engine) = cache.get(&type_id) {
             engine.clone().downcast::<NttEngine<F>>().unwrap()
         } else {
-            let engine = Arc::new(NttEngine::new_from_fftfield());
+            let engine = Arc::new(NttEngine::new_from_extension_field());
             cache.insert(type_id, engine.clone());
             engine
         }
     }
 
-    /// Construct a new engine from the field's `FftField` trait.
-    fn new_from_fftfield() -> Self {
+    /// Construct a new engine from the field's `ExtensionField` trait.
+    fn new_from_extension_field() -> Self {
         // TODO: Support SMALL_SUBGROUP
         if F::TWO_ADICITY <= 63 {
             Self::new(1 << F::TWO_ADICITY, F::TWO_ADIC_ROOT_OF_UNITY)

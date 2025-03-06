@@ -7,8 +7,8 @@ mod utils;
 mod wavelet;
 
 use self::matrix::MatrixMut;
-use ark_ff::FftField;
 
+use ff_ext::ExtensionField;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -19,7 +19,7 @@ pub use self::{
 };
 
 /// RS encode at a rate 1/`expansion`.
-pub fn expand_from_coeff<F: FftField>(coeffs: &[F], expansion: usize) -> Vec<F> {
+pub fn expand_from_coeff<F: ExtensionField>(coeffs: &[F], expansion: usize) -> Vec<F> {
     let engine = ntt_impl::NttEngine::<F>::new_from_cache();
     let expanded_size = coeffs.len() * expansion;
     let mut result = Vec::with_capacity(expanded_size);

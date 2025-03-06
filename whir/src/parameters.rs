@@ -1,7 +1,9 @@
 use std::{fmt::Display, marker::PhantomData, str::FromStr};
 
-use ark_crypto_primitives::merkle_tree::{Config, LeafParam, TwoToOneParam};
+use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
+
+use crate::crypto::MerkleConfig as Config;
 
 pub fn default_max_pow(num_variables: usize, log_inv_rate: usize) -> usize {
     num_variables + log_inv_rate - 3
@@ -173,10 +175,7 @@ impl FoldingFactor {
 }
 
 #[derive(Clone)]
-pub struct WhirParameters<MerkleConfig, PowStrategy>
-where
-    MerkleConfig: Config,
-{
+pub struct WhirParameters<E: ExtensionField, MerkleConfig: Config<E>, PowStrategy> {
     pub initial_statement: bool,
     pub starting_log_inv_rate: usize,
     pub folding_factor: FoldingFactor,
@@ -185,18 +184,12 @@ where
     pub pow_bits: usize,
 
     pub fold_optimisation: FoldType,
-
-    // PoW parameters
-    pub _pow_parameters: PhantomData<PowStrategy>,
-
     // Merkle tree parameters
-    pub leaf_hash_params: LeafParam<MerkleConfig>,
-    pub two_to_one_params: TwoToOneParam<MerkleConfig>,
+    pub hash_params: MerkleConfig::Mmcs,
 }
 
-impl<MerkleConfig, PowStrategy> Display for WhirParameters<MerkleConfig, PowStrategy>
-where
-    MerkleConfig: Config,
+impl<E: ExtensionField, MerkleConfig: Config<E>, PowStrategy> Display
+    for WhirParameters<E, MerkleConfig, PowStrategy>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(

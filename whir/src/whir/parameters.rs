@@ -1,24 +1,23 @@
 use core::{fmt, panic};
 use derive_more::Debug;
+use ff_ext::ExtensionField;
 use std::{f64::consts::LOG2_10, fmt::Display, marker::PhantomData};
 
-use ark_crypto_primitives::merkle_tree::{Config, LeafParam, TwoToOneParam};
-use ark_ff::FftField;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::fields::FieldWithSize,
+    crypto::MerkleConfig as Config,
     domain::Domain,
     parameters::{FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters},
 };
 
 #[derive(Clone, Debug)]
-pub struct WhirConfig<F, MerkleConfig, PowStrategy>
+pub struct WhirConfig<E, MerkleConfig, PowStrategy>
 where
-    F: FftField,
-    MerkleConfig: Config,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
 {
-    pub(crate) mv_parameters: MultivariateParameters<F>,
+    pub(crate) mv_parameters: MultivariateParameters<E>,
     pub(crate) soundness_type: SoundnessType,
     pub(crate) security_level: usize,
     pub(crate) max_pow_bits: usize,
@@ -31,7 +30,7 @@ where
     //    polynomial evaluation statement. In that case, the initial statement
     //    is set to true.
     pub(crate) initial_statement: bool,
-    pub(crate) starting_domain: Domain<F>,
+    pub(crate) starting_domain: Domain<E>,
     pub(crate) starting_log_inv_rate: usize,
     pub(crate) starting_folding_pow_bits: f64,
 
@@ -50,9 +49,7 @@ where
 
     // Merkle tree parameters
     #[debug(skip)]
-    pub(crate) leaf_hash_params: LeafParam<MerkleConfig>,
-    #[debug(skip)]
-    pub(crate) two_to_one_params: TwoToOneParam<MerkleConfig>,
+    pub(crate) hash_params: MerkleConfig::Mmcs,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,13 +61,13 @@ pub(crate) struct RoundConfig {
     pub(crate) log_inv_rate: usize,
 }
 
-impl<F, MerkleConfig, PowStrategy> WhirConfig<F, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig, PowStrategy> WhirConfig<E, MerkleConfig, PowStrategy>
 where
-    F: FftField + FieldWithSize,
-    MerkleConfig: Config,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
 {
     pub fn new(
-        mut mv_parameters: MultivariateParameters<F>,
+        mut mv_parameters: MultivariateParameters<E>,
         whir_parameters: WhirParameters<MerkleConfig, PowStrategy>,
     ) -> Self {
         // Pad the number of variables to folding factor
@@ -95,7 +92,7 @@ where
             .folding_factor
             .compute_number_of_rounds(mv_parameters.num_variables);
 
-        let field_size_bits = F::field_size_in_bits();
+        let field_size_bits = E::field_size_in_bits();
 
         let committment_ood_samples = if whir_parameters.initial_statement {
             Self::ood_samples(
@@ -232,8 +229,7 @@ where
             pow_strategy: PhantomData,
             fold_optimisation: whir_parameters.fold_optimisation,
             final_log_inv_rate: log_inv_rate,
-            leaf_hash_params: whir_parameters.leaf_hash_params,
-            two_to_one_params: whir_parameters.two_to_one_params,
+            hash_params: whir_parameters.hash_params,
         }
     }
 
@@ -442,10 +438,10 @@ where
     }
 }
 
-impl<F, MerkleConfig, PowStrategy> Display for WhirConfig<F, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig, PowStrategy> Display for WhirConfig<E, MerkleConfig, PowStrategy>
 where
-    F: FftField,
-    MerkleConfig: Config,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt::Display::fmt(&self.mv_parameters, f)?;
@@ -478,7 +474,7 @@ where
         writeln!(f, "Round by round soundness analysis:")?;
         writeln!(f, "------------------------------------")?;
 
-        let field_size_bits = F::field_size_in_bits();
+        let field_size_bits = E::field_size_in_bits();
         let log_eta = Self::log_eta(self.soundness_type, self.starting_log_inv_rate);
         let mut num_variables = self.mv_parameters.num_variables;
 

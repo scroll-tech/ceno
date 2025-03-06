@@ -1,6 +1,20 @@
 use crate::ntt::{transpose, transpose_bench_allocate};
-use ark_ff::Field;
+use p3_field::Field;
 use std::collections::BTreeSet;
+
+#[macro_export]
+macro_rules! start_timer {
+    ($exp: expr) => {
+        ()
+    };
+}
+
+#[macro_export]
+macro_rules! end_timer {
+    ($exp: expr) => {
+        ()
+    };
+}
 
 // checks whether the given number n is a power of two.
 pub fn is_power_of_two(n: usize) -> bool {
@@ -104,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_evaluations_stack() {
-        use crate::crypto::fields::Field64 as F;
+        use p3_goldilocks::Goldilocks as F;
 
         let num = 256;
         let folding_factor = 3;

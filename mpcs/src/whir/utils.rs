@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use plonky2::util::reverse_index_bits_in_place;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use whir::poly_utils::coeffs::CoefficientList;
+use whir::poly_utils::coeffs::DenseMultilinearExtension;
 
 use crate::util::arithmetic::interpolate_field_type_over_boolean_hypercube;
 
@@ -10,7 +10,7 @@ use super::field_wrapper::BaseFieldWrapper;
 
 pub fn poly2whir<E: ExtensionField>(
     poly: &DenseMultilinearExtension<E>,
-) -> CoefficientList<BaseFieldWrapper<E>> {
+) -> DenseMultilinearExtension<BaseFieldWrapper<E>> {
     let mut poly = poly.clone();
     interpolate_field_type_over_boolean_hypercube(&mut poly.evaluations);
     // The coefficients for WHIR is stored in big endian, but our
@@ -23,7 +23,7 @@ pub fn poly2whir<E: ExtensionField>(
         }
         multilinear_extensions::mle::FieldType::Base(coeffs) => {
             reverse_index_bits_in_place(coeffs.as_mut_slice());
-            CoefficientList::new(coeffs.par_iter().map(|x| BaseFieldWrapper(*x)).collect())
+            DenseMultilinearExtension::new(coeffs.par_iter().map(|x| BaseFieldWrapper(*x)).collect())
         }
         _ => unreachable!(),
     }
@@ -31,7 +31,7 @@ pub fn poly2whir<E: ExtensionField>(
 
 pub fn polys2whir<E: ExtensionField>(
     poly: &[DenseMultilinearExtension<E>],
-) -> Vec<CoefficientList<BaseFieldWrapper<E>>> {
+) -> Vec<DenseMultilinearExtension<BaseFieldWrapper<E>>> {
     poly.par_iter().map(|poly| poly2whir(poly)).collect()
 }
 
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(
             ExtensionFieldWrapper(poly.evaluate(&point)),
             whir_poly
-                .evaluate_at_extension(&whir::poly_utils::MultilinearPoint(whir_point.clone()))
+                .evaluate_at_extension(&whir::poly_utils::Vec(whir_point.clone()))
         );
     }
 
@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(
             ExtensionFieldWrapper(poly.evaluate(&point)),
             whir_poly
-                .evaluate_at_extension(&whir::poly_utils::MultilinearPoint(whir_point.clone()))
+                .evaluate_at_extension(&whir::poly_utils::Vec(whir_point.clone()))
         );
     }
 }

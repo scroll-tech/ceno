@@ -1,16 +1,14 @@
 use super::proof::SumcheckPolynomial;
-use crate::{
-    poly_utils::{MultilinearPoint, coeffs::CoefficientList, evals::EvaluationsList},
-    sumcheck::prover_single::SumcheckSingle,
-};
-use ark_ff::Field;
+use crate::sumcheck::prover_single::SumcheckSingle;
+use multilinear_extensions::mle::DenseMultilinearExtension;
+use p3_field::Field;
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
 
 pub struct SumcheckBatched<F> {
     // The evaluation on each p and eq
-    evaluations_of_p: Vec<EvaluationsList<F>>,
-    evaluations_of_equality: Vec<EvaluationsList<F>>,
+    evaluations_of_p: Vec<DenseMultilinearExtension<F>>,
+    evaluations_of_equality: Vec<DenseMultilinearExtension<F>>,
     comb_coeff: Vec<F>,
     num_polys: usize,
     num_variables: usize,
@@ -27,8 +25,8 @@ where
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p0(..) * eq0(..) + p1(..) * eq1(..) + ...
     pub fn new(
-        coeffs: Vec<CoefficientList<F>>,
-        points: &[MultilinearPoint<F>],
+        coeffs: Vec<DenseMultilinearExtension<F>>,
+        points: &[Vec<F>],
         poly_comb_coeff: &[F], // random coefficients for combining each poly
         evals: &[F],
     ) -> Self {
@@ -41,7 +39,10 @@ where
         let mut prover = SumcheckBatched {
             evaluations_of_p: coeffs.into_iter().map(|c| c.into()).collect(),
             evaluations_of_equality: vec![
-                EvaluationsList::new(vec![F::ZERO; 1 << num_variables]);
+                DenseMultilinearExtension::new(vec![
+                    F::ZERO;
+                    1 << num_variables
+                ]);
                 num_polys
             ],
             comb_coeff: poly_comb_coeff.to_vec(),
@@ -164,7 +165,7 @@ where
     pub fn compress(
         &mut self,
         combination_randomness: F, // Scale the initial point
-        folding_randomness: &MultilinearPoint<F>,
+        folding_randomness: &Vec<F>,
         sumcheck_poly: &SumcheckPolynomial<F>,
     ) {
         panic!("Non-parallel version not supported!");
@@ -187,8 +188,8 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p = EvaluationsList::new(evaluations_of_p);
-        self.evaluation_of_equality = EvaluationsList::new(evaluations_of_eq);
+        self.evaluation_of_p = DenseMultilinearExtension::new(evaluations_of_p);
+        self.evaluation_of_equality = DenseMultilinearExtension::new(evaluations_of_eq);
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 
@@ -196,7 +197,7 @@ where
     pub fn compress(
         &mut self,
         combination_randomness: F, // Scale the initial point
-        folding_randomness: &MultilinearPoint<F>,
+        folding_randomness: &Vec<F>,
         sumcheck_poly: &SumcheckPolynomial<F>,
     ) {
         assert_eq!(folding_randomness.n_variables(), 1);
@@ -225,8 +226,8 @@ where
                     },
                 );
                 (
-                    EvaluationsList::new(evaluation_of_p),
-                    EvaluationsList::new(evaluation_of_eq),
+                    DenseMultilinearExtension::new(evaluation_of_p),
+                    DenseMultilinearExtension::new(evaluation_of_eq),
                 )
             })
             .collect();
@@ -242,25 +243,20 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        crypto::fields::Field64,
-        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
-    };
+    use goldilocks::Goldilocks;
+    use multilinear_extensions::mle::DenseMultilinearExtension;
 
     use super::SumcheckBatched;
 
-    type F = Field64;
+    type F = Goldilocks;
 
     #[test]
     fn test_sumcheck_folding_factor_1() {
         let num_rounds = 2;
-        let eval_points = vec![
-            MultilinearPoint(vec![F::from(10), F::from(11)]),
-            MultilinearPoint(vec![F::from(7), F::from(8)]),
-        ];
+        let eval_points = vec![vec![F::from(10), F::from(11)], vec![F::from(7), F::from(8)]];
         let polynomials = vec![
-            CoefficientList::new(vec![F::from(1), F::from(5), F::from(10), F::from(14)]),
-            CoefficientList::new(vec![F::from(2), F::from(6), F::from(11), F::from(13)]),
+            DenseMultilinearExtension::new(vec![F::from(1), F::from(5), F::from(10), F::from(14)]),
+            DenseMultilinearExtension::new(vec![F::from(2), F::from(6), F::from(11), F::from(13)]),
         ];
         let poly_comb_coeffs = vec![F::from(2), F::from(3)];
 
@@ -286,7 +282,7 @@ mod tests {
             assert_eq!(poly.sum_over_hypercube(), claimed_value);
 
             let next_comb_randomness = F::from(100101);
-            let next_fold_randomness = MultilinearPoint(vec![F::from(4999)]);
+            let next_fold_randomness = vec![F::from(4999)];
 
             prover.compress(next_comb_randomness, &next_fold_randomness, &poly);
             claimed_value = next_comb_randomness * poly.evaluate_at_point(&next_fold_randomness);
@@ -299,7 +295,6 @@ mod tests {
             println!("POLY: {:?}", poly);
         }
         println!("EXPECTED:");
-        let fold_randomness_list = MultilinearPoint(fold_randomness_list);
         for poly in polynomials {
             println!("EVAL: {:?}", poly.evaluate(&fold_randomness_list));
         }

@@ -1,9 +1,6 @@
-use ark_ff::Field;
+use p3_field::Field;
 
-use crate::{
-    poly_utils::{MultilinearPoint, eq_poly3},
-    utils::base_decomposition,
-};
+use crate::{utils::base_decomposition, whir::fold::eq_poly3};
 
 // Stored in evaluation form
 #[derive(Debug, Clone)]
@@ -61,7 +58,7 @@ where
     /// evaluates the polynomial at an arbitrary point, not neccessarily in {0,1,2}^n_variables.
     ///
     /// We assert that point.n_variables() == self.n_variables
-    pub fn evaluate_at_point(&self, point: &MultilinearPoint<F>) -> F {
+    pub fn evaluate_at_point(&self, point: &Vec<F>) -> F {
         assert!(point.n_variables() == self.n_variables);
         let num_evaluation_points = 3_usize.pow(self.n_variables as u32);
 
@@ -77,11 +74,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{crypto::fields::Field64, poly_utils::MultilinearPoint, utils::base_decomposition};
+    use goldilocks::Goldilocks;
+
+    use crate::utils::base_decomposition;
 
     use super::SumcheckPolynomial;
 
-    type F = Field64;
+    type F = Goldilocks;
 
     #[test]
     fn test_evaluation() {
@@ -94,7 +93,7 @@ mod tests {
 
         for i in 0..num_evaluation_points {
             let decomp = base_decomposition(i, 3, num_variables);
-            let point = MultilinearPoint(decomp.into_iter().map(F::from).collect());
+            let point = decomp.into_iter().map(F::from).collect();
             assert_eq!(poly.evaluate_at_point(&point), poly.evaluations()[i]);
         }
     }

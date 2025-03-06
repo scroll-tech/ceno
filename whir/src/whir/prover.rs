@@ -1,39 +1,36 @@
 use super::{Statement, WhirProof, committer::Witness, parameters::WhirConfig};
 use crate::{
+    crypto::{MerkleConfig as Config, MerkleTree, MultiPath},
     domain::Domain,
+    end_timer,
     ntt::expand_from_coeff,
     parameters::FoldType,
-    poly_utils::{
-        MultilinearPoint,
-        coeffs::CoefficientList,
-        fold::{compute_fold, restructure_evaluations},
-    },
+    start_timer,
     sumcheck::prover_not_skipping::SumcheckProverNotSkipping,
     utils::{self, expand_randomness},
+    whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
 };
-use ark_crypto_primitives::merkle_tree::{Config, MerkleTree, MultiPath};
-use ark_ff::FftField;
-use ark_poly::EvaluationDomain;
-use ark_std::{end_timer, start_timer};
+use ff_ext::ExtensionField;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue::{
     ByteChallenges, ByteWriter, ProofResult,
     plugins::ark::{FieldChallenges, FieldWriter},
 };
 use nimue_pow::{self, PoWChallenge};
 
-use crate::whir::fs_utils::{DigestWriter, get_challenge_stir_queries};
+use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-pub struct Prover<F, MerkleConfig, PowStrategy>(pub WhirConfig<F, MerkleConfig, PowStrategy>)
+pub struct Prover<E, MerkleConfig, PowStrategy>(pub WhirConfig<E, MerkleConfig, PowStrategy>)
 where
-    F: FftField,
-    MerkleConfig: Config;
+    E: ExtensionField,
+    MerkleConfig: Config<E>;
 
-impl<F, MerkleConfig, PowStrategy> Prover<F, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig, PowStrategy> Prover<E, MerkleConfig, PowStrategy>
 where
-    F: FftField,
-    MerkleConfig: Config<Leaf = [F]>,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
     PowStrategy: nimue_pow::PowStrategy,
 {
     pub(crate) fn validate_parameters(&self) -> bool {
@@ -41,7 +38,7 @@ where
             == self.0.folding_factor.total_number(self.0.n_rounds()) + self.0.final_sumcheck_rounds
     }
 
-    fn validate_statement(&self, statement: &Statement<F>) -> bool {
+    fn validate_statement(&self, statement: &Statement<E>) -> bool {
         if statement.points.len() != statement.evaluations.len() {
             return false;
         }
@@ -58,7 +55,7 @@ where
         true
     }
 
-    fn validate_witness(&self, witness: &Witness<F, MerkleConfig>) -> bool {
+    fn validate_witness(&self, witness: &Witness<E, MerkleConfig>) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         if !self.0.initial_statement {
             assert!(witness.ood_points.is_empty());
@@ -69,21 +66,21 @@ where
     pub fn prove<Merlin>(
         &self,
         merlin: &mut Merlin,
-        mut statement: Statement<F>,
-        witness: Witness<F, MerkleConfig>,
-    ) -> ProofResult<WhirProof<MerkleConfig, F>>
+        mut statement: Statement<E>,
+        witness: Witness<E, MerkleConfig>,
+    ) -> ProofResult<WhirProof<MerkleConfig, E>>
     where
-        Merlin: FieldChallenges<F>
-            + FieldWriter<F>
+        Merlin: FieldChallenges<E>
+            + FieldWriter<E>
             + ByteChallenges
             + ByteWriter
             + PoWChallenge
-            + DigestWriter<MerkleConfig>,
+            + MmcsCommitmentWriter<MerkleConfig>,
     {
         // If any evaluation point is shorter than the folding factor, pad with 0 in front
         for p in statement.points.iter_mut() {
             while p.n_variables() < self.0.folding_factor.at_round(0) {
-                p.0.insert(0, F::ONE);
+                p.0.insert(0, E::ONE);
             }
         }
 
@@ -95,12 +92,7 @@ where
         let initial_claims: Vec<_> = witness
             .ood_points
             .into_iter()
-            .map(|ood_point| {
-                MultilinearPoint::expand_from_univariate(
-                    ood_point,
-                    self.0.mv_parameters.num_variables,
-                )
-            })
+            .map(|ood_point| expand_from_univariate(ood_point, self.0.mv_parameters.num_variables))
             .chain(statement.points)
             .collect();
         let initial_answers: Vec<_> = witness
@@ -145,13 +137,13 @@ where
             // If there is no initial statement, there is no need to run the
             // initial rounds of the sum-check, and the verifier directly sends
             // the initial folding randomnesses.
-            let mut folding_randomness = vec![F::ZERO; self.0.folding_factor.at_round(0)];
+            let mut folding_randomness = vec![E::ZERO; self.0.folding_factor.at_round(0)];
             merlin.fill_challenge_scalars(&mut folding_randomness)?;
 
             if self.0.starting_folding_pow_bits > 0. {
                 merlin.challenge_pow::<PowStrategy>(self.0.starting_folding_pow_bits)?;
             }
-            MultilinearPoint(folding_randomness)
+            folding_randomness
         };
 
         let round_state = RoundState {
@@ -177,15 +169,15 @@ where
     pub(crate) fn round<Merlin>(
         &self,
         merlin: &mut Merlin,
-        mut round_state: RoundState<F, MerkleConfig>,
-    ) -> ProofResult<WhirProof<MerkleConfig, F>>
+        mut round_state: RoundState<E, MerkleConfig>,
+    ) -> ProofResult<WhirProof<MerkleConfig, E>>
     where
-        Merlin: FieldChallenges<F>
+        Merlin: FieldChallenges<E>
             + ByteChallenges
-            + FieldWriter<F>
+            + FieldWriter<E>
             + ByteWriter
             + PoWChallenge
-            + DigestWriter<MerkleConfig>,
+            + MmcsCommitmentWriter<MerkleConfig>,
     {
         // Fold the coefficients
         let folded_coefficients = round_state
@@ -289,15 +281,12 @@ where
         merlin.add_digest(root)?;
 
         // OOD Samples
-        let mut ood_points = vec![F::ZERO; round_params.ood_samples];
+        let mut ood_points = vec![E::ZERO; round_params.ood_samples];
         let mut ood_answers = Vec::with_capacity(round_params.ood_samples);
         if round_params.ood_samples > 0 {
             merlin.fill_challenge_scalars(&mut ood_points)?;
             ood_answers.extend(ood_points.iter().map(|ood_point| {
-                folded_coefficients.evaluate(&MultilinearPoint::expand_from_univariate(
-                    *ood_point,
-                    num_variables,
-                ))
+                folded_coefficients.evaluate(&expand_from_univariate(*ood_point, num_variables))
             }));
             merlin.add_scalars(&ood_answers)?;
         }
@@ -321,7 +310,7 @@ where
                     .iter()
                     .map(|i| domain_scaled_gen.pow([*i as u64])),
             )
-            .map(|univariate| MultilinearPoint::expand_from_univariate(univariate, num_variables))
+            .map(|univariate| expand_from_univariate(univariate, num_variables))
             .collect();
 
         let merkle_proof = round_state
@@ -363,8 +352,8 @@ where
                         let coset_offset_inv = domain_gen_inv.pow([*index as u64]);
 
                         // In the Naive mode, the oracle consists directly of the
-                        // evaluations of f over the domain. We leverage an
-                        // algorithm to compute the evaluations of the folded f
+                        // evaluations of E over the domain. We leverage an
+                        // algorithm to compute the evaluations of the folded E
                         // at the corresponding point in folded domain (which is
                         // coset_offset^fold_size).
                         compute_fold(
@@ -372,7 +361,7 @@ where
                             &round_state.folding_randomness.0,
                             coset_offset_inv,
                             coset_generator_inv,
-                            F::from(2).inverse().unwrap(),
+                            E::from(2).inverse().unwrap(),
                             self.0.folding_factor.at_round(round_state.round),
                         )
                     },
@@ -382,8 +371,9 @@ where
                 // In the ProverHelps mode, the oracle values have been linearly
                 // transformed such that they are exactly the coefficients of the
                 // multilinear polynomial whose evaluation at the folding randomness
-                // is just the folding of f evaluated at the folded point.
-                CoefficientList::new(answers.to_vec()).evaluate(&round_state.folding_randomness)
+                // is just the folding of E evaluated at the folded point.
+                DenseMultilinearExtension::new(answers.to_vec())
+                    .evaluate(&round_state.folding_randomness)
             })),
         }
         round_state.merkle_proofs.push((merkle_proof, answers));
@@ -440,17 +430,17 @@ where
     }
 }
 
-pub(crate) struct RoundState<F, MerkleConfig>
+pub(crate) struct RoundState<E, MerkleConfig>
 where
-    F: FftField,
-    MerkleConfig: Config,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
 {
     pub(crate) round: usize,
-    pub(crate) domain: Domain<F>,
-    pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<F>>,
-    pub(crate) folding_randomness: MultilinearPoint<F>,
-    pub(crate) coefficients: CoefficientList<F>,
+    pub(crate) domain: Domain<E>,
+    pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<E>>,
+    pub(crate) folding_randomness: Vec<E>,
+    pub(crate) coefficients: DenseMultilinearExtension<E>,
     pub(crate) prev_merkle: MerkleTree<MerkleConfig>,
-    pub(crate) prev_merkle_answers: Vec<F>,
-    pub(crate) merkle_proofs: Vec<(MultiPath<MerkleConfig>, Vec<Vec<F>>)>,
+    pub(crate) prev_merkle_answers: Vec<E>,
+    pub(crate) merkle_proofs: Vec<(MultiPath<MerkleConfig>, Vec<Vec<E>>)>,
 }

@@ -1,59 +1,62 @@
 use super::parameters::WhirConfig;
 use crate::{
+    crypto::{MerkleConfig as Config, MerkleTree},
+    end_timer,
     ntt::expand_from_coeff,
-    poly_utils::{MultilinearPoint, coeffs::CoefficientList, fold::restructure_evaluations},
-    utils,
+    start_timer, utils,
+    whir::{
+        fold::{expand_from_univariate, restructure_evaluations},
+        fs_utils::MmcsCommitmentWriter,
+    },
 };
-use ark_crypto_primitives::merkle_tree::{Config, MerkleTree};
-use ark_ff::FftField;
-use ark_poly::EvaluationDomain;
-use ark_std::{end_timer, start_timer};
 use derive_more::Debug;
+use ff_ext::ExtensionField;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue::{
     ByteWriter, ProofResult,
     plugins::ark::{FieldChallenges, FieldWriter},
 };
 
-use crate::whir::fs_utils::DigestWriter;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 #[derive(Clone, Debug)]
-pub struct Witness<F, MerkleConfig>
+pub struct Witness<E: ExtensionField, MerkleConfig>
 where
-    MerkleConfig: Config,
+    MerkleConfig: Config<E>,
 {
-    pub(crate) polynomial: CoefficientList<F>,
+    pub(crate) polynomial: DenseMultilinearExtension<E>,
     #[debug(skip)]
-    pub(crate) merkle_tree: MerkleTree<MerkleConfig>,
-    pub(crate) merkle_leaves: Vec<F>,
-    pub(crate) ood_points: Vec<F>,
-    pub(crate) ood_answers: Vec<F>,
+    pub(crate) merkle_tree: MerkleTree<E, MerkleConfig>,
+    pub(crate) merkle_leaves: Vec<E>,
+    pub(crate) ood_points: Vec<E>,
+    pub(crate) ood_answers: Vec<E>,
 }
 
-pub struct Committer<F, MerkleConfig, PowStrategy>(
-    pub(crate) WhirConfig<F, MerkleConfig, PowStrategy>,
+pub struct Committer<E, MerkleConfig, PowStrategy>(
+    pub(crate) WhirConfig<E, MerkleConfig, PowStrategy>,
 )
 where
-    F: FftField,
-    MerkleConfig: Config;
+    E: ExtensionField,
+    MerkleConfig: Config<E>;
 
-impl<F, MerkleConfig, PowStrategy> Committer<F, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig, PowStrategy> Committer<E, MerkleConfig, PowStrategy>
 where
-    F: FftField,
-    MerkleConfig: Config<Leaf = [F]>,
+    E: ExtensionField,
+    MerkleConfig: Config<E>,
 {
-    pub fn new(config: WhirConfig<F, MerkleConfig, PowStrategy>) -> Self {
+    pub fn new(config: WhirConfig<E, MerkleConfig, PowStrategy>) -> Self {
         Self(config)
     }
 
     pub fn commit<Merlin>(
         &self,
         merlin: &mut Merlin,
-        mut polynomial: CoefficientList<F::BasePrimeField>,
-    ) -> ProofResult<Witness<F, MerkleConfig>>
+        mut polynomial: DenseMultilinearExtension<E::BasePrimeField>,
+    ) -> ProofResult<Witness<E, MerkleConfig>>
     where
-        Merlin: FieldWriter<F> + FieldChallenges<F> + ByteWriter + DigestWriter<MerkleConfig>,
+        Merlin:
+            FieldWriter<E> + FieldChallenges<E> + ByteWriter + MmcsCommitmentWriter<MerkleConfig>,
     {
         let timer = start_timer!(|| "Single Commit");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
@@ -79,7 +82,7 @@ where
         // TODO: Commit to base field directly.
         let folded_evals = folded_evals
             .into_iter()
-            .map(F::from_base_prime_field)
+            .map(E::from_base_prime_field)
             .collect::<Vec<_>>();
 
         // Group folds together as a leaf.
@@ -102,12 +105,12 @@ where
 
         merlin.add_digest(root)?;
 
-        let mut ood_points = vec![F::ZERO; self.0.committment_ood_samples];
+        let mut ood_points = vec![E::ZERO; self.0.committment_ood_samples];
         let mut ood_answers = Vec::with_capacity(self.0.committment_ood_samples);
         if self.0.committment_ood_samples > 0 {
             merlin.fill_challenge_scalars(&mut ood_points)?;
             ood_answers.extend(ood_points.iter().map(|ood_point| {
-                polynomial.evaluate_at_extension(&MultilinearPoint::expand_from_univariate(
+                polynomial.evaluate_at_extension(&expand_from_univariate(
                     *ood_point,
                     self.0.mv_parameters.num_variables,
                 ))

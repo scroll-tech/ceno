@@ -67,7 +67,7 @@ mod tests {
     use rand::Rng;
     use whir::{
         ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner},
-        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+        poly_utils::{Vec, coeffs::DenseMultilinearExtension},
     };
 
     type F = super::super::field_wrapper::ExtensionFieldWrapper<GoldilocksExt2>;
@@ -78,7 +78,7 @@ mod tests {
         let num_coeffs = 1 << poly_size;
         WhirInner::<F, WhirDefaultSpecInner>::setup(num_coeffs as usize);
 
-        let poly = CoefficientList::new(
+        let poly = DenseMultilinearExtension::new(
             (0..num_coeffs)
                 .map(<F as Field>::BasePrimeField::from)
                 .collect(),
@@ -89,7 +89,7 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let point: Vec<F> = (0..poly_size).map(|_| F::from(rng.gen::<u64>())).collect();
-        let eval = poly.evaluate_at_extension(&MultilinearPoint(point.clone()));
+        let eval = poly.evaluate_at_extension(&Vec(point.clone()));
 
         let proof =
             WhirInner::<F, WhirDefaultSpecInner>::open(&(), &witness, &point, &eval).unwrap();

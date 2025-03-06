@@ -1,7 +1,8 @@
+use crate::{end_timer, start_timer};
+
 use super::{super::utils::is_power_of_two, MatrixMut, utils::workload_size};
 use std::mem::swap;
 
-use ark_std::{end_timer, start_timer};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 #[cfg(feature = "parallel")]
 use rayon::join;

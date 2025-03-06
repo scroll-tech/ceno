@@ -1,16 +1,13 @@
-use crate::utils::dedup;
-use ark_crypto_primitives::merkle_tree::Config;
-use nimue::{ByteChallenges, ProofResult};
+use crate::{crypto::MerkleConfig as Config, error::Error, utils::dedup};
+use ff_ext::ExtensionField;
+use p3_commit::Mmcs;
 
 pub fn get_challenge_stir_queries<T>(
     domain_size: usize,
     folding_factor: usize,
     num_queries: usize,
     transcript: &mut T,
-) -> ProofResult<Vec<usize>>
-where
-    T: ByteChallenges,
-{
+) -> Result<Vec<usize>, Error> {
     let folded_domain_size = domain_size / (1 << folding_factor);
     // How many bytes do we need to represent an index in the folded domain?
     // domain_size_bytes = log2(folded_domain_size) / 8
@@ -30,10 +27,13 @@ where
     Ok(dedup(indices))
 }
 
-pub trait DigestWriter<MerkleConfig: Config> {
-    fn add_digest(&mut self, digest: MerkleConfig::InnerDigest) -> ProofResult<()>;
+pub trait MmcsCommitmentWriter<E: ExtensionField, MerkleConfig: Config<E>> {
+    fn add_digest(
+        &mut self,
+        digest: <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+    ) -> Result<(), Error>;
 }
 
-pub trait DigestReader<MerkleConfig: Config> {
-    fn read_digest(&mut self) -> ProofResult<MerkleConfig::InnerDigest>;
+pub trait MmcsCommitmentReader<E: ExtensionField, MerkleConfig: Config<E>> {
+    fn read_digest(&mut self) -> Result<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment, Error>;
 }

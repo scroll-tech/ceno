@@ -1,19 +1,14 @@
-use ark_ff::Field;
+use multilinear_extensions::mle::DenseMultilinearExtension;
+use p3_field::Field;
 
-use crate::{
-    poly_utils::{
-        MultilinearPoint, coeffs::CoefficientList, evals::EvaluationsList,
-        sequential_lag_poly::LagrangePolynomialIterator,
-    },
-    utils::base_decomposition,
-};
+use crate::{utils::base_decomposition, whir::fold::LagrangePolynomialIterator};
 
 use super::proof::SumcheckPolynomial;
 
 pub struct SumcheckCore<F> {
     // The evaluation of p
-    evaluation_of_p: EvaluationsList<F>,
-    evaluation_of_equality: EvaluationsList<F>,
+    evaluation_of_p: DenseMultilinearExtension<F>,
+    evaluation_of_equality: DenseMultilinearExtension<F>,
     num_variables: usize,
 }
 
@@ -25,8 +20,8 @@ where
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p(X_1, ... X_n) * (epsilon_1 eq_z_1(X) + epsilon_2 eq_z_2(X) ...)
     pub fn new(
-        coeffs: CoefficientList<F>,     // multilinear polynomial in n variables
-        points: &[MultilinearPoint<F>], // list of points, each of length n.
+        coeffs: DenseMultilinearExtension<F>, // multilinear polynomial in n variables
+        points: &[Vec<F>],                    // list of points, each of length n.
         combination_randomness: &[F],
     ) -> Self {
         assert_eq!(points.len(), combination_randomness.len());
@@ -34,7 +29,10 @@ where
 
         let mut prover = SumcheckCore {
             evaluation_of_p: coeffs.into(), // transform coefficient form -> evaluation form
-            evaluation_of_equality: EvaluationsList::new(vec![F::ZERO; 1 << num_variables]),
+            evaluation_of_equality: DenseMultilinearExtension::new(vec![
+                F::ZERO;
+                1 << num_variables
+            ]),
             num_variables,
         };
 
@@ -54,17 +52,15 @@ where
         // sets evaluation_points to the set of all {0,1,2}^folding_factor
         let evaluation_points: Vec<_> = (0..num_evaluation_points)
             .map(|point| {
-                MultilinearPoint(
-                    base_decomposition(point, 3, folding_factor)
-                        .into_iter()
-                        .map(|v| match v {
-                            0 => F::ZERO,
-                            1 => F::ONE,
-                            2 => two,
-                            _ => unreachable!(),
-                        })
-                        .collect(),
-                )
+                base_decomposition(point, 3, folding_factor)
+                    .into_iter()
+                    .map(|v| match v {
+                        0 => F::ZERO,
+                        1 => F::ONE,
+                        2 => two,
+                        _ => unreachable!(),
+                    })
+                    .collect()
             })
             .collect();
         let mut evaluations = vec![F::ZERO; num_evaluation_points];
@@ -76,9 +72,10 @@ where
             let indexes: Vec<_> = (0..suffix_len)
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
-            let left_poly =
-                EvaluationsList::new(indexes.iter().map(|&i| self.evaluation_of_p[i]).collect());
-            let right_poly = EvaluationsList::new(
+            let left_poly = DenseMultilinearExtension::new(
+                indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
+            );
+            let right_poly = DenseMultilinearExtension::new(
                 indexes
                     .iter()
                     .map(|&i| self.evaluation_of_equality[i])
@@ -95,11 +92,7 @@ where
         SumcheckPolynomial::new(evaluations, folding_factor)
     }
 
-    pub fn add_new_equality(
-        &mut self,
-        points: &[MultilinearPoint<F>],
-        combination_randomness: &[F],
-    ) {
+    pub fn add_new_equality(&mut self, points: &[Vec<F>], combination_randomness: &[F]) {
         assert_eq!(combination_randomness.len(), points.len());
         for (point, rand) in points.iter().zip(combination_randomness) {
             for (prefix, lag) in LagrangePolynomialIterator::new(point) {
@@ -113,7 +106,7 @@ where
         &mut self,
         folding_factor: usize,
         combination_randomness: F, // Scale the initial point
-        folding_randomness: &MultilinearPoint<F>,
+        folding_randomness: &Vec<F>,
     ) {
         assert_eq!(folding_randomness.n_variables(), folding_factor);
         assert!(self.num_variables >= folding_factor);
@@ -129,9 +122,10 @@ where
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
 
-            let left_poly =
-                EvaluationsList::new(indexes.iter().map(|&i| self.evaluation_of_p[i]).collect());
-            let right_poly = EvaluationsList::new(
+            let left_poly = DenseMultilinearExtension::new(
+                indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
+            );
+            let right_poly = DenseMultilinearExtension::new(
                 indexes
                     .iter()
                     .map(|&i| self.evaluation_of_equality[i])
@@ -145,7 +139,7 @@ where
 
         // Update
         self.num_variables -= folding_factor;
-        self.evaluation_of_p = EvaluationsList::new(evaluations_of_p);
-        self.evaluation_of_equality = EvaluationsList::new(evaluations_of_eq);
+        self.evaluation_of_p = DenseMultilinearExtension::new(evaluations_of_p);
+        self.evaluation_of_equality = DenseMultilinearExtension::new(evaluations_of_eq);
     }
 }

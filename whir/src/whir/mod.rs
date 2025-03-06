@@ -1,60 +1,49 @@
-use ark_crypto_primitives::merkle_tree::{Config, MultiPath};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-
-use crate::poly_utils::MultilinearPoint;
+use crate::crypto::{MerkleConfig as Config, MultiPath};
+use ff_ext::ExtensionField;
+use serde::{Deserialize, Serialize};
 
 pub mod batch;
 pub mod committer;
+pub mod fold;
 pub mod fs_utils;
-pub mod iopattern;
 pub mod parameters;
 pub mod prover;
 pub mod verifier;
 
 #[derive(Debug, Clone, Default)]
-pub struct Statement<F> {
-    pub points: Vec<MultilinearPoint<F>>,
-    pub evaluations: Vec<F>,
+pub struct Statement<E> {
+    pub points: Vec<Vec<E>>,
+    pub evaluations: Vec<E>,
 }
 
 // Only includes the authentication paths
-#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
-pub struct WhirProof<MerkleConfig, F>(pub(crate) Vec<(MultiPath<MerkleConfig>, Vec<Vec<F>>)>)
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WhirProof<MerkleConfig, E>(pub(crate) Vec<(MultiPath<E, MerkleConfig>, Vec<Vec<E>>)>)
 where
-    MerkleConfig: Config<Leaf = [F]>,
-    F: Sized + Clone + CanonicalSerialize + CanonicalDeserialize;
-
-pub fn whir_proof_size<MerkleConfig, F>(
-    transcript: &[u8],
-    whir_proof: &WhirProof<MerkleConfig, F>,
-) -> usize
-where
-    MerkleConfig: Config<Leaf = [F]>,
-    F: Sized + Clone + CanonicalSerialize + CanonicalDeserialize,
-{
-    transcript.len() + whir_proof.serialized_size(ark_serialize::Compress::Yes)
-}
+    MerkleConfig: Config<E>,
+    E: ExtensionField;
 
 #[cfg(test)]
 mod tests {
+    use multilinear_extensions::mle::DenseMultilinearExtension;
     use nimue::{DefaultHash, IOPattern};
     use nimue_pow::blake3::Blake3PoW;
+    use p3_goldilocks::Goldilocks;
+    use rand::rngs::OsRng;
 
     use crate::{
-        crypto::{fields::Field64, merkle_tree::blake3 as merkle_tree},
         parameters::{
             FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
         },
-        poly_utils::{MultilinearPoint, coeffs::CoefficientList},
         whir::{
-            Statement, batch::WhirBatchIOPattern, committer::Committer, iopattern::WhirIOPattern,
-            parameters::WhirConfig, prover::Prover, verifier::Verifier,
+            Statement, committer::Committer, parameters::WhirConfig, prover::Prover,
+            verifier::Verifier,
         },
     };
 
-    type MerkleConfig = merkle_tree::MerkleTreeParams<F>;
+    type MerkleConfig = merkle_tree::MerkleTreeParams<E>;
     type PowStrategy = Blake3PoW;
-    type F = Field64;
+    type E = Goldilocks;
 
     fn make_whir_things(
         num_variables: usize,
@@ -66,30 +55,28 @@ mod tests {
     ) {
         let num_coeffs = 1 << num_variables;
 
-        let mut rng = ark_std::test_rng();
-        let (leaf_hash_params, two_to_one_params) = merkle_tree::default_config::<F>(&mut rng);
+        let mut rng = OsRng;
+        let hash_params = merkle_tree::default_config::<E>(&mut rng);
 
-        let mv_params = MultivariateParameters::<F>::new(num_variables);
+        let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<MerkleConfig, PowStrategy> {
+        let whir_params = WhirParameters::<E, MerkleConfig, PowStrategy> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
             folding_factor,
-            leaf_hash_params,
-            two_to_one_params,
+            hash_params,
             soundness_type,
-            _pow_parameters: Default::default(),
             starting_log_inv_rate: 1,
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<F, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
+        let params = WhirConfig::<E, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
 
-        let polynomial = CoefficientList::new(vec![F::from(1); num_coeffs]);
+        let polynomial = DenseMultilinearExtension::new(vec![E::from(1); num_coeffs]);
 
         let points: Vec<_> = (0..num_points)
-            .map(|_| MultilinearPoint::rand(&mut rng, num_variables))
+            .map(|_| Vec::rand(&mut rng, num_variables))
             .collect();
 
         let statement = Statement {
@@ -136,34 +123,32 @@ mod tests {
         );
         let num_coeffs = 1 << num_variables;
 
-        let mut rng = ark_std::test_rng();
-        let (leaf_hash_params, two_to_one_params) = merkle_tree::default_config::<F>(&mut rng);
+        let mut rng = OsRng;
+        let hash_params = merkle_tree::default_config::<E>(&mut rng);
 
-        let mv_params = MultivariateParameters::<F>::new(num_variables);
+        let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<MerkleConfig, PowStrategy> {
+        let whir_params = WhirParameters::<E, MerkleConfig, PowStrategy> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
             folding_factor: FoldingFactor::Constant(folding_factor),
-            leaf_hash_params,
-            two_to_one_params,
+            hash_params,
             soundness_type,
-            _pow_parameters: Default::default(),
             starting_log_inv_rate: 1,
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<F, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
+        let params = WhirConfig::<E, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
 
-        let polynomials: Vec<CoefficientList<F>> = (0..num_polynomials)
-            .map(|i| CoefficientList::new(vec![F::from((i + 1) as i32); num_coeffs]))
+        let polynomials: Vec<DenseMultilinearExtension<E>> = (0..num_polynomials)
+            .map(|i| DenseMultilinearExtension::new(vec![E::from((i + 1) as i32); num_coeffs]))
             .collect();
 
-        let points: Vec<MultilinearPoint<F>> = (0..num_points)
-            .map(|_| MultilinearPoint::rand(&mut rng, num_variables))
+        let points: Vec<Vec<E>> = (0..num_points)
+            .map(|_| Vec::rand(&mut rng, num_variables))
             .collect();
-        let evals_per_point: Vec<Vec<F>> = points
+        let evals_per_point: Vec<Vec<E>> = points
             .iter()
             .map(|point| {
                 polynomials
@@ -218,34 +203,32 @@ mod tests {
         );
         let num_coeffs = 1 << num_variables;
 
-        let mut rng = ark_std::test_rng();
-        let (leaf_hash_params, two_to_one_params) = merkle_tree::default_config::<F>(&mut rng);
+        let mut rng = OsRng;
+        let hash_params = merkle_tree::default_config::<E>(&mut rng);
 
-        let mv_params = MultivariateParameters::<F>::new(num_variables);
+        let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<MerkleConfig, PowStrategy> {
+        let whir_params = WhirParameters::<E, MerkleConfig, PowStrategy> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
             folding_factor: FoldingFactor::Constant(folding_factor),
-            leaf_hash_params,
-            two_to_one_params,
+            hash_params,
             soundness_type,
-            _pow_parameters: Default::default(),
             starting_log_inv_rate: 1,
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<F, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
+        let params = WhirConfig::<E, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
 
-        let polynomials: Vec<CoefficientList<F>> = (0..num_polynomials)
-            .map(|i| CoefficientList::new(vec![F::from((i + 1) as i32); num_coeffs]))
+        let polynomials: Vec<DenseMultilinearExtension<E>> = (0..num_polynomials)
+            .map(|i| DenseMultilinearExtension::new(vec![E::from((i + 1) as i32); num_coeffs]))
             .collect();
 
-        let point_per_poly: Vec<MultilinearPoint<F>> = (0..num_polynomials)
-            .map(|_| MultilinearPoint::rand(&mut rng, num_variables))
+        let point_per_poly: Vec<Vec<E>> = (0..num_polynomials)
+            .map(|_| Vec::rand(&mut rng, num_variables))
             .collect();
-        let eval_per_poly: Vec<F> = polynomials
+        let eval_per_poly: Vec<E> = polynomials
             .iter()
             .zip(&point_per_poly)
             .map(|(poly, point)| poly.evaluate(point))

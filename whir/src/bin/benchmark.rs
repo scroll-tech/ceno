@@ -7,7 +7,7 @@ use ark_crypto_primitives::{
     crh::{CRHScheme, TwoToOneCRHScheme},
     merkle_tree::Config,
 };
-use ark_ff::{FftField, Field};
+use ark_ff::{TwoAdicField, Field};
 use ark_serialize::CanonicalSerialize;
 use nimue::{Arthur, DefaultHash, IOPattern, Merlin};
 use nimue_pow::blake3::Blake3PoW;
@@ -18,7 +18,7 @@ use whir::{
         merkle_tree::{self, HashCounter},
     },
     parameters::*,
-    poly_utils::coeffs::CoefficientList,
+    poly_utils::coeffs::DenseMultilinearExtension,
     whir::Statement,
 };
 
@@ -215,7 +215,7 @@ fn run_whir<F, MerkleConfig>(
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
 ) where
-    F: FftField + CanonicalSerialize,
+    F: TwoAdicField + CanonicalSerialize,
     MerkleConfig: Config<Leaf = [F]> + Clone,
     MerkleConfig::InnerDigest: AsRef<[u8]> + From<[u8; 32]>,
     IOPattern: DigestIOPattern<MerkleConfig>,
@@ -254,7 +254,7 @@ fn run_whir<F, MerkleConfig>(
         starting_log_inv_rate: starting_rate,
     };
 
-    let polynomial = CoefficientList::new(
+    let polynomial = DenseMultilinearExtension::new(
         (0..num_coeffs)
             .map(<F as Field>::BasePrimeField::from)
             .collect(),
@@ -340,7 +340,7 @@ fn run_whir<F, MerkleConfig>(
     ) = {
         // Run PCS
         use whir::{
-            poly_utils::MultilinearPoint,
+            poly_utils::Vec,
             whir::{
                 committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig,
                 prover::Prover, verifier::Verifier, whir_proof_size,
@@ -360,7 +360,7 @@ fn run_whir<F, MerkleConfig>(
         let mut merlin = io.to_merlin();
 
         let points: Vec<_> = (0..args.num_evaluations)
-            .map(|i| MultilinearPoint(vec![F::from(i as u64); num_variables]))
+            .map(|i| Vec(vec![F::from(i as u64); num_variables]))
             .collect();
         let evaluations = points
             .iter()

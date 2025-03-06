@@ -360,7 +360,7 @@ impl<E: FfExtField> Field for ExtensionFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> ark_ff::FftField for ExtensionFieldWrapper<E> {
+impl<E: FfExtField> ark_ff::TwoAdicField for ExtensionFieldWrapper<E> {
     const GENERATOR: Self = Self(<E as FfExtField>::MULTIPLICATIVE_GENERATOR);
     const TWO_ADICITY: u32 = E::TWO_ADICITY as u32;
     const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::TWO_ADIC_ROOT_OF_UNITY);

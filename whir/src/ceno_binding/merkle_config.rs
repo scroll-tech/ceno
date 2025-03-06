@@ -1,13 +1,13 @@
 use ark_crypto_primitives::merkle_tree::Config;
-use ark_ff::FftField;
+use ark_ff::TwoAdicField;
 use nimue::{Arthur, DefaultHash, IOPattern, Merlin, ProofResult};
 use nimue_pow::PowStrategy;
 
 use crate::{
-    crypto::merkle_tree::{
+    crypto::{
         blake3::MerkleTreeParams as Blake3Params, keccak::MerkleTreeParams as KeccakParams,
     },
-    poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+    poly_utils::{Vec, coeffs::DenseMultilinearExtension},
     whir::{
         Statement, WhirProof,
         batch::{WhirBatchIOPattern, Witnesses},
@@ -20,20 +20,20 @@ use crate::{
     },
 };
 
-pub trait WhirMerkleConfigWrapper<F: FftField> {
+pub trait WhirMerkleConfigWrapper<F: TwoAdicField> {
     type MerkleConfig: Config<Leaf = [F]> + Clone;
     type PowStrategy: PowStrategy;
 
     fn commit_to_merlin(
         committer: &Committer<F, Self::MerkleConfig, Self::PowStrategy>,
         merlin: &mut Merlin<DefaultHash>,
-        poly: CoefficientList<F::BasePrimeField>,
+        poly: DenseMultilinearExtension<F::BasePrimeField>,
     ) -> ProofResult<Witness<F, Self::MerkleConfig>>;
 
     fn commit_to_merlin_batch(
         committer: &Committer<F, Self::MerkleConfig, Self::PowStrategy>,
         merlin: &mut Merlin<DefaultHash>,
-        polys: &[CoefficientList<F::BasePrimeField>],
+        polys: &[DenseMultilinearExtension<F::BasePrimeField>],
     ) -> ProofResult<Witnesses<F, Self::MerkleConfig>>;
 
     fn prove_with_merlin(
@@ -94,16 +94,16 @@ pub trait WhirMerkleConfigWrapper<F: FftField> {
     ) -> ProofResult<()>;
 }
 
-pub struct Blake3ConfigWrapper<F: FftField>(Blake3Params<F>);
-pub struct KeccakConfigWrapper<F: FftField>(KeccakParams<F>);
+pub struct Blake3ConfigWrapper<F: TwoAdicField>(Blake3Params<F>);
+pub struct KeccakConfigWrapper<F: TwoAdicField>(KeccakParams<F>);
 
-impl<F: FftField> WhirMerkleConfigWrapper<F> for Blake3ConfigWrapper<F> {
+impl<F: TwoAdicField> WhirMerkleConfigWrapper<F> for Blake3ConfigWrapper<F> {
     type MerkleConfig = Blake3Params<F>;
     type PowStrategy = nimue_pow::blake3::Blake3PoW;
     fn commit_to_merlin(
         committer: &Committer<F, Self::MerkleConfig, Self::PowStrategy>,
         merlin: &mut Merlin<DefaultHash>,
-        poly: CoefficientList<F::BasePrimeField>,
+        poly: DenseMultilinearExtension<F::BasePrimeField>,
     ) -> ProofResult<Witness<F, Self::MerkleConfig>> {
         committer.commit(merlin, poly)
     }
@@ -111,7 +111,7 @@ impl<F: FftField> WhirMerkleConfigWrapper<F> for Blake3ConfigWrapper<F> {
     fn commit_to_merlin_batch(
         committer: &Committer<F, Self::MerkleConfig, Self::PowStrategy>,
         merlin: &mut Merlin<DefaultHash>,
-        polys: &[CoefficientList<F::BasePrimeField>],
+        polys: &[DenseMultilinearExtension<F::BasePrimeField>],
     ) -> ProofResult<Witnesses<F, Self::MerkleConfig>> {
         committer.batch_commit(merlin, polys)
     }
@@ -132,7 +132,7 @@ impl<F: FftField> WhirMerkleConfigWrapper<F> for Blake3ConfigWrapper<F> {
         evals: &[F],
         witness: &Witnesses<F, Self::MerkleConfig>,
     ) -> ProofResult<WhirProof<Self::MerkleConfig, F>> {
-        let points = [MultilinearPoint(point.to_vec())];
+        let points = [Vec(point.to_vec())];
         prover.simple_batch_prove(merlin, &points, &[evals.to_vec()], witness)
     }
 
@@ -152,7 +152,7 @@ impl<F: FftField> WhirMerkleConfigWrapper<F> for Blake3ConfigWrapper<F> {
         evals: &[F],
         whir_proof: &WhirProof<Self::MerkleConfig, F>,
     ) -> ProofResult<<Self::MerkleConfig as Config>::InnerDigest> {
-        let points = [MultilinearPoint(point.to_vec())];
+        let points = [Vec(point.to_vec())];
         verifier.simple_batch_verify(arthur, evals.len(), &points, &[evals.to_vec()], whir_proof)
     }
 
@@ -194,13 +194,13 @@ impl<F: FftField> WhirMerkleConfigWrapper<F> for Blake3ConfigWrapper<F> {
     }
 }
 
-impl<F: FftField> WhirMerkleConfigWrapper<F> for KeccakConfigWrapper<F> {
+impl<F: TwoAdicField> WhirMerkleConfigWrapper<F> for KeccakConfigWrapper<F> {
     type MerkleConfig = KeccakParams<F>;
     type PowStrategy = nimue_pow::keccak::KeccakPoW;
     fn commit_to_merlin(
         committer: &Committer<F, Self::MerkleConfig, Self::PowStrategy>,
         merlin: &mut Merlin<DefaultHash>,
-        poly: CoefficientList<F::BasePrimeField>,
+        poly: DenseMultilinearExtension<F::BasePrimeField>,
     ) -> ProofResult<Witness<F, Self::MerkleConfig>> {
         committer.commit(merlin, poly)
     }
@@ -208,7 +208,7 @@ impl<F: FftField> WhirMerkleConfigWrapper<F> for KeccakConfigWrapper<F> {
     fn commit_to_merlin_batch(
         committer: &Committer<F, Self::MerkleConfig, Self::PowStrategy>,
         merlin: &mut Merlin<DefaultHash>,
-        polys: &[CoefficientList<F::BasePrimeField>],
+        polys: &[DenseMultilinearExtension<F::BasePrimeField>],
     ) -> ProofResult<Witnesses<F, Self::MerkleConfig>> {
         committer.batch_commit(merlin, polys)
     }
@@ -229,7 +229,7 @@ impl<F: FftField> WhirMerkleConfigWrapper<F> for KeccakConfigWrapper<F> {
         evals: &[F],
         witness: &Witnesses<F, Self::MerkleConfig>,
     ) -> ProofResult<WhirProof<Self::MerkleConfig, F>> {
-        let points = [MultilinearPoint(point.to_vec())];
+        let points = [Vec(point.to_vec())];
         prover.simple_batch_prove(merlin, &points, &[evals.to_vec()], witness)
     }
 
@@ -249,7 +249,7 @@ impl<F: FftField> WhirMerkleConfigWrapper<F> for KeccakConfigWrapper<F> {
         evals: &[F],
         whir_proof: &WhirProof<Self::MerkleConfig, F>,
     ) -> ProofResult<<Self::MerkleConfig as Config>::InnerDigest> {
-        let points = [MultilinearPoint(point.to_vec())];
+        let points = [Vec(point.to_vec())];
         verifier.simple_batch_verify(arthur, evals.len(), &points, &[evals.to_vec()], whir_proof)
     }
 

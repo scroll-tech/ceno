@@ -410,7 +410,7 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
     }
 }
 
-impl<E: FfExtField> ark_ff::FftField for BaseFieldWrapper<E> {
+impl<E: FfExtField> ark_ff::TwoAdicField for BaseFieldWrapper<E> {
     const GENERATOR: Self = Self(<E::BaseField as p3_field::Field>::GENERATOR);
     const TWO_ADICITY: u32 = E::TWO_ADICITY as u32;
     const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::BASE_TWO_ADIC_ROOT_OF_UNITY);

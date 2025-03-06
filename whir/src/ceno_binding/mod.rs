@@ -3,7 +3,7 @@ mod pcs;
 pub use ark_crypto_primitives::merkle_tree::Config;
 pub use pcs::{DefaultHash, InnerDigestOf, Whir, WhirDefaultSpec, WhirSpec};
 
-use ark_ff::FftField;
+use ark_ff::TwoAdicField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
@@ -28,7 +28,7 @@ pub enum Error {
 /// trait required in Ceno mpcs. Because Ceno and the WHIR implementation
 /// in this crate assume different types of transcripts, to connect
 /// them we can provide a non-interactive interface from WHIR.
-pub trait PolynomialCommitmentScheme<E: FftField>: Clone {
+pub trait PolynomialCommitmentScheme<E: TwoAdicField>: Clone {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
     type Commitment: Clone + Debug;
     type CommitmentWithWitness: Clone + Debug;

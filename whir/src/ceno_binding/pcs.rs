@@ -3,12 +3,12 @@ use super::{
     merkle_config::{Blake3ConfigWrapper, WhirMerkleConfigWrapper},
 };
 use crate::{
-    crypto::merkle_tree::blake3::{self as mt},
+    crypto::blake3::{self as mt},
     parameters::{
         FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
         default_max_pow,
     },
-    poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+    poly_utils::{Vec, coeffs::DenseMultilinearExtension},
     whir::{
         Statement, WhirProof, batch::Witnesses, committer::Committer, parameters::WhirConfig,
         prover::Prover, verifier::Verifier,
@@ -16,7 +16,7 @@ use crate::{
 };
 
 use ark_crypto_primitives::merkle_tree::Config;
-use ark_ff::FftField;
+use ark_ff::TwoAdicField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use nimue::DefaultHash;
 use nimue::{
@@ -32,7 +32,7 @@ use std::{
     marker::PhantomData,
 };
 
-pub trait WhirSpec<E: FftField>: Default + std::fmt::Debug + Clone {
+pub trait WhirSpec<E: TwoAdicField>: Default + std::fmt::Debug + Clone {
     type MerkleConfigWrapper: WhirMerkleConfigWrapper<E>;
     fn get_parameters(
         num_variables: usize,
@@ -86,7 +86,7 @@ type PowOf<Spec, E> =
 #[derive(Debug, Clone, Default)]
 pub struct WhirDefaultSpec;
 
-impl<E: FftField> WhirSpec<E> for WhirDefaultSpec {
+impl<E: TwoAdicField> WhirSpec<E> for WhirDefaultSpec {
     type MerkleConfigWrapper = Blake3ConfigWrapper<E>;
     fn get_parameters(
         num_variables: usize,
@@ -116,13 +116,13 @@ impl<E: FftField> WhirSpec<E> for WhirDefaultSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct WhirSetupParams<E: FftField> {
+pub struct WhirSetupParams<E: TwoAdicField> {
     pub num_variables: usize,
     _phantom: PhantomData<E>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Whir<E: FftField, Spec: WhirSpec<E>>(PhantomData<(E, Spec)>);
+pub struct Whir<E: TwoAdicField, Spec: WhirSpec<E>>(PhantomData<(E, Spec)>);
 
 // Wrapper for WhirProof
 #[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
@@ -195,7 +195,7 @@ where
     pub witness: Witnesses<F, MerkleConfig>,
 }
 
-impl<F: FftField, MerkleConfig> CommitmentWithWitness<F, MerkleConfig>
+impl<F: TwoAdicField, MerkleConfig> CommitmentWithWitness<F, MerkleConfig>
 where
     MerkleConfig: Config,
 {
@@ -215,14 +215,14 @@ where
 
 impl<E, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
-    E: FftField + Serialize + DeserializeOwned + Debug,
+    E: TwoAdicField + Serialize + DeserializeOwned + Debug,
     E::BasePrimeField: Serialize + DeserializeOwned + Debug,
 {
     type Param = ();
     type Commitment = <MerkleConfigOf<Spec, E> as Config>::InnerDigest;
     type CommitmentWithWitness = CommitmentWithWitness<E, MerkleConfigOf<Spec, E>>;
     type Proof = WhirProofWrapper<MerkleConfigOf<Spec, E>, E>;
-    type Poly = CoefficientList<E::BasePrimeField>;
+    type Poly = DenseMultilinearExtension<E::BasePrimeField>;
 
     fn setup(_poly_size: usize) -> Self::Param {}
 
@@ -314,7 +314,7 @@ where
 
         let prover = Prover(params);
         let statement = Statement {
-            points: vec![MultilinearPoint(point.to_vec())],
+            points: vec![Vec(point.to_vec())],
             evaluations: vec![*eval],
         };
 
@@ -395,7 +395,7 @@ where
         let mut arthur = io.to_arthur(&proof.transcript);
 
         let statement = Statement {
-            points: vec![MultilinearPoint(point.to_vec())],
+            points: vec![Vec(point.to_vec())],
             evaluations: vec![*eval],
         };
 

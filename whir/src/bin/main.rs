@@ -4,7 +4,7 @@ use ark_crypto_primitives::{
     crh::{CRHScheme, TwoToOneCRHScheme},
     merkle_tree::Config,
 };
-use ark_ff::FftField;
+use ark_ff::TwoAdicField;
 use ark_serialize::CanonicalSerialize;
 use nimue::{Arthur, DefaultHash, IOPattern, Merlin};
 use whir::{
@@ -14,7 +14,7 @@ use whir::{
         merkle_tree::{self, HashCounter},
     },
     parameters::*,
-    poly_utils::{MultilinearPoint, coeffs::CoefficientList},
+    poly_utils::{Vec, coeffs::DenseMultilinearExtension},
     whir::Statement,
 };
 
@@ -186,7 +186,7 @@ fn run_whir<F, MerkleConfig>(
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
 ) where
-    F: FftField + CanonicalSerialize,
+    F: TwoAdicField + CanonicalSerialize,
     MerkleConfig: Config<Leaf = [F]> + Clone,
     MerkleConfig::InnerDigest: AsRef<[u8]> + From<[u8; 32]>,
     IOPattern: DigestIOPattern<MerkleConfig>,
@@ -206,7 +206,7 @@ fn run_whir_as_ldt<F, MerkleConfig>(
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
 ) where
-    F: FftField + CanonicalSerialize,
+    F: TwoAdicField + CanonicalSerialize,
     MerkleConfig: Config<Leaf = [F]> + Clone,
     MerkleConfig::InnerDigest: AsRef<[u8]> + From<[u8; 32]>,
     IOPattern: DigestIOPattern<MerkleConfig>,
@@ -270,7 +270,7 @@ fn run_whir_as_ldt<F, MerkleConfig>(
     }
 
     use ark_ff::Field;
-    let polynomial = CoefficientList::new(
+    let polynomial = DenseMultilinearExtension::new(
         (0..num_coeffs)
             .map(<F as Field>::BasePrimeField::from)
             .collect(),
@@ -317,7 +317,7 @@ fn run_whir_pcs<F, MerkleConfig>(
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
 ) where
-    F: FftField + CanonicalSerialize,
+    F: TwoAdicField + CanonicalSerialize,
     MerkleConfig: Config<Leaf = [F]> + Clone,
     MerkleConfig::InnerDigest: AsRef<[u8]> + From<[u8; 32]>,
     IOPattern: DigestIOPattern<MerkleConfig>,
@@ -383,13 +383,13 @@ fn run_whir_pcs<F, MerkleConfig>(
     }
 
     use ark_ff::Field;
-    let polynomial = CoefficientList::new(
+    let polynomial = DenseMultilinearExtension::new(
         (0..num_coeffs)
             .map(<F as Field>::BasePrimeField::from)
             .collect(),
     );
     let points: Vec<_> = (0..num_evaluations)
-        .map(|i| MultilinearPoint(vec![F::from(i as u64); num_variables]))
+        .map(|i| Vec(vec![F::from(i as u64); num_variables]))
         .collect();
     let evaluations = points
         .iter()

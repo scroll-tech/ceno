@@ -1,5 +1,5 @@
 use super::{transpose, utils::workload_size};
-use ark_ff::Field;
+use p3_field::Field;
 use std::cmp::max;
 
 #[cfg(feature = "parallel")]

@@ -1,11 +1,10 @@
-use ark_ff::Field;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue::{
     ProofResult,
     plugins::ark::{FieldChallenges, FieldWriter},
 };
 use nimue_pow::{PoWChallenge, PowStrategy};
-
-use crate::poly_utils::{MultilinearPoint, coeffs::CoefficientList};
+use p3_field::Field;
 
 use super::prover_batched::SumcheckBatched;
 
@@ -21,8 +20,8 @@ where
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p(X_1, ... X_n) * (epsilon_1 eq_z_1(X) + epsilon_2 eq_z_2(X) ...)
     pub fn new(
-        coeffs: Vec<CoefficientList<F>>,
-        points: &[MultilinearPoint<F>],
+        coeffs: Vec<DenseMultilinearExtension<F>>,
+        points: &[Vec<F>],
         poly_comb_coeff: &[F], // random coefficients for combining each poly
         evals: &[F],
     ) -> Self {
@@ -44,7 +43,7 @@ where
         merlin: &mut Merlin,
         folding_factor: usize,
         pow_bits: f64,
-    ) -> ProofResult<MultilinearPoint<F>>
+    ) -> ProofResult<Vec<F>>
     where
         S: PowStrategy,
         Merlin: FieldChallenges<F> + FieldWriter<F> + PoWChallenge,
@@ -67,64 +66,47 @@ where
         }
 
         res.reverse();
-        Ok(MultilinearPoint(res))
+        Ok(res)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use ark_ff::Field;
+    use goldilocks::Goldilocks;
+    use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
     use nimue::{
-        IOPattern, Merlin, ProofResult,
+        ProofResult,
         plugins::ark::{FieldChallenges, FieldIOPattern, FieldReader},
     };
     use nimue_pow::blake3::Blake3PoW;
+    use transcript::Transcript;
 
-    use crate::{
-        crypto::fields::Field64,
-        poly_utils::{MultilinearPoint, coeffs::CoefficientList, eq_poly_outside},
-        sumcheck::{
-            proof::SumcheckPolynomial,
-            prover_not_skipping_batched::SumcheckProverNotSkippingBatched,
-        },
+    use crate::sumcheck::{
+        proof::SumcheckPolynomial, prover_not_skipping_batched::SumcheckProverNotSkippingBatched,
     };
 
-    type F = Field64;
+    type F = Goldilocks;
 
     #[test]
     fn test_e2e_short() -> ProofResult<()> {
         let num_variables = 2;
         let folding_factor = 2;
         let polynomials = vec![
-            CoefficientList::new((0..1 << num_variables).map(F::from).collect()),
-            CoefficientList::new((1..(1 << num_variables) + 1).map(F::from).collect()),
+            DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect()),
+            DenseMultilinearExtension::new((1..(1 << num_variables) + 1).map(F::from).collect()),
         ];
 
         // Initial stuff
         let statement_points = vec![
-            MultilinearPoint::expand_from_univariate(F::from(97), num_variables),
-            MultilinearPoint::expand_from_univariate(F::from(75), num_variables),
+            Vec::expand_from_univariate(F::from(97), num_variables),
+            Vec::expand_from_univariate(F::from(75), num_variables),
         ];
 
         // Poly randomness
         let [alpha_1, alpha_2] = [F::from(15), F::from(32)];
 
-        fn add_sumcheck_io_pattern<F>() -> IOPattern
-        where
-            F: Field,
-            IOPattern: FieldIOPattern<F>,
-        {
-            IOPattern::new("test")
-                .add_scalars(3, "sumcheck_poly")
-                .challenge_scalars(1, "folding_randomness")
-                .add_scalars(3, "sumcheck_poly")
-                .challenge_scalars(1, "folding_randomness")
-        }
-
-        let iopattern = add_sumcheck_io_pattern::<F>();
-
         // Prover part
-        let mut merlin = iopattern.to_merlin();
+        let mut transcript = Transcript::new();
         let mut prover = SumcheckProverNotSkippingBatched::new(
             polynomials.clone(),
             &statement_points,
@@ -135,8 +117,8 @@ mod tests {
             ],
         );
 
-        let folding_randomness_1 = prover.compute_sumcheck_polynomials::<Blake3PoW, Merlin>(
-            &mut merlin,
+        let folding_randomness_1 = prover.compute_sumcheck_polynomials::<Blake3PoW>(
+            &mut transcript,
             folding_factor,
             0.,
         )?;
@@ -154,13 +136,13 @@ mod tests {
             .collect();
 
         // Verifier part
-        let mut arthur = iopattern.to_arthur(merlin.transcript());
-        let sumcheck_poly_11: [F; 3] = arthur.next_scalars()?;
+        let mut transcript = Transcript::new();
+        let sumcheck_poly_11: [F; 3] = transcript.next_scalars()?;
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
-        let [folding_randomness_11]: [F; 1] = arthur.challenge_scalars()?;
-        let sumcheck_poly_12: [F; 3] = arthur.next_scalars()?;
+        let [folding_randomness_11]: [F; 1] = transcript.challenge_scalars()?;
+        let sumcheck_poly_12: [F; 3] = transcript.next_scalars()?;
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
-        let [folding_randomness_12]: [F; 1] = arthur.challenge_scalars()?;
+        let [folding_randomness_12]: [F; 1] = transcript.challenge_scalars()?;
 
         assert_eq!(
             sumcheck_poly_11.sum_over_hypercube(),
@@ -172,13 +154,13 @@ mod tests {
             sumcheck_poly_11.evaluate_at_point(&folding_randomness_11.into())
         );
 
-        let full_folding = MultilinearPoint(vec![folding_randomness_12, folding_randomness_11]);
+        let full_folding = vec![folding_randomness_12, folding_randomness_11];
 
         let eval_coeff = [folded_polys_1[0].coeffs()[0], folded_polys_1[1].coeffs()[0]];
         assert_eq!(
             sumcheck_poly_12.evaluate_at_point(&folding_randomness_12.into()),
-            eval_coeff[0] * alpha_1 * eq_poly_outside(&full_folding, &statement_points[0])
-                + eval_coeff[1] * alpha_2 * eq_poly_outside(&full_folding, &statement_points[1])
+            eval_coeff[0] * alpha_1 * eq_eval(&full_folding, &statement_points[0])
+                + eval_coeff[1] * alpha_2 * eq_eval(&full_folding, &statement_points[1])
         );
 
         Ok(())

@@ -1,10 +1,7 @@
-use ark_crypto_primitives::merkle_tree::Config;
-use ark_ff::FftField;
 use nimue::plugins::ark::*;
 
 use crate::{
-    fs_utils::{OODIOPattern, WhirPoWIOPattern},
-    sumcheck::prover_not_skipping::SumcheckNotSkippingIOPattern,
+    crypto::MerkleConfig as Config, sumcheck::prover_not_skipping::SumcheckNotSkippingIOPattern,
 };
 
 use super::parameters::WhirConfig;
@@ -13,29 +10,29 @@ pub trait DigestIOPattern<MerkleConfig: Config> {
     fn add_digest(self, label: &str) -> Self;
 }
 
-pub trait WhirIOPattern<F: FftField, MerkleConfig: Config> {
+pub trait WhirIOPattern<E: ExtensionField, MerkleConfig: Config> {
     fn commit_statement<PowStrategy>(
         self,
-        params: &WhirConfig<F, MerkleConfig, PowStrategy>,
+        params: &WhirConfig<E, MerkleConfig, PowStrategy>,
     ) -> Self;
-    fn add_whir_proof<PowStrategy>(self, params: &WhirConfig<F, MerkleConfig, PowStrategy>)
+    fn add_whir_proof<PowStrategy>(self, params: &WhirConfig<E, MerkleConfig, PowStrategy>)
     -> Self;
 }
 
-impl<F, MerkleConfig, IOPattern> WhirIOPattern<F, MerkleConfig> for IOPattern
+impl<E, MerkleConfig, IOPattern> WhirIOPattern<E, MerkleConfig> for IOPattern
 where
-    F: FftField,
+    E: ExtensionField,
     MerkleConfig: Config,
     IOPattern: ByteIOPattern
-        + FieldIOPattern<F>
-        + SumcheckNotSkippingIOPattern<F>
+        + FieldIOPattern<E>
+        + SumcheckNotSkippingIOPattern<E>
         + WhirPoWIOPattern
-        + OODIOPattern<F>
+        + OODIOPattern<E>
         + DigestIOPattern<MerkleConfig>,
 {
     fn commit_statement<PowStrategy>(
         self,
-        params: &WhirConfig<F, MerkleConfig, PowStrategy>,
+        params: &WhirConfig<E, MerkleConfig, PowStrategy>,
     ) -> Self {
         // TODO: Add params
         let mut this = self.add_digest("merkle_digest");
@@ -48,7 +45,7 @@ where
 
     fn add_whir_proof<PowStrategy>(
         mut self,
-        params: &WhirConfig<F, MerkleConfig, PowStrategy>,
+        params: &WhirConfig<E, MerkleConfig, PowStrategy>,
     ) -> Self {
         // TODO: Add statement
         if params.initial_statement {
