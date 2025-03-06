@@ -23,7 +23,7 @@ where
 {
     inner: DuplexChallenger<F, P, 8, 4>,
     #[cfg(feature = "ro_query_stats")]
-    sample_tracking_map: HashMap<&'static str, usize>,
+    pub sample_tracking_map: HashMap<&'static str, usize>,
 }
 
 impl<F, P> DefaultChallenger<F, P>

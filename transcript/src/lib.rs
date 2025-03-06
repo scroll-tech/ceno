@@ -7,8 +7,9 @@ pub mod basic;
 mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
-use ff_ext::SmallField;
+use ff_ext::{PoseidonField, SmallField};
 use p3_field::PrimeCharacteristicRing;
+use poseidon::challenger::DefaultChallenger;
 pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
@@ -102,6 +103,10 @@ pub trait Transcript<E: ExtensionField> {
     fn send_challenge(&self, challenge: E);
 
     fn commit_rolling(&mut self);
+
+    fn get_inner_challenges(
+        &self,
+    ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>;
 }
 
 /// Forkable Transcript trait, enable fork method

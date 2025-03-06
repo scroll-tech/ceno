@@ -9,7 +9,7 @@ use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
 use p3_field::PrimeCharacteristicRing;
 use p3_goldilocks::Goldilocks;
-use std::{cell::RefCell, fs, panic};
+use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
@@ -148,14 +148,13 @@ fn main() {
     // do statistics
     if cfg!(feature = "ro_query_stats") {
         let stat_recorder = StatisticRecorder::default();
-        let basic_transcript = RefCell::new(Transcript::new(b"riscv"));
-        let transcript = TranscriptWithStat::new(&stat_recorder, &basic_transcript);
+        let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
+        // let transcript = Transcript::new(b"riscv");
         assert!(
             verifier
                 .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
                 .is_ok()
         );
-        println!("{}", basic_transcript.into_inner(),);
     }
     println!("e2e proof stat: {}", zkvm_proof);
 

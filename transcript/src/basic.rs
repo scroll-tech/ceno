@@ -58,6 +58,12 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     fn commit_rolling(&mut self) {
         // do nothing
     }
+
+    fn get_inner_challenges(
+        &self,
+    ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {
+        &self.challenger
+    }
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}

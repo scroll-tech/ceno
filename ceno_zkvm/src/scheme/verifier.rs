@@ -73,6 +73,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
+        println!("go verify_proof_validity");
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
@@ -261,6 +262,32 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // check rw_set equality across all proofs
         if prod_r != prod_w {
             return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
+        }
+
+        if cfg!(feature = "ro_query_stats") {
+            use std::collections::HashMap;
+            let agg_sample_tracking_map = transcripts
+                .iter()
+                .map(|t| &t.get_inner_challenges().sample_tracking_map)
+                .flat_map(|map| map.iter()) // Flatten all key-value pairs
+                .fold(HashMap::new(), |mut acc, (key, value)| {
+                    *acc.entry(key).or_insert(0) += value; // Group by key & sum values
+                    acc
+                });
+
+            // total count
+            let total_count: usize = agg_sample_tracking_map.values().copied().sum();
+
+            println!();
+            // Write the overall count
+            println!("overall sample count: {}", total_count);
+
+            // Write the percentages for each entry
+            for (key, count) in &agg_sample_tracking_map {
+                let percentage = (*count as f64 / total_count as f64) * 100.0;
+                println!("{} percentage: {:.2}%", key, percentage);
+            }
+            println!();
         }
 
         Ok(true)
