@@ -300,6 +300,8 @@ mod tests {
                 phantom: std::marker::PhantomData,
             },
             &mut transcript,
+            #[cfg(feature = "ro_query_stats")]
+            "test_sumcheck_different_degree",
         );
 
         let mut verifier_poly = VirtualPolynomial::new(max_num_vars);

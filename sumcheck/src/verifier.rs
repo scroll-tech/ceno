@@ -14,6 +14,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         proof: &IOPProof<E>,
         aux_info: &VPAuxInfo<E>,
         transcript: &mut impl Transcript<E>,
+        #[cfg(feature = "ro_query_stats")] source: &'static str,
     ) -> SumCheckSubClaim<E> {
         if aux_info.max_num_variables == 0 {
             return SumCheckSubClaim {
@@ -33,7 +34,13 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                 .evaluations
                 .iter()
                 .for_each(|e| transcript.append_field_element_ext(e));
-            Self::verify_round_and_update_state(&mut verifier_state, prover_msg, transcript);
+            Self::verify_round_and_update_state(
+                &mut verifier_state,
+                prover_msg,
+                transcript,
+                #[cfg(feature = "ro_query_stats")]
+                source,
+            );
         }
 
         let res = Self::check_and_generate_subclaim(&verifier_state, &claimed_sum);
@@ -67,6 +74,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         &mut self,
         prover_msg: &IOPProverMessage<E>,
         transcript: &mut impl Transcript<E>,
+        #[cfg(feature = "ro_query_stats")] source: &'static str,
     ) -> Challenge<E> {
         let start =
             start_timer!(|| format!("sum check verify {}-th round and update state", self.round));
@@ -84,7 +92,11 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         // When we turn the protocol to a non-interactive one, it is sufficient to defer
         // such checks to `check_and_generate_subclaim` after the last round.
 
-        let challenge = transcript.get_and_append_challenge(b"Internal round");
+        let challenge = if cfg!(feature = "ro_query_stats") {
+            transcript.get_and_append_challenge_tracking(b"Internal round", source)
+        } else {
+            transcript.get_and_append_challenge(b"Internal round")
+        };
         self.challenges.push(challenge);
         self.polynomials_received
             .push(prover_msg.evaluations.to_vec());

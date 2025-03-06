@@ -29,6 +29,10 @@ p3-goldilocks.workspace = true
 p3-mds.workspace = true
 poseidon.workspace = true
 
+[features]
+default = ["ro_query_stats"]
+ro_query_stats = []
+
 [[bench]]
 harness = false
 name = "devirgo_sumcheck"

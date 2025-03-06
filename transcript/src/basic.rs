@@ -35,7 +35,7 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
         }
     }
 
-    #[cfg(feature = "hash_count")]
+    #[cfg(feature = "ro_query_stats")]
     fn read_challenge_tracking(&mut self, source: &'static str) -> Challenge<E> {
         use poseidon::challenger::FieldChallengerExt;
         Challenge {
@@ -61,3 +61,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}
+
+#[cfg(feature = "ro_query_stats")]
+impl<E: ExtensionField> std::fmt::Display for BasicTranscript<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.challenger.fmt(f)
+    }
+}

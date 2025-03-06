@@ -76,7 +76,7 @@ pub trait Transcript<E: ExtensionField> {
         self.read_challenge()
     }
 
-    #[cfg(feature = "hash_count")]
+    #[cfg(feature = "ro_query_stats")]
     fn get_and_append_challenge_tracking(
         &mut self,
         label: &'static [u8],
@@ -96,7 +96,7 @@ pub trait Transcript<E: ExtensionField> {
 
     fn read_challenge(&mut self) -> Challenge<E>;
 
-    #[cfg(feature = "hash_count")]
+    #[cfg(feature = "ro_query_stats")]
     fn read_challenge_tracking(&mut self, source: &'static str) -> Challenge<E>;
 
     fn send_challenge(&self, challenge: E);

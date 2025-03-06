@@ -31,5 +31,5 @@ harness = false
 name = "hashing"
 
 [features]
-default = ["hash_count"]
-hash_count = []
+default = ["ro_query_stats"]
+ro_query_stats = []

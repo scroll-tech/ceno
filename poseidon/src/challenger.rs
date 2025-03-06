@@ -11,7 +11,7 @@ use std::{
 };
 
 use ff_ext::PoseidonField;
-#[cfg(feature = "hash_count")]
+#[cfg(feature = "ro_query_stats")]
 use p3_field::BasedVectorSpace;
 
 /// this wrap a DuplexChallenger as inner field,
@@ -23,8 +23,8 @@ where
     P: CryptographicPermutation<[F; 8]>,
 {
     inner: DuplexChallenger<F, P, 8, 4>,
-    #[cfg(feature = "hash_count")]
-    tracking: HashMap<&'static str, usize>,
+    #[cfg(feature = "ro_query_stats")]
+    sample_tracking_map: HashMap<&'static str, usize>,
 }
 
 impl<F, P> DefaultChallenger<F, P>
@@ -35,7 +35,7 @@ where
     pub fn new(perm: P) -> Self {
         Self {
             inner: DuplexChallenger::<F, P, 8, 4>::new(perm),
-            tracking: HashMap::default(),
+            sample_tracking_map: HashMap::default(),
         }
     }
 }
@@ -47,7 +47,7 @@ where
     pub fn new_poseidon_default() -> Self {
         Self {
             inner: DuplexChallenger::<F, F::T, 8, 4>::new(F::get_perm()),
-            tracking: HashMap::default(),
+            sample_tracking_map: HashMap::default(),
         }
     }
 }
@@ -84,13 +84,13 @@ pub trait FieldChallengerExt<F: PoseidonField>: FieldChallenger<F> {
         (0..n).map(|_| self.sample_algebra_element()).collect()
     }
 
-    #[cfg(feature = "hash_count")]
+    #[cfg(feature = "ro_query_stats")]
     fn sample_algebra_element_tracking<A: BasedVectorSpace<F>>(
         &mut self,
         source: &'static str,
     ) -> A;
 
-    #[cfg(feature = "hash_count")]
+    #[cfg(feature = "ro_query_stats")]
     fn sample_ext_vec_tracking<E: ExtensionField<BaseField = F>>(
         &mut self,
         n: usize,
@@ -98,7 +98,7 @@ pub trait FieldChallengerExt<F: PoseidonField>: FieldChallenger<F> {
     ) -> Vec<E>;
 }
 
-#[cfg(feature = "hash_count")]
+#[cfg(feature = "ro_query_stats")]
 pub trait CanSample<F: PrimeField>: P3CanSample<F> {
     fn sample_tracking(&mut self, source: &'static str) -> F;
     fn sample_vec_tracking(&mut self, n: usize, source: &'static str) -> Vec<F>;
@@ -115,24 +115,24 @@ where
     }
 }
 
-#[cfg(feature = "hash_count")]
+#[cfg(feature = "ro_query_stats")]
 impl<F, P> CanSample<F> for DefaultChallenger<F, P>
 where
     F: PoseidonField,
     P: CryptographicPermutation<[F; 8]>,
 {
     fn sample_tracking(&mut self, source: &'static str) -> F {
-        *self.tracking.entry(source).or_default() += 1;
+        *self.sample_tracking_map.entry(source).or_default() += 1;
         self.inner.sample()
     }
 
     fn sample_vec_tracking(&mut self, n: usize, source: &'static str) -> Vec<F> {
-        *self.tracking.entry(source).or_default() += n;
+        *self.sample_tracking_map.entry(source).or_default() += n;
         self.inner.sample_vec(n)
     }
 
     fn sample_array_tracking<const N: usize>(&mut self, source: &'static str) -> [F; N] {
-        *self.tracking.entry(source).or_default() += N;
+        *self.sample_tracking_map.entry(source).or_default() += N;
         self.inner.sample_array()
     }
 }
@@ -169,13 +169,13 @@ where
     F: PoseidonField,
     P: CryptographicPermutation<[F; 8]>,
 {
-    #[cfg(feature = "hash_count")]
+    #[cfg(feature = "ro_query_stats")]
     fn sample_ext_vec_tracking<E: ExtensionField<BaseField = F>>(
         &mut self,
         n: usize,
         source: &'static str,
     ) -> Vec<E> {
-        *self.tracking.entry(source).or_default() += n;
+        *self.sample_tracking_map.entry(source).or_default() += n;
         (0..n).map(|_| self.sample_algebra_element()).collect()
     }
 
@@ -183,7 +183,36 @@ where
         &mut self,
         source: &'static str,
     ) -> A {
-        *self.tracking.entry(source).or_default() += 1;
+        *self.sample_tracking_map.entry(source).or_default() += 1;
+        if source == "lookup challenge alpha" {
+            println!(
+                "gogogo total count {}",
+                self.sample_tracking_map.values().copied().sum::<usize>()
+            )
+        }
         <Self as FieldChallenger<F>>::sample_algebra_element(self)
+    }
+}
+
+#[cfg(feature = "ro_query_stats")]
+impl<F, P> std::fmt::Display for DefaultChallenger<F, P>
+where
+    F: PrimeField,
+    P: CryptographicPermutation<[F; 8]>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // total count
+        let total_count: usize = self.sample_tracking_map.values().copied().sum();
+
+        // Write the overall count
+        writeln!(f, "overall sample count: {}\n", total_count)?;
+
+        // Write the percentages for each entry
+        for (key, count) in &self.sample_tracking_map {
+            let percentage = (*count as f64 / total_count as f64) * 100.0;
+            writeln!(f, "{} percentage: {:.2}%\n", key, percentage)?;
+        }
+
+        Ok(())
     }
 }

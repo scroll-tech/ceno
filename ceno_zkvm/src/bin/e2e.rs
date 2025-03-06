@@ -9,7 +9,7 @@ use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
 use p3_field::PrimeCharacteristicRing;
 use p3_goldilocks::Goldilocks;
-use std::{fs, panic};
+use std::{cell::RefCell, fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
@@ -146,14 +146,18 @@ fn main() {
     let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
     // do statistics
-    let stat_recorder = StatisticRecorder::default();
-    let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
-    verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
+    if cfg!(feature = "ro_query_stats") {
+        let stat_recorder = StatisticRecorder::default();
+        let basic_transcript = RefCell::new(Transcript::new(b"riscv"));
+        let transcript = TranscriptWithStat::new(&stat_recorder, &basic_transcript);
+        verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
+        println!("{}", basic_transcript.into_inner(),);
+        println!(
+            "append_field_count: {}",
+            stat_recorder.into_inner().field_appended_num
+        )
+    }
     println!("e2e proof stat: {}", zkvm_proof);
-    println!(
-        "hashes count = {}",
-        stat_recorder.into_inner().field_appended_num
-    );
 
     // do sanity check
     let transcript = Transcript::new(b"riscv");

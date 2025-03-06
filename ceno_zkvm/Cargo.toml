@@ -58,9 +58,10 @@ proptest.workspace = true
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow"]
+default = ["forbid_overflow", "ro_query_stats"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
+ro_query_stats = ["transcript/ro_query_stats", "sumcheck/ro_query_stats", "poseidon/ro_query_stats", "mpcs/ro_query_stats"]
 
 [[bench]]
 harness = false

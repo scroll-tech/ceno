@@ -127,10 +127,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // alpha, beta
-        let challenges = [
-            transcript.read_challenge().elements,
-            transcript.read_challenge().elements,
-        ];
+        let challenges = if cfg!(feature = "ro_query_stats") {
+            [
+                transcript
+                    .read_challenge_tracking("lookup challenge alpha")
+                    .elements,
+                transcript
+                    .read_challenge_tracking("lookup challenge beta")
+                    .elements,
+            ]
+        } else {
+            [
+                transcript.read_challenge().elements,
+                transcript.read_challenge().elements,
+            ]
+        };
         tracing::debug!("challenges in verifier: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
@@ -363,6 +374,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 phantom: PhantomData,
             },
             transcript,
+            #[cfg(feature = "ro_query_stats")]
+            "opcode_proof main_sumcheck",
         );
         let (input_opening_point, expected_evaluation) = (
             main_sel_subclaim
@@ -665,6 +678,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     phantom: PhantomData,
                 },
                 transcript,
+                #[cfg(feature = "ro_query_stats")]
+                "table proof same_r_sumcheck",
             );
             let (input_opening_point, expected_evaluation) = (
                 sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
@@ -869,9 +884,22 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
-        let initial_rt: Point<E> = (0..log2_num_fanin)
-            .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
-            .collect_vec();
+        let initial_rt: Point<E> = if cfg!(feature = "ro_query_stats") {
+            (0..log2_num_fanin)
+                .map(|_| {
+                    transcript
+                        .get_and_append_challenge_tracking(
+                            b"product_sum",
+                            "tower_prover initial_rt",
+                        )
+                        .elements
+                })
+                .collect_vec()
+        } else {
+            (0..log2_num_fanin)
+                .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
+                .collect_vec()
+        };
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
@@ -936,6 +964,7 @@ impl TowerVerify {
                         phantom: PhantomData,
                     },
                     transcript,
+                    #[cfg(feature = "ro_query_stats")] "tower_verifier"
                 );
 
                 // check expected_evaluation
