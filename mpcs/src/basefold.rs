@@ -794,9 +794,15 @@ where
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = (0..batch_size_log)
             .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs")
-                    .elements
+                if cfg!(feature = "hash_count") {
+                    transcript
+                        .get_and_append_challenge_tracking(b"batch coeffs", "mpcs batch_coeffs")
+                        .elements
+                } else {
+                    transcript
+                        .get_and_append_challenge(b"batch coeffs")
+                        .elements
+                }
             })
             .collect::<Vec<_>>();
 

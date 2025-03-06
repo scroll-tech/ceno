@@ -1,8 +1,9 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
+use poseidon::challenger::DefaultChallenger;
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
+use p3_challenger::{CanObserve, FieldChallenger};
 
 #[derive(Clone)]
 pub struct BasicTranscript<E: ExtensionField> {
@@ -31,6 +32,14 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     fn read_challenge(&mut self) -> Challenge<E> {
         Challenge {
             elements: self.challenger.sample_algebra_element(),
+        }
+    }
+
+    #[cfg(feature = "hash_count")]
+    fn read_challenge_tracking(&mut self, source: &'static str) -> Challenge<E> {
+        use poseidon::challenger::FieldChallengerExt;
+        Challenge {
+            elements: self.challenger.sample_algebra_element_tracking(source),
         }
     }
 

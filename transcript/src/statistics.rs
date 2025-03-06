@@ -35,6 +35,11 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
         self.inner.append_field_element_ext(element)
     }
 
+    #[cfg(feature = "hash_count")]
+    fn read_challenge_tracking(&mut self, source: &'static str) -> Challenge<E> {
+        self.inner.read_challenge_tracking(source)
+    }
+
     fn read_challenge(&mut self) -> Challenge<E> {
         self.inner.read_challenge()
     }

@@ -16,5 +16,10 @@ p3-field.workspace = true
 p3-goldilocks.workspace = true
 p3-mds.workspace = true
 p3-symmetric.workspace = true
+p3-challenger.workspace = true
 poseidon.workspace = true
 serde.workspace = true
+
+[features]
+default = ["hash_count"]
+hash_count = []

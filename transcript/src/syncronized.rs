@@ -85,4 +85,8 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
     fn commit_rolling(&mut self) {
         self.rolling_index = (self.rolling_index + 1) % 2
     }
+
+    fn read_challenge_tracking(&mut self, _source: &'static str) -> Challenge<E> {
+        unimplemented!()
+    }
 }

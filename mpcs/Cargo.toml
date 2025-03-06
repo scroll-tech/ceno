@@ -44,6 +44,7 @@ criterion.workspace = true
 [features]
 benchmark = ["parallel"]
 default = ["parallel"] # Add "sanity-check" to debug
+hash_count = [] # add "hash_count" to output statistics info
 parallel = ["dep:rayon"]
 print-trace = ["ark-std/print-trace", "whir/print-trace"]
 sanity-check = []

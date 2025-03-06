@@ -76,6 +76,16 @@ pub trait Transcript<E: ExtensionField> {
         self.read_challenge()
     }
 
+    #[cfg(feature = "hash_count")]
+    fn get_and_append_challenge_tracking(
+        &mut self,
+        label: &'static [u8],
+        source: &'static str,
+    ) -> Challenge<E> {
+        self.append_message(label);
+        self.read_challenge_tracking(source)
+    }
+
     fn read_field_element_ext(&self) -> E {
         self.read_field_element_exts()[0]
     }
@@ -85,6 +95,9 @@ pub trait Transcript<E: ExtensionField> {
     fn read_field_element(&self) -> E::BaseField;
 
     fn read_challenge(&mut self) -> Challenge<E>;
+
+    #[cfg(feature = "hash_count")]
+    fn read_challenge_tracking(&mut self, source: &'static str) -> Challenge<E>;
 
     fn send_challenge(&self, challenge: E);
 
