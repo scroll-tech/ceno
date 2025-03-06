@@ -3,15 +3,19 @@ use std::marker::PhantomData;
 use super::{EncodingProverParameters, EncodingScheme};
 use crate::{
     Error,
+    basefold::PolyEvalsCodeword,
     util::{field_type_index_mul_base, log2_strict, plonky2_util::reverse_bits},
     vec_mut,
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
+use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField, TwoAdicField};
 
+use p3_matrix::{Matrix, bitrev::BitReversableMatrix};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use witness::RowMajorMatrix;
 
 use crate::util::plonky2_util::reverse_index_bits_in_place;
 
@@ -258,11 +262,12 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct RSCode<Spec: RSCodeSpec> {
+pub struct RSCode<Spec: RSCodeSpec, E: ExtensionField> {
     _phantom_data: PhantomData<Spec>,
+    fft: Radix2DitParallel<E::BaseField>,
 }
 
-impl<E: ExtensionField, Spec: RSCodeSpec> EncodingScheme<E> for RSCode<Spec>
+impl<E: ExtensionField, Spec: RSCodeSpec> EncodingScheme<E> for RSCode<Spec, E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -271,6 +276,8 @@ where
     type ProverParameters = RSCodeProverParameters<E>;
 
     type VerifierParameters = RSCodeVerifierParameters<E>;
+
+    type EncodedData = PolyEvalsCodeword<E>;
 
     fn setup(max_message_size_log: usize) -> Self::PublicParameters {
         RSCodeParameters {
@@ -347,10 +354,37 @@ where
         ))
     }
 
-    fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E> {
-        assert!(log2_strict(coeffs.len()) >= Spec::get_basecode_msg_size_log());
+    fn encode(
+        &self,
+        pp: &Self::ProverParameters,
+        rmm: RowMajorMatrix<E::BaseField>,
+    ) -> Self::EncodedData {
+        assert!(rmm.num_vars() >= Spec::get_basecode_msg_size_log());
+
+        // bh_evals is just a copy of poly.evals().
+        // Note that this function implicitly assumes that the size of poly.evals() is a
+        // power of two. Otherwise, the function crashes with index out of bound.
+        let num_vars = rmm.num_vars();
+        if num_vars > pp.get_max_message_size_log() {
+            return PolyEvalsCodeword::TooBig(num_vars);
+        }
+
+        // In this case, the polynomial is so small that the opening is trivial.
+        // So we just build the Merkle tree over the polynomial evaluations.
+        // No codeword is needed.
+        if num_vars <= Spec::get_basecode_msg_size_log() {
+            return PolyEvalsCodeword::TooSmall(Box::new(rmm.into_default_padded_p3_rmm(false)));
+        }
+
+        let m = rmm
+            .into_p3_rmm()
+            .bit_reverse_rows() // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
+            .to_row_major_matrix()
+            .bit_reversed_zero_pad(Spec::get_rate_log());
+        let codeword = self.fft.dft_batch(m).to_row_major_matrix();
+        PolyEvalsCodeword::Normal(Box::new(codeword))
         // Use the full message size to determine the shift factor.
-        Self::encode_internal(&pp.fft_root_table, coeffs, pp.full_message_size_log)
+        // Self::encode_internal(&pp.fft_root_table, coeffs, pp.full_message_size_log)
     }
 
     fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E> {
@@ -454,8 +488,8 @@ where
     }
 }
 
-impl<Spec: RSCodeSpec> RSCode<Spec> {
-    fn encode_internal<E: ExtensionField>(
+impl<Spec: RSCodeSpec, E: ExtensionField> RSCode<Spec, E> {
+    fn encode_internal(
         fft_root_table: &FftRootTable<E::BaseField>,
         coeffs: &FieldType<E>,
         full_message_size_log: usize,
@@ -501,11 +535,7 @@ impl<Spec: RSCodeSpec> RSCode<Spec> {
     }
 
     #[allow(unused)]
-    fn folding_coeffs_naive<E: ExtensionField>(
-        level: usize,
-        index: usize,
-        full_message_size_log: usize,
-    ) -> (E, E, E) {
+    fn folding_coeffs_naive(level: usize, index: usize, full_message_size_log: usize) -> (E, E, E) {
         // The coefficients are for the bit-reversed codeword, so reverse the
         // bits before providing the coefficients.
         let index = reverse_bits(index, level);
@@ -640,7 +670,7 @@ mod tests {
 
     #[test]
     fn prover_verifier_consistency() {
-        type Code = RSCode<RSCodeDefaultSpec>;
+        type Code = RSCode<RSCodeDefaultSpec, GoldilocksExt2>;
         let pp: RSCodeParameters<GoldilocksExt2> = Code::setup(10);
         let (pp, vp) = Code::trim(pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
@@ -664,12 +694,12 @@ mod tests {
 
     #[test]
     fn test_rs_codeword_folding() {
-        test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec>>();
+        test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec, GoldilocksExt2>>();
     }
 
     type E = GoldilocksExt2;
     type F = Goldilocks;
-    type Code = RSCode<RSCodeDefaultSpec>;
+    type Code = RSCode<RSCodeDefaultSpec, GoldilocksExt2>;
 
     #[test]
     pub fn test_colinearity() {

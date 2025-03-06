@@ -244,7 +244,7 @@ impl<E: ExtensionField> BasefoldSpec<E> for BasefoldRSParams
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    type EncodingScheme = RSCode<RSCodeDefaultSpec>;
+    type EncodingScheme = RSCode<RSCodeDefaultSpec, E>;
 }
 
 #[derive(Debug)]

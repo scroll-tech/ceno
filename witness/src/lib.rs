@@ -65,8 +65,16 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         inner
     }
 
+    pub fn into_p3_rmm(self) -> p3_matrix::dense::RowMajorMatrix<T> {
+        self.inner
+    }
+
     pub fn n_col(&self) -> usize {
         self.inner.width
+    }
+
+    pub fn num_vars(&self) -> usize {
+        (next_pow2_instance_padding(self.num_instances())).ilog2() as usize
     }
 
     pub fn new(num_rows: usize, num_col: usize, padding_strategy: InstancePaddingStrategy) -> Self {

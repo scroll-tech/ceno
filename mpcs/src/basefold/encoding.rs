@@ -3,9 +3,6 @@ use multilinear_extensions::mle::FieldType;
 
 mod utils;
 
-mod basecode;
-pub use basecode::{Basecode, BasecodeDefaultSpec};
-
 mod rs;
 use plonky2::util::log2_strict;
 use rayon::{
@@ -15,6 +12,7 @@ use rayon::{
 pub use rs::{RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table};
 
 use serde::{Serialize, de::DeserializeOwned};
+use witness::RowMajorMatrix;
 
 use crate::{Error, util::arithmetic::interpolate2_weights};
 
@@ -31,6 +29,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         + EncodingProverParameters
         + Sync;
     type VerifierParameters: Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync;
+    type EncodedData;
 
     fn setup(max_msg_size_log: usize) -> Self::PublicParameters;
 
@@ -39,7 +38,11 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error>;
 
-    fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E>;
+    fn encode(
+        &self,
+        pp: &Self::ProverParameters,
+        coeffs: RowMajorMatrix<E::BaseField>,
+    ) -> Self::EncodedData;
 
     /// Encodes a message of small length, such that the verifier is also able
     /// to execute the encoding.
