@@ -150,12 +150,12 @@ fn main() {
         let stat_recorder = StatisticRecorder::default();
         let basic_transcript = RefCell::new(Transcript::new(b"riscv"));
         let transcript = TranscriptWithStat::new(&stat_recorder, &basic_transcript);
-        verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
+        assert!(
+            verifier
+                .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
+                .is_ok()
+        );
         println!("{}", basic_transcript.into_inner(),);
-        println!(
-            "append_field_count: {}",
-            stat_recorder.into_inner().field_appended_num
-        )
     }
     println!("e2e proof stat: {}", zkvm_proof);
 
