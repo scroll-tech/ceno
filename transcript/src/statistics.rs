@@ -61,10 +61,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
         self.inner.commit_rolling()
     }
 
-    fn get_inner_challenges(
+    fn get_inner_challenger(
         &self,
     ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {
-        self.inner.get_inner_challenges()
+        self.inner.get_inner_challenger()
     }
 }
 

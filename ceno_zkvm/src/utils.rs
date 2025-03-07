@@ -62,18 +62,21 @@ pub fn get_challenge_pows<E: ExtensionField>(
     size: usize,
     transcript: &mut impl Transcript<E>,
 ) -> Vec<E> {
-    let alpha = if cfg!(feature = "ro_query_stats") {
-        transcript
-            .get_and_append_challenge_tracking(
-                b"combine subset evals",
-                "get_challenge_pows combine subset evals",
-            )
-            .elements
-    } else {
-        transcript
-            .get_and_append_challenge(b"combine subset evals")
-            .elements
-    };
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "ro_query_stats")] {
+            let alpha = transcript
+                .get_and_append_challenge_tracking(
+                    b"combine subset evals",
+                    "get_challenge_pows combine subset evals",
+                )
+                .elements;
+        } else {
+            let alpha = transcript
+                .get_and_append_challenge(b"combine subset evals")
+                .elements;
+        }
+    }
+
     (0..size)
         .scan(E::ONE, |state, _| {
             let res = *state;

@@ -104,7 +104,7 @@ pub trait Transcript<E: ExtensionField> {
 
     fn commit_rolling(&mut self);
 
-    fn get_inner_challenges(
+    fn get_inner_challenger(
         &self,
     ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>;
 }

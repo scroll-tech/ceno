@@ -76,6 +76,11 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         unimplemented!()
     }
 
+    #[cfg(feature = "ro_query_stats")]
+    fn read_challenge_tracking(&mut self, _source: &'static str) -> Challenge<E> {
+        unimplemented!()
+    }
+
     fn send_challenge(&self, challenge: E) {
         self.challenge_tx[self.rolling_index]
             .send(challenge)
@@ -86,12 +91,7 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         self.rolling_index = (self.rolling_index + 1) % 2
     }
 
-    #[cfg(feature = "ro_query_stats")]
-    fn read_challenge_tracking(&mut self, _source: &'static str) -> Challenge<E> {
-        unimplemented!()
-    }
-
-    fn get_inner_challenges(
+    fn get_inner_challenger(
         &self,
     ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {
         unimplemented!()
@@ -112,6 +112,11 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         self.append_field_element_exts(&[*element])
     }
 
+    fn read_field_element_ext(&self) -> E {
+        self.read_field_element_exts()[0]
+    }
+
+    #[cfg(feature = "ro_query_stats")]
     fn get_and_append_challenge_tracking(
         &mut self,
         label: &'static [u8],
@@ -119,9 +124,5 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
     ) -> Challenge<E> {
         self.append_message(label);
         self.read_challenge_tracking(source)
-    }
-
-    fn read_field_element_ext(&self) -> E {
-        self.read_field_element_exts()[0]
     }
 }

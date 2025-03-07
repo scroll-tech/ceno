@@ -1082,14 +1082,16 @@ where
         let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
         let t = (0..batch_size_log)
             .map(|_| {
-                if cfg!(feature = "ro_query_stats") {
-                    transcript
-                        .get_and_append_challenge_tracking(b"batch coeffs", "mpcs opening batch")
-                        .elements
-                } else {
-                    transcript
-                        .get_and_append_challenge(b"batch coeffs")
-                        .elements
+                cfg_if::cfg_if!{
+                    if #[cfg(feature = "ro_query_stats")] {
+                        transcript
+                            .get_and_append_challenge_tracking(b"batch coeffs", "mpcs opening batch")
+                            .elements
+                    } else {
+                        transcript
+                            .get_and_append_challenge(b"batch coeffs")
+                            .elements
+                    }
                 }
             })
             .collect::<Vec<_>>();
@@ -1100,18 +1102,21 @@ where
         let sumcheck_messages = &proof.sumcheck_messages;
         for i in 0..num_rounds {
             transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
-            fold_challenges.push(if cfg!(feature = "ro_query_stats") {
-                transcript
-                    .get_and_append_challenge_tracking(
-                        b"commit round",
-                        "mpcs sumcheck folding round",
-                    )
-                    .elements
-            } else {
-                transcript
-                    .get_and_append_challenge(b"commit round")
-                    .elements
-            });
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "ro_query_stats")] {
+                    let challenge = transcript
+                        .get_and_append_challenge_tracking(
+                            b"commit round",
+                            "mpcs sumcheck folding round",
+                        )
+                        .elements;
+                } else {
+                    let challenge = transcript
+                        .get_and_append_challenge(b"commit round")
+                        .elements;
+                }
+            };
+            fold_challenges.push(challenge);
             if i < num_rounds - 1 {
                 write_digest_to_transcript(&roots[i], transcript);
             }
@@ -1121,15 +1126,16 @@ where
 
         let queries: Vec<_> = (0..Spec::get_number_queries())
             .map(|_| {
-                ext_to_usize(&if cfg!(feature = "ro_query_stats") {
-                    transcript
+                cfg_if::cfg_if! {if #[cfg(feature = "ro_query_stats")] {
+                    let challenge = transcript
                         .get_and_append_challenge_tracking(b"query indices", "mpcs query indices")
-                        .elements
+                        .elements;
                 } else {
-                    transcript
+                    let challenge = transcript
                         .get_and_append_challenge(b"query indices")
-                        .elements
-                }) % (1 << (num_vars + Spec::get_rate_log()))
+                        .elements;
+                }};
+                ext_to_usize(&challenge) % (1 << (num_vars + Spec::get_rate_log()))
             })
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();

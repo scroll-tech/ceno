@@ -6,10 +6,13 @@ use crate::{
     digest::Digest,
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use p3_challenger::{CanObserve, CanSample as P3CanSample};
+use p3_challenger::CanObserve;
 
 #[cfg(feature = "ro_query_stats")]
 use crate::challenger::CanSample;
+
+#[cfg(not(feature = "ro_query_stats"))]
+use p3_challenger::CanSample as P3CanSample;
 
 pub struct PoseidonHash<F> {
     _phantom: PhantomData<F>,
@@ -42,10 +45,13 @@ impl<F: PoseidonField> PoseidonHash<F> {
 pub fn hash_n_to_m_no_pad<F: PoseidonField>(inputs: &[F], num_outputs: usize) -> Vec<F> {
     let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
     challenger.observe_slice(inputs);
-    if cfg!(feature = "ro_query_stats") {
-        challenger.sample_vec_tracking(num_outputs, "hash_n_to_m_no_pad")
-    } else {
-        challenger.sample_vec(num_outputs)
+
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "ro_query_stats")] {
+            challenger.sample_vec_tracking(num_outputs, "hash_n_to_m_no_pad")
+        } else {
+            challenger.sample_vec(num_outputs)
+        }
     }
 }
 
@@ -55,10 +61,12 @@ pub fn hash_n_to_m_no_pad_ext<F: PoseidonField, E: ExtensionField<BaseField = F>
 ) -> Vec<F> {
     let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
     challenger.observe_ext_slice(inputs);
-    if cfg!(feature = "ro_query_stats") {
-        challenger.sample_vec_tracking(num_outputs, "hash_n_to_m_no_pad_ext")
-    } else {
-        challenger.sample_vec(num_outputs)
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "ro_query_stats")] {
+            challenger.sample_vec_tracking(num_outputs, "hash_n_to_m_no_pad_ext")
+        } else {
+            challenger.sample_vec(num_outputs)
+        }
     }
 }
 
@@ -78,9 +86,11 @@ pub fn compress<F: PoseidonField>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
     let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
     challenger.observe_slice(x.elements());
     challenger.observe_slice(y.elements());
-    if cfg!(feature = "ro_query_stats") {
-        Digest(challenger.sample_array_tracking::<DIGEST_WIDTH>("compress"))
-    } else {
-        Digest(challenger.sample_array::<DIGEST_WIDTH>())
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "ro_query_stats")] {
+            Digest(challenger.sample_array_tracking::<DIGEST_WIDTH>("compress"))
+        } else {
+            Digest(challenger.sample_array::<DIGEST_WIDTH>())
+        }
     }
 }

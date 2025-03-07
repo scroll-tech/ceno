@@ -73,7 +73,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
-        println!("go verify_proof_validity");
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
@@ -122,21 +121,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // alpha, beta
-        let challenges = if cfg!(feature = "ro_query_stats") {
-            [
-                transcript
-                    .read_challenge_tracking("lookup challenge alpha")
-                    .elements,
-                transcript
-                    .read_challenge_tracking("lookup challenge beta")
-                    .elements,
-            ]
-        } else {
-            [
-                transcript.read_challenge().elements,
-                transcript.read_challenge().elements,
-            ]
-        };
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                let challenges = [
+                    transcript
+                        .read_challenge_tracking("lookup challenge alpha")
+                        .elements,
+                    transcript
+                        .read_challenge_tracking("lookup challenge beta")
+                        .elements,
+                ];
+            } else {
+                let challenges = [
+                    transcript.read_challenge().elements,
+                    transcript.read_challenge().elements,
+                ];
+            }
+        }
         tracing::debug!("challenges in verifier: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
@@ -264,30 +265,32 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
         }
 
-        if cfg!(feature = "ro_query_stats") {
-            use std::collections::HashMap;
-            let agg_sample_tracking_map = transcripts
-                .iter()
-                .map(|t| &t.get_inner_challenges().sample_tracking_map)
-                .flat_map(|map| map.iter()) // Flatten all key-value pairs
-                .fold(HashMap::new(), |mut acc, (key, value)| {
-                    *acc.entry(key).or_insert(0) += value; // Group by key & sum values
-                    acc
-                });
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                use std::collections::HashMap;
+                let agg_sample_tracking_map = transcripts
+                    .iter()
+                    .map(|t| &t.get_inner_challenger().sample_tracking_map)
+                    .flat_map(|map| map.iter()) // Flatten all key-value pairs
+                    .fold(HashMap::new(), |mut acc, (key, value)| {
+                        *acc.entry(key).or_insert(0) += value; // Group by key & sum values
+                        acc
+                    });
 
-            // total count
-            let total_count: usize = agg_sample_tracking_map.values().copied().sum();
+                // total count
+                let total_count: usize = agg_sample_tracking_map.values().copied().sum();
 
-            println!();
-            // Write the overall count
-            println!("overall sample count: {}", total_count);
+                println!();
+                // Write the overall count
+                println!("overall sample count: {}", total_count);
 
-            // Write the percentages for each entry
-            for (key, count) in &agg_sample_tracking_map {
-                let percentage = (*count as f64 / total_count as f64) * 100.0;
-                println!("{} percentage: {:.2}%", key, percentage);
+                // Write the percentages for each entry
+                for (key, count) in &agg_sample_tracking_map {
+                    let percentage = (*count as f64 / total_count as f64) * 100.0;
+                    println!("{} percentage: {:.2}%", key, percentage);
+                }
+                println!();
             }
-            println!();
         }
 
         Ok(true)
@@ -905,21 +908,23 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
-        let initial_rt: Point<E> = if cfg!(feature = "ro_query_stats") {
-            (0..log2_num_fanin)
-                .map(|_| {
-                    transcript
-                        .get_and_append_challenge_tracking(
-                            b"product_sum",
-                            "tower_prover initial_rt",
-                        )
-                        .elements
-                })
-                .collect_vec()
-        } else {
-            (0..log2_num_fanin)
-                .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
-                .collect_vec()
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                let initial_rt = (0..log2_num_fanin)
+                    .map(|_| {
+                        transcript
+                            .get_and_append_challenge_tracking(
+                                b"product_sum",
+                                "tower_prover initial_rt",
+                            )
+                            .elements
+                    })
+                    .collect_vec();
+            } else {
+                let initial_rt = (0..log2_num_fanin)
+                    .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
+                    .collect_vec();
+            }
         };
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])

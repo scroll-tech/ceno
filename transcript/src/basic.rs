@@ -59,7 +59,7 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
         // do nothing
     }
 
-    fn get_inner_challenges(
+    fn get_inner_challenger(
         &self,
     ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {
         &self.challenger

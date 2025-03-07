@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fs, path::PathBuf, time::Duration};
+use std::{fs, path::PathBuf, time::Duration};
 
 use ceno_emul::{Platform, Program};
 use ceno_zkvm::{
@@ -6,7 +6,7 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 use criterion::*;
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder};
+use transcript::{BasicTranscriptWithStat, StatisticRecorder};
 
 use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
@@ -52,32 +52,20 @@ fn fibonacci_prove(c: &mut Criterion) {
         .expect("PrepSanityCheck do not provide proof and verifier");
 
         println!("e2e proof {}", proof);
-        if cfg!(feature = "ro_query_stats") {
-            let stat_recorder = StatisticRecorder::default();
-            let basic_transcript = RefCell::new(BasicTranscript::new(b"riscv"));
-            let transcript = BasicTranscriptWithStat::new(&stat_recorder, &basic_transcript);
-            assert!(
-                verifier
-                    .verify_proof_halt(proof, transcript, false)
-                    .expect("verify proof return with error"),
-            );
-            println!();
-            println!(
-                "max_steps = {}, {}, append_field_count: {}",
-                max_steps,
-                basic_transcript.into_inner(),
-                stat_recorder.into_inner().field_appended_num
-            );
-        } else {
-            let transcript = BasicTranscript::new(b"riscv");
-            assert!(
-                verifier
-                    .verify_proof_halt(proof, transcript, false)
-                    .expect("verify proof return with error"),
-            );
-            println!();
-            println!("max_steps = {}", max_steps,);
-        }
+
+        let stat_recorder = StatisticRecorder::default();
+        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        assert!(
+            verifier
+                .verify_proof_halt(proof, transcript, false)
+                .expect("verify proof return with error"),
+        );
+        println!();
+        println!(
+            "max_steps = {}, append_field_count: {}",
+            max_steps,
+            stat_recorder.into_inner().field_appended_num
+        );
 
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("fibonacci_max_steps_{}", max_steps));

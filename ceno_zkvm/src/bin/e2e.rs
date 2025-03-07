@@ -146,16 +146,15 @@ fn main() {
     let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
     // do statistics
-    if cfg!(feature = "ro_query_stats") {
-        let stat_recorder = StatisticRecorder::default();
-        let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
-        // let transcript = Transcript::new(b"riscv");
-        assert!(
-            verifier
-                .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
-                .is_ok()
-        );
-    }
+
+    let stat_recorder = StatisticRecorder::default();
+    let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
+    assert!(
+        verifier
+            .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
+            .is_ok()
+    );
+
     println!("e2e proof stat: {}", zkvm_proof);
 
     // do sanity check

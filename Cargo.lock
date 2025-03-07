@@ -1520,6 +1520,7 @@ dependencies = [
  "ark-std",
  "bincode",
  "bitvec",
+ "cfg-if",
  "criterion",
  "ctr",
  "ff_ext",
@@ -2673,6 +2674,7 @@ name = "sumcheck"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "cfg-if",
  "criterion",
  "crossbeam-channel",
  "ff_ext",

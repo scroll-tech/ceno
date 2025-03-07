@@ -92,10 +92,12 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         // When we turn the protocol to a non-interactive one, it is sufficient to defer
         // such checks to `check_and_generate_subclaim` after the last round.
 
-        let challenge = if cfg!(feature = "ro_query_stats") {
-            transcript.get_and_append_challenge_tracking(b"Internal round", source)
-        } else {
-            transcript.get_and_append_challenge(b"Internal round")
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                let challenge = transcript.get_and_append_challenge_tracking(b"Internal round", source);
+            } else {
+                let challenge = transcript.get_and_append_challenge(b"Internal round");
+            }
         };
         self.challenges.push(challenge);
         self.polynomials_received
