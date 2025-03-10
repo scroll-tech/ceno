@@ -3,14 +3,17 @@ use std::iter;
 use ff_ext::ExtensionField;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
 use nimue::{
-    ByteChallenges, ByteReader, ProofError, ProofResult,
+    ByteChallenges, ByteReader, ProofError,
     plugins::ark::{FieldChallenges, FieldReader},
 };
-use nimue_pow::{self, PoWChallenge};
+use p3_commit::Mmcs;
+use p3_field::{Field, PrimeCharacteristicRing};
+use transcript::Transcript;
 
 use super::{Statement, WhirProof, parameters::WhirConfig};
 use crate::{
     crypto::MerkleConfig as Config,
+    error::Error,
     parameters::FoldType,
     sumcheck::proof::SumcheckPolynomial,
     utils::expand_randomness,
@@ -20,23 +23,24 @@ use crate::{
     },
 };
 
-pub struct Verifier<E, MerkleConfig, PowStrategy>
+pub struct Verifier<E, MerkleConfig>
 where
     E: ExtensionField,
+    MerkleConfig: Config<E>,
 {
-    pub(crate) params: WhirConfig<E, MerkleConfig, PowStrategy>,
+    pub(crate) params: WhirConfig<E, MerkleConfig>,
     pub(crate) two_inv: E::BaseField,
 }
 
 #[derive(Clone)]
-pub(crate) struct ParsedCommitment<E, D> {
+pub(crate) struct WhirCommitmentInTranscript<E, D> {
     pub(crate) root: D,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
 
 #[derive(Clone)]
-pub(crate) struct ParsedProof<E> {
+pub(crate) struct ParsedProof<E: ExtensionField> {
     pub(crate) initial_combination_randomness: Vec<E>,
     pub(crate) initial_sumcheck_rounds: Vec<(SumcheckPolynomial<E>, E)>,
     pub(crate) rounds: Vec<ParsedRound<E>>,
@@ -63,64 +67,47 @@ pub(crate) struct ParsedRound<E> {
     pub(crate) domain_gen_inv: E,
 }
 
-impl<E, MerkleConfig, PowStrategy> Verifier<E, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig> Verifier<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
-    PowStrategy: nimue_pow::PowStrategy,
 {
-    pub fn new(params: WhirConfig<E, MerkleConfig, PowStrategy>) -> Self {
+    pub fn new(params: WhirConfig<E, MerkleConfig>) -> Self {
         Verifier {
             params,
-            two_inv: E::from(2).inverse().unwrap(), // The only inverse in the entire code :)
+            two_inv: E::BaseField::from_u64(2).inverse(), // The only inverse in the entire code :)
         }
     }
 
-    fn parse_commitment<Arthur>(
+    fn write_commitment_to_transcript<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
-    ) -> ProofResult<ParsedCommitment<E, MerkleConfig::InnerDigest>>
-    where
-        Arthur:
-            ByteReader + FieldReader<E> + FieldChallenges<E> + MmcsCommitmentReader<MerkleConfig>,
-    {
-        let root = arthur.read_digest()?;
-
-        let mut ood_points = vec![E::ZERO; self.params.committment_ood_samples];
-        let mut ood_answers = vec![E::ZERO; self.params.committment_ood_samples];
+        commitment: &mut WhirCommitmentInTranscript<E, <MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
+        transcript: &mut T,
+    ) {
         if self.params.committment_ood_samples > 0 {
-            arthur.fill_challenge_scalars(&mut ood_points)?;
-            arthur.fill_next_scalars(&mut ood_answers)?;
+            commitment.ood_points = (0..self.params.committment_ood_samples)
+                .map(|_| transcript.read_challenge().elements)
+                .collect::<Vec<_>>();
+            transcript.append_field_element_exts(&commitment.ood_answers);
         }
-
-        Ok(ParsedCommitment {
-            root,
-            ood_points,
-            ood_answers,
-        })
     }
 
-    fn parse_proof<Arthur>(
+    fn write_proof_to_transcript<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
-        parsed_commitment: &ParsedCommitment<E, MerkleConfig::InnerDigest>,
+        transcript: &mut T,
+        parsed_commitment: &WhirCommitmentInTranscript<
+            E,
+            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+        >,
         statement: &Statement<E>, // Will be needed later
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> ProofResult<ParsedProof<E>>
-    where
-        Arthur: FieldReader<E>
-            + FieldChallenges<E>
-            + PoWChallenge
-            + ByteReader
-            + ByteChallenges
-            + MmcsCommitmentReader<MerkleConfig>,
-    {
+    ) -> Result<ParsedProof<E>, Error> {
         let mut sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
         let initial_combination_randomness;
         if self.params.initial_statement {
             // Derive combination randomness and first sumcheck polynomial
-            let [combination_randomness_gen]: [E; 1] = arthur.challenge_scalars()?;
+            let combination_randomness_gen = transcript.read_challenge().elements;
             initial_combination_randomness = expand_randomness(
                 combination_randomness_gen,
                 parsed_commitment.ood_points.len() + statement.points.len(),
@@ -128,15 +115,12 @@ where
 
             // Initial sumcheck
             sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
-            for _ in 0..self.params.folding_factor.at_round(0) {
-                let sumcheck_poly_evals: [E; 3] = arthur.next_scalars()?;
+            for i in 0..self.params.folding_factor.at_round(0) {
+                let sumcheck_poly_evals: [E; 3] = whir_proof.sumcheck_poly_evals[i];
+                transcript.append_field_element_exts(&sumcheck_poly_evals);
                 let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-                let [folding_randomness_single] = arthur.challenge_scalars()?;
+                let folding_randomness_single = transcript.read_challenge().elements;
                 sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-
-                if self.params.starting_folding_pow_bits > 0. {
-                    arthur.challenge_pow::<PowStrategy>(self.params.starting_folding_pow_bits)?;
-                }
             }
 
             folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
@@ -146,66 +130,62 @@ where
 
             initial_combination_randomness = vec![E::ONE];
 
-            let mut folding_randomness_vec = vec![E::ZERO; self.params.folding_factor.at_round(0)];
-            arthur.fill_challenge_scalars(&mut folding_randomness_vec)?;
-            folding_randomness = folding_randomness_vec;
-
-            // PoW
-            if self.params.starting_folding_pow_bits > 0. {
-                arthur.challenge_pow::<PowStrategy>(self.params.starting_folding_pow_bits)?;
-            }
+            folding_randomness = (0..self.params.folding_factor.at_round(0))
+                .map(|_| transcript.read_challenge().elements)
+                .collect();
         };
 
         let mut prev_root = parsed_commitment.root.clone();
-        let mut domain_gen = self.params.starting_domain.backing_domain.group_gen();
-        let mut exp_domain_gen = domain_gen.pow([1 << self.params.folding_factor.at_round(0)]);
-        let mut domain_gen_inv = self.params.starting_domain.backing_domain.group_gen_inv();
+        let mut domain_gen = self.params.starting_domain.backing_domain_group_gen();
+        let mut exp_domain_gen = domain_gen.exp_power_of_2(self.params.folding_factor.at_round(0));
+        let mut domain_gen_inv = self
+            .params
+            .starting_domain
+            .backing_domain_group_gen()
+            .inverse();
         let mut domain_size = self.params.starting_domain.size();
         let mut rounds = vec![];
 
         for r in 0..self.params.n_rounds() {
-            let (merkle_proof, answers) = &whir_proof.0[r];
+            let (merkle_proof, answers) = &whir_proof.merkle_answers[r];
             let round_params = &self.params.round_parameters[r];
 
-            let new_root = arthur.read_digest()?;
+            let new_root = transcript.read_digest()?;
 
             let mut ood_points = vec![E::ZERO; round_params.ood_samples];
             let mut ood_answers = vec![E::ZERO; round_params.ood_samples];
             if round_params.ood_samples > 0 {
-                arthur.fill_challenge_scalars(&mut ood_points)?;
-                arthur.fill_next_scalars(&mut ood_answers)?;
+                transcript.fill_challenge_scalars(&mut ood_points)?;
+                transcript.fill_next_scalars(&mut ood_answers)?;
             }
 
             let stir_challenges_indexes = get_challenge_stir_queries(
                 domain_size,
                 self.params.folding_factor.at_round(r),
                 round_params.num_queries,
-                arthur,
+                transcript,
             )?;
 
             let stir_challenges_points = stir_challenges_indexes
                 .iter()
-                .map(|index| exp_domain_gen.pow([*index as u64]))
+                .map(|index| exp_domain_gen.exp_u64(*index as u64))
                 .collect();
 
             if !merkle_proof
                 .verify(
-                    &self.params.leaf_hash_params,
-                    &self.params.two_to_one_params,
+                    &self.params.hash_params,
                     &prev_root,
-                    answers.iter().map(|a| a.as_ref()),
+                    p3_util::log2_strict_usize(domain_size),
+                    1,
+                    &stir_challenges_indexes,
+                    answers.iter().map(|a| a.as_ref()).collect().as_slice(),
                 )
-                .unwrap()
-                || merkle_proof.leaf_indexes != stir_challenges_indexes
+                .is_ok()
             {
-                return Err(ProofError::InvalidProof);
+                return Err(Error::InvalidProof("Merkle proof failed".to_string()));
             }
 
-            if round_params.pow_bits > 0. {
-                arthur.challenge_pow::<PowStrategy>(round_params.pow_bits)?;
-            }
-
-            let [combination_randomness_gen] = arthur.challenge_scalars()?;
+            let combination_randomness_gen = transcript.read_challenge().elements;
             let combination_randomness = expand_randomness(
                 combination_randomness_gen,
                 stir_challenges_indexes.len() + round_params.ood_samples,
@@ -214,14 +194,10 @@ where
             let mut sumcheck_rounds =
                 Vec::with_capacity(self.params.folding_factor.at_round(r + 1));
             for _ in 0..self.params.folding_factor.at_round(r + 1) {
-                let sumcheck_poly_evals: [E; 3] = arthur.next_scalars()?;
+                let sumcheck_poly_evals: [E; 3] = transcript.next_scalars()?;
                 let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-                let [folding_randomness_single] = arthur.challenge_scalars()?;
+                let [folding_randomness_single] = transcript.challenge_scalars()?;
                 sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-
-                if round_params.folding_pow_bits > 0. {
-                    arthur.challenge_pow::<PowStrategy>(round_params.folding_pow_bits)?;
-                }
             }
 
             let new_folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
@@ -248,7 +224,7 @@ where
         }
 
         let mut final_coefficients = vec![E::ZERO; 1 << self.params.final_sumcheck_rounds];
-        arthur.fill_next_scalars(&mut final_coefficients)?;
+        transcript.fill_next_scalars(&mut final_coefficients)?;
         let final_coefficients = DenseMultilinearExtension::new(final_coefficients);
 
         // Final queries verify
@@ -256,7 +232,7 @@ where
             domain_size,
             self.params.folding_factor.at_round(self.params.n_rounds()),
             self.params.final_queries,
-            arthur,
+            transcript,
         )?;
         let final_randomness_points = final_randomness_indexes
             .iter()
@@ -277,20 +253,12 @@ where
             return Err(ProofError::InvalidProof);
         }
 
-        if self.params.final_pow_bits > 0. {
-            arthur.challenge_pow::<PowStrategy>(self.params.final_pow_bits)?;
-        }
-
         let mut final_sumcheck_rounds = Vec::with_capacity(self.params.final_sumcheck_rounds);
         for _ in 0..self.params.final_sumcheck_rounds {
-            let sumcheck_poly_evals: [E; 3] = arthur.next_scalars()?;
+            let sumcheck_poly_evals: [E; 3] = transcript.next_scalars()?;
             let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-            let [folding_randomness_single] = arthur.challenge_scalars()?;
+            let [folding_randomness_single] = transcript.challenge_scalars()?;
             final_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-
-            if self.params.final_folding_pow_bits > 0. {
-                arthur.challenge_pow::<PowStrategy>(self.params.final_folding_pow_bits)?;
-            }
         }
         let final_sumcheck_randomness = final_sumcheck_rounds
             .iter()
@@ -315,7 +283,10 @@ where
 
     fn compute_v_poly(
         &self,
-        parsed_commitment: &ParsedCommitment<E, MerkleConfig::InnerDigest>,
+        parsed_commitment: &WhirCommitmentInTranscript<
+            E,
+            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+        >,
         statement: &Statement<E>,
         proof: &ParsedProof<E>,
     ) -> E {
@@ -479,24 +450,17 @@ where
         result
     }
 
-    pub fn verify<Arthur>(
+    pub fn verify<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
+        transcript: &mut T,
         statement: &Statement<E>,
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> ProofResult<MerkleConfig::InnerDigest>
-    where
-        Arthur: FieldChallenges<E>
-            + FieldReader<E>
-            + ByteChallenges
-            + ByteReader
-            + PoWChallenge
-            + MmcsCommitmentReader<MerkleConfig>,
-    {
+    ) -> Result<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment> {
         // We first do a pass in which we rederive all the FS challenges
         // Then we will check the algebraic part (so to optimise inversions)
-        let parsed_commitment = self.parse_commitment(arthur)?;
-        let parsed = self.parse_proof(arthur, &parsed_commitment, statement, whir_proof)?;
+        let parsed_commitment = self.write_commitment_to_transcript(transcript)?;
+        let parsed =
+            self.write_proof_to_transcript(transcript, &parsed_commitment, statement, whir_proof)?;
 
         let computed_folds = self.compute_folds(&parsed);
 

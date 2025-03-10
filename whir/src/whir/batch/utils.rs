@@ -7,7 +7,7 @@ use crate::{
     whir::fs_utils::{MmcsCommitmentReader, MmcsCommitmentWriter},
 };
 use ff_ext::ExtensionField;
-use nimue::{ByteReader, ByteWriter, ProofResult};
+use nimue::{ByteReader, ByteWriter, Result};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -66,7 +66,7 @@ pub fn horizontal_stacking<E: ExtensionField>(
 pub fn generate_random_vector_batch_open<E, Merlin, MerkleConfig>(
     merlin: &mut Merlin,
     size: usize,
-) -> ProofResult<Vec<E>>
+) -> Result<Vec<E>>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
@@ -84,7 +84,7 @@ where
 pub fn generate_random_vector_batch_verify<E, Arthur, MerkleConfig>(
     arthur: &mut Arthur,
     size: usize,
-) -> ProofResult<Vec<E>>
+) -> Result<Vec<E>>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,

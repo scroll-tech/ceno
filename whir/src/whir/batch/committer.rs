@@ -12,9 +12,10 @@ use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue::{
-    ByteWriter, ProofResult,
+    ByteWriter, Result,
     plugins::ark::{FieldChallenges, FieldWriter},
 };
+use p3_matrix::dense::RowMajorMatrix;
 
 use crate::whir::fs_utils::MmcsCommitmentWriter;
 #[cfg(feature = "parallel")]
@@ -33,7 +34,9 @@ where
     pub(crate) ood_answers: Vec<E>,
 }
 
-impl<E, MerkleConfig: Config<E>> From<Witness<E, MerkleConfig>> for Witnesses<E, MerkleConfig> {
+impl<M, E, MerkleConfig: Config<E>> From<Witness<M, E, MerkleConfig>>
+    for Witnesses<E, MerkleConfig>
+{
     fn from(witness: Witness<E, MerkleConfig>) -> Self {
         Self {
             polys: vec![witness.polynomial],
@@ -45,8 +48,8 @@ impl<E, MerkleConfig: Config<E>> From<Witness<E, MerkleConfig>> for Witnesses<E,
     }
 }
 
-impl<E: Clone, MerkleConfig: Config<E>> From<Witnesses<E, MerkleConfig>>
-    for Witness<E, MerkleConfig>
+impl<M, E: Clone, MerkleConfig: Config<E>> From<Witnesses<E, MerkleConfig>>
+    for Witness<M, E, MerkleConfig>
 {
     fn from(witness: Witnesses<E, MerkleConfig>) -> Self {
         Self {
@@ -69,7 +72,7 @@ where
         &self,
         merlin: &mut Merlin,
         polys: &[DenseMultilinearExtension<E::BasePrimeField>],
-    ) -> ProofResult<Witnesses<E, MerkleConfig>>
+    ) -> Result<Witnesses<E, MerkleConfig>>
     where
         Merlin:
             FieldWriter<E> + FieldChallenges<E> + ByteWriter + MmcsCommitmentWriter<MerkleConfig>,

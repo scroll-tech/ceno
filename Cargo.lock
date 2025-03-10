@@ -3091,6 +3091,7 @@ dependencies = [
  "p3-commit",
  "p3-field",
  "p3-goldilocks",
+ "p3-matrix",
  "p3-mds",
  "p3-merkle-tree",
  "p3-symmetric",

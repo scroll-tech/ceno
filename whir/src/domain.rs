@@ -1,5 +1,6 @@
 use ff_ext::ExtensionField;
 use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::PrimeCharacteristicRing;
 
 #[derive(Debug, Clone)]
 pub struct Domain<E>
@@ -17,7 +18,10 @@ where
 {
     pub fn new(degree: usize, log_rho_inv: usize) -> Option<Self> {
         let size = degree * (1 << log_rho_inv);
-        let base_domain = TwoAdicMultiplicativeCoset::new(size)?;
+        let base_domain = TwoAdicMultiplicativeCoset {
+            log_n: p3_util::log2_strict_usize(size) + log_rho_inv,
+            shift: E::BaseField::from_u64(1),
+        };
         let backing_domain = Self::to_extension_domain(&base_domain);
 
         Some(Self {
@@ -30,12 +34,12 @@ where
     //
     // This asserts that the domain size is divisible by 1 << folding_factor
     pub fn folded_size(&self, folding_factor: usize) -> usize {
-        assert!(self.backing_domain.size() % (1 << folding_factor) == 0);
-        self.backing_domain.size() / (1 << folding_factor)
+        assert!(self.backing_domain.log_n >= folding_factor);
+        1 << (self.backing_domain.log_n - folding_factor)
     }
 
     pub fn size(&self) -> usize {
-        self.backing_domain.size()
+        1 << self.backing_domain.log_n
     }
 
     pub fn scale(&self, power: usize) -> Self {
@@ -61,5 +65,9 @@ where
             log_n: self.backing_domain.log_n - p3_util::log2_strict_usize(power),
             shift: self.backing_domain.shift.exp_u64(power as u64),
         }
+    }
+
+    pub fn backing_domain_group_gen(&self) -> E {
+        E::two_adic_generator(self.backing_domain.log_n)
     }
 }

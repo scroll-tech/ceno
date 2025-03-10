@@ -20,7 +20,7 @@ use ff_ext::ExtensionField;
 use itertools::zip_eq;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue::{
-    ByteChallenges, ByteWriter, ProofResult,
+    ByteChallenges, ByteWriter, Result,
     plugins::ark::{FieldChallenges, FieldWriter},
 };
 use nimue_pow::{self, PoWChallenge};
@@ -72,7 +72,7 @@ where
         points: &[Vec<E>],
         evals_per_point: &[Vec<E>], // outer loop on each point, inner loop on each poly
         witness: &Witnesses<E, MerkleConfig>,
-    ) -> ProofResult<WhirProof<MerkleConfig, E>>
+    ) -> Result<WhirProof<MerkleConfig, E>>
     where
         Merlin: FieldChallenges<E>
             + FieldWriter<E>
@@ -203,7 +203,7 @@ where
         merlin: &mut Merlin,
         round_state: RoundStateBatch<E, MerkleConfig>,
         num_polys: usize,
-    ) -> ProofResult<WhirProof<MerkleConfig, E>>
+    ) -> Result<WhirProof<MerkleConfig, E>>
     where
         Merlin: FieldChallenges<E>
             + ByteChallenges
@@ -287,7 +287,7 @@ where
         let folded_evals = restructure_evaluations(
             folded_evals,
             self.0.fold_optimisation,
-            new_domain.backing_domain.group_gen(),
+            new_domain.backing_domain_group_gen(),
             new_domain.backing_domain.group_gen_inv(),
             self.0.folding_factor.at_round(round_state.round + 1),
         );
@@ -464,7 +464,7 @@ where
         point_per_poly: &[Vec<E>],
         eval_per_poly: &[E],
         witness: &Witnesses<E, MerkleConfig>,
-    ) -> ProofResult<WhirProof<MerkleConfig, E>>
+    ) -> Result<WhirProof<MerkleConfig, E>>
     where
         Merlin: FieldChallenges<E>
             + FieldWriter<E>

@@ -112,6 +112,8 @@ pub fn stack_evaluations_bench_allocate<F: Field>(
 
 #[cfg(test)]
 mod tests {
+    use p3_field::PrimeCharacteristicRing;
+
     use crate::utils::base_decomposition;
 
     use super::{is_power_of_two, stack_evaluations, to_binary};
@@ -124,7 +126,7 @@ mod tests {
         let folding_factor = 3;
         let fold_size = 1 << folding_factor;
         assert_eq!(num % fold_size, 0);
-        let evals: Vec<_> = (0..num as u64).map(F::from).collect();
+        let evals: Vec<F> = (0..num as u64).map(F::from_u64).collect();
 
         let stacked = stack_evaluations(evals, folding_factor);
         assert_eq!(stacked.len(), num);
@@ -132,7 +134,7 @@ mod tests {
         for (i, fold) in stacked.chunks_exact(fold_size).enumerate() {
             assert_eq!(fold.len(), fold_size);
             for (j, item) in fold.iter().copied().enumerate().take(fold_size) {
-                assert_eq!(item, F::from((i + j * num / fold_size) as u64));
+                assert_eq!(item, F::from_u64((i + j * num / fold_size) as u64));
             }
         }
     }

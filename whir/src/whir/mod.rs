@@ -1,6 +1,6 @@
 use crate::crypto::{MerkleConfig as Config, MultiPath};
 use ff_ext::ExtensionField;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod batch;
 pub mod committer;
@@ -18,10 +18,14 @@ pub struct Statement<E> {
 
 // Only includes the authentication paths
 #[derive(Clone, Serialize, Deserialize)]
-pub struct WhirProof<MerkleConfig, E>(pub(crate) Vec<(MultiPath<E, MerkleConfig>, Vec<Vec<E>>)>)
+pub struct WhirProof<MerkleConfig, E>
 where
     MerkleConfig: Config<E>,
-    E: ExtensionField;
+    E: ExtensionField + Serialize + DeserializeOwned,
+{
+    pub(crate) merkle_answers: Vec<(MultiPath<E, MerkleConfig>, Vec<Vec<E>>)>,
+    pub(crate) sumcheck_poly_evals: Vec<[E; 3]>,
+}
 
 #[cfg(test)]
 mod tests {
@@ -32,6 +36,7 @@ mod tests {
     use rand::rngs::OsRng;
 
     use crate::{
+        crypto::MerkleDefaultConfig,
         parameters::{
             FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
         },
@@ -41,7 +46,7 @@ mod tests {
         },
     };
 
-    type MerkleConfig = merkle_tree::MerkleTreeParams<E>;
+    type MerkleConfig = MerkleDefaultConfig<E>;
     type PowStrategy = Blake3PoW;
     type E = Goldilocks;
 
@@ -56,7 +61,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = merkle_tree::default_config::<E>(&mut rng);
+        let hash_params = MerkleDefaultConfig::new();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
@@ -124,7 +129,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = merkle_tree::default_config::<E>(&mut rng);
+        let hash_params = MerkleDefaultConfig::new();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
@@ -204,7 +209,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = merkle_tree::default_config::<E>(&mut rng);
+        let hash_params = MerkleDefaultConfig::new();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 

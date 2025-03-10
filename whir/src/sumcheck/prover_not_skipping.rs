@@ -1,6 +1,6 @@
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue::{
-    ProofResult,
+    Result,
     plugins::ark::{FieldChallenges, FieldIOPattern, FieldWriter},
 };
 use nimue_pow::{PoWChallenge, PowStrategy};
@@ -44,7 +44,7 @@ where
         merlin: &mut Merlin,
         folding_factor: usize,
         pow_bits: f64,
-    ) -> ProofResult<Vec<F>>
+    ) -> Result<Vec<F>>
     where
         S: PowStrategy,
         Merlin: FieldChallenges<F> + FieldWriter<F> + PoWChallenge,
@@ -86,7 +86,7 @@ mod tests {
     use goldilocks::Goldilocks;
     use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
     use nimue::{
-        Merlin, ProofResult,
+        Merlin, Result,
         plugins::ark::{FieldChallenges, FieldIOPattern, FieldReader},
     };
     use nimue_pow::blake3::Blake3PoW;
@@ -99,7 +99,7 @@ mod tests {
     type F = Goldilocks;
 
     #[test]
-    fn test_e2e_short() -> ProofResult<()> {
+    fn test_e2e_short() -> Result<()> {
         let num_variables = 2;
         let folding_factor = 2;
         let polynomial =
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn test_e2e() -> ProofResult<()> {
+    fn test_e2e() -> Result<()> {
         let num_variables = 4;
         let folding_factor = 2;
         let polynomial =

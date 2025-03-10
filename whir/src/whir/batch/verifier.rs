@@ -7,14 +7,14 @@ use crate::{
     whir::{
         Statement, WhirProof,
         fs_utils::{MmcsCommitmentReader, get_challenge_stir_queries},
-        verifier::{ParsedCommitment, ParsedProof, ParsedRound, Verifier},
+        verifier::{ParsedProof, ParsedRound, Verifier, WhirCommitmentInTranscript},
     },
 };
 use ff_ext::ExtensionField;
 use itertools::zip_eq;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
 use nimue::{
-    ByteChallenges, ByteReader, ProofError, ProofResult,
+    ByteChallenges, ByteReader, ProofError, Result,
     plugins::ark::{FieldChallenges, FieldReader},
 };
 use nimue_pow::{self, PoWChallenge};
@@ -34,7 +34,7 @@ where
         points: &[Vec<E>],
         evals_per_point: &[Vec<E>],
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> ProofResult<MerkleConfig::InnerDigest>
+    ) -> Result<MerkleConfig::InnerDigest>
     where
         Arthur: FieldChallenges<E>
             + FieldReader<E>
@@ -68,7 +68,7 @@ where
         point_per_poly: &[Vec<E>],
         eval_per_poly: &[E], // evaluations of the polys on individual points
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> ProofResult<MerkleConfig::InnerDigest>
+    ) -> Result<MerkleConfig::InnerDigest>
     where
         Arthur: FieldChallenges<E>
             + FieldReader<E>
@@ -106,9 +106,9 @@ where
         num_polys: usize,
         points: &[Vec<E>],
         evals_per_point: &[Vec<E>],
-        parsed_commitment: ParsedCommitment<E, MerkleConfig::InnerDigest>,
+        parsed_commitment: WhirCommitmentInTranscript<E, MerkleConfig::InnerDigest>,
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> ProofResult<MerkleConfig::InnerDigest>
+    ) -> Result<MerkleConfig::InnerDigest>
     where
         Arthur: FieldChallenges<E>
             + FieldReader<E>
@@ -289,7 +289,7 @@ where
         &self,
         arthur: &mut Arthur,
         num_polys: usize,
-    ) -> ProofResult<ParsedCommitment<E, MerkleConfig::InnerDigest>>
+    ) -> Result<WhirCommitmentInTranscript<E, MerkleConfig::InnerDigest>>
     where
         Arthur:
             ByteReader + FieldReader<E> + FieldChallenges<E> + MmcsCommitmentReader<MerkleConfig>,
@@ -303,7 +303,7 @@ where
             arthur.fill_next_scalars(&mut ood_answers)?;
         }
 
-        Ok(ParsedCommitment {
+        Ok(WhirCommitmentInTranscript {
             root,
             ood_points,
             ood_answers,
@@ -315,7 +315,7 @@ where
         arthur: &mut Arthur,
         point_per_poly: &[Vec<E>],
         poly_comb_randomness: Vec<E>,
-    ) -> ProofResult<(Vec<E>, Vec<E>)>
+    ) -> Result<(Vec<E>, Vec<E>)>
     where
         Arthur: FieldReader<E>
             + FieldChallenges<E>
@@ -382,12 +382,12 @@ where
     fn parse_proof_batch<Arthur>(
         &self,
         arthur: &mut Arthur,
-        parsed_commitment: &ParsedCommitment<E, MerkleConfig::InnerDigest>,
+        parsed_commitment: &WhirCommitmentInTranscript<E, MerkleConfig::InnerDigest>,
         statement: &Statement<E>, // Will be needed later
         whir_proof: &WhirProof<MerkleConfig, E>,
         batched_randomness: Vec<E>,
         num_polys: usize,
-    ) -> ProofResult<ParsedProof<E>>
+    ) -> Result<ParsedProof<E>>
     where
         Arthur: FieldReader<E>
             + FieldChallenges<E>
@@ -439,7 +439,7 @@ where
         };
 
         let mut prev_root = parsed_commitment.root.clone();
-        let domain_gen = self.params.starting_domain.backing_domain.group_gen();
+        let domain_gen = self.params.starting_domain.backing_domain_group_gen();
         // Precompute the powers of the domain generator, so that
         // we can always compute domain_gen.pow(1 << i) by domain_gen_powers[i]
         let domain_gen_powers = std::iter::successors(Some(domain_gen), |&curr| Some(curr * curr))

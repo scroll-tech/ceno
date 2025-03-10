@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub struct WhirConfig<E, MerkleConfig, PowStrategy>
+pub struct WhirConfig<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
@@ -44,9 +44,6 @@ where
     pub(crate) final_sumcheck_rounds: usize,
     pub(crate) final_folding_pow_bits: f64,
 
-    // PoW parameters
-    pub(crate) pow_strategy: PhantomData<PowStrategy>,
-
     // Merkle tree parameters
     #[debug(skip)]
     pub(crate) hash_params: MerkleConfig::Mmcs,
@@ -61,14 +58,14 @@ pub(crate) struct RoundConfig {
     pub(crate) log_inv_rate: usize,
 }
 
-impl<E, MerkleConfig, PowStrategy> WhirConfig<E, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig> WhirConfig<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
 {
     pub fn new(
         mut mv_parameters: MultivariateParameters<E>,
-        whir_parameters: WhirParameters<MerkleConfig, PowStrategy>,
+        whir_parameters: WhirParameters<E, MerkleConfig>,
     ) -> Self {
         // Pad the number of variables to folding factor
         if mv_parameters.num_variables < whir_parameters.folding_factor.at_round(0) {

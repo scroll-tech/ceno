@@ -13,7 +13,7 @@ use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue::{
-    ByteWriter, ProofResult,
+    ByteWriter, Result,
     plugins::ark::{FieldChallenges, FieldWriter},
 };
 
@@ -21,7 +21,7 @@ use nimue::{
 use rayon::prelude::*;
 
 #[derive(Clone, Debug)]
-pub struct Witness<E: ExtensionField, MerkleConfig>
+pub struct Witness<M, E: ExtensionField, MerkleConfig>
 where
     MerkleConfig: Config<E>,
 {
@@ -53,7 +53,7 @@ where
         &self,
         merlin: &mut Merlin,
         mut polynomial: DenseMultilinearExtension<E::BasePrimeField>,
-    ) -> ProofResult<Witness<E, MerkleConfig>>
+    ) -> Result<Witness<E, MerkleConfig>>
     where
         Merlin:
             FieldWriter<E> + FieldChallenges<E> + ByteWriter + MmcsCommitmentWriter<MerkleConfig>,
