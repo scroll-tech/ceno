@@ -58,7 +58,7 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         unimplemented!()
     }
 
-    fn get_and_append_challenge(&mut self, _label: &'static [u8]) -> Challenge<E> {
+    fn sample_and_append_challenge(&mut self, _label: &'static [u8]) -> Challenge<E> {
         Challenge {
             elements: self.challenge_rx[self.rolling_index].recv().unwrap(),
         }
@@ -117,12 +117,21 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
     }
 
     #[cfg(feature = "ro_query_stats")]
-    fn get_and_append_challenge_tracking(
+    fn sample_and_append_challenge_tracking(
         &mut self,
         label: &'static [u8],
         source: &'static str,
     ) -> Challenge<E> {
         self.append_message(label);
         self.read_challenge_tracking(source)
+    }
+
+    fn sample_vec(&mut self, _n: usize) -> Vec<E> {
+        unimplemented!()
+    }
+
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_vec_tracking(&mut self, _: usize, _: &'static str) -> std::vec::Vec<E> {
+        unimplemented!()
     }
 }

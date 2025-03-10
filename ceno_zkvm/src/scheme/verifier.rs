@@ -910,20 +910,9 @@ impl TowerVerify {
         );
         cfg_if::cfg_if! {
             if #[cfg(feature = "ro_query_stats")] {
-                let initial_rt = (0..log2_num_fanin)
-                    .map(|_| {
-                        transcript
-                            .get_and_append_challenge_tracking(
-                                b"product_sum",
-                                "tower_prover initial_rt",
-                            )
-                            .elements
-                    })
-                    .collect_vec();
+                let initial_rt: Point<E> = transcript.sample_and_append_vec_tracking(b"product_sum", log2_num_fanin, "tower_prover initial_rt");
             } else {
-                let initial_rt = (0..log2_num_fanin)
-                    .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
-                    .collect_vec();
+                let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
             }
         };
         // initial_claim = \sum_j alpha^j * out_j[rt]
@@ -1029,9 +1018,7 @@ impl TowerVerify {
                 // derive single eval
                 // rt' = r_merge || rt
                 // r_merge.len() == ceil_log2(num_product_fanin)
-                let r_merge = (0..log2_num_fanin)
-                    .map(|_| transcript.get_and_append_challenge(b"merge").elements)
-                    .collect_vec();
+                let r_merge =transcript.sample_and_append_vec(b"merge", log2_num_fanin);
                 let coeffs = build_eq_x_r_vec_sequential(&r_merge);
                 assert_eq!(coeffs.len(), num_fanin);
                 let rt_prime = [rt, r_merge].concat();

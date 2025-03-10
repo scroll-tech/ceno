@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 crossbeam-channel.workspace = true
 ff_ext = { path = "../ff_ext" }
+itertools.workspace = true
 p3-challenger.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true

@@ -61,6 +61,15 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
         self.inner.commit_rolling()
     }
 
+    fn sample_vec(&mut self, n: usize) -> Vec<E> {
+        self.inner.sample_vec(n)
+    }
+
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_vec_tracking(&mut self, n: usize, source: &'static str) -> std::vec::Vec<E> {
+        self.inner.sample_vec_tracking(n, source)
+    }
+
     fn get_inner_challenger(
         &self,
     ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {

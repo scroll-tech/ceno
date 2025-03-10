@@ -1,9 +1,9 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use poseidon::challenger::DefaultChallenger;
+use p3_challenger::{CanObserve, FieldChallenger};
+use poseidon::challenger::{DefaultChallenger, FieldChallengerExt};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
-use p3_challenger::{CanObserve, FieldChallenger};
 
 #[derive(Clone)]
 pub struct BasicTranscript<E: ExtensionField> {
@@ -63,6 +63,15 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
         &self,
     ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {
         &self.challenger
+    }
+
+    fn sample_vec(&mut self, n: usize) -> Vec<E> {
+        self.challenger.sample_ext_vec(n)
+    }
+
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_vec_tracking(&mut self, n: usize, source: &'static str) -> Vec<E> {
+        self.challenger.sample_ext_vec_tracking(n, source)
     }
 }
 

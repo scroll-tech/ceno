@@ -65,14 +65,11 @@ pub fn get_challenge_pows<E: ExtensionField>(
     cfg_if::cfg_if! {
         if #[cfg(feature = "ro_query_stats")] {
             let alpha = transcript
-                .get_and_append_challenge_tracking(
-                    b"combine subset evals",
-                    "get_challenge_pows combine subset evals",
-                )
+                .sample_and_append_challenge_tracking(b"combine subset evals", "get_challenge_pows combine subset evals")
                 .elements;
         } else {
             let alpha = transcript
-                .get_and_append_challenge(b"combine subset evals")
+                .sample_and_append_challenge(b"combine subset evals")
                 .elements;
         }
     }

@@ -94,9 +94,9 @@ impl<E: ExtensionField> IOPVerifierState<E> {
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "ro_query_stats")] {
-                let challenge = transcript.get_and_append_challenge_tracking(b"Internal round", source);
+                let challenge = transcript.sample_and_append_challenge_tracking(b"Internal round", source);
             } else {
-                let challenge = transcript.get_and_append_challenge(b"Internal round");
+                let challenge = transcript.sample_and_append_challenge(b"Internal round");
             }
         };
         self.challenges.push(challenge);
