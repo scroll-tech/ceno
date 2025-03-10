@@ -33,13 +33,7 @@ pub fn prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries: Vec<_> = (0..num_verifier_queries)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"query indices")
-                .elements
-        })
-        .collect();
+    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -69,13 +63,7 @@ pub fn simple_batch_prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries: Vec<_> = (0..num_verifier_queries)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"query indices")
-                .elements
-        })
-        .collect();
+    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries

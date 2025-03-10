@@ -2975,6 +2975,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "ff_ext",
+ "itertools 0.13.0",
  "p3-field",
  "p3-goldilocks",
  "p3-mds",
