@@ -27,6 +27,7 @@ num-bigint = "0.4"
 num-integer = "0.1"
 p3-field.workspace = true
 p3-goldilocks.workspace = true
+p3-matrix.workspace = true
 p3-mds.workspace = true
 p3-symmetric.workspace = true
 plonky2.workspace = true
@@ -37,6 +38,7 @@ rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
 whir = { path = "../whir", features = ["ceno"] }
+witness = { path = "../witness" }
 zeroize = "1.8"
 
 [dev-dependencies]

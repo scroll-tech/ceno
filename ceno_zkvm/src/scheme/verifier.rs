@@ -12,6 +12,7 @@ use multilinear_extensions::{
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::{ForkableTranscript, Transcript};
+use witness::next_pow2_instance_padding;
 
 use crate::{
     error::ZKVMError,
@@ -21,10 +22,7 @@ use crate::{
         utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{
-        eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows,
-        next_pow2_instance_padding,
-    },
+    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
 };
 
 use super::{
