@@ -58,7 +58,7 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         unimplemented!()
     }
 
-    fn get_and_append_challenge(&mut self, _label: &'static [u8]) -> Challenge<E> {
+    fn sample_and_append_challenge(&mut self, _label: &'static [u8]) -> Challenge<E> {
         Challenge {
             elements: self.challenge_rx[self.rolling_index].recv().unwrap(),
         }
@@ -84,5 +84,9 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
 
     fn commit_rolling(&mut self) {
         self.rolling_index = (self.rolling_index + 1) % 2
+    }
+
+    fn sample_vec(&mut self, _n: usize) -> Vec<E> {
+        unimplemented!()
     }
 }

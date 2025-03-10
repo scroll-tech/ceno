@@ -93,7 +93,7 @@ where
         transcript.append_field_element_exts(&last_sumcheck_message);
         sumcheck_messages.push(last_sumcheck_message);
 
-        let challenge = transcript.get_and_append_challenge(b"commit round");
+        let challenge = transcript.sample_and_append_challenge(b"commit round");
 
         // Fold the current oracle for FRI
         let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
@@ -252,7 +252,7 @@ where
         sumcheck_messages.push(last_sumcheck_message);
 
         let challenge = transcript
-            .get_and_append_challenge(b"commit round")
+            .sample_and_append_challenge(b"commit round")
             .elements;
 
         // Fold the current oracle for FRI

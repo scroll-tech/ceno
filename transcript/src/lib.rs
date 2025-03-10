@@ -8,6 +8,7 @@ mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
 use ff_ext::SmallField;
+use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
 pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
@@ -71,9 +72,28 @@ pub trait Transcript<E: ExtensionField> {
     ///
     /// The output field element is statistical uniform as long
     /// as the field has a size less than 2^384.
-    fn get_and_append_challenge(&mut self, label: &'static [u8]) -> Challenge<E> {
+    fn sample_and_append_challenge(&mut self, label: &'static [u8]) -> Challenge<E> {
         self.append_message(label);
         self.read_challenge()
+    }
+
+    fn sample_and_append_vec(&mut self, label: &'static [u8], n: usize) -> Vec<E> {
+        self.append_message(label);
+        self.sample_vec(n)
+    }
+
+    fn sample_vec(&mut self, n: usize) -> Vec<E>;
+
+    /// derive one challenge from transcript and return all pows result
+    fn sample_and_append_challenge_pows(&mut self, size: usize, label: &'static [u8]) -> Vec<E> {
+        let alpha = self.sample_and_append_challenge(label).elements;
+        (0..size)
+            .scan(E::ONE, |state, _| {
+                let res = *state;
+                *state *= alpha;
+                Some(res)
+            })
+            .collect_vec()
     }
 
     fn read_field_element_ext(&self) -> E {

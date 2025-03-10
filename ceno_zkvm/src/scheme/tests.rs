@@ -288,8 +288,7 @@ fn test_single_add_instance_e2e() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let encoded_bin = bincode::serialize(&zkvm_proof).unwrap();
-
+    println!("encoded zkvm proof {}", &zkvm_proof,);
     let stat_recorder = StatisticRecorder::default();
     {
         let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
@@ -300,8 +299,7 @@ fn test_single_add_instance_e2e() {
         );
     }
     println!(
-        "encoded zkvm proof size: {}, hash_num: {}",
-        encoded_bin.len(),
+        "hash_num: {}",
         stat_recorder.into_inner().field_appended_num
     );
 }
