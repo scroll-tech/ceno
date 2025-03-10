@@ -11,6 +11,7 @@ version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
+cfg-if.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 p3-field.workspace = true
@@ -28,6 +29,10 @@ criterion.workspace = true
 p3-goldilocks.workspace = true
 p3-mds.workspace = true
 poseidon.workspace = true
+
+[features]
+default = []
+ro_query_stats = ["transcript/ro_query_stats"]
 
 [[bench]]
 harness = false

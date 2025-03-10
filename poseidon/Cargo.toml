@@ -10,6 +10,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+cfg-if.workspace = true
 criterion.workspace = true
 ff_ext = { path = "../ff_ext" }
 p3-challenger.workspace = true
@@ -29,3 +30,7 @@ rand.workspace = true
 [[bench]]
 harness = false
 name = "hashing"
+
+[features]
+default = []
+ro_query_stats = []

@@ -62,10 +62,18 @@ pub fn get_challenge_pows<E: ExtensionField>(
     size: usize,
     transcript: &mut impl Transcript<E>,
 ) -> Vec<E> {
-    // println!("alpha_pow");
-    let alpha = transcript
-        .sample_and_append_challenge(b"combine subset evals")
-        .elements;
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "ro_query_stats")] {
+            let alpha = transcript
+                .sample_and_append_challenge_tracking(b"combine subset evals", "get_challenge_pows combine subset evals")
+                .elements;
+        } else {
+            let alpha = transcript
+                .sample_and_append_challenge(b"combine subset evals")
+                .elements;
+        }
+    }
+
     (0..size)
         .scan(E::ONE, |state, _| {
             let res = *state;
@@ -180,11 +188,6 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
                 .collect::<Vec<T>>()
         })
         .collect()
-}
-
-/// get next power of 2 instance with minimal size 2
-pub fn next_pow2_instance_padding(num_instance: usize) -> usize {
-    num_instance.next_power_of_two().max(2)
 }
 
 pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {

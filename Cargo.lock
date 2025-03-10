@@ -585,6 +585,7 @@ dependencies = [
  "num-traits",
  "p3-field",
  "p3-goldilocks",
+ "p3-matrix",
  "p3-mds",
  "parse-size",
  "paste",
@@ -607,6 +608,7 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber 0.3.19",
  "transcript",
+ "witness",
 ]
 
 [[package]]
@@ -1520,6 +1522,7 @@ dependencies = [
  "ark-std",
  "bincode",
  "bitvec",
+ "cfg-if",
  "criterion",
  "ctr",
  "ff_ext",
@@ -1530,6 +1533,7 @@ dependencies = [
  "num-integer",
  "p3-field",
  "p3-goldilocks",
+ "p3-matrix",
  "p3-mds",
  "p3-symmetric",
  "plonky2",
@@ -1540,6 +1544,7 @@ dependencies = [
  "serde",
  "transcript",
  "whir",
+ "witness",
  "zeroize",
 ]
 
@@ -2067,6 +2072,7 @@ name = "poseidon"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "cfg-if",
  "criterion",
  "ff_ext",
  "p3-challenger",
@@ -2672,6 +2678,7 @@ name = "sumcheck"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "cfg-if",
  "criterion",
  "crossbeam-channel",
  "ff_ext",
@@ -2969,6 +2976,7 @@ dependencies = [
  "crossbeam-channel",
  "ff_ext",
  "itertools 0.13.0",
+ "p3-challenger",
  "p3-field",
  "p3-goldilocks",
  "p3-mds",
@@ -3325,6 +3333,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3268f3d866458b787f390cf61f4bbb563b922d091359f9608842999eaee3943c"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "witness"
+version = "0.1.0"
+dependencies = [
+ "ff_ext",
+ "multilinear_extensions",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-matrix",
+ "rand",
+ "rayon",
+ "serde",
 ]
 
 [[package]]

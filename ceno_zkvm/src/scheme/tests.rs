@@ -29,7 +29,7 @@ use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
 use p3_field::PrimeCharacteristicRing;
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
+use transcript::{BasicTranscript, Transcript};
 
 use super::{
     PublicValues,
@@ -124,14 +124,10 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZKVMProver::new(pk);
         let mut transcript = BasicTranscript::new(b"test");
-        let wits_in = zkvm_witness
-            .into_iter_sorted()
-            .next()
-            .unwrap()
-            .1
-            .into_mles();
+        let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
+        let wits_in = rmm.to_mles();
         // commit to main traces
-        let commit = Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript).unwrap();
+        let commit = Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript).unwrap();
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
         let prover_challenges = [
             transcript.read_challenge().elements,
@@ -153,9 +149,8 @@ fn test_rw_lk_expression_combination() {
             .expect("create_proof failed");
 
         // verify proof
-        let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
+        let mut v_transcript = BasicTranscript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -177,10 +172,6 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
-        println!(
-            "hashed fields {}",
-            stat_recorder.into_inner().field_appended_num
-        );
     }
 
     // <lookup count, rw count>
@@ -292,19 +283,11 @@ fn test_single_add_instance_e2e() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    println!("encoded zkvm proof {}", &zkvm_proof,);
-    let stat_recorder = StatisticRecorder::default();
-    {
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
-        assert!(
-            verifier
-                .verify_proof(zkvm_proof, transcript)
-                .expect("verify proof return with error"),
-        );
-    }
-    println!(
-        "hash_num: {}",
-        stat_recorder.into_inner().field_appended_num
+    let transcript = BasicTranscript::new(b"riscv");
+    assert!(
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect("verify proof return with error"),
     );
 }
 

@@ -12,20 +12,17 @@ use multilinear_extensions::{
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::{ForkableTranscript, Transcript};
+use witness::next_pow2_instance_padding;
 
 use crate::{
     error::ZKVMError,
     expression::{Instance, StructuralWitIn},
-    instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{
-        eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows,
-        next_pow2_instance_padding,
-    },
+    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
 };
 
 use super::{
@@ -56,18 +53,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
-        does_halt: bool,
+        expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
-        let num_instances = vm_proof
-            .opcode_proofs
-            .get(&HaltInstruction::<E>::name())
-            .map(|(_, p)| p.num_instances)
-            .unwrap_or(0);
-        if num_instances != (does_halt as usize) {
+        let has_halt = vm_proof.has_halt();
+        if has_halt != expect_halt {
             return Err(ZKVMError::VerifyError(format!(
-                "ecall/halt num_instances={}, expected={}",
-                num_instances, does_halt as usize
+                "ecall/halt mismatch: expected {expect_halt} != {has_halt}",
             )));
         }
 
@@ -127,10 +119,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // alpha, beta
-        let challenges = [
-            transcript.read_challenge().elements,
-            transcript.read_challenge().elements,
-        ];
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                let challenges = [
+                    transcript
+                        .read_challenge_tracking("lookup challenge alpha")
+                        .elements,
+                    transcript
+                        .read_challenge_tracking("lookup challenge beta")
+                        .elements,
+                ];
+            } else {
+                let challenges = [
+                    transcript.read_challenge().elements,
+                    transcript.read_challenge().elements,
+                ];
+            }
+        }
         tracing::debug!("challenges in verifier: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
@@ -258,6 +263,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
         }
 
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                use std::collections::HashMap;
+                let agg_sample_tracking_map = transcripts
+                    .iter()
+                    .map(|t| &t.get_inner_challenger().sample_tracking_map)
+                    .flat_map(|map| map.iter()) // Flatten all key-value pairs
+                    .fold(HashMap::new(), |mut acc, (key, value)| {
+                        *acc.entry(key).or_insert(0) += value; // Group by key & sum values
+                        acc
+                    });
+
+                // total count
+                let total_count: usize = agg_sample_tracking_map.values().copied().sum();
+
+                println!();
+                // Write the overall count
+                println!("overall sample count: {}", total_count);
+
+                // Write the percentages for each entry
+                for (key, count) in &agg_sample_tracking_map {
+                    let percentage = (*count as f64 / total_count as f64) * 100.0;
+                    println!("{} percentage: {:.2}%", key, percentage);
+                }
+                println!();
+            }
+        }
+
         Ok(true)
     }
 
@@ -363,6 +396,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 phantom: PhantomData,
             },
             transcript,
+            #[cfg(feature = "ro_query_stats")]
+            "opcode_proof main_sumcheck",
         );
         let (input_opening_point, expected_evaluation) = (
             main_sel_subclaim
@@ -665,6 +700,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     phantom: PhantomData,
                 },
                 transcript,
+                #[cfg(feature = "ro_query_stats")]
+                "table proof same_r_sumcheck",
             );
             let (input_opening_point, expected_evaluation) = (
                 sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
@@ -869,7 +906,13 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
-        let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                let initial_rt: Point<E> = transcript.sample_and_append_vec_tracking(b"product_sum", log2_num_fanin, "tower_prover initial_rt");
+            } else {
+                let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
+            }
+        };
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
@@ -934,6 +977,7 @@ impl TowerVerify {
                         phantom: PhantomData,
                     },
                     transcript,
+                    #[cfg(feature = "ro_query_stats")] "tower_verifier"
                 );
 
                 // check expected_evaluation

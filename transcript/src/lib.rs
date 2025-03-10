@@ -7,9 +7,10 @@ pub mod basic;
 mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
-use ff_ext::SmallField;
+use ff_ext::{PoseidonField, SmallField};
 use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
+use poseidon::challenger::DefaultChallenger;
 pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
@@ -77,16 +78,60 @@ pub trait Transcript<E: ExtensionField> {
         self.read_challenge()
     }
 
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_and_append_challenge_tracking(
+        &mut self,
+        label: &'static [u8],
+        source: &'static str,
+    ) -> Challenge<E> {
+        self.append_message(label);
+        self.read_challenge_tracking(source)
+    }
+
     fn sample_and_append_vec(&mut self, label: &'static [u8], n: usize) -> Vec<E> {
         self.append_message(label);
         self.sample_vec(n)
     }
 
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_and_append_vec_tracking(
+        &mut self,
+        label: &'static [u8],
+        n: usize,
+        source: &'static str,
+    ) -> Vec<E> {
+        self.append_message(label);
+        self.sample_vec_tracking(n, source)
+    }
+
     fn sample_vec(&mut self, n: usize) -> Vec<E>;
+
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_vec_tracking(&mut self, n: usize, source: &'static str) -> Vec<E>;
 
     /// derive one challenge from transcript and return all pows result
     fn sample_and_append_challenge_pows(&mut self, size: usize, label: &'static [u8]) -> Vec<E> {
         let alpha = self.sample_and_append_challenge(label).elements;
+        (0..size)
+            .scan(E::ONE, |state, _| {
+                let res = *state;
+                *state *= alpha;
+                Some(res)
+            })
+            .collect_vec()
+    }
+
+    /// derive one challenge from transcript and return all pows result
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_and_append_challenge_pows_tracking(
+        &mut self,
+        size: usize,
+        label: &'static [u8],
+        source: &'static str,
+    ) -> Vec<E> {
+        let alpha = self
+            .sample_and_append_challenge_tracking(label, source)
+            .elements;
         (0..size)
             .scan(E::ONE, |state, _| {
                 let res = *state;
@@ -106,9 +151,16 @@ pub trait Transcript<E: ExtensionField> {
 
     fn read_challenge(&mut self) -> Challenge<E>;
 
+    #[cfg(feature = "ro_query_stats")]
+    fn read_challenge_tracking(&mut self, source: &'static str) -> Challenge<E>;
+
     fn send_challenge(&self, challenge: E);
 
     fn commit_rolling(&mut self);
+
+    fn get_inner_challenger(
+        &self,
+    ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>;
 }
 
 /// Forkable Transcript trait, enable fork method

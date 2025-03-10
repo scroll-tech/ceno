@@ -354,8 +354,9 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        rmm: witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
+        let polys = rmm.to_mles();
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
@@ -1046,19 +1047,32 @@ where
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
 
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
-        let batch_coeffs =
-            transcript.sample_and_append_challenge_pows(evals.len(), b"batch coeffs");
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "ro_query_stats")] {
+                let batch_coeffs= transcript.sample_and_append_challenge_pows_tracking(evals.len(), b"batch coeffs", "mpcs opening batch");
+            } else {
+                let batch_coeffs = transcript.sample_and_append_challenge_pows(evals.len(), b"batch coeffs");
+            }
+        }
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
         let roots = &proof.roots;
         let sumcheck_messages = &proof.sumcheck_messages;
         for i in 0..num_rounds {
             transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
-            fold_challenges.push(
-                transcript
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "ro_query_stats")] {
+                    let challenge = transcript
+                        .sample_and_append_challenge_tracking(b"commit round", "mpcs sumcheck folding round",)
+                        .elements;
+
+                } else {
+                    let challenge = transcript
                     .sample_and_append_challenge(b"commit round")
-                    .elements,
-            );
+                    .elements;
+                }
+            };
+            fold_challenges.push(challenge);
             if i < num_rounds - 1 {
                 write_digest_to_transcript(&roots[i], transcript);
             }
@@ -1066,8 +1080,14 @@ where
         let final_message = &proof.final_message;
         transcript.append_field_element_exts(final_message.as_slice());
 
-        let queries: Vec<_> = transcript
-            .sample_and_append_vec(b"query indices", Spec::get_number_queries())
+        cfg_if::cfg_if! {if #[cfg(feature = "ro_query_stats")] {
+            let queries = transcript
+                .sample_and_append_vec_tracking(b"query indices", Spec::get_number_queries(), "mpcs query indices");
+        } else {
+            let queries =  transcript
+                .sample_and_append_vec(b"query indices", Spec::get_number_queries());
+        }};
+        let queries: Vec<_> = queries
             .into_iter()
             .map(|r| ext_to_usize(&r) % (1 << (num_vars + Spec::get_rate_log())))
             .collect();

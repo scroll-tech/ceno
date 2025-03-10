@@ -1,9 +1,9 @@
 use std::array;
 
-use crossbeam_channel::{Receiver, Sender, bounded};
-use ff_ext::ExtensionField;
-
 use crate::{Challenge, Transcript};
+use crossbeam_channel::{Receiver, Sender, bounded};
+use ff_ext::{ExtensionField, PoseidonField, SmallField};
+use poseidon::challenger::DefaultChallenger;
 
 #[derive(Clone)]
 pub struct TranscriptSyncronized<E: ExtensionField> {
@@ -76,6 +76,11 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         unimplemented!()
     }
 
+    #[cfg(feature = "ro_query_stats")]
+    fn read_challenge_tracking(&mut self, _source: &'static str) -> Challenge<E> {
+        unimplemented!()
+    }
+
     fn send_challenge(&self, challenge: E) {
         self.challenge_tx[self.rolling_index]
             .send(challenge)
@@ -86,7 +91,47 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
         self.rolling_index = (self.rolling_index + 1) % 2
     }
 
+    fn get_inner_challenger(
+        &self,
+    ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {
+        unimplemented!()
+    }
+
+    fn append_field_elements(&mut self, elements: &[<E as ExtensionField>::BaseField]) {
+        for e in elements {
+            self.append_field_element(e);
+        }
+    }
+
+    fn append_message(&mut self, msg: &[u8]) {
+        let msg_f = <E as ExtensionField>::BaseField::bytes_to_field_elements(msg);
+        self.append_field_elements(&msg_f);
+    }
+
+    fn append_field_element_ext(&mut self, element: &E) {
+        self.append_field_element_exts(&[*element])
+    }
+
+    fn read_field_element_ext(&self) -> E {
+        self.read_field_element_exts()[0]
+    }
+
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_and_append_challenge_tracking(
+        &mut self,
+        label: &'static [u8],
+        source: &'static str,
+    ) -> Challenge<E> {
+        self.append_message(label);
+        self.read_challenge_tracking(source)
+    }
+
     fn sample_vec(&mut self, _n: usize) -> Vec<E> {
+        unimplemented!()
+    }
+
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_vec_tracking(&mut self, _: usize, _: &'static str) -> std::vec::Vec<E> {
         unimplemented!()
     }
 }

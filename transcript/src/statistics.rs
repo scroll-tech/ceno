@@ -1,5 +1,6 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
+use poseidon::challenger::DefaultChallenger;
 use std::cell::RefCell;
 
 #[derive(Debug, Default)]
@@ -30,6 +31,11 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
         self.inner.append_field_elements(elements)
     }
 
+    #[cfg(feature = "ro_query_stats")]
+    fn read_challenge_tracking(&mut self, source: &'static str) -> Challenge<E> {
+        self.inner.read_challenge_tracking(source)
+    }
+
     fn append_field_element_ext(&mut self, element: &E) {
         self.stat.borrow_mut().field_appended_num += E::DEGREE as u32;
         self.inner.append_field_element_ext(element)
@@ -57,6 +63,17 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
 
     fn sample_vec(&mut self, n: usize) -> Vec<E> {
         self.inner.sample_vec(n)
+    }
+
+    #[cfg(feature = "ro_query_stats")]
+    fn sample_vec_tracking(&mut self, n: usize, source: &'static str) -> std::vec::Vec<E> {
+        self.inner.sample_vec_tracking(n, source)
+    }
+
+    fn get_inner_challenger(
+        &self,
+    ) -> &DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T> {
+        self.inner.get_inner_challenger()
     }
 }
 

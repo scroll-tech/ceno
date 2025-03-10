@@ -146,14 +146,16 @@ fn main() {
     let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
     // do statistics
+
     let stat_recorder = StatisticRecorder::default();
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
-    verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
-    println!("e2e proof stat: {}", zkvm_proof);
-    println!(
-        "hashes count = {}",
-        stat_recorder.into_inner().field_appended_num
+    assert!(
+        verifier
+            .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
+            .is_ok()
     );
+
+    println!("e2e proof stat: {}", zkvm_proof);
 
     // do sanity check
     let transcript = Transcript::new(b"riscv");

@@ -1,26 +1,22 @@
 [package]
 categories.workspace = true
-description = "Transcript generation for Ceno"
+description = "Witness for Ceno"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "transcript"
+name = "witness"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
-crossbeam-channel.workspace = true
+multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+
 ff_ext = { path = "../ff_ext" }
-itertools.workspace = true
-p3-challenger.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
-p3-mds.workspace = true
-p3-symmetric.workspace = true
-poseidon.workspace = true
+p3-matrix.workspace = true
+rayon.workspace = true
 serde.workspace = true
 
-[features]
-default = []
-ro_query_stats = ["poseidon/ro_query_stats"]
+rand.workspace = true

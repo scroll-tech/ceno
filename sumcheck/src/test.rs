@@ -28,7 +28,14 @@ fn test_sumcheck<E: ExtensionField>(
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
 
     let mut transcript = BasicTranscript::new(b"test");
-    let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
+    let subclaim = IOPVerifierState::<E>::verify(
+        asserted_sum,
+        &proof,
+        &poly_info,
+        &mut transcript,
+        #[cfg(feature = "ro_query_stats")]
+        "test_sumcheck",
+    );
     assert!(
         poly.evaluate(
             subclaim
@@ -68,6 +75,8 @@ fn test_sumcheck_internal<E: ExtensionField>(
             &mut verifier_state,
             &prover_message,
             &mut transcript,
+            #[cfg(feature = "ro_query_stats")]
+            "test_sumcheck_internal",
         ));
     }
     // pushing the last challenge point to the state

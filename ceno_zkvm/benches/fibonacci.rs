@@ -52,6 +52,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         .expect("PrepSanityCheck do not provide proof and verifier");
 
         println!("e2e proof {}", proof);
+
         let stat_recorder = StatisticRecorder::default();
         let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
         assert!(
@@ -61,7 +62,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         );
         println!();
         println!(
-            "max_steps = {}, hashes count = {}",
+            "max_steps = {}, append_field_count: {}",
             max_steps,
             stat_recorder.into_inner().field_appended_num
         );
