@@ -1,5 +1,5 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger, FieldChallengerExt};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
@@ -48,6 +48,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
 
     fn commit_rolling(&mut self) {
         // do nothing
+    }
+
+    fn sample_vec(&mut self, n: usize) -> Vec<E> {
+        self.challenger.sample_ext_vec(n)
     }
 }
 

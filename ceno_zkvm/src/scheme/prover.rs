@@ -1216,9 +1216,7 @@ impl TowerProver {
             logup_specs.len() * 2,
             transcript,
         );
-        let initial_rt: Point<E> = (0..log_num_fanin)
-            .map(|_| transcript.get_and_append_challenge(b"product_sum").elements)
-            .collect_vec();
+        let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
 
         let (next_rt, _) =
             (1..=max_round_index).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
@@ -1294,9 +1292,7 @@ impl TowerProver {
                 proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
 
                 // rt' = r_merge || rt
-                let r_merge = (0..log_num_fanin)
-                    .map(|_| transcript.get_and_append_challenge(b"merge").elements)
-                    .collect_vec();
+                let r_merge =  transcript.sample_and_append_vec(b"merge", log_num_fanin);
                 let rt_prime = [sumcheck_proofs.point, r_merge].concat();
 
                 // generate next round challenge

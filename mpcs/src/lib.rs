@@ -429,9 +429,7 @@ pub mod test_util {
         num_vars: usize,
         transcript: &mut impl Transcript<E>,
     ) -> Vec<E> {
-        (0..num_vars)
-            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-            .collect()
+        transcript.sample_and_append_vec(b"Point", num_vars)
     }
     pub fn get_points_from_challenge<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,

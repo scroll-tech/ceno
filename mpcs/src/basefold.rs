@@ -572,20 +572,12 @@ where
 
         let sumcheck_timer = start_timer!(|| "Basefold::batch_open::initial sumcheck");
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
-        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = (0..batch_size_log)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs")
-                    .elements
-            })
-            .collect::<Vec<_>>();
+        let batch_size = evals.len().next_power_of_two();
+        let batch_coeffs = DenseMultilinearExtension::from_evaluations_ext_vec(
+            batch_size.ilog2() as usize,
+            transcript.sample_and_append_challenge_pows(batch_size, b"batch coeffs"),
+        );
 
-        // Use eq(X,t) where t is random to batch the different evaluation queries.
-        // Note that this is a small polynomial (only batch_size) compared to the polynomials
-        // to open.
-        let eq_xt =
-            DenseMultilinearExtension::<E>::from_evaluations_ext_vec(t.len(), build_eq_x_r_vec(&t));
         // When this polynomial is smaller, it will be repeatedly summed over the cosets of the hypercube
         let target_sum = inner_product_three(
             evals.iter().map(Evaluation::value),
@@ -593,11 +585,11 @@ where
                 .iter()
                 .map(|eval| E::from_u64(1 << (num_vars - points[eval.point()].len())))
                 .collect_vec(),
-            &poly_iter_ext(&eq_xt).take(evals.len()).collect_vec(),
+            &poly_iter_ext(&batch_coeffs).take(evals.len()).collect_vec(),
         );
 
         // Merge the polynomials for every point. One merged polynomial for each point.
-        let merged_polys = evals.iter().zip(poly_iter_ext(&eq_xt)).fold(
+        let merged_polys = evals.iter().zip(poly_iter_ext(&batch_coeffs)).fold(
             // This folding will generate a vector of |points| pairs of (scalar, polynomial)
             // The polynomials are initialized to zero, and the scalars are initialized to one
             vec![(E::ONE, Cow::<DenseMultilinearExtension<E>>::default()); points.len()],
@@ -686,7 +678,7 @@ where
             .collect_vec();
         let mut coeffs = vec![E::ZERO; comms.len()];
         evals.iter().enumerate().for_each(|(i, eval)| {
-            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&eq_xt, i);
+            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&batch_coeffs, i);
         });
 
         if cfg!(feature = "sanity-check") {
@@ -792,20 +784,9 @@ where
                 .for_each(|(eval, poly)| assert_eq!(&poly.evaluate(point), eval))
         }
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
-        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = (0..batch_size_log)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-
-        // Use eq(X,t) where t is random to batch the different evaluation queries.
-        // Note that this is a small polynomial (only batch_size) compared to the polynomials
-        // to open.
-        let eq_xt = build_eq_x_r_vec(&t)[..evals.len()].to_vec();
-        let _target_sum = inner_product(evals, &eq_xt);
+        let batch_coeffs = &transcript
+            .sample_and_append_challenge_pows(evals.len(), b"batch coeffs")[0..evals.len()];
+        let _target_sum = inner_product(evals, batch_coeffs);
 
         // Now the verifier has obtained the new target sum, and is able to compute the random
         // linear coefficients.
@@ -815,7 +796,7 @@ where
         let (trees, commit_phase_proof) = simple_batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
             point,
-            &eq_xt,
+            batch_coeffs,
             comm,
             transcript,
             num_vars,
@@ -883,7 +864,7 @@ where
             transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
             fold_challenges.push(
                 transcript
-                    .get_and_append_challenge(b"commit round")
+                    .sample_and_append_challenge(b"commit round")
                     .elements,
             );
             if i < num_rounds - 1 {
@@ -894,14 +875,10 @@ where
         let final_message = &proof.final_message;
         transcript.append_field_element_exts(final_message.as_slice());
 
-        let queries: Vec<_> = (0..Spec::get_number_queries())
-            .map(|_| {
-                ext_to_usize(
-                    &transcript
-                        .get_and_append_challenge(b"query indices")
-                        .elements,
-                ) % (1 << (num_vars + Spec::get_rate_log()))
-            })
+        let queries: Vec<_> = transcript
+            .sample_and_append_vec(b"query indices", Spec::get_number_queries())
+            .into_iter()
+            .map(|r| ext_to_usize(&r) % (1 << (num_vars + Spec::get_rate_log())))
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_single();
 
@@ -954,24 +931,18 @@ where
         assert!(!proof.is_trivial());
 
         let sumcheck_timer = start_timer!(|| "Basefold::batch_verify::initial sumcheck");
-        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = (0..batch_size_log)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-
-        let eq_xt =
-            DenseMultilinearExtension::from_evaluations_ext_vec(t.len(), build_eq_x_r_vec(&t));
+        let batch_size = evals.len().next_power_of_two();
+        let batch_coeffs = DenseMultilinearExtension::from_evaluations_ext_vec(
+            batch_size.ilog2() as usize,
+            transcript.sample_and_append_challenge_pows(batch_size, b"batch coeffs"),
+        );
         let target_sum = inner_product_three(
             evals.iter().map(Evaluation::value),
             &evals
                 .iter()
                 .map(|eval| E::from_u64(1 << (num_vars - points[eval.point()].len())))
                 .collect_vec(),
-            &poly_iter_ext(&eq_xt).take(evals.len()).collect_vec(),
+            &poly_iter_ext(&batch_coeffs).take(evals.len()).collect_vec(),
         );
 
         let (new_target_sum, verify_point) = SumCheck::verify(
@@ -992,7 +963,7 @@ where
             .collect_vec();
         let mut coeffs = vec![E::ZERO; comms.len()];
         evals.iter().enumerate().for_each(|(i, eval)| {
-            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&eq_xt, i)
+            coeffs[eval.poly()] += eq_xy_evals[eval.point()] * poly_index_ext(&batch_coeffs, i)
         });
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
@@ -1002,7 +973,7 @@ where
             transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
             fold_challenges.push(
                 transcript
-                    .get_and_append_challenge(b"commit round")
+                    .sample_and_append_challenge(b"commit round")
                     .elements,
             );
             if i < num_rounds - 1 {
@@ -1012,14 +983,10 @@ where
         let final_message = &proof.final_message;
         transcript.append_field_element_exts(final_message.as_slice());
 
-        let queries: Vec<_> = (0..Spec::get_number_queries())
-            .map(|_| {
-                ext_to_usize(
-                    &transcript
-                        .get_and_append_challenge(b"query indices")
-                        .elements,
-                ) % (1 << (num_vars + Spec::get_rate_log()))
-            })
+        let queries: Vec<_> = transcript
+            .sample_and_append_vec(b"query indices", Spec::get_number_queries())
+            .into_iter()
+            .map(|r| ext_to_usize(&r) % (1 << (num_vars + Spec::get_rate_log())))
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_batched();
 
@@ -1080,15 +1047,8 @@ where
         let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
 
         // evals.len() is the batch size, i.e., how many polynomials are being opened together
-        let batch_size_log = evals.len().next_power_of_two().ilog2() as usize;
-        let t = (0..batch_size_log)
-            .map(|_| {
-                transcript
-                    .get_and_append_challenge(b"batch coeffs")
-                    .elements
-            })
-            .collect::<Vec<_>>();
-        let eq_xt = build_eq_x_r_vec(&t)[..evals.len()].to_vec();
+        let batch_coeffs =
+            transcript.sample_and_append_challenge_pows(evals.len(), b"batch coeffs");
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
         let roots = &proof.roots;
@@ -1097,7 +1057,7 @@ where
             transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
             fold_challenges.push(
                 transcript
-                    .get_and_append_challenge(b"commit round")
+                    .sample_and_append_challenge(b"commit round")
                     .elements,
             );
             if i < num_rounds - 1 {
@@ -1107,14 +1067,10 @@ where
         let final_message = &proof.final_message;
         transcript.append_field_element_exts(final_message.as_slice());
 
-        let queries: Vec<_> = (0..Spec::get_number_queries())
-            .map(|_| {
-                ext_to_usize(
-                    &transcript
-                        .get_and_append_challenge(b"query indices")
-                        .elements,
-                ) % (1 << (num_vars + Spec::get_rate_log()))
-            })
+        let queries: Vec<_> = transcript
+            .sample_and_append_vec(b"query indices", Spec::get_number_queries())
+            .into_iter()
+            .map(|r| ext_to_usize(&r) % (1 << (num_vars + Spec::get_rate_log())))
             .collect();
         let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
 
@@ -1130,7 +1086,7 @@ where
             query_result_with_merkle_path,
             sumcheck_messages,
             &fold_challenges,
-            &eq_xt,
+            &batch_coeffs,
             num_rounds,
             num_vars,
             final_message,

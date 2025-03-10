@@ -84,7 +84,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
         // When we turn the protocol to a non-interactive one, it is sufficient to defer
         // such checks to `check_and_generate_subclaim` after the last round.
 
-        let challenge = transcript.get_and_append_challenge(b"Internal round");
+        let challenge = transcript.sample_and_append_challenge(b"Internal round");
         self.challenges.push(challenge);
         self.polynomials_received
             .push(prover_msg.evaluations.to_vec());

@@ -105,7 +105,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
 
                         challenge = Some(
-                            thread_based_transcript.get_and_append_challenge(b"Internal round"),
+                            thread_based_transcript.sample_and_append_challenge(b"Internal round"),
                         );
                         thread_based_transcript.commit_rolling();
                     }
@@ -164,7 +164,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 let get_challenge_span = entered_span!("main_thread_get_challenge");
                 transcript.append_field_element_exts(&evaluations.0);
 
-                let next_challenge = transcript.get_and_append_challenge(b"Internal round");
+                let next_challenge = transcript.sample_and_append_challenge(b"Internal round");
                 (0..num_worker_threads).for_each(|_| {
                     thread_based_transcript.send_challenge(next_challenge.elements);
                 });
@@ -271,7 +271,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 .iter()
                 .for_each(|e| transcript.append_field_element_ext(e));
             prover_msgs.push(prover_msg);
-            challenge = Some(transcript.get_and_append_challenge(b"Internal round"));
+            challenge = Some(transcript.sample_and_append_challenge(b"Internal round"));
         }
         exit_span!(span);
 
@@ -527,7 +527,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
             prover_msgs.push(prover_msg);
             let span = entered_span!("get_challenge");
-            challenge = Some(transcript.get_and_append_challenge(b"Internal round"));
+            challenge = Some(transcript.sample_and_append_challenge(b"Internal round"));
             exit_span!(span);
         }
         exit_span!(span);

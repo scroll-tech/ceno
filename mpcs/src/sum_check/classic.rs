@@ -267,7 +267,7 @@ where
             }
 
             let challenge = transcript
-                .get_and_append_challenge(b"sumcheck round")
+                .sample_and_append_challenge(b"sumcheck round")
                 .elements;
             challenges.push(challenge);
 
@@ -300,7 +300,7 @@ where
                 msgs.push(proof.rounds[i].clone());
                 challenges.push(
                     transcript
-                        .get_and_append_challenge(b"sumcheck round")
+                        .sample_and_append_challenge(b"sumcheck round")
                         .elements,
                 );
             }
