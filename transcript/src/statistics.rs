@@ -54,6 +54,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
     fn commit_rolling(&mut self) {
         self.inner.commit_rolling()
     }
+
+    fn sample_vec(&mut self, n: usize) -> Vec<E> {
+        self.inner.sample_vec(n)
+    }
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E> {}
