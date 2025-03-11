@@ -26,8 +26,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         + std::fmt::Debug
         + Serialize
         + DeserializeOwned
-        + EncodingProverParameters
-        + Sync;
+        + EncodingProverParameters;
     type VerifierParameters: Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync;
     type EncodedData;
 
@@ -39,7 +38,6 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error>;
 
     fn encode(
-        &self,
         pp: &Self::ProverParameters,
         coeffs: RowMajorMatrix<E::BaseField>,
     ) -> Self::EncodedData;

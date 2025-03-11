@@ -11,8 +11,9 @@ use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{Field, PrimeCharacteristicRing, PrimeField, TwoAdicField};
-
+use p3_field::{
+    Field, PrimeCharacteristicRing, PrimeField, TwoAdicField, batch_multiplicative_inverse,
+};
 use p3_matrix::{Matrix, bitrev::BitReversableMatrix};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
@@ -233,6 +234,9 @@ pub struct RSCodeParameters<E: ExtensionField> {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct RSCodeProverParameters<E: ExtensionField> {
+    #[serde(skip)]
+    pub(crate) dft: Radix2DitParallel<E::BaseField>,
+    pub(crate) t_inv_halves: Vec<Vec<E::BaseField>>,
     pub(crate) fft_root_table: FftRootTable<E::BaseField>,
     pub(crate) gamma_powers: Vec<E::BaseField>,
     pub(crate) gamma_powers_inv_div_two: Vec<E::BaseField>,
@@ -303,6 +307,8 @@ where
             // So just give trivial parameters.
             return Ok((
                 Self::ProverParameters {
+                    dft: Default::default(),
+                    t_inv_halves: Default::default(),
                     fft_root_table: vec![],
                     gamma_powers: vec![],
                     gamma_powers_inv_div_two: vec![],
@@ -328,6 +334,7 @@ where
         gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
         pp.fft_root_table
             .truncate(max_message_size_log + Spec::get_rate_log());
+
         let verifier_fft_root_table = pp.fft_root_table
             [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
             .iter()
@@ -338,8 +345,21 @@ where
                     .map(|v| vec![v[1]]),
             )
             .collect();
+
+        // TODO figure out how to set this correctly
+        let t_inv_halves = (0..max_message_size_log + Spec::get_rate_log())
+            .map(|i| {
+                let t_i = E::BaseField::two_adic_generator(log2_c + i + 1)
+                    .powers()
+                    .take(n_0 << i)
+                    .collect_vec();
+                batch_multiplicative_inverse(&t_i.iter().map(E::BaseField::double).collect_vec())
+            })
+            .collect();
         Ok((
             Self::ProverParameters {
+                dft: Default::default(),
+                t_inv_halves,
                 fft_root_table: pp.fft_root_table,
                 gamma_powers: gamma_powers.clone(),
                 gamma_powers_inv_div_two: gamma_powers_inv.clone(),
@@ -354,11 +374,7 @@ where
         ))
     }
 
-    fn encode(
-        &self,
-        pp: &Self::ProverParameters,
-        rmm: RowMajorMatrix<E::BaseField>,
-    ) -> Self::EncodedData {
+    fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData {
         assert!(rmm.num_vars() >= Spec::get_basecode_msg_size_log());
 
         // bh_evals is just a copy of poly.evals().
@@ -381,7 +397,7 @@ where
             .bit_reverse_rows() // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
             .to_row_major_matrix()
             .bit_reversed_zero_pad(Spec::get_rate_log());
-        let codeword = self.fft.dft_batch(m).to_row_major_matrix();
+        let codeword = pp.dft.dft_batch(m).to_row_major_matrix();
         PolyEvalsCodeword::Normal(Box::new(codeword))
         // Use the full message size to determine the shift factor.
         // Self::encode_internal(&pp.fft_root_table, coeffs, pp.full_message_size_log)

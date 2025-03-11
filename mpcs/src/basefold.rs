@@ -272,6 +272,8 @@ where
         }
         let timer = start_timer!(|| "Basefold::batch commit");
 
+        Spec::EncodingScheme::encode(&self, pp, coeffs)
+        pp.encoding_params.en
         let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
         let evals_codewords = polys
