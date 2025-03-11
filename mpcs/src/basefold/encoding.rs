@@ -27,7 +27,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         + Serialize
         + DeserializeOwned
         + EncodingProverParameters;
-    type VerifierParameters: Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync;
+    type VerifierParameters: Clone + std::fmt::Debug + Serialize + DeserializeOwned;
     type EncodedData;
 
     fn setup(max_msg_size_log: usize) -> Self::PublicParameters;
@@ -83,6 +83,15 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         level: usize,
         index: usize,
     ) -> (E, E, E);
+
+    /// TODO add docs
+    fn prover_folding_coeffs_level(pp: &Self::ProverParameters, level: usize) -> &[E::BaseField];
+
+    /// TODO add docs
+    fn verifier_folding_coeffs_level(
+        pp: &Self::VerifierParameters,
+        level: usize,
+    ) -> &[E::BaseField];
 
     /// Fold the given codeword into a smaller codeword of half size, using
     /// the folding coefficients computed by `prover_folding_coeffs`.

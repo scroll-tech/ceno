@@ -561,7 +561,7 @@ dependencies = [
 name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
- "getrandom 0.2.15",
+ "getrandom 0.3.1",
  "rkyv",
 ]
 
@@ -1530,11 +1530,13 @@ dependencies = [
  "multilinear_extensions",
  "num-bigint",
  "num-integer",
+ "p3-commit",
  "p3-dft",
  "p3-field",
  "p3-goldilocks",
  "p3-matrix",
  "p3-mds",
+ "p3-merkle-tree",
  "p3-symmetric",
  "plonky2",
  "poseidon",
@@ -1805,6 +1807,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-commit"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-util",
+ "serde",
+]
+
+[[package]]
 name = "p3-dft"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
@@ -1886,6 +1902,23 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "rand",
+]
+
+[[package]]
+name = "p3-merkle-tree"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-commit",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+ "serde",
+ "tracing",
 ]
 
 [[package]]

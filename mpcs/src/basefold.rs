@@ -12,7 +12,7 @@ use crate::{
         ext_to_usize,
         hash::{Digest, write_digest_to_transcript},
         log2_strict,
-        merkle_tree::MerkleTree,
+        merkle_tree::{MerkleTree, Poseidon2MerkleMmcs, poseidon2_merkle_tree},
         plonky2_util::reverse_index_bits_in_place_field_type,
         poly_index_ext, poly_iter_ext,
     },
@@ -26,6 +26,7 @@ pub use encoding::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
+use p3_commit::Mmcs;
 use p3_matrix::dense::DenseMatrix;
 use query_phase::{
     QueriesResultWithMerklePath, SimpleBatchQueriesResultWithMerklePath,
@@ -194,6 +195,7 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> PolynomialCommitmentScheme<E> for
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
+    Spec: BasefoldSpec<E, EncodingScheme = RSCode<RSCodeDefaultSpec, E>>,
 {
     type Param = BasefoldParams<E, Spec>;
     type ProverParam = BasefoldProverParams<E, Spec>;
@@ -271,72 +273,31 @@ where
             ));
         }
         let timer = start_timer!(|| "Basefold::batch commit");
-
-        Spec::EncodingScheme::encode(&self, pp, coeffs)
-        pp.encoding_params.en
         let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
-        let evals_codewords = polys
-            .par_iter()
-            .map(|poly| Self::get_poly_bh_evals_and_codeword(pp, poly))
-            .collect::<Vec<PolyEvalsCodeword<E>>>();
+        let evals_codewords = Spec::EncodingScheme::encode(&pp.encoding_params, rmm);
         exit_span!(span);
         end_timer!(encode_timer);
 
         let span = entered_span!("build mt", profiling_3 = true);
-        // build merkle tree from leaves
-        let ret = match evals_codewords[0] {
-            PolyEvalsCodeword::Normal(_) => {
-                let codewords = evals_codewords
-                    .into_iter()
-                    .map(|evals_codeword| match evals_codeword {
-                        PolyEvalsCodeword::Normal(codeword) => *codeword,
-                        PolyEvalsCodeword::TooSmall(_) => {
-                            unreachable!();
-                        }
-                        PolyEvalsCodeword::TooBig(_) => {
-                            unreachable!();
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(codewords);
+        // build merkle tree
+        let ret = match evals_codewords {
+            PolyEvalsCodeword::Normal(codewords) => {
+                let mmcs = poseidon2_merkle_tree::<E>();
+                let (comm, codeword) = mmcs.commit_matrix(*codewords);
                 let polys: Vec<ArcMultilinearExtension<E>> =
                     polys.into_iter().map(|poly| poly.into()).collect_vec();
                 Self::CommitmentWithWitness {
-                    codeword_tree,
+                    comm,
+                    codeword,
                     polynomials_bh_evals: polys,
                     num_vars,
                     is_base,
                     num_polys,
                 }
             }
-            PolyEvalsCodeword::TooSmall(_) => {
-                let bh_evals = evals_codewords
-                    .into_iter()
-                    .map(|bh_evals| match bh_evals {
-                        PolyEvalsCodeword::Normal(_) => unreachable!(),
-                        PolyEvalsCodeword::TooSmall(evals) => *evals,
-                        PolyEvalsCodeword::TooBig(_) => {
-                            unreachable!();
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let codeword_tree = MerkleTree::<E>::from_batch_leaves(bh_evals.clone());
-                Self::CommitmentWithWitness {
-                    codeword_tree,
-                    polynomials_bh_evals: bh_evals
-                        .into_iter()
-                        .map(|bh_evals| {
-                            DenseMultilinearExtension::from_field_type(num_vars, bh_evals).into()
-                        })
-                        .collect_vec(),
-
-                    num_vars,
-                    is_base,
-                    num_polys: polys.len(),
-                }
-            }
-            PolyEvalsCodeword::TooBig(num_vars) => return Err(Error::PolynomialTooLarge(num_vars)),
+            PolyEvalsCodeword::TooSmall(dense_matrix) => unimplemented!(),
+            PolyEvalsCodeword::TooBig(_) => return Err(Error::PolynomialTooLarge(num_vars)),
         };
         exit_span!(span);
         end_timer!(timer);

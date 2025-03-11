@@ -6,6 +6,10 @@ use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
 use itertools::izip;
+use p3_commit::Mmcs;
+use p3_matrix::dense::RowMajorMatrix;
+use p3_merkle_tree::MerkleTree as P3MerkleTree;
+use p3_symmetric::Hash as P3Hash;
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::ArcMultilinearExtension};
@@ -59,12 +63,13 @@ pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
 /// used to generate this commitment and for assistant in opening
-#[derive(Clone, Debug, Default)]
+#[derive(Debug)]
 pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) codeword_tree: MerkleTree<E>,
+    pub(crate) comm: P3Hash<E::BaseField, E::BaseField, 4>,
+    pub(crate) codeword: P3MerkleTree<E::BaseField, E::BaseField, E::BaseField, 4>,
     pub(crate) polynomials_bh_evals: Vec<ArcMultilinearExtension<'static, E>>,
     pub(crate) num_vars: usize,
     pub(crate) is_base: bool,
@@ -77,7 +82,7 @@ where
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
-            self.codeword_tree.root(),
+            self.comm.clone(),
             self.num_vars,
             self.is_base,
             self.num_polys,
@@ -151,13 +156,13 @@ where
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
 pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) root: Digest<E::BaseField>,
+    pub(super) root: P3Hash<E::BaseField, E::BaseField, 4>,
     pub(super) num_vars: Option<usize>,
     pub(super) is_base: bool,
     pub(super) num_polys: Option<usize>,
@@ -168,7 +173,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn new(
-        root: Digest<E::BaseField>,
+        root: P3Hash<E::BaseField, E::BaseField, 4>,
         num_vars: usize,
         is_base: bool,
         num_polys: usize,

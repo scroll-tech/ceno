@@ -9,12 +9,13 @@ use crate::{
 };
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
-use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
+use p3_dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{
     Field, PrimeCharacteristicRing, PrimeField, TwoAdicField, batch_multiplicative_inverse,
 };
-use p3_matrix::{Matrix, bitrev::BitReversableMatrix};
+use p3_matrix::Matrix;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
 
@@ -254,6 +255,9 @@ pub struct RSCodeVerifierParameters<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    #[serde(skip)]
+    pub(crate) dft: Radix2Dit<E::BaseField>,
+    pub(crate) t_inv_halves: Vec<Vec<E::BaseField>>,
     /// The verifier also needs a FFT table (much smaller)
     /// for small-size encoding. It contains the same roots as the
     /// prover's version for the first few levels (i < basecode_msg_size_log)
@@ -315,6 +319,8 @@ where
                     full_message_size_log: max_message_size_log,
                 },
                 Self::VerifierParameters {
+                    dft: Default::default(),
+                    t_inv_halves: Default::default(),
                     fft_root_table: vec![],
                     gamma_powers: vec![],
                     gamma_powers_inv_div_two: vec![],
@@ -346,6 +352,8 @@ where
             )
             .collect();
 
+        let log2_c = Spec::get_basecode_msg_size_log();
+        let n_0 = 1 << log2_c;
         // TODO figure out how to set this correctly
         let t_inv_halves = (0..max_message_size_log + Spec::get_rate_log())
             .map(|i| {
@@ -355,17 +363,21 @@ where
                     .collect_vec();
                 batch_multiplicative_inverse(&t_i.iter().map(E::BaseField::double).collect_vec())
             })
-            .collect();
+            .collect_vec();
+
         Ok((
             Self::ProverParameters {
                 dft: Default::default(),
-                t_inv_halves,
+                t_inv_halves: t_inv_halves.clone(),
                 fft_root_table: pp.fft_root_table,
                 gamma_powers: gamma_powers.clone(),
                 gamma_powers_inv_div_two: gamma_powers_inv.clone(),
                 full_message_size_log: max_message_size_log,
             },
             Self::VerifierParameters {
+                dft: Default::default(),
+                // TODO verifier just need much smaller halves table
+                t_inv_halves,
                 fft_root_table: verifier_fft_root_table,
                 full_message_size_log: max_message_size_log,
                 gamma_powers,
@@ -394,13 +406,9 @@ where
 
         let m = rmm
             .into_p3_rmm()
-            .bit_reverse_rows() // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
-            .to_row_major_matrix()
-            .bit_reversed_zero_pad(Spec::get_rate_log());
+            .bit_reversed_zero_pad(Spec::get_rate_log()); // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
         let codeword = pp.dft.dft_batch(m).to_row_major_matrix();
         PolyEvalsCodeword::Normal(Box::new(codeword))
-        // Use the full message size to determine the shift factor.
-        // Self::encode_internal(&pp.fft_root_table, coeffs, pp.full_message_size_log)
     }
 
     fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E> {
@@ -424,6 +432,7 @@ where
         false
     }
 
+    /// level goes from large domain to smaller domain
     fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {
         // The coefficients are for the bit-reversed codeword, so reverse the
         // bits before providing the coefficients.
@@ -454,6 +463,7 @@ where
             } else if index == 1 << level {
                 -E::BaseField::ONE
             } else {
+                // index > (1 << level)
                 pp.fft_root_table[level][(1 << (level + 1)) - index]
             };
         (E::from(x0), E::from(x1), E::from(w))
@@ -501,6 +511,17 @@ where
                 vp.fft_root_table[level][0].exp_u64((1 << (level + 1)) - index as u64)
             };
         (E::from(x0), E::from(x1), E::from(w))
+    }
+
+    fn prover_folding_coeffs_level(pp: &Self::ProverParameters, level: usize) -> &[E::BaseField] {
+        &pp.t_inv_halves[level]
+    }
+
+    fn verifier_folding_coeffs_level(
+        pp: &Self::VerifierParameters,
+        level: usize,
+    ) -> &[E::BaseField] {
+        &pp.t_inv_halves[level]
     }
 }
 

@@ -114,8 +114,8 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
-    type CommitmentWithWitness: Clone + Debug;
-    type Commitment: Clone + Debug + Default + Serialize + DeserializeOwned;
+    type CommitmentWithWitness: Debug;
+    type Commitment: Clone + Debug + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone + Debug + Default;
     type Proof: Clone + Debug + Serialize + DeserializeOwned;
 

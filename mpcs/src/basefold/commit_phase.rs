@@ -18,6 +18,7 @@ use crate::util::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
+use p3_field::Field;
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -336,11 +337,10 @@ fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: Basefold
 ) -> Vec<E> {
     values
         .par_chunks_exact(2)
-        .enumerate()
-        .map(|(i, ys)| {
-            let (x0, x1, w) =
-                <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs(pp, level, i);
-            interpolate2_weights([(x0, ys[0]), (x1, ys[1])], w, challenge)
+        .zip(<Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level))
+        .map(|(ys, coeff)| {
+            let (lo, hi) = ((ys[0] + ys[1]).halve(), (ys[0] - ys[1]) * *coeff);
+            lo + (hi - lo) * challenge
         })
         .collect::<Vec<_>>()
 }

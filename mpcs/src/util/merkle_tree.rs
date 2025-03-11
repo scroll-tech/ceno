@@ -1,6 +1,8 @@
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
+use p3_merkle_tree::MerkleTreeMmcs;
+use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -479,4 +481,22 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
         x_index >>= 1;
     }
     assert_eq!(&hash, root);
+}
+
+pub(crate) type Poseidon2Sponge<Perm8> = PaddingFreeSponge<Perm8, 8, 4, 4>;
+pub(crate) type Poseidon2Compression<Perm16> = TruncatedPermutation<Perm16, 2, 8, 8>;
+pub(crate) type Poseidon2MerkleMmcs<E, Perm16, Perm8> = MerkleTreeMmcs<
+    <E as ExtensionField>::BaseField,
+    <E as ExtensionField>::BaseField,
+    Poseidon2Sponge<Perm8>,
+    Poseidon2Compression<Perm16>,
+    8,
+>;
+
+pub fn poseidon2_merkle_tree<E: ExtensionField>()
+-> Poseidon2MerkleMmcs<E, <E::BaseField as PoseidonField>::T, <E::BaseField as PoseidonField>::T> {
+    MerkleTreeMmcs::new(
+        Poseidon2Sponge::new(<E::BaseField as PoseidonField>::get_perm()),
+        Poseidon2Compression::new(<E::BaseField as PoseidonField>::get_perm()),
+    )
 }
