@@ -2,6 +2,7 @@ use super::parameters::WhirConfig;
 use crate::{
     crypto::{MerkleConfig as Config, MerkleTree},
     end_timer,
+    error::Error,
     ntt::expand_from_coeff,
     start_timer, utils,
     whir::{
@@ -12,16 +13,14 @@ use crate::{
 use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use nimue::{
-    ByteWriter, Result,
-    plugins::ark::{FieldChallenges, FieldWriter},
-};
+use transcript::Transcript;
 
+use p3_commit::Mmcs;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 #[derive(Clone, Debug)]
-pub struct Witness<M, E: ExtensionField, MerkleConfig>
+pub struct Witness<E: ExtensionField, MerkleConfig>
 where
     MerkleConfig: Config<E>,
 {
@@ -33,31 +32,31 @@ where
     pub(crate) ood_answers: Vec<E>,
 }
 
-pub struct Committer<E, MerkleConfig, PowStrategy>(
-    pub(crate) WhirConfig<E, MerkleConfig, PowStrategy>,
-)
+pub struct Committer<E, MerkleConfig>(pub(crate) WhirConfig<E, MerkleConfig>)
 where
     E: ExtensionField,
     MerkleConfig: Config<E>;
 
-impl<E, MerkleConfig, PowStrategy> Committer<E, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig> Committer<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
 {
-    pub fn new(config: WhirConfig<E, MerkleConfig, PowStrategy>) -> Self {
+    pub fn new(config: WhirConfig<E, MerkleConfig>) -> Self {
         Self(config)
     }
 
-    pub fn commit<Merlin>(
+    pub fn commit<T: Transcript<E>>(
         &self,
-        merlin: &mut Merlin,
-        mut polynomial: DenseMultilinearExtension<E::BasePrimeField>,
-    ) -> Result<Witness<E, MerkleConfig>>
-    where
-        Merlin:
-            FieldWriter<E> + FieldChallenges<E> + ByteWriter + MmcsCommitmentWriter<MerkleConfig>,
-    {
+        transcript: &mut T,
+        mut polynomial: DenseMultilinearExtension<E>,
+    ) -> Result<
+        (
+            Witness<E, MerkleConfig>,
+            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+        ),
+        Error,
+    > {
         let timer = start_timer!(|| "Single Commit");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
         polynomial.pad_to_num_vars(self.0.folding_factor.at_round(0));
@@ -103,19 +102,19 @@ where
 
         let root = merkle_tree.root();
 
-        merlin.add_digest(root)?;
+        transcript.add_digest(root)?;
 
         let mut ood_points = vec![E::ZERO; self.0.committment_ood_samples];
         let mut ood_answers = Vec::with_capacity(self.0.committment_ood_samples);
         if self.0.committment_ood_samples > 0 {
-            merlin.fill_challenge_scalars(&mut ood_points)?;
+            transcript.fill_challenge_scalars(&mut ood_points)?;
             ood_answers.extend(ood_points.iter().map(|ood_point| {
                 polynomial.evaluate_at_extension(&expand_from_univariate(
                     *ood_point,
                     self.0.mv_parameters.num_variables,
                 ))
             }));
-            merlin.add_scalars(&ood_answers)?;
+            transcript.add_scalars(&ood_answers)?;
         }
 
         end_timer!(timer);

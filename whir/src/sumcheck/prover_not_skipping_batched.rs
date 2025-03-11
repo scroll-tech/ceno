@@ -1,65 +1,53 @@
+use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use nimue::{
-    Result,
-    plugins::ark::{FieldChallenges, FieldWriter},
-};
-use nimue_pow::{PoWChallenge, PowStrategy};
+use nimue_pow::PoWChallenge;
 use p3_field::Field;
+use transcript::Transcript;
+
+use crate::error::Error;
 
 use super::prover_batched::SumcheckBatched;
 
-pub struct SumcheckProverNotSkippingBatched<F> {
-    sumcheck_prover: SumcheckBatched<F>,
+pub struct SumcheckProverNotSkippingBatched<E: ExtensionField> {
+    sumcheck_prover: SumcheckBatched<E>,
 }
 
-impl<F> SumcheckProverNotSkippingBatched<F>
-where
-    F: Field,
-{
+impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
     // Get the coefficient of polynomial p and a list of points
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p(X_1, ... X_n) * (epsilon_1 eq_z_1(X) + epsilon_2 eq_z_2(X) ...)
     pub fn new(
-        coeffs: Vec<DenseMultilinearExtension<F>>,
-        points: &[Vec<F>],
-        poly_comb_coeff: &[F], // random coefficients for combining each poly
-        evals: &[F],
+        coeffs: Vec<DenseMultilinearExtension<E>>,
+        points: &[Vec<E>],
+        poly_comb_coeff: &[E], // random coefficients for combining each poly
+        evals: &[E],
     ) -> Self {
         Self {
             sumcheck_prover: SumcheckBatched::new(coeffs, points, poly_comb_coeff, evals),
         }
     }
 
-    pub fn get_folded_polys(&self) -> Vec<F> {
+    pub fn get_folded_polys(&self) -> Vec<E> {
         self.sumcheck_prover.get_folded_polys()
     }
 
-    pub fn _get_folded_eqs(&self) -> Vec<F> {
+    pub fn _get_folded_eqs(&self) -> Vec<E> {
         self.sumcheck_prover.get_folded_eqs()
     }
 
-    pub fn compute_sumcheck_polynomials<S, Merlin>(
+    pub fn compute_sumcheck_polynomials<T: Transcript>(
         &mut self,
-        merlin: &mut Merlin,
+        transcript: &mut T,
         folding_factor: usize,
         pow_bits: f64,
-    ) -> Result<Vec<F>>
-    where
-        S: PowStrategy,
-        Merlin: FieldChallenges<F> + FieldWriter<F> + PoWChallenge,
-    {
+    ) -> Result<Vec<E>, Error> {
         let mut res = Vec::with_capacity(folding_factor);
 
         for _ in 0..folding_factor {
             let sumcheck_poly = self.sumcheck_prover.compute_sumcheck_polynomial();
-            merlin.add_scalars(sumcheck_poly.evaluations())?;
-            let [folding_randomness]: [F; 1] = merlin.challenge_scalars()?;
+            transcript.add_scalars(sumcheck_poly.evaluations())?;
+            let [folding_randomness]: [F; 1] = transcript.challenge_scalars()?;
             res.push(folding_randomness);
-
-            // Do PoW if needed
-            if pow_bits > 0. {
-                merlin.challenge_pow::<S>(pow_bits)?;
-            }
 
             self.sumcheck_prover
                 .compress(F::ONE, &folding_randomness.into(), &sumcheck_poly);
@@ -98,8 +86,8 @@ mod tests {
 
         // Initial stuff
         let statement_points = vec![
-            Vec::expand_from_univariate(F::from(97), num_variables),
-            Vec::expand_from_univariate(F::from(75), num_variables),
+            expand_from_univariate(F::from(97), num_variables),
+            expand_from_univariate(F::from(75), num_variables),
         ];
 
         // Poly randomness

@@ -1,28 +1,25 @@
 use crate::{
     crypto::{MerkleConfig as Config, MerkleTree},
     end_timer,
+    error::Error,
     ntt::expand_from_coeff,
     start_timer, utils,
     whir::{
         committer::{Committer, Witness},
-        fold::restructure_evaluations,
+        fold::{expand_from_univariate, restructure_evaluations},
     },
 };
 use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use nimue::{
-    ByteWriter, Result,
-    plugins::ark::{FieldChallenges, FieldWriter},
-};
-use p3_matrix::dense::RowMajorMatrix;
+use transcript::Transcript;
 
 use crate::whir::fs_utils::MmcsCommitmentWriter;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
-pub struct Witnesses<E, MerkleConfig>
+pub struct Witnesses<E: ExtensionField, MerkleConfig>
 where
     MerkleConfig: Config<E>,
 {
@@ -34,7 +31,7 @@ where
     pub(crate) ood_answers: Vec<E>,
 }
 
-impl<M, E, MerkleConfig: Config<E>> From<Witness<M, E, MerkleConfig>>
+impl<E: ExtensionField, MerkleConfig: Config<E>> From<Witness<E, MerkleConfig>>
     for Witnesses<E, MerkleConfig>
 {
     fn from(witness: Witness<E, MerkleConfig>) -> Self {
@@ -48,8 +45,8 @@ impl<M, E, MerkleConfig: Config<E>> From<Witness<M, E, MerkleConfig>>
     }
 }
 
-impl<M, E: Clone, MerkleConfig: Config<E>> From<Witnesses<E, MerkleConfig>>
-    for Witness<M, E, MerkleConfig>
+impl<E: ExtensionField, MerkleConfig: Config<E>> From<Witnesses<E, MerkleConfig>>
+    for Witness<E, MerkleConfig>
 {
     fn from(witness: Witnesses<E, MerkleConfig>) -> Self {
         Self {
@@ -62,21 +59,16 @@ impl<M, E: Clone, MerkleConfig: Config<E>> From<Witnesses<E, MerkleConfig>>
     }
 }
 
-impl<E, MerkleConfig, PowStrategy> Committer<E, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig> Committer<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
-    PowStrategy: Sync,
 {
-    pub fn batch_commit<Merlin>(
+    pub fn batch_commit<T: Transcript<E>>(
         &self,
-        merlin: &mut Merlin,
-        polys: &[DenseMultilinearExtension<E::BasePrimeField>],
-    ) -> Result<Witnesses<E, MerkleConfig>>
-    where
-        Merlin:
-            FieldWriter<E> + FieldChallenges<E> + ByteWriter + MmcsCommitmentWriter<MerkleConfig>,
-    {
+        transcript: &mut T,
+        polys: &[DenseMultilinearExtension<E>],
+    ) -> Result<Witnesses<E, MerkleConfig>, Error> {
         let timer = start_timer!(|| "Batch Commit");
         let base_domain = self.0.starting_domain.base_domain.unwrap();
         let expansion = base_domain.size() / polys[0].num_coeffs();
@@ -151,25 +143,25 @@ where
 
         let root = merkle_tree.root();
 
-        merlin.add_digest(root)?;
+        transcript.add_digest(root)?;
 
         let mut ood_points = vec![E::ZERO; self.0.committment_ood_samples];
         let mut ood_answers = vec![E::ZERO; polys.len() * self.0.committment_ood_samples];
         if self.0.committment_ood_samples > 0 {
-            merlin.fill_challenge_scalars(&mut ood_points)?;
+            transcript.fill_challenge_scalars(&mut ood_points)?;
             ood_points
                 .par_iter()
                 .zip(ood_answers.par_chunks_mut(polys.len()))
                 .for_each(|(ood_point, ood_answers)| {
                     for j in 0..polys.len() {
-                        let eval = polys[j].evaluate_at_extension(&Vec::expand_from_univariate(
+                        let eval = polys[j].evaluate_at_extension(&expand_from_univariate(
                             *ood_point,
                             self.0.mv_parameters.num_variables,
                         ));
                         ood_answers[j] = eval;
                     }
                 });
-            merlin.add_scalars(&ood_answers)?;
+            transcript.add_scalars(&ood_answers)?;
         }
 
         let polys = polys

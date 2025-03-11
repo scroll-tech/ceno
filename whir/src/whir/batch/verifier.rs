@@ -2,56 +2,46 @@ use std::iter;
 
 use crate::{
     crypto::MerkleConfig as Config,
+    error::Error,
     sumcheck::proof::SumcheckPolynomial,
     utils::expand_randomness,
     whir::{
         Statement, WhirProof,
-        fs_utils::{MmcsCommitmentReader, get_challenge_stir_queries},
+        fold::expand_from_univariate,
+        fs_utils::get_challenge_stir_queries,
         verifier::{ParsedProof, ParsedRound, Verifier, WhirCommitmentInTranscript},
     },
 };
 use ff_ext::ExtensionField;
 use itertools::zip_eq;
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
-use nimue::{
-    ByteChallenges, ByteReader, ProofError, Result,
-    plugins::ark::{FieldChallenges, FieldReader},
-};
-use nimue_pow::{self, PoWChallenge};
+use p3_commit::Mmcs;
 use p3_util::log2_strict_usize;
+use transcript::Transcript;
 
-impl<E, MerkleConfig, PowStrategy> Verifier<E, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig> Verifier<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
-    PowStrategy: nimue_pow::PowStrategy,
 {
     // Same multiple points on each polynomial
-    pub fn simple_batch_verify<Arthur>(
+    pub fn simple_batch_verify<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
+        transcript: &mut T,
         num_polys: usize,
         points: &[Vec<E>],
         evals_per_point: &[Vec<E>],
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> Result<MerkleConfig::InnerDigest>
-    where
-        Arthur: FieldChallenges<E>
-            + FieldReader<E>
-            + ByteChallenges
-            + ByteReader
-            + PoWChallenge
-            + MmcsCommitmentReader<MerkleConfig>,
-    {
+    ) -> Result<(), Error> {
         for evals in evals_per_point {
             assert_eq!(num_polys, evals.len());
         }
 
         // We first do a pass in which we rederive all the FS challenges
         // Then we will check the algebraic part (so to optimise inversions)
-        let parsed_commitment = self.parse_commitment_batch(arthur, num_polys)?;
+        let parsed_commitment = self.parse_commitment_batch(transcript, num_polys)?;
         self.batch_verify_internal(
-            arthur,
+            transcript,
             num_polys,
             points,
             evals_per_point,
@@ -61,37 +51,29 @@ where
     }
 
     // Different points on each polynomial
-    pub fn same_size_batch_verify<Arthur>(
+    pub fn same_size_batch_verify<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
+        transcript: &mut T,
         num_polys: usize,
         point_per_poly: &[Vec<E>],
         eval_per_poly: &[E], // evaluations of the polys on individual points
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> Result<MerkleConfig::InnerDigest>
-    where
-        Arthur: FieldChallenges<E>
-            + FieldReader<E>
-            + ByteChallenges
-            + ByteReader
-            + PoWChallenge
-            + MmcsCommitmentReader<MerkleConfig>,
-    {
+    ) -> Result<(), Error> {
         assert_eq!(num_polys, point_per_poly.len());
         assert_eq!(num_polys, eval_per_poly.len());
 
         // We first do a pass in which we rederive all the FS challenges
         // Then we will check the algebraic part (so to optimise inversions)
-        let parsed_commitment = self.parse_commitment_batch(arthur, num_polys)?;
+        let parsed_commitment = self.parse_commitment_batch(transcript, num_polys)?;
 
         // parse proof
         let poly_comb_randomness =
-            super::utils::generate_random_vector_batch_verify(arthur, num_polys)?;
+            super::utils::generate_random_vector_batch_verify(transcript, num_polys)?;
         let (folded_points, folded_evals) =
-            self.parse_unify_sumcheck(arthur, point_per_poly, poly_comb_randomness)?;
+            self.parse_unify_sumcheck(transcript, point_per_poly, poly_comb_randomness)?;
 
         self.batch_verify_internal(
-            arthur,
+            transcript,
             num_polys,
             &[folded_points],
             &[folded_evals.clone()],
@@ -100,34 +82,30 @@ where
         )
     }
 
-    fn batch_verify_internal<Arthur>(
+    fn batch_verify_internal<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
+        transcript: &mut T,
         num_polys: usize,
         points: &[Vec<E>],
         evals_per_point: &[Vec<E>],
-        parsed_commitment: WhirCommitmentInTranscript<E, MerkleConfig::InnerDigest>,
+        parsed_commitment: WhirCommitmentInTranscript<
+            E,
+            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+        >,
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> Result<MerkleConfig::InnerDigest>
-    where
-        Arthur: FieldChallenges<E>
-            + FieldReader<E>
-            + ByteChallenges
-            + ByteReader
-            + PoWChallenge
-            + MmcsCommitmentReader<MerkleConfig>,
-    {
+    ) -> Result<(), Error> {
         // parse proof
         let compute_dot_product =
             |evals: &[E], coeff: &[E]| -> E { zip_eq(evals, coeff).map(|(a, b)| *a * *b).sum() };
 
-        let random_coeff = super::utils::generate_random_vector_batch_verify(arthur, num_polys)?;
+        let random_coeff =
+            super::utils::generate_random_vector_batch_verify(transcript, num_polys)?;
         let initial_claims: Vec<_> = parsed_commitment
             .ood_points
             .clone()
             .into_iter()
             .map(|ood_point| {
-                Vec::expand_from_univariate(ood_point, self.params.mv_parameters.num_variables)
+                expand_from_univariate(ood_point, self.params.mv_parameters.num_variables)
             })
             .chain(points.to_vec())
             .collect();
@@ -149,7 +127,7 @@ where
             evaluations: initial_answers,
         };
         let parsed = self.parse_proof_batch(
-            arthur,
+            transcript,
             &parsed_commitment,
             &statement,
             whir_proof,
@@ -172,15 +150,18 @@ where
                     .map(|(ans, rand)| ans * rand)
                     .sum()
             {
-                return Err(ProofError::InvalidProof);
+                return Err(Error::InvalidProof(
+                    "Initial sumcheck poly sum mismatched with statement rlc".to_string(),
+                ));
             }
 
             // Check the rest of the rounds
             for (sumcheck_poly, new_randomness) in &parsed.initial_sumcheck_rounds[1..] {
-                if sumcheck_poly.sum_over_hypercube()
-                    != prev_poly.evaluate_at_point(&randomness.into())
+                if sumcheck_poly.sum_over_hypercube() != prev_poly.evaluate_at_point(&[randomness])
                 {
-                    return Err(ProofError::InvalidProof);
+                    return Err(Error::InvalidProof(
+                        "Initial sumcheck poly sum mismatched with prev poly eval".to_string(),
+                    ));
                 }
                 prev_poly = sumcheck_poly.clone();
                 randomness = *new_randomness;
@@ -195,7 +176,7 @@ where
             let values = round.ood_answers.iter().copied().chain(folds.clone());
 
             let prev_eval = if let Some((prev_poly, randomness)) = prev {
-                prev_poly.evaluate_at_point(&randomness.into())
+                prev_poly.evaluate_at_point(&[randomness])
             } else {
                 E::ZERO
             };
@@ -206,7 +187,9 @@ where
                     .sum::<E>();
 
             if sumcheck_poly.sum_over_hypercube() != claimed_sum {
-                return Err(ProofError::InvalidProof);
+                return Err(Error::InvalidProof(
+                    "Initial sumcheck poly sum mismatched with claimed sum".to_string(),
+                ));
             }
 
             prev = Some((sumcheck_poly.clone(), *new_randomness));
@@ -214,10 +197,11 @@ where
             // Check the rest of the round
             for (sumcheck_poly, new_randomness) in &round.sumcheck_rounds[1..] {
                 let (prev_poly, randomness) = prev.unwrap();
-                if sumcheck_poly.sum_over_hypercube()
-                    != prev_poly.evaluate_at_point(&randomness.into())
+                if sumcheck_poly.sum_over_hypercube() != prev_poly.evaluate_at_point(&[randomness])
                 {
-                    return Err(ProofError::InvalidProof);
+                    return Err(Error::InvalidProof(
+                        "Sumcheck poly sum mismatched with prev poly eval".to_string(),
+                    ));
                 }
                 prev = Some((sumcheck_poly.clone(), *new_randomness));
             }
@@ -227,19 +211,21 @@ where
         let final_folds = &computed_folds[computed_folds.len() - 1];
         let final_evaluations = parsed
             .final_coefficients
-            .evaluate_at_univariate(&parsed.final_randomness_points);
+            .evaluate_as_univariate(&parsed.final_randomness_points);
         if !final_folds
             .iter()
             .zip(final_evaluations)
             .all(|(&fold, eval)| fold == eval)
         {
-            return Err(ProofError::InvalidProof);
+            return Err(Error::InvalidProof(
+                "Final foldings mismatched with final evaluations".to_string(),
+            ));
         }
 
         // Check the final sumchecks
         if self.params.final_sumcheck_rounds > 0 {
             let prev_sumcheck_poly_eval = if let Some((prev_poly, randomness)) = prev {
-                prev_poly.evaluate_at_point(&randomness.into())
+                prev_poly.evaluate_at_point(&[randomness])
             } else {
                 E::ZERO
             };
@@ -247,7 +233,9 @@ where
             let claimed_sum = prev_sumcheck_poly_eval;
 
             if sumcheck_poly.sum_over_hypercube() != claimed_sum {
-                return Err(ProofError::InvalidProof);
+                return Err(Error::InvalidProof(
+                    "Final sumcheck poly sum mismatched with claimed sum".to_string(),
+                ));
             }
 
             prev = Some((sumcheck_poly.clone(), *new_randomness));
@@ -255,17 +243,18 @@ where
             // Check the rest of the round
             for (sumcheck_poly, new_randomness) in &parsed.final_sumcheck_rounds[1..] {
                 let (prev_poly, randomness) = prev.unwrap();
-                if sumcheck_poly.sum_over_hypercube()
-                    != prev_poly.evaluate_at_point(&randomness.into())
+                if sumcheck_poly.sum_over_hypercube() != prev_poly.evaluate_at_point(&[randomness])
                 {
-                    return Err(ProofError::InvalidProof);
+                    return Err(Error::InvalidProof(
+                        "Final sumcheck poly sum mismatched with prev poly eval".to_string(),
+                    ));
                 }
                 prev = Some((sumcheck_poly.clone(), *new_randomness));
             }
         }
 
         let prev_sumcheck_poly_eval = if let Some((prev_poly, randomness)) = prev {
-            prev_poly.evaluate_at_point(&randomness.into())
+            prev_poly.evaluate_at_point(&[randomness])
         } else {
             E::ZERO
         };
@@ -279,69 +268,48 @@ where
                     .final_coefficients
                     .evaluate(&parsed.final_sumcheck_randomness)
         {
-            return Err(ProofError::InvalidProof);
+            return Err(Error::InvalidProof(
+                "Final sumcheck evaluation mismatched".to_string(),
+            ));
         }
 
         Ok(parsed_commitment.root)
     }
 
-    fn parse_commitment_batch<Arthur>(
+    fn write_commitment_to_transcript_batch<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
+        commitment: &mut WhirCommitmentInTranscript<E, <MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
+        transcript: &mut T,
         num_polys: usize,
-    ) -> Result<WhirCommitmentInTranscript<E, MerkleConfig::InnerDigest>>
-    where
-        Arthur:
-            ByteReader + FieldReader<E> + FieldChallenges<E> + MmcsCommitmentReader<MerkleConfig>,
-    {
-        let root = arthur.read_digest()?;
-
-        let mut ood_points = vec![E::ZERO; self.params.committment_ood_samples];
-        let mut ood_answers = vec![E::ZERO; self.params.committment_ood_samples * num_polys];
+    ) {
         if self.params.committment_ood_samples > 0 {
-            arthur.fill_challenge_scalars(&mut ood_points)?;
-            arthur.fill_next_scalars(&mut ood_answers)?;
+            commitment.ood_points = (0..self.params.committment_ood_samples)
+                .map(|_| transcript.read_challenge().elements)
+                .collect::<Vec<_>>();
+            transcript.append_field_element_exts(&commitment.ood_answers);
         }
-
-        Ok(WhirCommitmentInTranscript {
-            root,
-            ood_points,
-            ood_answers,
-        })
     }
 
-    fn parse_unify_sumcheck<Arthur>(
+    fn parse_unify_sumcheck<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
+        transcript: &mut T,
         point_per_poly: &[Vec<E>],
         poly_comb_randomness: Vec<E>,
-    ) -> Result<(Vec<E>, Vec<E>)>
-    where
-        Arthur: FieldReader<E>
-            + FieldChallenges<E>
-            + PoWChallenge
-            + ByteReader
-            + ByteChallenges
-            + MmcsCommitmentReader<MerkleConfig>,
-    {
+    ) -> Result<(Vec<E>, Vec<E>), Error> {
         let num_variables = self.params.mv_parameters.num_variables;
         let mut sumcheck_rounds = Vec::new();
 
         // Derive combination randomness and first sumcheck polynomial
-        // let [point_comb_randomness_gen]: [E; 1] = arthur.challenge_scalars()?;
+        // let [point_comb_randomness_gen]: [E; 1] = transcript.challenge_scalars()?;
         // let point_comb_randomness = expand_randomness(point_comb_randomness_gen, num_points);
 
         // Unifying sumcheck
         sumcheck_rounds.reserve_exact(num_variables);
         for _ in 0..num_variables {
-            let sumcheck_poly_evals: [E; 3] = arthur.next_scalars()?;
+            let sumcheck_poly_evals: [E; 3] = transcript.next_scalars()?;
             let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-            let [folding_randomness_single] = arthur.challenge_scalars()?;
+            let [folding_randomness_single] = transcript.challenge_scalars()?;
             sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-
-            if self.params.starting_folding_pow_bits > 0. {
-                arthur.challenge_pow::<PowStrategy>(self.params.starting_folding_pow_bits)?;
-            }
         }
         let folded_point = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
         let folded_eqs: Vec<E> = point_per_poly
@@ -350,7 +318,7 @@ where
             .map(|(point, randomness)| *randomness * eq_eval(point, &folded_point))
             .collect();
         let mut folded_evals = vec![E::ZERO; point_per_poly.len()];
-        arthur.fill_next_scalars(&mut folded_evals)?;
+        transcript.fill_next_scalars(&mut folded_evals)?;
         let sumcheck_claim = sumcheck_rounds[num_variables - 1]
             .0
             .evaluate_at_point(&vec![sumcheck_rounds[num_variables - 1].1]);
@@ -360,7 +328,9 @@ where
             .map(|(eval, eq)| *eval * *eq)
             .sum();
         if sumcheck_claim != sumcheck_expected {
-            return Err(ProofError::InvalidProof);
+            return Err(Error::InvalidProof(
+                "Sumcheck mismatch with claimed in parse unify sumcheck".to_string(),
+            ));
         }
 
         Ok((folded_point, folded_evals))
@@ -379,30 +349,26 @@ where
         result
     }
 
-    fn parse_proof_batch<Arthur>(
+    fn write_proof_to_transcript_batch<T: Transcript<E>>(
         &self,
-        arthur: &mut Arthur,
-        parsed_commitment: &WhirCommitmentInTranscript<E, MerkleConfig::InnerDigest>,
+        transcript: &mut T,
+        parsed_commitment: &WhirCommitmentInTranscript<
+            E,
+            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+        >,
         statement: &Statement<E>, // Will be needed later
         whir_proof: &WhirProof<MerkleConfig, E>,
         batched_randomness: Vec<E>,
         num_polys: usize,
-    ) -> Result<ParsedProof<E>>
-    where
-        Arthur: FieldReader<E>
-            + FieldChallenges<E>
-            + PoWChallenge
-            + ByteReader
-            + ByteChallenges
-            + MmcsCommitmentReader<MerkleConfig>,
-    {
+    ) -> Result<ParsedProof<E>, Error> {
         let mut sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
         let initial_combination_randomness;
+        let mut sumcheck_poly_evals_iter = whir_proof.sumcheck_poly_evals.iter();
 
         if self.params.initial_statement {
             // Derive combination randomness and first sumcheck polynomial
-            let [combination_randomness_gen]: [E; 1] = arthur.challenge_scalars()?;
+            let [combination_randomness_gen]: [E; 1] = transcript.challenge_scalars()?;
             initial_combination_randomness = expand_randomness(
                 combination_randomness_gen,
                 parsed_commitment.ood_points.len() + statement.points.len(),
@@ -411,14 +377,16 @@ where
             // Initial sumcheck
             sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
             for _ in 0..self.params.folding_factor.at_round(0) {
-                let sumcheck_poly_evals: [E; 3] = arthur.next_scalars()?;
+                let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+                    .next()
+                    .ok_or(Error::InvalidProof(
+                        "Insufficient number of sumcheck polynomial evaluations".to_string(),
+                    ))?
+                    .clone();
+                transcript.append_field_element_exts(&sumcheck_poly_evals);
                 let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-                let [folding_randomness_single] = arthur.challenge_scalars()?;
+                let [folding_randomness_single] = transcript.challenge_scalars()?;
                 sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-
-                if self.params.starting_folding_pow_bits > 0. {
-                    arthur.challenge_pow::<PowStrategy>(self.params.starting_folding_pow_bits)?;
-                }
             }
 
             folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
@@ -427,15 +395,9 @@ where
             assert_eq!(statement.points.len(), 0);
 
             initial_combination_randomness = vec![E::ONE];
-
-            let mut folding_randomness_vec = vec![E::ZERO; self.params.folding_factor.at_round(0)];
-            arthur.fill_challenge_scalars(&mut folding_randomness_vec)?;
-            folding_randomness = folding_randomness_vec;
-
-            // PoW
-            if self.params.starting_folding_pow_bits > 0. {
-                arthur.challenge_pow::<PowStrategy>(self.params.starting_folding_pow_bits)?;
-            }
+            folding_randomness = (0..self.params.folding_factor.at_round(0))
+                .map(|_| transcript.read_challenge().elements)
+                .collect();
         };
 
         let mut prev_root = parsed_commitment.root.clone();
@@ -455,23 +417,29 @@ where
         let mut rounds = vec![];
 
         for r in 0..self.params.n_rounds() {
-            let (merkle_proof, answers) = &whir_proof.0[r];
+            let (merkle_proof, answers) = &whir_proof.merkle_answers[r];
             let round_params = &self.params.round_parameters[r];
 
-            let new_root = arthur.read_digest()?;
+            let new_root = whir_proof.merkle_roots[r].clone();
 
-            let mut ood_points = vec![E::ZERO; round_params.ood_samples];
-            let mut ood_answers = vec![E::ZERO; round_params.ood_samples];
-            if round_params.ood_samples > 0 {
-                arthur.fill_challenge_scalars(&mut ood_points)?;
-                arthur.fill_next_scalars(&mut ood_answers)?;
-            }
+            let (ood_points, ood_answers) = if round_params.ood_samples > 0 {
+                let ood_points =
+                    transcript.sample_and_append_vec(b"ood_points", round_params.ood_samples);
+                let ood_answers = whir_proof.ood_answers[r].clone();
+                transcript.append_field_element_exts(&ood_answers);
+                (ood_points, ood_answers)
+            } else {
+                (
+                    vec![E::ZERO; round_params.ood_samples],
+                    vec![E::ZERO; round_params.ood_samples],
+                )
+            };
 
             let stir_challenges_indexes = get_challenge_stir_queries(
                 domain_size,
                 self.params.folding_factor.at_round(r),
                 round_params.num_queries,
-                arthur,
+                transcript,
             )?;
 
             let stir_challenges_points = stir_challenges_indexes
@@ -487,15 +455,20 @@ where
 
             if !merkle_proof
                 .verify(
-                    &self.params.leaf_hash_params,
-                    &self.params.two_to_one_params,
+                    &self.params.hash_params,
                     &prev_root,
-                    answers.iter().map(|a| a.as_ref()),
+                    p3_util::log2_strict_usize(domain_size),
+                    1,
+                    &stir_challenges_indexes,
+                    answers
+                        .iter()
+                        .map(|a| a.clone())
+                        .collect::<Vec<Vec<E>>>()
+                        .as_slice(),
                 )
-                .unwrap()
-                || merkle_proof.leaf_indexes != stir_challenges_indexes
+                .is_ok()
             {
-                return Err(ProofError::InvalidProof);
+                return Err(Error::InvalidProof("Merkle proof failed".to_string()));
             }
 
             let answers: Vec<_> = if r == 0 {
@@ -521,11 +494,7 @@ where
                 answers.to_vec()
             };
 
-            if round_params.pow_bits > 0. {
-                arthur.challenge_pow::<PowStrategy>(round_params.pow_bits)?;
-            }
-
-            let [combination_randomness_gen] = arthur.challenge_scalars()?;
+            let [combination_randomness_gen] = transcript.challenge_scalars()?;
             let combination_randomness = expand_randomness(
                 combination_randomness_gen,
                 stir_challenges_indexes.len() + round_params.ood_samples,
@@ -534,14 +503,17 @@ where
             let mut sumcheck_rounds =
                 Vec::with_capacity(self.params.folding_factor.at_round(r + 1));
             for _ in 0..self.params.folding_factor.at_round(r + 1) {
-                let sumcheck_poly_evals: [E; 3] = arthur.next_scalars()?;
+                let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+                    .next()
+                    .ok_or(Error::InvalidProof(
+                        "Insufficient number of sumcheck polynomial evaluations".to_string(),
+                    ))?
+                    .clone();
                 let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-                let [folding_randomness_single] = arthur.challenge_scalars()?;
+                let folding_randomness_single = transcript
+                    .sample_and_append_challenge(b"folding_randomness")
+                    .elements;
                 sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-
-                if round_params.folding_pow_bits > 0. {
-                    arthur.challenge_pow::<PowStrategy>(round_params.folding_pow_bits)?;
-                }
             }
 
             let new_folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
@@ -567,7 +539,7 @@ where
         }
 
         let mut final_coefficients = vec![E::ZERO; 1 << self.params.final_sumcheck_rounds];
-        arthur.fill_next_scalars(&mut final_coefficients)?;
+        transcript.fill_next_scalars(&mut final_coefficients)?;
         let final_coefficients = DenseMultilinearExtension::new(final_coefficients);
 
         // Final queries verify
@@ -575,7 +547,7 @@ where
             domain_size,
             self.params.folding_factor.at_round(self.params.n_rounds()),
             self.params.final_queries,
-            arthur,
+            transcript,
         )?;
         let final_randomness_points = final_randomness_indexes
             .iter()
@@ -591,15 +563,20 @@ where
         let (final_merkle_proof, final_randomness_answers) = &whir_proof.0[whir_proof.0.len() - 1];
         if !final_merkle_proof
             .verify(
-                &self.params.leaf_hash_params,
-                &self.params.two_to_one_params,
+                &self.params.hash_params,
                 &prev_root,
-                final_randomness_answers.iter().map(|a| a.as_ref()),
+                p3_util::log2_strict_usize(domain_size),
+                1,
+                &final_randomness_indexes,
+                final_randomness_answers
+                    .iter()
+                    .map(|a| a.clone())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
             )
-            .unwrap()
-            || final_merkle_proof.leaf_indexes != final_randomness_indexes
+            .is_ok()
         {
-            return Err(ProofError::InvalidProof);
+            return Err(Error::InvalidProof("Final Merkle proof failed".to_string()));
         }
 
         let final_randomness_answers: Vec<_> = if self.params.n_rounds() == 0 {
@@ -625,20 +602,12 @@ where
             final_randomness_answers.to_vec()
         };
 
-        if self.params.final_pow_bits > 0. {
-            arthur.challenge_pow::<PowStrategy>(self.params.final_pow_bits)?;
-        }
-
         let mut final_sumcheck_rounds = Vec::with_capacity(self.params.final_sumcheck_rounds);
         for _ in 0..self.params.final_sumcheck_rounds {
-            let sumcheck_poly_evals: [E; 3] = arthur.next_scalars()?;
+            let sumcheck_poly_evals: [E; 3] = transcript.next_scalars()?;
             let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-            let [folding_randomness_single] = arthur.challenge_scalars()?;
+            let [folding_randomness_single] = transcript.challenge_scalars()?;
             final_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-
-            if self.params.final_folding_pow_bits > 0. {
-                arthur.challenge_pow::<PowStrategy>(self.params.final_folding_pow_bits)?;
-            }
         }
         let final_sumcheck_randomness = final_sumcheck_rounds
             .iter()
@@ -691,7 +660,7 @@ where
                 .chain(stir_challenges_points)
                 .cloned()
                 .map(|univariate| {
-                    Vec::expand_from_univariate(univariate, num_variables)
+                    expand_from_univariate(univariate, num_variables)
                     // TODO:
                     // Maybe refactor outside
                 })

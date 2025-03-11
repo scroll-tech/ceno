@@ -3,6 +3,7 @@ use crate::{
     crypto::{MerkleConfig as Config, MerkleTree, MultiPath},
     domain::Domain,
     end_timer,
+    error::Error,
     ntt::expand_from_coeff,
     parameters::FoldType,
     start_timer,
@@ -11,27 +12,23 @@ use crate::{
     whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
 };
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
-use nimue::{
-    ByteChallenges, ByteWriter, Result,
-    plugins::ark::{FieldChallenges, FieldWriter},
-};
-use nimue_pow::{self, PoWChallenge};
+use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+use p3_commit::Mmcs;
+use transcript::Transcript;
 
 use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-pub struct Prover<E, MerkleConfig, PowStrategy>(pub WhirConfig<E, MerkleConfig, PowStrategy>)
+pub struct Prover<E, MerkleConfig>(pub WhirConfig<E, MerkleConfig>)
 where
     E: ExtensionField,
     MerkleConfig: Config<E>;
 
-impl<E, MerkleConfig, PowStrategy> Prover<E, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig> Prover<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
-    PowStrategy: nimue_pow::PowStrategy,
 {
     pub(crate) fn validate_parameters(&self) -> bool {
         self.0.mv_parameters.num_variables
@@ -45,7 +42,7 @@ where
         if !statement
             .points
             .iter()
-            .all(|point| point.0.len() == self.0.mv_parameters.num_variables)
+            .all(|point| point.len() == self.0.mv_parameters.num_variables)
         {
             return false;
         }
@@ -60,27 +57,22 @@ where
         if !self.0.initial_statement {
             assert!(witness.ood_points.is_empty());
         }
-        witness.polynomial.num_variables() == self.0.mv_parameters.num_variables
+        witness.polynomial.num_vars() == self.0.mv_parameters.num_variables
     }
 
-    pub fn prove<Merlin>(
+    pub fn prove<T: Transcript<E>>(
         &self,
-        merlin: &mut Merlin,
+        transcript: &mut T,
         mut statement: Statement<E>,
         witness: Witness<E, MerkleConfig>,
-    ) -> Result<WhirProof<MerkleConfig, E>>
-    where
-        Merlin: FieldChallenges<E>
-            + FieldWriter<E>
-            + ByteChallenges
-            + ByteWriter
-            + PoWChallenge
-            + MmcsCommitmentWriter<MerkleConfig>,
-    {
+    ) -> Result<WhirProof<MerkleConfig, E>, Error> {
         // If any evaluation point is shorter than the folding factor, pad with 0 in front
+        let mut sumcheck_poly_evals = Vec::new();
+        let mut ood_answers = Vec::new();
+        let mut merkle_roots = Vec::new();
         for p in statement.points.iter_mut() {
-            while p.n_variables() < self.0.folding_factor.at_round(0) {
-                p.0.insert(0, E::ONE);
+            while p.len() < (1 << self.0.folding_factor.at_round(0)) {
+                p.insert(0, E::ONE);
             }
         }
 
@@ -114,7 +106,9 @@ where
         let folding_randomness = if self.0.initial_statement {
             // If there is initial statement, then we run the sum-check for
             // this initial statement.
-            let [combination_randomness_gen] = merlin.challenge_scalars()?;
+            let combination_randomness_gen = transcript
+                .sample_and_append_challenge(b"combination_randomness")
+                .elements;
             let combination_randomness =
                 expand_randomness(combination_randomness_gen, initial_claims.len());
 
@@ -128,21 +122,18 @@ where
             sumcheck_prover
                 .as_mut()
                 .unwrap()
-                .compute_sumcheck_polynomials::<PowStrategy, Merlin>(
-                    merlin,
+                .compute_sumcheck_polynomials::<T>(
+                    transcript,
+                    &mut sumcheck_poly_evals,
                     self.0.folding_factor.at_round(0),
-                    self.0.starting_folding_pow_bits,
                 )?
         } else {
             // If there is no initial statement, there is no need to run the
             // initial rounds of the sum-check, and the verifier directly sends
             // the initial folding randomnesses.
-            let mut folding_randomness = vec![E::ZERO; self.0.folding_factor.at_round(0)];
-            merlin.fill_challenge_scalars(&mut folding_randomness)?;
-
-            if self.0.starting_folding_pow_bits > 0. {
-                merlin.challenge_pow::<PowStrategy>(self.0.starting_folding_pow_bits)?;
-            }
+            let mut folding_randomness = (0..self.0.folding_factor.at_round(0))
+                .map(|_| transcript.read_challenge().elements)
+                .collect();
             folding_randomness
         };
 
@@ -158,7 +149,13 @@ where
         };
 
         let round_timer = start_timer!(|| "Single Round");
-        let result = self.round(merlin, round_state);
+        let result = self.round(
+            transcript,
+            &mut sumcheck_poly_evals,
+            &mut ood_answers,
+            &mut merkle_roots,
+            round_state,
+        );
         end_timer!(round_timer);
 
         end_timer!(timer);
@@ -166,19 +163,14 @@ where
         result
     }
 
-    pub(crate) fn round<Merlin>(
+    pub(crate) fn round<T: Transcript<E>>(
         &self,
-        merlin: &mut Merlin,
+        transcript: &mut T,
+        sumcheck_poly_evals: &mut Vec<[E; 3]>,
+        ood_answers: &mut Vec<Vec<E>>,
+        merkle_roots: &mut Vec<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
         mut round_state: RoundState<E, MerkleConfig>,
-    ) -> Result<WhirProof<MerkleConfig, E>>
-    where
-        Merlin: FieldChallenges<E>
-            + ByteChallenges
-            + FieldWriter<E>
-            + ByteWriter
-            + PoWChallenge
-            + MmcsCommitmentWriter<MerkleConfig>,
-    {
+    ) -> Result<WhirProof<MerkleConfig, E>, Error> {
         // Fold the coefficients
         let folded_coefficients = round_state
             .coefficients
@@ -192,7 +184,8 @@ where
         // Base case
         if round_state.round == self.0.n_rounds() {
             // Directly send coefficients of the polynomial to the verifier.
-            merlin.add_scalars(folded_coefficients.coeffs())?;
+            transcript.add_scalars(folded_coefficients.coeffs())?;
+            sumcheck_poly_evals.push(folded_coefficients);
 
             // Final verifier queries and answers. The indices are over the
             // *folded* domain.
@@ -200,7 +193,7 @@ where
                 round_state.domain.size(), // The size of the *original* domain before folding
                 self.0.folding_factor.at_round(round_state.round), /* The folding factor we used to fold the previous polynomial */
                 self.0.final_queries,
-                merlin,
+                transcript,
             )?;
 
             let merkle_proof = round_state
@@ -217,11 +210,6 @@ where
                 .collect();
             round_state.merkle_proofs.push((merkle_proof, answers));
 
-            // PoW
-            if self.0.final_pow_bits > 0. {
-                merlin.challenge_pow::<PowStrategy>(self.0.final_pow_bits)?;
-            }
-
             // Final sumcheck
             if self.0.final_sumcheck_rounds > 0 {
                 round_state
@@ -229,14 +217,19 @@ where
                     .unwrap_or_else(|| {
                         SumcheckProverNotSkipping::new(folded_coefficients.clone(), &[], &[], &[])
                     })
-                    .compute_sumcheck_polynomials::<PowStrategy, Merlin>(
-                        merlin,
+                    .compute_sumcheck_polynomials::<T>(
+                        transcript,
+                        sumcheck_poly_evals,
                         self.0.final_sumcheck_rounds,
-                        self.0.final_folding_pow_bits,
                     )?;
             }
 
-            return Ok(WhirProof(round_state.merkle_proofs));
+            return Ok(WhirProof {
+                merkle_answers: round_state.merkle_proofs,
+                sumcheck_poly_evals,
+                merkle_roots,
+                ood_answers,
+            });
         }
 
         let round_params = &self.0.round_parameters[round_state.round];
@@ -278,25 +271,30 @@ where
         .unwrap();
 
         let root = merkle_tree.root();
-        merlin.add_digest(root)?;
+        transcript.add_digest(root)?;
+        merkle_roots.push(root);
 
-        // OOD Samples
-        let mut ood_points = vec![E::ZERO; round_params.ood_samples];
-        let mut ood_answers = Vec::with_capacity(round_params.ood_samples);
-        if round_params.ood_samples > 0 {
-            merlin.fill_challenge_scalars(&mut ood_points)?;
-            ood_answers.extend(ood_points.iter().map(|ood_point| {
+        let (ood_points, ood_answers) = if round_params.ood_samples > 0 {
+            let ood_points =
+                transcript.sample_and_append_vec(b"ood_points", round_params.ood_samples);
+            let ood_answers = ood_points.iter().map(|ood_point| {
                 folded_coefficients.evaluate(&expand_from_univariate(*ood_point, num_variables))
-            }));
-            merlin.add_scalars(&ood_answers)?;
-        }
+            });
+            transcript.append_field_element_exts(&ood_answers);
+            (ood_points, ood_answers)
+        } else {
+            (
+                vec![E::ZERO; round_params.ood_samples],
+                vec![E::ZERO; round_params.ood_samples],
+            )
+        };
 
         // STIR queries
         let stir_challenges_indexes = get_challenge_stir_queries(
             round_state.domain.size(), // Current domain size *before* folding
             self.0.folding_factor.at_round(round_state.round), // Current fold factor
             round_params.num_queries,
-            merlin,
+            transcript,
         )?;
         // Compute the generator of the folded domain, in the extension field
         let domain_scaled_gen = round_state
@@ -327,7 +325,7 @@ where
         match self.0.fold_optimisation {
             FoldType::Naive => {
                 // See `Verifier::compute_folds_full`
-                let domain_size = round_state.domain.backing_domain.size();
+                let domain_size = round_state.domain.size();
                 let domain_gen = round_state.domain.backing_domain.element(1);
                 let domain_gen_inv = domain_gen.inverse().unwrap();
                 let coset_domain_size = 1 << self.0.folding_factor.at_round(round_state.round);
@@ -378,13 +376,8 @@ where
         }
         round_state.merkle_proofs.push((merkle_proof, answers));
 
-        // PoW
-        if round_params.pow_bits > 0. {
-            merlin.challenge_pow::<PowStrategy>(round_params.pow_bits)?;
-        }
-
         // Randomness for combination
-        let [combination_randomness_gen] = merlin.challenge_scalars()?;
+        let [combination_randomness_gen] = transcript.challenge_scalars()?;
         let combination_randomness =
             expand_randomness(combination_randomness_gen, stir_challenges.len());
 
@@ -408,12 +401,11 @@ where
                 )
             });
 
-        let folding_randomness = sumcheck_prover
-            .compute_sumcheck_polynomials::<PowStrategy, Merlin>(
-                merlin,
-                self.0.folding_factor.at_round(round_state.round + 1),
-                round_params.folding_pow_bits,
-            )?;
+        let folding_randomness = sumcheck_prover.compute_sumcheck_polynomials::<Transcript>(
+            transcript,
+            sumcheck_poly_evals,
+            self.0.folding_factor.at_round(round_state.round + 1),
+        )?;
 
         let round_state = RoundState {
             round: round_state.round + 1,
@@ -426,7 +418,13 @@ where
             merkle_proofs: round_state.merkle_proofs,
         };
 
-        self.round(merlin, round_state)
+        self.round(
+            transcript,
+            sumcheck_poly_evals,
+            ood_answers,
+            merkle_roots,
+            round_state,
+        )
     }
 }
 
@@ -440,7 +438,7 @@ where
     pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<E>>,
     pub(crate) folding_randomness: Vec<E>,
     pub(crate) coefficients: DenseMultilinearExtension<E>,
-    pub(crate) prev_merkle: MerkleTree<MerkleConfig>,
+    pub(crate) prev_merkle: MerkleTree<E, MerkleConfig>,
     pub(crate) prev_merkle_answers: Vec<E>,
-    pub(crate) merkle_proofs: Vec<(MultiPath<MerkleConfig>, Vec<Vec<E>>)>,
+    pub(crate) merkle_proofs: Vec<(MultiPath<E, MerkleConfig>, Vec<Vec<E>>)>,
 }

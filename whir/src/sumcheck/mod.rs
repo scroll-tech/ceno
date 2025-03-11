@@ -51,8 +51,8 @@ mod tests {
         let polynomial =
             DenseMultilinearExtension::new(vec![F::from(1), F::from(2), F::from(3), F::from(4)]);
 
-        let ood_point = Vec::expand_from_univariate(F::from(2), num_variables);
-        let statement_point = Vec::expand_from_univariate(F::from(3), num_variables);
+        let ood_point = expand_from_univariate(F::from(2), num_variables);
+        let statement_point = expand_from_univariate(F::from(3), num_variables);
 
         let ood_answer = polynomial.evaluate(&ood_point);
         let statement_answer = polynomial.evaluate(&statement_point);
@@ -143,8 +143,8 @@ mod tests {
             DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect());
 
         // Initial stuff
-        let ood_point = Vec::expand_from_univariate(F::from(42), num_variables);
-        let statement_point = Vec::expand_from_univariate(F::from(97), num_variables);
+        let ood_point = expand_from_univariate(F::from(42), num_variables);
+        let statement_point = expand_from_univariate(F::from(97), num_variables);
 
         // All the randomness
         let [epsilon_1, epsilon_2] = [F::from(15), F::from(32)];
@@ -207,8 +207,8 @@ mod tests {
             DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect());
 
         // Initial stuff
-        let ood_point = Vec::expand_from_univariate(F::from(42), num_variables);
-        let statement_point = Vec::expand_from_univariate(F::from(97), num_variables);
+        let ood_point = expand_from_univariate(F::from(42), num_variables);
+        let statement_point = expand_from_univariate(F::from(97), num_variables);
 
         // All the randomness
         let [epsilon_1, epsilon_2] = [F::from(15), F::from(32)];

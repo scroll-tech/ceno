@@ -11,12 +11,8 @@ pub trait DigestIOPattern<MerkleConfig: Config> {
 }
 
 pub trait WhirIOPattern<E: ExtensionField, MerkleConfig: Config> {
-    fn commit_statement<PowStrategy>(
-        self,
-        params: &WhirConfig<E, MerkleConfig, PowStrategy>,
-    ) -> Self;
-    fn add_whir_proof<PowStrategy>(self, params: &WhirConfig<E, MerkleConfig, PowStrategy>)
-    -> Self;
+    fn commit_statement<PowStrategy>(self, params: &WhirConfig<E, MerkleConfig>) -> Self;
+    fn add_whir_proof<PowStrategy>(self, params: &WhirConfig<E, MerkleConfig>) -> Self;
 }
 
 impl<E, MerkleConfig, IOPattern> WhirIOPattern<E, MerkleConfig> for IOPattern
@@ -30,10 +26,7 @@ where
         + OODIOPattern<E>
         + DigestIOPattern<MerkleConfig>,
 {
-    fn commit_statement<PowStrategy>(
-        self,
-        params: &WhirConfig<E, MerkleConfig, PowStrategy>,
-    ) -> Self {
+    fn commit_statement<PowStrategy>(self, params: &WhirConfig<E, MerkleConfig>) -> Self {
         // TODO: Add params
         let mut this = self.add_digest("merkle_digest");
         if params.committment_ood_samples > 0 {
@@ -43,10 +36,7 @@ where
         this
     }
 
-    fn add_whir_proof<PowStrategy>(
-        mut self,
-        params: &WhirConfig<E, MerkleConfig, PowStrategy>,
-    ) -> Self {
+    fn add_whir_proof<PowStrategy>(mut self, params: &WhirConfig<E, MerkleConfig>) -> Self {
         // TODO: Add statement
         if params.initial_statement {
             self = self

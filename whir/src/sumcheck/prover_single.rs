@@ -1,11 +1,11 @@
 use super::proof::SumcheckPolynomial;
 
+use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use p3_field::Field;
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
 
-pub struct SumcheckSingle<E> {
+pub struct SumcheckSingle<E: ExtensionField> {
     // The evaluation of p
     evaluation_of_p: DenseMultilinearExtension<E>,
     evaluation_of_equality: DenseMultilinearExtension<E>,
@@ -15,7 +15,7 @@ pub struct SumcheckSingle<E> {
 
 impl<E> SumcheckSingle<E>
 where
-    E: Field,
+    E: ExtensionField,
 {
     // Get the coefficient of polynomial p and a list of points
     // and initialises the table of the initial polynomial

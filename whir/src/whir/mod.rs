@@ -1,5 +1,6 @@
 use crate::crypto::{MerkleConfig as Config, MultiPath};
 use ff_ext::ExtensionField;
+use p3_commit::Mmcs;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod batch;
@@ -25,6 +26,8 @@ where
 {
     pub(crate) merkle_answers: Vec<(MultiPath<E, MerkleConfig>, Vec<Vec<E>>)>,
     pub(crate) sumcheck_poly_evals: Vec<[E; 3]>,
+    pub(crate) merkle_roots: Vec<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
+    pub(crate) ood_answers: Vec<Vec<E>>,
 }
 
 #[cfg(test)]
@@ -65,7 +68,7 @@ mod tests {
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<E, MerkleConfig, PowStrategy> {
+        let whir_params = WhirParameters::<E, MerkleConfig> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
@@ -76,7 +79,7 @@ mod tests {
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<E, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
+        let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
 
         let polynomial = DenseMultilinearExtension::new(vec![E::from(1); num_coeffs]);
 
@@ -97,20 +100,23 @@ mod tests {
             .add_whir_proof(&params)
             .clone();
 
-        let mut merlin = io.to_merlin();
+        let mut transcript = io.to_transcript();
 
         let committer = Committer::new(params.clone());
-        let witness = committer.commit(&mut merlin, polynomial).unwrap();
+        let (witness, commitment) = committer.commit(&mut transcript, polynomial).unwrap();
 
         let prover = Prover(params.clone());
 
         let proof = prover
-            .prove(&mut merlin, statement.clone(), witness)
+            .prove(&mut transcript, statement.clone(), witness)
             .unwrap();
 
         let verifier = Verifier::new(params);
-        let mut arthur = io.to_arthur(merlin.transcript());
-        assert!(verifier.verify(&mut arthur, &statement, &proof).is_ok());
+        assert!(
+            verifier
+                .verify(commitment, &mut transcript, &statement, &proof)
+                .is_ok()
+        );
     }
 
     fn make_whir_batch_things_same_point(
@@ -133,7 +139,7 @@ mod tests {
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<E, MerkleConfig, PowStrategy> {
+        let whir_params = WhirParameters::<E, MerkleConfig> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
@@ -144,7 +150,7 @@ mod tests {
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<E, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
+        let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
 
         let polynomials: Vec<DenseMultilinearExtension<E>> = (0..num_polynomials)
             .map(|i| DenseMultilinearExtension::new(vec![E::from((i + 1) as i32); num_coeffs]))
@@ -167,19 +173,21 @@ mod tests {
             .commit_batch_statement(&params, num_polynomials)
             .add_whir_batch_proof(&params, num_polynomials)
             .clone();
-        let mut merlin = io.to_merlin();
+        let mut transcript = io.to_transcript();
 
         let committer = Committer::new(params.clone());
-        let witnesses = committer.batch_commit(&mut merlin, &polynomials).unwrap();
+        let witnesses = committer
+            .batch_commit(&mut transcript, &polynomials)
+            .unwrap();
 
         let prover = Prover(params.clone());
 
         let proof = prover
-            .simple_batch_prove(&mut merlin, &points, &evals_per_point, &witnesses)
+            .simple_batch_prove(&mut transcript, &points, &evals_per_point, &witnesses)
             .unwrap();
 
         let verifier = Verifier::new(params);
-        let mut arthur = io.to_arthur(merlin.transcript());
+        let mut arthur = io.to_arthur(transcript.transcript());
         assert!(
             verifier
                 .simple_batch_verify(
@@ -213,7 +221,7 @@ mod tests {
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<E, MerkleConfig, PowStrategy> {
+        let whir_params = WhirParameters::<E, MerkleConfig> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
@@ -224,7 +232,7 @@ mod tests {
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<E, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
+        let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
 
         let polynomials: Vec<DenseMultilinearExtension<E>> = (0..num_polynomials)
             .map(|i| DenseMultilinearExtension::new(vec![E::from((i + 1) as i32); num_coeffs]))
@@ -244,19 +252,21 @@ mod tests {
             .add_whir_unify_proof(&params, num_polynomials)
             .add_whir_batch_proof(&params, num_polynomials)
             .clone();
-        let mut merlin = io.to_merlin();
+        let mut transcript = io.to_transcript();
 
         let committer = Committer::new(params.clone());
-        let witnesses = committer.batch_commit(&mut merlin, &polynomials).unwrap();
+        let witnesses = committer
+            .batch_commit(&mut transcript, &polynomials)
+            .unwrap();
 
         let prover = Prover(params.clone());
 
         let proof = prover
-            .same_size_batch_prove(&mut merlin, &point_per_poly, &eval_per_poly, &witnesses)
+            .same_size_batch_prove(&mut transcript, &point_per_poly, &eval_per_poly, &witnesses)
             .unwrap();
 
         let verifier = Verifier::new(params);
-        let mut arthur = io.to_arthur(merlin.transcript());
+        let mut arthur = io.to_arthur(transcript.transcript());
         verifier
             .same_size_batch_verify(
                 &mut arthur,

@@ -58,7 +58,7 @@ where
     /// evaluates the polynomial at an arbitrary point, not neccessarily in {0,1,2}^n_variables.
     ///
     /// We assert that point.n_variables() == self.n_variables
-    pub fn evaluate_at_point(&self, point: &Vec<F>) -> F {
+    pub fn evaluate_at_point(&self, point: &[F]) -> F {
         assert!(point.n_variables() == self.n_variables);
         let num_evaluation_points = 3_usize.pow(self.n_variables as u32);
 

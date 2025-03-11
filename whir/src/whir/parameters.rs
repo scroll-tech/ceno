@@ -1,7 +1,7 @@
 use core::{fmt, panic};
 use derive_more::Debug;
 use ff_ext::ExtensionField;
-use std::{f64::consts::LOG2_10, fmt::Display, marker::PhantomData};
+use std::{f64::consts::LOG2_10, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
@@ -223,7 +223,6 @@ where
             final_pow_bits,
             final_sumcheck_rounds,
             final_folding_pow_bits,
-            pow_strategy: PhantomData,
             fold_optimisation: whir_parameters.fold_optimisation,
             final_log_inv_rate: log_inv_rate,
             hash_params: whir_parameters.hash_params,
@@ -435,7 +434,7 @@ where
     }
 }
 
-impl<E, MerkleConfig, PowStrategy> Display for WhirConfig<E, MerkleConfig, PowStrategy>
+impl<E, MerkleConfig> Display for WhirConfig<E, MerkleConfig>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,

@@ -7,7 +7,7 @@ use ark_crypto_primitives::{
     crh::{CRHScheme, TwoToOneCRHScheme},
     merkle_tree::Config,
 };
-use ark_ff::{TwoAdicField, Field};
+use ark_ff::{Field, TwoAdicField};
 use ark_serialize::CanonicalSerialize;
 use nimue::{Arthur, DefaultHash, IOPattern, Merlin};
 use nimue_pow::blake3::Blake3PoW;
@@ -238,7 +238,7 @@ fn run_whir<F, MerkleConfig>(
 
     let mv_params = MultivariateParameters::<F>::new(num_variables);
 
-    let whir_params = WhirParameters::<MerkleConfig, PowStrategy> {
+    let whir_params = WhirParameters::<MerkleConfig> {
         initial_statement: true,
         security_level,
         pow_bits,
@@ -273,12 +273,11 @@ fn run_whir<F, MerkleConfig>(
             verifier::Verifier, whir_proof_size,
         };
 
-        let whir_params = WhirParameters::<MerkleConfig, PowStrategy> {
+        let whir_params = WhirParameters::<MerkleConfig> {
             initial_statement: false,
             ..whir_params.clone()
         };
-        let params =
-            WhirConfig::<F, MerkleConfig, PowStrategy>::new(mv_params, whir_params.clone());
+        let params = WhirConfig::<F, MerkleConfig>::new(mv_params, whir_params.clone());
         if !params.check_pow_bits() {
             println!("WARN: more PoW bits required than what specified.");
         }
@@ -288,23 +287,25 @@ fn run_whir<F, MerkleConfig>(
             .add_whir_proof(&params)
             .clone();
 
-        let mut merlin = io.to_merlin();
+        let mut transcript = io.to_transcript();
 
         let whir_ldt_prover_time = Instant::now();
 
         HashCounter::reset();
 
         let committer = Committer::new(params.clone());
-        let witness = committer.commit(&mut merlin, polynomial.clone()).unwrap();
+        let witness = committer
+            .commit(&mut transcript, polynomial.clone())
+            .unwrap();
 
         let prover = Prover(params.clone());
 
         let proof = prover
-            .prove(&mut merlin, Statement::default(), witness)
+            .prove(&mut transcript, Statement::default(), witness)
             .unwrap();
 
         let whir_ldt_prover_time = whir_ldt_prover_time.elapsed();
-        let whir_ldt_argument_size = whir_proof_size(merlin.transcript(), &proof);
+        let whir_ldt_argument_size = whir_proof_size(transcript.transcript(), &proof);
         let whir_ldt_prover_hashes = HashCounter::get();
 
         // Just not to count that initial inversion (which could be precomputed)
@@ -313,7 +314,7 @@ fn run_whir<F, MerkleConfig>(
         HashCounter::reset();
         let whir_ldt_verifier_time = Instant::now();
         for _ in 0..reps {
-            let mut arthur = io.to_arthur(merlin.transcript());
+            let mut arthur = io.to_arthur(transcript.transcript());
             verifier
                 .verify(&mut arthur, &Statement::default(), &proof)
                 .unwrap();
@@ -347,7 +348,7 @@ fn run_whir<F, MerkleConfig>(
             },
         };
 
-        let params = WhirConfig::<F, MerkleConfig, PowStrategy>::new(mv_params, whir_params);
+        let params = WhirConfig::<F, MerkleConfig>::new(mv_params, whir_params);
         if !params.check_pow_bits() {
             println!("WARN: more PoW bits required than what specified.");
         }
@@ -357,7 +358,7 @@ fn run_whir<F, MerkleConfig>(
             .add_whir_proof(&params)
             .clone();
 
-        let mut merlin = io.to_merlin();
+        let mut transcript = io.to_transcript();
 
         let points: Vec<_> = (0..args.num_evaluations)
             .map(|i| Vec(vec![F::from(i as u64); num_variables]))
@@ -375,16 +376,18 @@ fn run_whir<F, MerkleConfig>(
         let whir_prover_time = Instant::now();
 
         let committer = Committer::new(params.clone());
-        let witness = committer.commit(&mut merlin, polynomial.clone()).unwrap();
+        let witness = committer
+            .commit(&mut transcript, polynomial.clone())
+            .unwrap();
 
         let prover = Prover(params.clone());
 
         let proof = prover
-            .prove(&mut merlin, statement.clone(), witness)
+            .prove(&mut transcript, statement.clone(), witness)
             .unwrap();
 
         let whir_prover_time = whir_prover_time.elapsed();
-        let whir_argument_size = whir_proof_size(merlin.transcript(), &proof);
+        let whir_argument_size = whir_proof_size(transcript.transcript(), &proof);
         let whir_prover_hashes = HashCounter::get();
 
         // Just not to count that initial inversion (which could be precomputed)
@@ -393,7 +396,7 @@ fn run_whir<F, MerkleConfig>(
         HashCounter::reset();
         let whir_verifier_time = Instant::now();
         for _ in 0..reps {
-            let mut arthur = io.to_arthur(merlin.transcript());
+            let mut arthur = io.to_arthur(transcript.transcript());
             verifier.verify(&mut arthur, &statement, &proof).unwrap();
         }
 

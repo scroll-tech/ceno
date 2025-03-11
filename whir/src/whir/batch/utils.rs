@@ -1,15 +1,15 @@
 use crate::{
     crypto::MerkleConfig as Config,
     end_timer,
+    error::Error,
     ntt::{transpose, transpose_test},
     start_timer,
     utils::expand_randomness,
-    whir::fs_utils::{MmcsCommitmentReader, MmcsCommitmentWriter},
 };
 use ff_ext::ExtensionField;
-use nimue::{ByteReader, ByteWriter, Result};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+use transcript::Transcript;
 
 pub fn stack_evaluations<E: ExtensionField>(
     mut evals: Vec<E>,
@@ -63,32 +63,30 @@ pub fn horizontal_stacking<E: ExtensionField>(
 }
 
 // generate a random vector for batching open
-pub fn generate_random_vector_batch_open<E, Merlin, MerkleConfig>(
-    merlin: &mut Merlin,
+pub fn generate_random_vector_batch_open<E: ExtensionField, T: Transcript<E>, MerkleConfig>(
+    transcript: &mut T,
     size: usize,
-) -> Result<Vec<E>>
+) -> Result<Vec<E>, Error>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
-    Merlin: ByteWriter + MmcsCommitmentWriter<E, MerkleConfig>,
 {
     if size == 1 {
         return Ok(vec![E::one()]);
     }
-    let [gamma] = merlin.challenge_scalars()?;
+    let [gamma] = transcript.challenge_scalars()?;
     let res = expand_randomness(gamma, size);
     Ok(res)
 }
 
 // generate a random vector for batching verify
-pub fn generate_random_vector_batch_verify<E, Arthur, MerkleConfig>(
-    arthur: &mut Arthur,
+pub fn generate_random_vector_batch_verify<E: ExtensionField, T: Transcript<E>, MerkleConfig>(
+    arthur: &mut T,
     size: usize,
-) -> Result<Vec<E>>
+) -> Result<Vec<E>, Error>
 where
     E: ExtensionField,
     MerkleConfig: Config<E>,
-    Arthur: ByteReader + MmcsCommitmentReader<E, MerkleConfig>,
 {
     if size == 1 {
         return Ok(vec![E::one()]);

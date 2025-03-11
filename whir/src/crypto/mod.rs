@@ -1,12 +1,11 @@
-use std::{borrow::Borrow, marker::PhantomData, sync::atomic::AtomicUsize};
+use std::sync::atomic::AtomicUsize;
 
 use ff_ext::{ExtensionField, PoseidonField};
 use lazy_static::lazy_static;
 use p3_commit::Mmcs;
 use p3_matrix::{Dimensions, dense::RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::CompressionFunctionFromHasher;
-use rand::RngCore;
+use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub trait MerkleConfig<E: ExtensionField> {
@@ -15,6 +14,102 @@ pub trait MerkleConfig<E: ExtensionField> {
 
 pub struct MerkleTree<E: ExtensionField, Config: MerkleConfig<E>> {
     pub mmcs: <Config::Mmcs as Mmcs<E>>::ProverData<RowMajorMatrix<E>>,
+}
+
+/// A padding-free, overwrite-mode sponge function.
+///
+/// `WIDTH` is the sponge's rate plus the sponge's capacity.
+#[derive(Clone, Debug)]
+pub struct WhirHasher<E: ExtensionField, const WIDTH: usize, const RATE: usize, const OUT: usize> {
+    permutation: <E::BaseField as PoseidonField>::T,
+}
+
+#[derive(Clone, Debug)]
+pub struct WhirHasherBase<
+    E: ExtensionField,
+    const WIDTH: usize,
+    const RATE: usize,
+    const OUT: usize,
+> {
+    permutation: <E::BaseField as PoseidonField>::T,
+}
+
+impl<E: ExtensionField, const WIDTH: usize, const RATE: usize, const OUT: usize>
+    WhirHasher<E, WIDTH, RATE, OUT>
+{
+    pub const fn new(permutation: <E::BaseField as PoseidonField>::T) -> Self {
+        Self { permutation }
+    }
+}
+
+impl<E: ExtensionField, const WIDTH: usize, const RATE: usize, const OUT: usize>
+    WhirHasherBase<E, WIDTH, RATE, OUT>
+{
+    pub const fn new(permutation: <E::BaseField as PoseidonField>::T) -> Self {
+        Self { permutation }
+    }
+}
+
+impl<E: ExtensionField, const WIDTH: usize, const RATE: usize, const OUT: usize>
+    CryptographicHasher<E, [E::BaseField; OUT]> for WhirHasher<E, WIDTH, RATE, OUT>
+{
+    fn hash_iter<I>(&self, input: I) -> [E::BaseField; OUT]
+    where
+        I: IntoIterator<Item = E>,
+    {
+        // static_assert(RATE < WIDTH)
+        let mut state = [E::BaseField::ZERO; WIDTH];
+        let mut input = input.into_iter().flat_map(|x| x.as_bases().iter());
+
+        // Itertools' chunks() is more convenient, but seems to add more overhead,
+        // hence the more manual loop.
+        'outer: loop {
+            for i in 0..RATE {
+                if let Some(x) = input.next() {
+                    state[i] = x;
+                } else {
+                    if i != 0 {
+                        self.permutation.permute_mut(&mut state);
+                    }
+                    break 'outer;
+                }
+            }
+            self.permutation.permute_mut(&mut state);
+        }
+
+        state[..OUT].try_into().unwrap()
+    }
+}
+
+impl<E: ExtensionField, const WIDTH: usize, const RATE: usize, const OUT: usize>
+    CryptographicHasher<E::BaseField, [E::BaseField; OUT]> for WhirHasherBase<E, WIDTH, RATE, OUT>
+{
+    fn hash_iter<I>(&self, input: I) -> [E::BaseField; OUT]
+    where
+        I: IntoIterator<Item = E::BaseField>,
+    {
+        // static_assert(RATE < WIDTH)
+        let mut state = [E::BaseField::ZERO; WIDTH];
+        let mut input = input.into_iter();
+
+        // Itertools' chunks() is more convenient, but seems to add more overhead,
+        // hence the more manual loop.
+        'outer: loop {
+            for i in 0..RATE {
+                if let Some(x) = input.next() {
+                    state[i] = x;
+                } else {
+                    if i != 0 {
+                        self.permutation.permute_mut(&mut state);
+                    }
+                    break 'outer;
+                }
+            }
+            self.permutation.permute_mut(&mut state);
+        }
+
+        state[..OUT].try_into().unwrap()
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -44,7 +139,7 @@ impl<E: ExtensionField, Config: MerkleConfig<E>> MultiPath<E, Config> {
                     width: leaf_size,
                 }],
                 *index,
-                opened_values,
+                &[opened_values[i].clone()],
                 &self.path[i],
             )
             .map_err(|err| crate::error::Error::MmcsError(format!("{:?}", err)))?;
@@ -67,8 +162,8 @@ where
     type Mmcs = MerkleTreeMmcs<
         E,
         E::BaseField,
-        <E::BaseField as PoseidonField>::T,
-        CompressionFunctionFromHasher<<E::BaseField as PoseidonField>::T, 2, 4>,
+        WhirHasher<E, 8, 4, 4>,
+        CompressionFunctionFromHasher<WhirHasherBase<E, 8, 4, 4>, 2, 4>,
         4,
     >;
 }
