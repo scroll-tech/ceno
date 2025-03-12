@@ -1,9 +1,16 @@
-use crate::sum_check::classic::{Coefficients, SumcheckProof};
+use crate::{
+    sum_check::classic::{Coefficients, SumcheckProof},
+    util::merkle_tree::{Poseidon2MerkleMmcs, poseidon2_merkle_tree},
+};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
-
 use itertools::izip;
-use p3_matrix::{dense::RowMajorMatrix, extension::FlatMatrixView};
+use p3_commit::Mmcs;
+use p3_matrix::{
+    Matrix,
+    dense::{DenseMatrix, RowMajorMatrix},
+    extension::FlatMatrixView,
+};
 use p3_merkle_tree::MerkleTree as P3MerkleTree;
 use p3_symmetric::Hash as P3Hash;
 use poseidon::DIGEST_WIDTH;
@@ -106,6 +113,17 @@ where
 
     pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
         Self::trivial_num_vars::<Spec>(self.num_vars)
+    }
+
+    pub fn codeword_size(&self) -> usize {
+        let mmcs = poseidon2_merkle_tree::<E>();
+        mmcs.get_matrices(&self.codeword)[0].height()
+        // self.codeword.
+    }
+
+    pub fn get_codewords(&self) -> &DenseMatrix<E::BaseField> {
+        let mmcs = poseidon2_merkle_tree::<E>();
+        mmcs.get_matrices(&self.codeword)[0]
     }
 }
 

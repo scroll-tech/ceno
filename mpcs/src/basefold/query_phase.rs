@@ -12,6 +12,7 @@ use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use p3_matrix::dense::DenseMatrix;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -329,8 +330,8 @@ where
 }
 
 fn simple_batch_basefold_get_query<E: ExtensionField>(
-    poly_codewords: &[FieldType<E>],
-    trees: &[MerkleTree<E>],
+    poly_codewords: &DenseMatrix<E::BaseField>,
+    trees: &[MerkleTreeExt<E>],
     x_index: usize,
 ) -> SimpleBatchSingleQueryResult<E>
 where

@@ -23,7 +23,7 @@ use ceno_sumcheck::macros::{entered_span, exit_span};
 pub use encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
-use p3_commit::Mmcs;
+use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_matrix::dense::DenseMatrix;
 use query_phase::{
     QueriesResultWithMerklePath, SimpleBatchQueriesResultWithMerklePath,
