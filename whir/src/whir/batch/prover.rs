@@ -361,7 +361,7 @@ where
                 // See `Verifier::compute_folds_full`
                 let domain_size = round_state.domain.size();
                 let domain_gen = round_state.domain.backing_domain.element(1);
-                let domain_gen_inv = domain_gen.inverse().unwrap();
+                let domain_gen_inv = domain_gen.inverse();
                 let coset_domain_size = 1 << self.0.folding_factor.at_round(round_state.round);
                 let coset_generator_inv =
                     domain_gen_inv.pow([(domain_size / coset_domain_size) as u64]);
@@ -376,7 +376,7 @@ where
                             &round_state.folding_randomness.0,
                             coset_offset_inv,
                             coset_generator_inv,
-                            E::from(2).inverse().unwrap(),
+                            E::from(2).inverse(),
                             self.0.folding_factor.at_round(round_state.round),
                         )
                     },

@@ -64,7 +64,7 @@ pub fn restructure_evaluations<F: ExtensionField>(
 
             // Apply coset and size correction.
             // Stacked evaluation at i is f(B_l) where B_l = w^i * <w^n/k>
-            let size_inv = F::from(folding_size).inverse().unwrap();
+            let size_inv = F::from_u64(folding_size).inverse();
             #[cfg(not(feature = "parallel"))]
             {
                 let mut coset_offset_inv = F::ONE;
@@ -83,14 +83,14 @@ pub fn restructure_evaluations<F: ExtensionField>(
                 .enumerate()
                 .for_each_with(F::ZERO, |offset, (i, answers)| {
                     if *offset == F::ZERO {
-                        *offset = domain_gen_inv.pow([i as u64]);
+                        *offset = domain_gen_inv.exp_u64(i as u64);
                     } else {
                         *offset *= domain_gen_inv;
                     }
                     let mut scale = size_inv;
                     for v in answers.iter_mut() {
                         *v *= scale;
-                        scale *= &*offset;
+                        scale *= *offset;
                     }
                 });
 
@@ -135,18 +135,18 @@ pub struct LagrangePolynomialIterator<F: Field> {
 
 impl<F: Field> LagrangePolynomialIterator<F> {
     pub fn new(point: &Vec<F>) -> Self {
-        let num_variables = point.0.len();
+        let num_variables = point.len();
 
         // Initialize a stack with capacity for messages/ message_hats and the identity element
-        let mut stack: Vec<F> = Vec::with_capacity(point.0.len() + 1);
+        let mut stack: Vec<F> = Vec::with_capacity(point.len() + 1);
         stack.push(F::ONE);
 
-        let mut point = point.0.clone();
+        let mut point = point.clone();
         let mut point_negated: Vec<_> = point.iter().map(|x| F::ONE - *x).collect();
         // Iterate over the message_hats, update the running product, and push it onto the stack
         let mut running_product: F = F::ONE;
         for point_neg in &point_negated {
-            running_product *= point_neg;
+            running_product *= *point_neg;
             stack.push(running_product);
         }
 
@@ -223,16 +223,16 @@ where
     F: Field,
 {
     let two = F::ONE + F::ONE;
-    let two_inv = two.inverse().unwrap();
+    let two_inv = two.inverse();
 
-    let n_variables = coords.n_variables();
+    let n_variables = p3_util::log2_strict_usize(coords.len());
     assert!(point < 3usize.pow(n_variables as u32));
 
     let mut acc = F::ONE;
 
     // Note: This iterates over the ternary decomposition least-significant trit(?) first.
     // Since our convention is big endian, we reverse the order of coords to account for this.
-    for &val in coords.0.iter().rev() {
+    for &val in coords.iter().rev() {
         let b = point % 3;
         acc *= match b {
             0 => (val - F::ONE) * (val - two) * two_inv,
@@ -248,14 +248,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ff_ext::{ExtensionField, GoldilocksExt2};
     use goldilocks::Goldilocks;
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 
     use crate::{utils::stack_evaluations, whir::fold::expand_from_univariate};
 
     use super::{compute_fold, restructure_evaluations};
 
-    type F = Goldilocks;
+    type F = GoldilocksExt2;
 
     #[test]
     fn test_folding() {
@@ -266,21 +268,25 @@ mod tests {
         let folding_factor = 3; // We fold in 8
         let folding_factor_exp = 1 << folding_factor;
 
-        let poly = DenseMultilinearExtension::new((0..num_coeffs).map(F::from).collect());
+        let poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_variables,
+            (0..num_coeffs).map(F::from_u64).collect::<Vec<_>>(),
+        );
 
-        let root_of_unity = F::get_root_of_unity(domain_size).unwrap();
+        let root_of_unity = F::two_adic_generator(p3_util::log2_strict_usize(domain_size));
 
         let index = 15;
-        let folding_randomness: Vec<_> = (0..folding_factor).map(|i| F::from(i as u64)).collect();
+        let folding_randomness: Vec<_> =
+            (0..folding_factor).map(|i| F::from_u64(i as u64)).collect();
 
-        let coset_offset = root_of_unity.pow([index]);
-        let coset_gen = root_of_unity.pow([domain_size / folding_factor_exp]);
+        let coset_offset = root_of_unity.exp_u64(index);
+        let coset_gen = root_of_unity.exp_u64((domain_size / folding_factor_exp) as u64);
 
         // Evaluate the polynomial on the coset
         let poly_eval: Vec<_> = (0..folding_factor_exp)
             .map(|i| {
                 poly.evaluate(&expand_from_univariate(
-                    coset_offset * coset_gen.pow([i]),
+                    coset_offset * coset_gen.exp_u64(i as u64),
                     num_variables,
                 ))
             })
@@ -289,18 +295,18 @@ mod tests {
         let fold_value = compute_fold(
             &poly_eval,
             &folding_randomness,
-            coset_offset.inverse().unwrap(),
-            coset_gen.inverse().unwrap(),
-            F::from(2).inverse().unwrap(),
+            coset_offset.inverse(),
+            coset_gen.inverse(),
+            F::from_u64(2).inverse(),
             folding_factor,
         );
 
-        let truth_value = poly
-            .fold(&folding_randomness)
-            .evaluate(&expand_from_univariate(
-                root_of_unity.pow([folding_factor_exp * index]),
-                2,
-            ));
+        let truth_value =
+            poly.fix_variables(&folding_randomness)
+                .evaluate(&expand_from_univariate(
+                    root_of_unity.exp_u64(folding_factor_exp as u64 * index),
+                    2,
+                ));
 
         assert_eq!(fold_value, truth_value);
     }
@@ -314,16 +320,20 @@ mod tests {
         let folding_factor = 3; // We fold in 8
         let folding_factor_exp = 1 << folding_factor;
 
-        let poly = DenseMultilinearExtension::new((0..num_coeffs).map(F::from).collect());
+        let poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_variables,
+            (0..num_coeffs).map(F::from_u64).collect::<Vec<_>>(),
+        );
 
-        let root_of_unity = F::get_root_of_unity(domain_size).unwrap();
-        let root_of_unity_inv = root_of_unity.inverse().unwrap();
+        let root_of_unity = F::two_adic_generator(p3_util::log2_strict_usize(domain_size));
+        let root_of_unity_inv = root_of_unity.inverse();
 
-        let folding_randomness: Vec<_> = (0..folding_factor).map(|i| F::from(i as u64)).collect();
+        let folding_randomness: Vec<_> =
+            (0..folding_factor).map(|i| F::from_u64(i as u64)).collect();
 
         // Evaluate the polynomial on the domain
         let domain_evaluations: Vec<_> = (0..domain_size)
-            .map(|w| root_of_unity.pow([w]))
+            .map(|w| root_of_unity.exp_u64(w as u64))
             .map(|point| poly.evaluate(&expand_from_univariate(point, num_variables)))
             .collect();
 
@@ -338,10 +348,10 @@ mod tests {
         );
 
         let num = domain_size / folding_factor_exp;
-        let coset_gen_inv = root_of_unity_inv.pow([num]);
+        let coset_gen_inv = root_of_unity_inv.exp_u64(num as u64);
 
         for index in 0..num {
-            let offset_inv = root_of_unity_inv.pow([index]);
+            let offset_inv = root_of_unity_inv.exp_u64(index as u64);
             let span =
                 (index * folding_factor_exp) as usize..((index + 1) * folding_factor_exp) as usize;
 
@@ -350,12 +360,15 @@ mod tests {
                 &folding_randomness,
                 offset_inv,
                 coset_gen_inv,
-                F::from(2).inverse().unwrap(),
+                F::from_u64(2).inverse(),
                 folding_factor,
             );
 
-            let answer_processed = DenseMultilinearExtension::new(processed[span].to_vec())
-                .evaluate(&folding_randomness.clone());
+            let answer_processed = DenseMultilinearExtension::from_evaluations_ext_vec(
+                p3_util::log2_strict_usize(processed[span.clone()].len()),
+                processed[span].to_vec(),
+            )
+            .evaluate(&folding_randomness.clone());
 
             assert_eq!(answer_processed, answer_unprocessed);
         }

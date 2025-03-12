@@ -33,11 +33,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use ff_ext::{FromUniformBytes, GoldilocksExt2};
+    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
     use nimue::{DefaultHash, IOPattern};
     use nimue_pow::blake3::Blake3PoW;
+    use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks;
     use rand::rngs::OsRng;
+    use transcript::BasicTranscript;
 
     use crate::{
         crypto::MerkleDefaultConfig,
@@ -45,14 +48,18 @@ mod tests {
             FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
         },
         whir::{
-            Statement, committer::Committer, parameters::WhirConfig, prover::Prover,
-            verifier::Verifier,
+            Statement,
+            committer::Committer,
+            parameters::WhirConfig,
+            prover::Prover,
+            verifier::{Verifier, WhirCommitmentInTranscript},
         },
     };
 
     type MerkleConfig = MerkleDefaultConfig<E>;
     type PowStrategy = Blake3PoW;
-    type E = Goldilocks;
+    type E = GoldilocksExt2;
+    type T = BasicTranscript<E>;
 
     fn make_whir_things(
         num_variables: usize,
@@ -65,7 +72,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = MerkleDefaultConfig::new();
+        let hash_params = MerkleDefaultConfig::<E>::new().mmcs;
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
@@ -82,10 +89,13 @@ mod tests {
 
         let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
 
-        let polynomial = DenseMultilinearExtension::new(vec![E::from(1); num_coeffs]);
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, vec![
+                <E as p3_field::PrimeCharacteristicRing>::from_u64(1);
+                num_coeffs
+            ]);
 
         let points: Vec<_> = (0..num_points)
-            .map(|_| Vec::rand(&mut rng, num_variables))
+            .map(|_| E::random_vec(num_variables, rng))
             .collect();
 
         let statement = Statement {
@@ -96,15 +106,11 @@ mod tests {
                 .collect(),
         };
 
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_statement(&params)
-            .add_whir_proof(&params)
-            .clone();
-
-        let mut transcript = io.to_transcript();
+        let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
-        let (witness, commitment) = committer.commit(&mut transcript, polynomial).unwrap();
+        let (witness, commitment): (_, WhirCommitmentInTranscript<_, _>) =
+            committer.commit(&mut transcript, polynomial).unwrap();
 
         let prover = Prover(params.clone());
 
@@ -115,7 +121,7 @@ mod tests {
         let verifier = Verifier::new(params);
         assert!(
             verifier
-                .verify(commitment, &mut transcript, &statement, &proof)
+                .verify(&commitment, &mut transcript, &statement, &proof)
                 .is_ok()
         );
     }
@@ -136,7 +142,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = MerkleDefaultConfig::new();
+        let hash_params = MerkleDefaultConfig::<E>::new().mmcs;
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
@@ -153,12 +159,18 @@ mod tests {
 
         let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
 
-        let polynomials: Vec<DenseMultilinearExtension<E>> = (0..num_polynomials)
-            .map(|i| DenseMultilinearExtension::new(vec![E::from((i + 1) as i32); num_coeffs]))
-            .collect();
+        let polynomials: Vec<DenseMultilinearExtension<E>> =
+            (0..num_polynomials)
+                .map(|i| {
+                    DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, vec![
+                    E::from_u64((i + 1) as u64);
+                    num_coeffs
+                ])
+                })
+                .collect();
 
         let points: Vec<Vec<E>> = (0..num_points)
-            .map(|_| Vec::rand(&mut rng, num_variables))
+            .map(|_| E::random_vec(num_variables, rng))
             .collect();
         let evals_per_point: Vec<Vec<E>> = points
             .iter()
@@ -170,11 +182,7 @@ mod tests {
             })
             .collect();
 
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_batch_statement(&params, num_polynomials)
-            .add_whir_batch_proof(&params, num_polynomials)
-            .clone();
-        let mut transcript = io.to_transcript();
+        let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
         let witnesses = committer
@@ -188,11 +196,11 @@ mod tests {
             .unwrap();
 
         let verifier = Verifier::new(params);
-        let mut arthur = io.to_arthur(transcript.transcript());
+        let mut transcript = T::new(b"test");
         assert!(
             verifier
                 .simple_batch_verify(
-                    &mut arthur,
+                    &mut transcript,
                     num_polynomials,
                     &points,
                     &evals_per_point,
@@ -218,7 +226,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = MerkleDefaultConfig::new();
+        let hash_params = MerkleDefaultConfig::new().mmcs;
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
@@ -235,12 +243,18 @@ mod tests {
 
         let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
 
-        let polynomials: Vec<DenseMultilinearExtension<E>> = (0..num_polynomials)
-            .map(|i| DenseMultilinearExtension::new(vec![E::from((i + 1) as i32); num_coeffs]))
-            .collect();
+        let polynomials: Vec<DenseMultilinearExtension<E>> =
+            (0..num_polynomials)
+                .map(|i| {
+                    DenseMultilinearExtension::from_evaluations_ext_vec(
+                        num_variables,
+                        vec![E::from_u64((i + 1) as u64); num_coeffs],
+                    )
+                })
+                .collect();
 
         let point_per_poly: Vec<Vec<E>> = (0..num_polynomials)
-            .map(|_| Vec::rand(&mut rng, num_variables))
+            .map(|_| E::random_vec(num_variables, rng))
             .collect();
         let eval_per_poly: Vec<E> = polynomials
             .iter()
@@ -248,12 +262,7 @@ mod tests {
             .map(|(poly, point)| poly.evaluate(point))
             .collect();
 
-        let io = IOPattern::<DefaultHash>::new("🌪️")
-            .commit_batch_statement(&params, num_polynomials)
-            .add_whir_unify_proof(&params, num_polynomials)
-            .add_whir_batch_proof(&params, num_polynomials)
-            .clone();
-        let mut transcript = io.to_transcript();
+        let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
         let witnesses = committer
@@ -267,10 +276,10 @@ mod tests {
             .unwrap();
 
         let verifier = Verifier::new(params);
-        let mut arthur = io.to_arthur(transcript.transcript());
+        let mut transcript = T::new(b"test");
         verifier
             .same_size_batch_verify(
-                &mut arthur,
+                &mut transcript,
                 num_polynomials,
                 &point_per_poly,
                 &eval_per_poly,

@@ -89,7 +89,7 @@ where
             .folding_factor
             .compute_number_of_rounds(mv_parameters.num_variables);
 
-        let field_size_bits = E::field_size_in_bits();
+        let field_size_bits = E::bits();
 
         let committment_ood_samples = if whir_parameters.initial_statement {
             Self::ood_samples(
@@ -470,7 +470,7 @@ where
         writeln!(f, "Round by round soundness analysis:")?;
         writeln!(f, "------------------------------------")?;
 
-        let field_size_bits = E::field_size_in_bits();
+        let field_size_bits = E::bits();
         let log_eta = Self::log_eta(self.soundness_type, self.starting_log_inv_rate);
         let mut num_variables = self.mv_parameters.num_variables;
 

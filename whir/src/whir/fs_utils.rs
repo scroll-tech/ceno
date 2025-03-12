@@ -1,29 +1,20 @@
 use crate::{crypto::MerkleConfig as Config, error::Error, utils::dedup};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use p3_commit::Mmcs;
+use transcript::Transcript;
 
-pub fn get_challenge_stir_queries<T>(
+pub fn get_challenge_stir_queries<E: ExtensionField, T: Transcript<E>>(
     domain_size: usize,
     folding_factor: usize,
     num_queries: usize,
     transcript: &mut T,
 ) -> Result<Vec<usize>, Error> {
     let folded_domain_size = domain_size / (1 << folding_factor);
-    // How many bytes do we need to represent an index in the folded domain?
-    // domain_size_bytes = log2(folded_domain_size) / 8
-    // (both operations are rounded up)
-    let domain_size_bytes = ((folded_domain_size * 2 - 1).ilog2() as usize + 7) / 8;
     // We need these many bytes to represent the query indices
-    let mut queries = vec![0u8; num_queries * domain_size_bytes];
-    transcript.fill_challenge_bytes(&mut queries)?;
-    let indices = queries.chunks_exact(domain_size_bytes).map(|chunk| {
-        let mut result = 0;
-        for byte in chunk {
-            result <<= 8;
-            result |= *byte as usize;
-        }
-        result % folded_domain_size
-    });
+    let queries = transcript.sample_and_append_vec(b"stir_queries", num_queries);
+    let indices = queries
+        .iter()
+        .map(|query| query.as_bases()[0].to_canonical_u64() as usize % folded_domain_size);
     Ok(dedup(indices))
 }
 

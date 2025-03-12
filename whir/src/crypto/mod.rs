@@ -60,8 +60,7 @@ impl<E: ExtensionField, const RATE: usize, const OUT: usize>
         let mut state = [E::BaseField::ZERO; 8];
         let mut input = input
             .into_iter()
-            .flat_map(|x| x.as_bases().iter())
-            .map(|x| *x);
+            .flat_map(|x| x.as_bases().iter().map(|x| *x).collect::<Vec<_>>());
 
         // Itertools' chunks() is more convenient, but seems to add more overhead,
         // hence the more manual loop.
@@ -150,11 +149,19 @@ impl<E: ExtensionField, Config: MerkleConfig<E>> MultiPath<E, Config> {
     }
 }
 
+#[derive(Clone)]
 pub struct MerkleDefaultConfig<E: ExtensionField>
 where
     E::BaseField: PoseidonField,
 {
-    hasher: <E::BaseField as PoseidonField>::T,
+    pub(crate) hasher: <E::BaseField as PoseidonField>::T,
+    pub(crate) mmcs: MerkleTreeMmcs<
+        E,
+        E::BaseField,
+        WhirHasher<E, 4, 4>,
+        CompressionFunctionFromHasher<WhirHasherBase<E, 4, 4>, 2, 4>,
+        4,
+    >,
 }
 
 impl<E: ExtensionField> MerkleConfig<E> for MerkleDefaultConfig<E>
@@ -177,6 +184,12 @@ where
     pub fn new() -> Self {
         Self {
             hasher: <E::BaseField as PoseidonField>::get_perm(),
+            mmcs: MerkleTreeMmcs::new(
+                WhirHasher::new(<E::BaseField as PoseidonField>::get_perm()),
+                CompressionFunctionFromHasher::new(WhirHasherBase::new(
+                    <E::BaseField as PoseidonField>::get_perm(),
+                )),
+            ),
         }
     }
 }

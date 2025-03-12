@@ -29,8 +29,8 @@ where
 }
 
 #[derive(Clone)]
-pub(crate) struct WhirCommitmentInTranscript<E, D> {
-    pub(crate) root: D,
+pub(crate) struct WhirCommitmentInTranscript<E: ExtensionField, MerkleConfig: Config<E>> {
+    pub(crate) root: <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
@@ -77,7 +77,7 @@ where
 
     fn write_commitment_to_transcript<T: Transcript<E>>(
         &self,
-        commitment: &mut WhirCommitmentInTranscript<E, <MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
+        commitment: &mut WhirCommitmentInTranscript<E, MerkleConfig>,
         transcript: &mut T,
     ) {
         if self.params.committment_ood_samples > 0 {
@@ -91,10 +91,7 @@ where
     fn write_proof_to_transcript<T: Transcript<E>>(
         &self,
         transcript: &mut T,
-        parsed_commitment: &WhirCommitmentInTranscript<
-            E,
-            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
-        >,
+        parsed_commitment: &WhirCommitmentInTranscript<E, MerkleConfig>,
         statement: &Statement<E>, // Will be needed later
         whir_proof: &WhirProof<MerkleConfig, E>,
     ) -> Result<ParsedProof<E>, Error> {
@@ -320,10 +317,7 @@ where
 
     fn compute_v_poly(
         &self,
-        parsed_commitment: &WhirCommitmentInTranscript<
-            E,
-            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
-        >,
+        parsed_commitment: &WhirCommitmentInTranscript<E, MerkleConfig>,
         statement: &Statement<E>,
         proof: &ParsedProof<E>,
     ) -> E {
@@ -495,13 +489,11 @@ where
 
     pub fn verify<T: Transcript<E>>(
         &self,
-        commitment: &WhirCommitmentInTranscript<E, <MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
+        commitment: &WhirCommitmentInTranscript<E, MerkleConfig>,
         transcript: &mut T,
         statement: &Statement<E>,
         whir_proof: &WhirProof<MerkleConfig, E>,
-    ) -> Result<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment, Error> {
-        // We first do a pass in which we rederive all the FS challenges
-        // Then we will check the algebraic part (so to optimise inversions)
+    ) -> Result<(), Error> {
         let mut parsed_commitment = commitment.clone();
         self.write_commitment_to_transcript(&mut parsed_commitment, transcript);
         let parsed =
@@ -643,6 +635,6 @@ where
             ));
         }
 
-        Ok(parsed_commitment.root)
+        Ok(())
     }
 }

@@ -8,11 +8,12 @@ use crate::{
     whir::{
         fold::{expand_from_univariate, restructure_evaluations},
         fs_utils::MmcsCommitmentWriter,
+        verifier::WhirCommitmentInTranscript,
     },
 };
 use derive_more::Debug;
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
 use transcript::Transcript;
 
 use p3_commit::Mmcs;
@@ -53,7 +54,7 @@ where
     ) -> Result<
         (
             Witness<E, MerkleConfig>,
-            <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+            WhirCommitmentInTranscript<E, MerkleConfig>,
         ),
         Error,
     > {
@@ -62,16 +63,16 @@ where
         polynomial.pad_to_num_vars(self.0.folding_factor.at_round(0));
 
         let base_domain = self.0.starting_domain.base_domain.unwrap();
-        let expansion = base_domain.size() / polynomial.num_coeffs();
-        let evals = expand_from_coeff(polynomial.coeffs(), expansion);
+        let expansion = self.0.starting_domain.size() / polynomial.evaluations().len();
+        let evals = expand_from_coeff(polynomial.evaluations(), expansion);
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
         // They also partially overlap and undo one another. We should merge them.
         let folded_evals = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
         let folded_evals = restructure_evaluations(
             folded_evals,
             self.0.fold_optimisation,
-            base_domain.group_gen(),
-            base_domain.group_gen_inv(),
+            self.0.starting_domain.base_domain_group_gen(),
+            self.0.starting_domain.base_domain_group_gen().inverse(),
             self.0.folding_factor.at_round(0),
         );
 
@@ -119,12 +120,21 @@ where
 
         end_timer!(timer);
 
-        Ok(Witness {
-            polynomial: polynomial.to_extension(),
-            merkle_tree,
-            merkle_leaves: folded_evals,
+        let commitment = WhirCommitmentInTranscript {
+            root,
             ood_points,
             ood_answers,
-        })
+        };
+
+        Ok((
+            Witness {
+                polynomial: polynomial.to_extension(),
+                merkle_tree,
+                merkle_leaves: folded_evals,
+                ood_points,
+                ood_answers,
+            },
+            commitment,
+        ))
     }
 }
