@@ -89,56 +89,6 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         pp: &Self::VerifierParameters,
         level: usize,
     ) -> &[E::BaseField];
-
-    /// Fold the given codeword into a smaller codeword of half size, using
-    /// the folding coefficients computed by `prover_folding_coeffs`.
-    /// The given codeword is assumed to be bit-reversed on the original
-    /// codeword directly produced from the `encode` method.
-    fn fold_bitreversed_codeword(
-        pp: &Self::ProverParameters,
-        codeword: &FieldType<E>,
-        challenge: E,
-    ) -> Vec<E> {
-        let level = log2_strict(codeword.len()) - 1;
-        match codeword {
-            FieldType::Ext(codeword) => codeword
-                .par_chunks_exact(2)
-                .enumerate()
-                .map(|(i, ys)| {
-                    let (x0, x1, w) = Self::prover_folding_coeffs(pp, level, i);
-                    interpolate2_weights([(x0, ys[0]), (x1, ys[1])], w, challenge)
-                })
-                .collect::<Vec<_>>(),
-            FieldType::Base(codeword) => codeword
-                .par_chunks_exact(2)
-                .enumerate()
-                .map(|(i, ys)| {
-                    let (x0, x1, w) = Self::prover_folding_coeffs(pp, level, i);
-                    interpolate2_weights([(x0, E::from(ys[0])), (x1, E::from(ys[1]))], w, challenge)
-                })
-                .collect::<Vec<_>>(),
-            _ => panic!("Unsupported field type"),
-        }
-    }
-
-    /// Fold the given message into a smaller message of half size using challenge
-    /// as the random linear combination coefficient.
-    /// Note that this is always even-odd fold, assuming the message has
-    /// been bit-reversed (or not) according to the setting
-    /// of the `message_need_bit_reversion` function.
-    fn fold_message(msg: &FieldType<E>, challenge: E) -> Vec<E> {
-        match msg {
-            FieldType::Ext(msg) => msg
-                .par_chunks_exact(2)
-                .map(|ys| ys[0] + ys[1] * challenge)
-                .collect::<Vec<_>>(),
-            FieldType::Base(msg) => msg
-                .par_chunks_exact(2)
-                .map(|ys| E::from(ys[0]) + E::from(ys[1]) * challenge)
-                .collect::<Vec<_>>(),
-            _ => panic!("Unsupported field type"),
-        }
-    }
 }
 
 fn concatenate_field_types<E: ExtensionField>(coeffs: &[FieldType<E>]) -> FieldType<E> {

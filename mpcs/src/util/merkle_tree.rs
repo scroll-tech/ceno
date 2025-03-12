@@ -1,5 +1,4 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use p3_field::Field;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use poseidon::DIGEST_WIDTH;
@@ -7,8 +6,6 @@ use poseidon::DIGEST_WIDTH;
 pub(crate) type Poseidon2Sponge<P> = PaddingFreeSponge<P, 8, 4, 4>;
 // TODO investigate compression setting legibility
 pub(crate) type Poseidon2Compression<P> = TruncatedPermutation<P, 2, 4, 8>;
-// pub(crate) type Poseidon2Sponge<P> = PaddingFreeSponge<P, 4, 2, 2>;
-// pub(crate) type Poseidon2Compression<P> = TruncatedPermutation<P, 2, 2, 4>;
 pub(crate) type Poseidon2MerkleMmcs<F, P> =
     MerkleTreeMmcs<F, F, Poseidon2Sponge<P>, Poseidon2Compression<P>, DIGEST_WIDTH>;
 

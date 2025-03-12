@@ -1,6 +1,6 @@
 use crate::{
     sum_check::classic::{Coefficients, SumcheckProof},
-    util::merkle_tree::{Poseidon2MerkleMmcs, poseidon2_merkle_tree},
+    util::merkle_tree::poseidon2_merkle_tree,
 };
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
@@ -30,10 +30,6 @@ pub type MerkleTreeExt<E: ExtensionField> = P3MerkleTree<
 >;
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
-use super::query_phase::{
-    BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-    SimpleBatchQueriesResultWithMerklePath,
-};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -207,16 +203,6 @@ pub trait BasefoldSpec<E: ExtensionField>: Debug + Clone {
 }
 
 #[derive(Debug, Clone)]
-pub struct BasefoldBasecodeParams;
-
-impl<E: ExtensionField> BasefoldSpec<E> for BasefoldBasecodeParams
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    type EncodingScheme = Basecode<BasecodeDefaultSpec>;
-}
-
-#[derive(Debug, Clone)]
 pub struct BasefoldRSParams;
 
 impl<E: ExtensionField> BasefoldSpec<E> for BasefoldRSParams
@@ -243,66 +229,6 @@ pub type BasefoldDefault<F> = Basefold<F, BasefoldRSParams>;
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     fn clone(&self) -> Self {
         Self(PhantomData)
-    }
-}
-
-// impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitment<E>
-// where
-//     E::BaseField: Serialize + DeserializeOwned,
-// {
-//     fn as_ref(&self) -> &[Digest<E::BaseField>] {
-//         let root = &self.root;
-//         slice::from_ref(root)
-//     }
-// }
-
-// impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithWitness<E>
-// where
-//     E::BaseField: Serialize + DeserializeOwned,
-// {
-//     fn as_ref(&self) -> &[Digest<E::BaseField>] {
-//         let root = self.get_root_ref();
-//         slice::from_ref(root)
-//     }
-// }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    Single(QueriesResultWithMerklePath<E>),
-    Batched(BatchedQueriesResultWithMerklePath<E>),
-    SimpleBatched(SimpleBatchQueriesResultWithMerklePath<E>),
-}
-
-impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn as_single(&self) -> &QueriesResultWithMerklePath<E> {
-        match self {
-            Self::Single(x) => x,
-            _ => panic!("Not a single query result"),
-        }
-    }
-
-    pub fn as_batched(&self) -> &BatchedQueriesResultWithMerklePath<E> {
-        match self {
-            Self::Batched(x) => x,
-            _ => panic!("Not a batched query result"),
-        }
-    }
-
-    pub fn as_simple_batched(&self) -> &SimpleBatchQueriesResultWithMerklePath<E> {
-        match self {
-            Self::SimpleBatched(x) => x,
-            _ => panic!("Not a simple batched query result"),
-        }
     }
 }
 
@@ -338,9 +264,7 @@ where
             sumcheck_messages: vec![],
             roots: vec![],
             final_message: vec![],
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
-                QueriesResultWithMerklePath::empty(),
-            ),
+            query_opening_proof: Default::default(),
             sumcheck_proof: None,
             trivial_proof: evals,
         }

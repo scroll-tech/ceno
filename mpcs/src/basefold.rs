@@ -655,7 +655,6 @@ where
             .into_iter()
             .map(|r| ext_to_usize(&r) % (1 << (num_vars + Spec::get_rate_log())))
             .collect();
-        let query_result_with_merkle_path = proof.query_result_with_merkle_path.as_simple_batched();
 
         // coeff is the eq polynomial evaluated at the first challenge.len() variables
         let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
@@ -666,7 +665,7 @@ where
         simple_batch_verifier_query_phase::<E, Spec>(
             queries.as_slice(),
             &vp.encoding_params,
-            query_result_with_merkle_path,
+            &proof.query_opening_proof,
             sumcheck_messages,
             &fold_challenges,
             &batch_coeffs,

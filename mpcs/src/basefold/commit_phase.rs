@@ -51,8 +51,8 @@ where
     assert_eq!(comm.num_polys, batch_coeffs.len());
     let prepare_timer = start_timer!(|| "Prepare");
 
+    let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
     let mmcs = poseidon2_merkle_tree::<E>();
-    let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(mmcs);
     let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(num_vars);
 
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
@@ -61,7 +61,7 @@ where
         .par_chunks(comm.num_polys)
         .map(|row| dot_product(batch_coeffs.iter().copied(), row.iter().copied()))
         .collect::<Vec<_>>();
-    let running_oracle = RowMajorMatrix::new(running_oracle, comm.num_polys);
+    let mut running_oracle = RowMajorMatrix::new(running_oracle, comm.num_polys);
     end_timer!(batch_codewords_timer);
 
     let Some((running_evals, _)): Option<(ArcMultilinearExtension<E>, E)> = izip!(
@@ -104,7 +104,6 @@ where
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut roots = Vec::with_capacity(num_rounds - 1);
     let mut final_evals = Vec::new();
-    let mut running_tree_inner = Vec::new();
     for i in 0..num_rounds {
         let sumcheck_timer = start_timer!(|| format!("Basefold round {}", i));
         // For the first round, no need to send the running root, because this root is
@@ -141,7 +140,6 @@ where
             // knows the old value is safe to move.
             running_sumcheck_message = Vec::new();
             running_oracle = DenseMatrix::default(0, 0);
-            running_tree_inner = Vec::new();
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // running_evals is exactly the evaluation representation of the
