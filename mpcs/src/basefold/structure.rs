@@ -118,7 +118,6 @@ where
     pub fn codeword_size(&self) -> usize {
         let mmcs = poseidon2_merkle_tree::<E>();
         mmcs.get_matrices(&self.codeword)[0].height()
-        // self.codeword.
     }
 
     pub fn get_codewords(&self) -> &DenseMatrix<E::BaseField> {
@@ -307,6 +306,12 @@ where
     }
 }
 
+pub type MerkleProofWithLeafs<F1, F2> = (Vec<F1>, Vec<[F2; DIGEST_WIDTH]>);
+pub type QueryOpeningProofs<E: ExtensionField> = Vec<(
+    MerkleProofWithLeafs<E::BaseField, E::BaseField>,
+    Vec<MerkleProofWithLeafs<E, E::BaseField>>,
+)>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
@@ -319,7 +324,7 @@ where
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) roots: Vec<Digest<E>>,
     pub(crate) final_message: Vec<E>,
-    pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
+    pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
     pub(crate) trivial_proof: Vec<FieldType<E>>,
 }

@@ -6,31 +6,24 @@ use crate::{
         eq_xy_eval,
     },
     util::{
-        arithmetic::{
-            inner_product, inner_product_three, interpolate_field_type_over_boolean_hypercube,
-        },
+        arithmetic::{inner_product, inner_product_three},
         ext_to_usize,
         hash::write_digest_to_transcript,
         log2_strict,
-        merkle_tree::{Poseidon2MerkleMmcs, poseidon2_merkle_tree},
-        plonky2_util::reverse_index_bits_in_place_field_type,
+        merkle_tree::poseidon2_merkle_tree,
         poly_index_ext, poly_iter_ext,
     },
     validate_input,
 };
 use ark_std::{end_timer, start_timer};
 use ceno_sumcheck::macros::{entered_span, exit_span};
-pub use encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
+pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
-use p3_commit::{ExtensionMmcs, Mmcs};
+use p3_commit::Mmcs;
 use p3_matrix::dense::DenseMatrix;
-use query_phase::{
-    QueriesResultWithMerklePath, SimpleBatchQueriesResultWithMerklePath,
-    batch_verifier_query_phase, prover_query_phase, simple_batch_prover_query_phase,
-    simple_batch_verifier_query_phase, verifier_query_phase,
-};
-use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
+use query_phase::{simple_batch_prover_query_phase, simple_batch_verifier_query_phase};
+use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest, MerkleTree};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
@@ -405,25 +398,16 @@ where
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
-        let queries =
+        let query_opening_proof =
             simple_batch_prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
         end_timer!(query_timer);
 
-        let query_timer = start_timer!(|| "Basefold::open::build_query_result");
-
-        let queries_with_merkle_path =
-            SimpleBatchQueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
-        end_timer!(query_timer);
-
         end_timer!(timer);
-
         Ok(Self::Proof {
             sumcheck_messages: commit_phase_proof.sumcheck_messages,
             roots: commit_phase_proof.roots,
             final_message: commit_phase_proof.final_message,
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::SimpleBatched(
-                queries_with_merkle_path,
-            ),
+            query_opening_proof,
             sumcheck_proof: None,
             trivial_proof: vec![],
         })

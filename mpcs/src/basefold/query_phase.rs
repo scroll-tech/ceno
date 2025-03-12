@@ -5,37 +5,42 @@ use crate::{
             degree_2_eval, degree_2_zero_plus_one, inner_product,
             interpolate_over_boolean_hypercube, interpolate2_weights,
         },
-        ext_to_usize, field_type_index_base, field_type_index_ext,
+        ext_to_usize,
+        merkle_tree::poseidon2_merkle_tree,
     },
 };
 use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use p3_matrix::dense::DenseMatrix;
+use p3_commit::{ExtensionMmcs, Mmcs};
+use p3_matrix::Matrix;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
+use crate::basefold::structure::QueryOpeningProofs;
 use multilinear_extensions::mle::FieldType;
-
-use crate::util::plonky2_util::reverse_index_bits_in_place;
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use super::{
     encoding::EncodingScheme,
     structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
 };
+use crate::util::plonky2_util::reverse_index_bits_in_place;
+use rayon::prelude::ParallelIterator;
 
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
     comm: &BasefoldCommitmentWithWitness<E>,
     trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
-) -> SimpleBatchQueriesResult<E>
+) -> QueryOpeningProofs<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
     let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
+
+    let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
+    let mmcs = poseidon2_merkle_tree::<E>();
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -43,165 +48,35 @@ where
         .map(|x_index| ext_to_usize(x_index) % comm.codeword_size())
         .collect_vec();
 
-    SimpleBatchQueriesResult {
-        inner: queries_usize
-            .par_iter()
-            .map(|x_index| {
-                (
-                    *x_index,
-                    simple_batch_basefold_get_query::<E>(comm.get_codewords(), trees, *x_index),
-                )
-            })
-            .collect(),
-    }
-}
+    queries_usize
+        .iter()
+        .map(|idx| {
+            let odd = idx | 1;
+            let even = odd - 1;
 
-#[allow(clippy::too_many_arguments)]
-pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
-    indices: &[usize],
-    vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-    queries: &QueriesResultWithMerklePath<E>,
-    sum_check_messages: &[Vec<E>],
-    fold_challenges: &[E],
-    num_rounds: usize,
-    num_vars: usize,
-    final_message: &[E],
-    roots: &[Digest<E::BaseField>],
-    comm: &BasefoldCommitment<E>,
-    partial_eq: &[E],
-    eval: &E,
-) where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let timer = start_timer!(|| "Verifier query phase");
-
-    let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.to_vec();
-    interpolate_over_boolean_hypercube(&mut message);
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
-        reverse_index_bits_in_place(&mut message);
-    }
-    let final_codeword =
-        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
-    let mut final_codeword = match final_codeword {
-        FieldType::Ext(final_codeword) => final_codeword,
-        _ => panic!("Final codeword must be extension field"),
-    };
-    reverse_index_bits_in_place(&mut final_codeword);
-    end_timer!(encode_timer);
-
-    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
-    queries.check::<Spec>(
-        indices,
-        vp,
-        fold_challenges,
-        num_rounds,
-        num_vars,
-        &final_codeword,
-        roots,
-        comm,
-    );
-    end_timer!(queries_timer);
-
-    let final_timer = start_timer!(|| "Final checks");
-    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
-
-    // The sum-check part of the protocol
-    for i in 0..fold_challenges.len() - 1 {
-        assert_eq!(
-            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
-            degree_2_zero_plus_one(&sum_check_messages[i + 1])
-        );
-    }
-
-    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
-    // sent from the prover
-    assert_eq!(
-        degree_2_eval(
-            &sum_check_messages[fold_challenges.len() - 1],
-            fold_challenges[fold_challenges.len() - 1]
-        ),
-        inner_product(final_message, partial_eq)
-    );
-    end_timer!(final_timer);
-
-    end_timer!(timer);
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
-    indices: &[usize],
-    vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
-    queries: &BatchedQueriesResultWithMerklePath<E>,
-    sum_check_messages: &[Vec<E>],
-    fold_challenges: &[E],
-    num_rounds: usize,
-    num_vars: usize,
-    final_message: &[E],
-    roots: &[Digest<E::BaseField>],
-    comms: &[&BasefoldCommitment<E>],
-    coeffs: &[E],
-    partial_eq: &[E],
-    eval: &E,
-) where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let timer = start_timer!(|| "Verifier batch query phase");
-    let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
-        reverse_index_bits_in_place(&mut message);
-    }
-    interpolate_over_boolean_hypercube(&mut message);
-    let final_codeword =
-        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
-    let mut final_codeword = match final_codeword {
-        FieldType::Ext(final_codeword) => final_codeword,
-        _ => panic!("Final codeword must be extension field"),
-    };
-    reverse_index_bits_in_place(&mut final_codeword);
-    end_timer!(encode_timer);
-
-    // For computing the weights on the fly, because the verifier is incapable of storing
-    // the weights.
-
-    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
-    queries.check::<Spec>(
-        indices,
-        vp,
-        fold_challenges,
-        num_rounds,
-        num_vars,
-        &final_codeword,
-        roots,
-        comms,
-        coeffs,
-    );
-    end_timer!(queries_timer);
-
-    #[allow(unused)]
-    let final_timer = start_timer!(|| "Final checks");
-    assert_eq!(eval, &degree_2_zero_plus_one(&sum_check_messages[0]));
-
-    // The sum-check part of the protocol
-    for i in 0..fold_challenges.len() - 1 {
-        assert_eq!(
-            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
-            degree_2_zero_plus_one(&sum_check_messages[i + 1])
-        );
-    }
-
-    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
-    // sent from the prover
-    assert_eq!(
-        degree_2_eval(
-            &sum_check_messages[fold_challenges.len() - 1],
-            fold_challenges[fold_challenges.len() - 1]
-        ),
-        inner_product(final_message, partial_eq)
-    );
-    end_timer!(final_timer);
-    end_timer!(timer);
+            let opening = {
+                let (mut values, proof) = mmcs.open_batch(even, &comm.codeword);
+                let leafs = values.pop().unwrap();
+                // leaf length equal to number of polynomial
+                debug_assert_eq!(leafs.len(), mmcs.get_matrices(&comm.codeword)[0].width());
+                (leafs, proof)
+            };
+            let (_, opening_ext) =
+                trees
+                    .iter()
+                    .fold((idx >> 1, vec![]), |(idx, mut proofs), tree| {
+                        let odd = idx | 1;
+                        let even = odd - 1;
+                        let (mut values, proof) = mmcs_ext.open_batch(even, tree);
+                        let leafs = values.pop().unwrap();
+                        debug_assert_eq!(leafs.len(), 2);
+                        // TODO we can keep only one of the leafs, as the other can be interpolate from previous layer
+                        proofs.push((leafs, proof));
+                        (idx >> 1, proofs)
+                    });
+            (opening, opening_ext)
+        })
+        .collect_vec()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -281,322 +156,6 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     end_timer!(final_timer);
 
     end_timer!(timer);
-}
-
-fn basefold_get_query<E: ExtensionField>(
-    poly_codeword: &FieldType<E>,
-    trees: &[MerkleTree<E>],
-    x_index: usize,
-) -> SingleQueryResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let mut index = x_index;
-    let p1 = index | 1;
-    let p0 = p1 - 1;
-
-    let commitment_query = match poly_codeword {
-        FieldType::Ext(poly_codeword) => {
-            CodewordSingleQueryResult::new_ext(poly_codeword[p0], poly_codeword[p1], p0)
-        }
-        FieldType::Base(poly_codeword) => {
-            CodewordSingleQueryResult::new_base(poly_codeword[p0], poly_codeword[p1], p0)
-        }
-        _ => unreachable!(),
-    };
-    index >>= 1;
-
-    let mut oracle_queries = Vec::with_capacity(trees.len() + 1);
-    for tree in trees {
-        let p1 = index | 1;
-        let p0 = p1 - 1;
-
-        oracle_queries.push(CodewordSingleQueryResult::new_ext(
-            tree.get_leaf_as_extension(p0)[0],
-            tree.get_leaf_as_extension(p1)[0],
-            p0,
-        ));
-        index >>= 1;
-    }
-
-    let oracle_query = OracleListQueryResult {
-        inner: oracle_queries,
-    };
-
-    SingleQueryResult {
-        oracle_query,
-        commitment_query,
-    }
-}
-
-fn simple_batch_basefold_get_query<E: ExtensionField>(
-    poly_codewords: &DenseMatrix<E::BaseField>,
-    trees: &[MerkleTreeExt<E>],
-    x_index: usize,
-) -> SimpleBatchSingleQueryResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let mut index = x_index;
-    let p1 = index | 1;
-    let p0 = p1 - 1;
-
-    let commitment_query = match poly_codewords[0] {
-        FieldType::Ext(_) => SimpleBatchCommitmentSingleQueryResult::new_ext(
-            poly_codewords
-                .iter()
-                .map(|c| field_type_index_ext(c, p0))
-                .collect(),
-            poly_codewords
-                .iter()
-                .map(|c| field_type_index_ext(c, p1))
-                .collect(),
-            p0,
-        ),
-        FieldType::Base(_) => SimpleBatchCommitmentSingleQueryResult::new_base(
-            poly_codewords
-                .iter()
-                .map(|c| field_type_index_base(c, p0))
-                .collect(),
-            poly_codewords
-                .iter()
-                .map(|c| field_type_index_base(c, p1))
-                .collect(),
-            p0,
-        ),
-        _ => unreachable!(),
-    };
-    index >>= 1;
-
-    let mut oracle_queries = Vec::with_capacity(trees.len() + 1);
-    for tree in trees {
-        let p1 = index | 1;
-        let p0 = p1 - 1;
-
-        oracle_queries.push(CodewordSingleQueryResult::new_ext(
-            tree.get_leaf_as_extension(p0)[0],
-            tree.get_leaf_as_extension(p1)[0],
-            p0,
-        ));
-        index >>= 1;
-    }
-
-    let oracle_query = OracleListQueryResult {
-        inner: oracle_queries,
-    };
-
-    SimpleBatchSingleQueryResult {
-        oracle_query,
-        commitment_query,
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-enum CodewordPointPair<E: ExtensionField> {
-    Ext(E, E),
-    Base(E::BaseField, E::BaseField),
-}
-
-impl<E: ExtensionField> CodewordPointPair<E> {
-    pub fn as_ext(&self) -> (E, E) {
-        match self {
-            CodewordPointPair::Ext(x, y) => (*x, *y),
-            CodewordPointPair::Base(x, y) => (E::from(*x), E::from(*y)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-enum SimpleBatchLeavesPair<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    Ext(Vec<(E, E)>),
-    Base(Vec<(E::BaseField, E::BaseField)>),
-}
-
-impl<E: ExtensionField> SimpleBatchLeavesPair<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    #[allow(unused)]
-    pub fn as_ext(&self) -> Vec<(E, E)> {
-        match self {
-            SimpleBatchLeavesPair::Ext(x) => x.clone(),
-            SimpleBatchLeavesPair::Base(x) => {
-                x.iter().map(|(x, y)| ((*x).into(), (*y).into())).collect()
-            }
-        }
-    }
-
-    pub fn batch(&self, coeffs: &[E]) -> (E, E) {
-        match self {
-            SimpleBatchLeavesPair::Ext(x) => {
-                let mut result = (E::ZERO, E::ZERO);
-                for (i, (x, y)) in x.iter().enumerate() {
-                    result.0 += coeffs[i] * *x;
-                    result.1 += coeffs[i] * *y;
-                }
-                result
-            }
-            SimpleBatchLeavesPair::Base(x) => {
-                let mut result = (E::ZERO, E::ZERO);
-                for (i, (x, y)) in x.iter().enumerate() {
-                    result.0 += coeffs[i] * *x;
-                    result.1 += coeffs[i] * *y;
-                }
-                result
-            }
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-struct CodewordSingleQueryResult<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    codepoints: CodewordPointPair<E>,
-    index: usize,
-}
-
-impl<E: ExtensionField> CodewordSingleQueryResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn new_ext(left: E, right: E, index: usize) -> Self {
-        Self {
-            codepoints: CodewordPointPair::Ext(left, right),
-            index,
-        }
-    }
-
-    fn new_base(left: E::BaseField, right: E::BaseField, index: usize) -> Self {
-        Self {
-            codepoints: CodewordPointPair::Base(left, right),
-            index,
-        }
-    }
-
-    fn left_ext(&self) -> E {
-        match &self.codepoints {
-            CodewordPointPair::Ext(x, _) => *x,
-            CodewordPointPair::Base(x, _) => E::from(*x),
-        }
-    }
-
-    fn right_ext(&self) -> E {
-        match &self.codepoints {
-            CodewordPointPair::Ext(_, y) => *y,
-            CodewordPointPair::Base(_, y) => E::from(*y),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-struct CodewordSingleQueryResultWithMerklePath<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    query: CodewordSingleQueryResult<E>,
-    merkle_path: MerklePathWithoutLeafOrRoot<E>,
-}
-
-impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
-        // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
-        match self.query.codepoints {
-            CodewordPointPair::Ext(left, right) => {
-                self.merkle_path
-                    .authenticate_leaves_root_ext(left, right, self.query.index, root);
-            }
-            CodewordPointPair::Base(left, right) => {
-                self.merkle_path
-                    .authenticate_leaves_root_base(left, right, self.query.index, root);
-            }
-        }
-        // end_timer!(timer);
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-struct OracleListQueryResult<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    inner: Vec<CodewordSingleQueryResult<E>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-struct CommitmentsQueryResult<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    inner: Vec<CodewordSingleQueryResult<E>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-struct OracleListQueryResultWithMerklePath<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-struct CommitmentsQueryResultWithMerklePath<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
-}
-
-impl<E: ExtensionField> ListQueryResult<E> for OracleListQueryResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
-        &self.inner
-    }
-
-    fn get_inner_into(self) -> Vec<CodewordSingleQueryResult<E>> {
-        self.inner
-    }
 }
 
 impl<E: ExtensionField> ListQueryResult<E> for CommitmentsQueryResult<E>
