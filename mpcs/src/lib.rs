@@ -5,7 +5,6 @@ use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::{BasicTranscript, Transcript};
-use util::hash::Digest;
 use witness::RowMajorMatrix;
 
 pub mod sum_check;
@@ -116,7 +115,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
     type CommitmentWithWitness: Debug;
     type Commitment: Clone + Debug + Serialize + DeserializeOwned;
-    type CommitmentChunk: Clone + Debug + Default;
+    type CommitmentChunk: Clone + Debug;
     type Proof: Clone + Debug + Serialize + DeserializeOwned;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error>;

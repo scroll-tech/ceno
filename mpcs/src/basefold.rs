@@ -10,9 +10,9 @@ use crate::{
             inner_product, inner_product_three, interpolate_field_type_over_boolean_hypercube,
         },
         ext_to_usize,
-        hash::{Digest, write_digest_to_transcript},
+        hash::write_digest_to_transcript,
         log2_strict,
-        merkle_tree::{MerkleTree, Poseidon2MerkleMmcs, poseidon2_merkle_tree},
+        merkle_tree::{Poseidon2MerkleMmcs, poseidon2_merkle_tree},
         plonky2_util::reverse_index_bits_in_place_field_type,
         poly_index_ext, poly_iter_ext,
     },
@@ -20,10 +20,7 @@ use crate::{
 };
 use ark_std::{end_timer, start_timer};
 use ceno_sumcheck::macros::{entered_span, exit_span};
-pub use encoding::{
-    Basecode, BasecodeDefaultSpec, EncodingProverParameters, EncodingScheme, RSCode,
-    RSCodeDefaultSpec,
-};
+pub use encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
 use p3_commit::Mmcs;
@@ -33,8 +30,8 @@ use query_phase::{
     batch_verifier_query_phase, prover_query_phase, simple_batch_prover_query_phase,
     simple_batch_verifier_query_phase, verifier_query_phase,
 };
-pub use structure::BasefoldSpec;
 use structure::{BasefoldProof, ProofQueriesResultWithMerklePath};
+pub use structure::{BasefoldSpec, Digest, MerkleTree};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -61,7 +58,7 @@ pub use structure::{
     BasefoldVerifierParams,
 };
 mod commit_phase;
-use commit_phase::{commit_phase, simple_batch_commit_phase};
+use commit_phase::simple_batch_commit_phase;
 mod encoding;
 pub use encoding::{coset_fft, fft, fft_root_table};
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
@@ -202,7 +199,7 @@ where
     type VerifierParam = BasefoldVerifierParams<E, Spec>;
     type CommitmentWithWitness = BasefoldCommitmentWithWitness<E>;
     type Commitment = BasefoldCommitment<E>;
-    type CommitmentChunk = Digest<E::BaseField>;
+    type CommitmentChunk = Digest<E>;
     type Proof = BasefoldProof<E>;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error> {
@@ -296,7 +293,7 @@ where
                     num_polys,
                 }
             }
-            PolyEvalsCodeword::TooSmall(dense_matrix) => unimplemented!(),
+            PolyEvalsCodeword::TooSmall(_) => todo!(),
             PolyEvalsCodeword::TooBig(_) => return Err(Error::PolynomialTooLarge(num_vars)),
         };
         exit_span!(span);
@@ -321,78 +318,14 @@ where
     /// commitment with data contains more than one polynomial, this function
     /// will panic.
     fn open(
-        pp: &Self::ProverParam,
-        poly: &ArcMultilinearExtension<E>,
-        comm: &Self::CommitmentWithWitness,
-        point: &[E],
+        _pp: &Self::ProverParam,
+        _poly: &ArcMultilinearExtension<E>,
+        _comm: &Self::CommitmentWithWitness,
+        _point: &[E],
         _eval: &E, // Opening does not need eval, except for sanity check
-        transcript: &mut impl Transcript<E>,
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        let timer = start_timer!(|| "Basefold::open");
-
-        // The encoded polynomial should at least have the number of
-        // variables of the basecode, i.e., the size of the message
-        // when the protocol stops. If the polynomial is smaller
-        // the protocol won't work, and saves no verifier work anyway.
-        // In this case, simply return the evaluations as trivial proof.
-        if comm.is_trivial::<Spec>() {
-            return Ok(Self::Proof::trivial(vec![poly.evaluations().clone()]));
-        }
-
-        assert!(comm.num_vars >= Spec::get_basecode_msg_size_log());
-
-        assert!(comm.num_polys == 1);
-
-        // 1. Committing phase. This phase runs the sum-check and
-        //    the FRI protocols interleavingly. After this phase,
-        //    the sum-check protocol is finished, so nothing is
-        //    to return about the sum-check. However, for the FRI
-        //    part, the prover needs to prepare the answers to the
-        //    queries, so the prover needs the oracles and the Merkle
-        //    trees built over them.
-        let (trees, commit_phase_proof) = commit_phase::<E, Spec>(
-            &pp.encoding_params,
-            point,
-            comm,
-            transcript,
-            poly.num_vars(),
-            poly.num_vars() - Spec::get_basecode_msg_size_log(),
-        );
-
-        // 2. Query phase. ---------------------------------------
-        //    Compute the query indices by Fiat-Shamir.
-        //    For each index, prepare the answers and the Merkle paths.
-        //    Each entry in queried_els stores a list of triples
-        //    (F, F, i) indicating the position opened at each round and
-        //    the two values at that round
-
-        // 2.1 Prepare the answers. These include two values in each oracle,
-        //     in positions (i, i XOR 1), (i >> 1, (i >> 1) XOR 1), ...
-        //     respectively.
-        let query_timer = start_timer!(|| "Basefold::open::query_phase");
-        let queries = prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
-        end_timer!(query_timer);
-
-        // 2.2 Prepare the merkle paths for these answers.
-        let query_timer = start_timer!(|| "Basefold::open::build_query_result");
-        let queries_with_merkle_path =
-            QueriesResultWithMerklePath::from_query_result(queries, &trees, comm);
-        end_timer!(query_timer);
-
-        end_timer!(timer);
-
-        // End of query phase.----------------------------------
-
-        Ok(Self::Proof {
-            sumcheck_messages: commit_phase_proof.sumcheck_messages,
-            roots: commit_phase_proof.roots,
-            final_message: commit_phase_proof.final_message,
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
-                queries_with_merkle_path,
-            ),
-            sumcheck_proof: None,
-            trivial_proof: vec![],
-        })
+        unimplemented!()
     }
 
     /// Open a batch of polynomial commitments at several points.

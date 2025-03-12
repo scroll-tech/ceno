@@ -3,5 +3,6 @@ extern crate core;
 
 pub mod challenger;
 pub(crate) mod constants;
-pub mod digest;
+pub use constants::DIGEST_WIDTH;
+pub(crate) mod digest;
 pub mod poseidon_hash;

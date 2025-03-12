@@ -1,28 +1,31 @@
-use crate::{
-    sum_check::classic::{Coefficients, SumcheckProof},
-    util::{hash::Digest, merkle_tree::MerkleTree},
-};
+use crate::sum_check::classic::{Coefficients, SumcheckProof};
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 
 use itertools::izip;
-use p3_commit::Mmcs;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{dense::RowMajorMatrix, extension::FlatMatrixView};
 use p3_merkle_tree::MerkleTree as P3MerkleTree;
 use p3_symmetric::Hash as P3Hash;
+use poseidon::DIGEST_WIDTH;
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::ArcMultilinearExtension};
 
-use std::{marker::PhantomData, slice};
+use std::marker::PhantomData;
+
+pub type Digest<E: ExtensionField> = P3Hash<E::BaseField, E::BaseField, DIGEST_WIDTH>;
+pub type MerkleTree<F> = P3MerkleTree<F, F, RowMajorMatrix<F>, DIGEST_WIDTH>;
+pub type MerkleTreeExt<E: ExtensionField> = P3MerkleTree<
+    E::BaseField,
+    E::BaseField,
+    FlatMatrixView<E::BaseField, E, RowMajorMatrix<E>>,
+    DIGEST_WIDTH,
+>;
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
-use super::{
-    Basecode, BasecodeDefaultSpec,
-    query_phase::{
-        BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-        SimpleBatchQueriesResultWithMerklePath,
-    },
+use super::query_phase::{
+    BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
+    SimpleBatchQueriesResultWithMerklePath,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -68,8 +71,8 @@ pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) comm: P3Hash<E::BaseField, E::BaseField, 4>,
-    pub(crate) codeword: P3MerkleTree<E::BaseField, E::BaseField, E::BaseField, 4>,
+    pub(crate) comm: Digest<E>,
+    pub(crate) codeword: MerkleTree<E::BaseField>,
     pub(crate) polynomials_bh_evals: Vec<ArcMultilinearExtension<'static, E>>,
     pub(crate) num_vars: usize,
     pub(crate) is_base: bool,
@@ -89,40 +92,8 @@ where
         )
     }
 
-    pub fn get_root_ref(&self) -> &Digest<E::BaseField> {
-        self.codeword_tree.root_ref()
-    }
-
-    pub fn get_root_as(&self) -> Digest<E::BaseField> {
-        Digest::<E::BaseField>(self.get_root_ref().0)
-    }
-
-    pub fn get_codewords(&self) -> &Vec<FieldType<E>> {
-        self.codeword_tree.leaves()
-    }
-
-    pub fn batch_codewords(&self, coeffs: &[E]) -> Vec<E> {
-        self.codeword_tree.batch_leaves(coeffs)
-    }
-
-    pub fn codeword_size(&self) -> usize {
-        self.codeword_tree.size().1
-    }
-
-    pub fn codeword_size_log(&self) -> usize {
-        self.codeword_tree.height()
-    }
-
     pub fn poly_size(&self) -> usize {
         1 << self.num_vars
-    }
-
-    pub fn get_codeword_entry_base(&self, index: usize) -> Vec<E::BaseField> {
-        self.codeword_tree.get_leaf_as_base(index)
-    }
-
-    pub fn get_codeword_entry_ext(&self, index: usize) -> Vec<E> {
-        self.codeword_tree.get_leaf_as_extension(index)
     }
 
     pub fn is_base(&self) -> bool {
@@ -138,23 +109,14 @@ where
     }
 }
 
-impl<E: ExtensionField> From<BasefoldCommitmentWithWitness<E>> for Digest<E::BaseField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn from(val: BasefoldCommitmentWithWitness<E>) -> Self {
-        val.get_root_as()
-    }
-}
-
-impl<E: ExtensionField> From<&BasefoldCommitmentWithWitness<E>> for BasefoldCommitment<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn from(val: &BasefoldCommitmentWithWitness<E>) -> Self {
-        val.to_commitment()
-    }
-}
+// impl<E: ExtensionField> From<&BasefoldCommitmentWithWitness<E>> for BasefoldCommitment<E>
+// where
+//     E::BaseField: Serialize + DeserializeOwned,
+// {
+//     fn from(val: &BasefoldCommitmentWithWitness<E>) -> Self {
+//         val.to_commitment()
+//     }
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
@@ -162,7 +124,7 @@ pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) root: P3Hash<E::BaseField, E::BaseField, 4>,
+    pub(super) root: Digest<E>,
     pub(super) num_vars: Option<usize>,
     pub(super) is_base: bool,
     pub(super) num_polys: Option<usize>,
@@ -172,12 +134,7 @@ impl<E: ExtensionField> BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn new(
-        root: P3Hash<E::BaseField, E::BaseField, 4>,
-        num_vars: usize,
-        is_base: bool,
-        num_polys: usize,
-    ) -> Self {
+    pub fn new(root: Digest<E>, num_vars: usize, is_base: bool, num_polys: usize) -> Self {
         Self {
             root,
             num_vars: Some(num_vars),
@@ -186,7 +143,7 @@ where
         }
     }
 
-    pub fn root(&self) -> Digest<E::BaseField> {
+    pub fn root(&self) -> Digest<E> {
         self.root.clone()
     }
 
@@ -272,25 +229,25 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     }
 }
 
-impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitment<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn as_ref(&self) -> &[Digest<E::BaseField>] {
-        let root = &self.root;
-        slice::from_ref(root)
-    }
-}
+// impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitment<E>
+// where
+//     E::BaseField: Serialize + DeserializeOwned,
+// {
+//     fn as_ref(&self) -> &[Digest<E::BaseField>] {
+//         let root = &self.root;
+//         slice::from_ref(root)
+//     }
+// }
 
-impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithWitness<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn as_ref(&self) -> &[Digest<E::BaseField>] {
-        let root = self.get_root_ref();
-        slice::from_ref(root)
-    }
-}
+// impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithWitness<E>
+// where
+//     E::BaseField: Serialize + DeserializeOwned,
+// {
+//     fn as_ref(&self) -> &[Digest<E::BaseField>] {
+//         let root = self.get_root_ref();
+//         slice::from_ref(root)
+//     }
+// }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -342,7 +299,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
-    pub(crate) roots: Vec<Digest<E::BaseField>>,
+    pub(crate) roots: Vec<Digest<E>>,
     pub(crate) final_message: Vec<E>,
     pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
     pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
@@ -381,6 +338,6 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
-    pub(crate) roots: Vec<Digest<E::BaseField>>,
+    pub(crate) roots: Vec<Digest<E>>,
     pub(crate) final_message: Vec<E>,
 }

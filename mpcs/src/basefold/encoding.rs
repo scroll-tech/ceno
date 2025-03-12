@@ -37,10 +37,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error>;
 
-    fn encode(
-        pp: &Self::ProverParameters,
-        coeffs: RowMajorMatrix<E::BaseField>,
-    ) -> Self::EncodedData;
+    fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData;
 
     /// Encodes a message of small length, such that the verifier is also able
     /// to execute the encoding.

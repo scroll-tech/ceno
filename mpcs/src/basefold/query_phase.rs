@@ -1,11 +1,12 @@
-use crate::util::{
-    arithmetic::{
-        degree_2_eval, degree_2_zero_plus_one, inner_product, interpolate_over_boolean_hypercube,
-        interpolate2_weights,
+use crate::{
+    basefold::structure::MerkleTreeExt,
+    util::{
+        arithmetic::{
+            degree_2_eval, degree_2_zero_plus_one, inner_product,
+            interpolate_over_boolean_hypercube, interpolate2_weights,
+        },
+        ext_to_usize, field_type_index_base, field_type_index_ext,
     },
-    ext_to_usize, field_type_index_base, field_type_index_ext,
-    hash::Digest,
-    merkle_tree::{MerklePathWithoutLeafOrRoot, MerkleTree},
 };
 use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
@@ -24,40 +25,10 @@ use super::{
     structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
 };
 
-pub fn prover_query_phase<E: ExtensionField>(
-    transcript: &mut impl Transcript<E>,
-    comm: &BasefoldCommitmentWithWitness<E>,
-    trees: &[MerkleTree<E>],
-    num_verifier_queries: usize,
-) -> QueriesResult<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
-
-    // Transform the challenge queries from field elements into integers
-    let queries_usize: Vec<usize> = queries
-        .iter()
-        .map(|x_index| ext_to_usize(x_index) % comm.codeword_size())
-        .collect_vec();
-
-    QueriesResult {
-        inner: queries_usize
-            .par_iter()
-            .map(|x_index| {
-                (
-                    *x_index,
-                    basefold_get_query::<E>(&comm.get_codewords()[0], trees, *x_index),
-                )
-            })
-            .collect(),
-    }
-}
-
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
     comm: &BasefoldCommitmentWithWitness<E>,
-    trees: &[MerkleTree<E>],
+    trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
 ) -> SimpleBatchQueriesResult<E>
 where

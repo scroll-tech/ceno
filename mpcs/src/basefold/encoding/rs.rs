@@ -15,7 +15,7 @@ use p3_dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{
     Field, PrimeCharacteristicRing, PrimeField, TwoAdicField, batch_multiplicative_inverse,
 };
-use p3_matrix::Matrix;
+use p3_matrix::{Matrix, bitrev::BitReversableMatrix};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
 
@@ -406,8 +406,21 @@ where
 
         let m = rmm
             .into_p3_rmm()
-            .bit_reversed_zero_pad(Spec::get_rate_log()); // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
-        let codeword = pp.dft.dft_batch(m).to_row_major_matrix();
+            // reverse bit of raw message first, because
+            // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
+            .bit_reversed_zero_pad(Spec::get_rate_log()); //dft(reverse_row_bit(message)) == basefold::rs_encode(message)
+        let codeword = pp
+            .dft
+            .dft_batch(m)
+            // The encoding scheme always folds the codeword in left-and-right
+            // manner. However, in query phase the two folded positions are
+            // always opened together, so it will be more efficient if the
+            // folded positions are simultaneously sibling nodes in the Merkle
+            // tree. Therefore, instead of left-and-right folding, we bit-reverse
+            // the codeword to make the folding even-and-odd, i.e., adjacent
+            // positions are folded.
+            .bit_reverse_rows()
+            .to_row_major_matrix();
         PolyEvalsCodeword::Normal(Box::new(codeword))
     }
 

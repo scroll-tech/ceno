@@ -88,6 +88,16 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         }
     }
 
+    pub fn new_by_inner_matrix(
+        m: p3_matrix::dense::RowMajorMatrix<T>,
+        padding_strategy: InstancePaddingStrategy,
+    ) -> Self {
+        RowMajorMatrix {
+            inner: m,
+            padding_strategy,
+        }
+    }
+
     pub fn num_padding_instances(&self) -> usize {
         next_pow2_instance_padding(self.num_instances()) - self.num_instances()
     }
