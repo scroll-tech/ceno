@@ -4,17 +4,12 @@ use multilinear_extensions::mle::FieldType;
 mod utils;
 
 mod rs;
-use plonky2::util::log2_strict;
-use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
-    slice::ParallelSlice,
-};
 pub use rs::{RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table};
 
 use serde::{Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
 
-use crate::{Error, util::arithmetic::interpolate2_weights};
+use crate::Error;
 
 pub trait EncodingProverParameters {
     fn get_max_message_size_log(&self) -> usize;
@@ -41,7 +36,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
 
     /// Encodes a message of small length, such that the verifier is also able
     /// to execute the encoding.
-    fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E>;
+    fn encode_small(vp: &Self::VerifierParameters, rmm: RowMajorMatrix<E>) -> FieldType<E>;
 
     fn get_number_queries() -> usize;
 

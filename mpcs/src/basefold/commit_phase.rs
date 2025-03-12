@@ -13,10 +13,7 @@ use ff_ext::ExtensionField;
 use itertools::izip;
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::dot_product;
-use p3_matrix::{
-    bitrev::BitReversableMatrix,
-    dense::{DenseMatrix, RowMajorMatrix},
-};
+use p3_matrix::dense::RowMajorMatrix;
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -56,12 +53,12 @@ where
     let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(num_vars);
 
     let batch_codewords_timer = start_timer!(|| "Batch codewords");
-    let running_oracle = mmcs.get_matrices(&comm.codeword)[0]
+    let initial_oracle = mmcs.get_matrices(&comm.codeword)[0]
         .values
         .par_chunks(comm.num_polys)
         .map(|row| dot_product(batch_coeffs.iter().copied(), row.iter().copied()))
         .collect::<Vec<_>>();
-    let mut running_oracle = RowMajorMatrix::new(running_oracle, comm.num_polys);
+    let initial_oracle = RowMajorMatrix::new(initial_oracle, comm.num_polys);
     end_timer!(batch_codewords_timer);
 
     let Some((running_evals, _)): Option<(ArcMultilinearExtension<E>, E)> = izip!(
@@ -117,12 +114,22 @@ where
             .elements;
 
         // Fold the current oracle for FRI
-        let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
-            pp,
-            log2_strict(running_oracle.values.len()) - 1,
-            &running_oracle.values,
-            challenge,
-        );
+        let new_running_oracle = if trees.is_empty() {
+            basefold_one_round_by_interpolation_weights::<E, Spec>(
+                pp,
+                log2_strict(initial_oracle.values.len()) - 1,
+                &initial_oracle.values,
+                challenge,
+            )
+        } else {
+            let values = &mmcs_ext.get_matrices(trees.last().unwrap())[0].values;
+            basefold_one_round_by_interpolation_weights::<E, Spec>(
+                pp,
+                log2_strict(values.len()) - 1,
+                values,
+                challenge,
+            )
+        };
 
         if i < num_rounds - 1 {
             let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_oracle);
@@ -130,7 +137,6 @@ where
             let running_root = commitment;
             write_digest_to_transcript(&running_root, transcript);
             roots.push(running_root);
-            running_oracle = new_running_oracle;
 
             // go next round sumcheck and update sumcheck message
             running_sumcheck_message =
@@ -139,7 +145,6 @@ where
             // Assign a new value to the old running vars so that the compiler
             // knows the old value is safe to move.
             running_sumcheck_message = Vec::new();
-            running_oracle = DenseMatrix::default(0, 0);
             // The difference of the last round is that we don't need to compute the message,
             // and we don't interpolate the small polynomials. So after the last round,
             // running_evals is exactly the evaluation representation of the
@@ -155,9 +160,9 @@ where
                 // If the prover is honest, in the last round, the running oracle
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
-                // let mut evaluations = final_evals.clone();
+                // let evaluations = final_evals.clone();
                 // TODO to make it work, we need to support encode on extension field element
-                // let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
+                // let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
                 //     pp,
                 //     MyRowMajorMatrix::new_by_inner_matrix(
                 //         RowMajorMatrix::new(evaluations, 1),
@@ -169,7 +174,7 @@ where
                 //     _ => panic!("Should be ext field"),
                 // };
                 // flip row index back to left right
-                let mut new_running_oracle = new_running_oracle.bit_reverse_rows();
+                // let mut new_running_oracle = new_running_oracle.bit_reverse_rows();
                 // assert_eq!(basecode, new_running_oracle);
             }
         }

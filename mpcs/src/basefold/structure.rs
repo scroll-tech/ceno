@@ -16,7 +16,7 @@ use p3_symmetric::Hash as P3Hash;
 use poseidon::DIGEST_WIDTH;
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 
-use multilinear_extensions::{mle::FieldType, virtual_poly::ArcMultilinearExtension};
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 use std::marker::PhantomData;
 
@@ -252,26 +252,26 @@ where
     pub(crate) final_message: Vec<E>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
-    pub(crate) trivial_proof: Vec<FieldType<E>>,
+    pub(crate) trivial_proof: Option<DenseMatrix<E::BaseField>>,
 }
 
 impl<E: ExtensionField> BasefoldProof<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn trivial(evals: Vec<FieldType<E>>) -> Self {
+    pub fn trivial(evals: DenseMatrix<E::BaseField>) -> Self {
         Self {
             sumcheck_messages: vec![],
             roots: vec![],
             final_message: vec![],
             query_opening_proof: Default::default(),
             sumcheck_proof: None,
-            trivial_proof: evals,
+            trivial_proof: Some(evals),
         }
     }
 
     pub fn is_trivial(&self) -> bool {
-        !self.trivial_proof.is_empty()
+        self.trivial_proof.is_some()
     }
 }
 
