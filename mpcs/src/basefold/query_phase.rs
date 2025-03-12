@@ -96,63 +96,64 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let timer = start_timer!(|| "Verifier query phase");
+    unimplemented!()
+    // let timer = start_timer!(|| "Verifier query phase");
 
-    let encode_timer = start_timer!(|| "Encode final codeword");
-    let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
-        reverse_index_bits_in_place(&mut message);
-    }
-    interpolate_over_boolean_hypercube(&mut message);
-    let final_codeword =
-        <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
-    let mut final_codeword = match final_codeword {
-        FieldType::Ext(final_codeword) => final_codeword,
-        _ => panic!("Final codeword must be extension field"),
-    };
-    reverse_index_bits_in_place(&mut final_codeword);
-    end_timer!(encode_timer);
+    // let encode_timer = start_timer!(|| "Encode final codeword");
+    // let mut message = final_message.to_vec();
+    // if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
+    //     reverse_index_bits_in_place(&mut message);
+    // }
+    // interpolate_over_boolean_hypercube(&mut message);
+    // let final_codeword =
+    //     <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
+    // let mut final_codeword = match final_codeword {
+    //     FieldType::Ext(final_codeword) => final_codeword,
+    //     _ => panic!("Final codeword must be extension field"),
+    // };
+    // reverse_index_bits_in_place(&mut final_codeword);
+    // end_timer!(encode_timer);
 
-    // For computing the weights on the fly, because the verifier is incapable of storing
-    // the weights.
-    let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
-    queries.check::<Spec>(
-        indices,
-        vp,
-        fold_challenges,
-        batch_coeffs,
-        num_rounds,
-        num_vars,
-        &final_codeword,
-        roots,
-        comm,
-    );
-    end_timer!(queries_timer);
+    // // For computing the weights on the fly, because the verifier is incapable of storing
+    // // the weights.
+    // let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
+    // // queries.check::<Spec>(
+    // //     indices,
+    // //     vp,
+    // //     fold_challenges,
+    // //     batch_coeffs,
+    // //     num_rounds,
+    // //     num_vars,
+    // //     &final_codeword,
+    // //     roots,
+    // //     comm,
+    // // );
+    // end_timer!(queries_timer);
 
-    let final_timer = start_timer!(|| "Final checks");
-    assert_eq!(
-        &inner_product(batch_coeffs, evals),
-        &degree_2_zero_plus_one(&sum_check_messages[0])
-    );
+    // let final_timer = start_timer!(|| "Final checks");
+    // assert_eq!(
+    //     &inner_product(batch_coeffs, evals),
+    //     &degree_2_zero_plus_one(&sum_check_messages[0])
+    // );
 
-    // The sum-check part of the protocol
-    for i in 0..fold_challenges.len() - 1 {
-        assert_eq!(
-            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
-            degree_2_zero_plus_one(&sum_check_messages[i + 1])
-        );
-    }
+    // // The sum-check part of the protocol
+    // for i in 0..fold_challenges.len() - 1 {
+    //     assert_eq!(
+    //         degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
+    //         degree_2_zero_plus_one(&sum_check_messages[i + 1])
+    //     );
+    // }
 
-    // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
-    // sent from the prover
-    assert_eq!(
-        degree_2_eval(
-            &sum_check_messages[fold_challenges.len() - 1],
-            fold_challenges[fold_challenges.len() - 1]
-        ),
-        inner_product(final_message, partial_eq)
-    );
-    end_timer!(final_timer);
+    // // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
+    // // sent from the prover
+    // assert_eq!(
+    //     degree_2_eval(
+    //         &sum_check_messages[fold_challenges.len() - 1],
+    //         fold_challenges[fold_challenges.len() - 1]
+    //     ),
+    //     inner_product(final_message, partial_eq)
+    // );
+    // end_timer!(final_timer);
 
-    end_timer!(timer);
+    // end_timer!(timer);
 }

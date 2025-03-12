@@ -237,10 +237,15 @@ impl<E: FfExtField> ark_ff::PrimeField for BaseFieldWrapper<E> {
     const MODULUS_BIT_SIZE: u32 = 64;
 
     const TRACE: Self::BigInt =
-        Self::BigInt::new([(E::BaseField::MODULUS_U64 - 1) / (1 << E::TWO_ADICITY)]);
+        Self::BigInt::new(
+            [(E::BaseField::MODULUS_U64 - 1) / (1 << <E as FfExtField>::TWO_ADICITY)],
+        );
 
-    const TRACE_MINUS_ONE_DIV_TWO: Self::BigInt =
-        Self::BigInt::new([((E::BaseField::MODULUS_U64 - 1) / (1 << E::TWO_ADICITY) - 1) / 2]);
+    const TRACE_MINUS_ONE_DIV_TWO: Self::BigInt = Self::BigInt::new([((E::BaseField::MODULUS_U64
+        - 1)
+        / (1 << <E as FfExtField>::TWO_ADICITY)
+        - 1)
+        / 2]);
 
     fn from_bigint(repr: Self::BigInt) -> Option<Self> {
         Some(Self::from(repr))
@@ -412,7 +417,7 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
 
 impl<E: FfExtField> ark_ff::FftField for BaseFieldWrapper<E> {
     const GENERATOR: Self = Self(<E::BaseField as p3_field::Field>::GENERATOR);
-    const TWO_ADICITY: u32 = E::TWO_ADICITY as u32;
+    const TWO_ADICITY: u32 = <E as FfExtField>::TWO_ADICITY as u32;
     const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::BASE_TWO_ADIC_ROOT_OF_UNITY);
     const SMALL_SUBGROUP_BASE: Option<u32> = None;
     const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> = None;

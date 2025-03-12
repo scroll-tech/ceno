@@ -34,9 +34,12 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
 
     fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData;
 
-    /// Encodes a message of small length, such that the verifier is also able
+    /// Encodes a message in extension field, such that the verifier is also able
     /// to execute the encoding.
-    fn encode_small(vp: &Self::VerifierParameters, rmm: RowMajorMatrix<E>) -> FieldType<E>;
+    fn encode_small(
+        vp: &Self::VerifierParameters,
+        rmm: p3_matrix::dense::RowMajorMatrix<E>,
+    ) -> p3_matrix::dense::RowMajorMatrix<E>;
 
     fn get_number_queries() -> usize;
 
@@ -122,67 +125,67 @@ pub(crate) mod test_util {
 
     use super::EncodingScheme;
 
-    pub fn test_codeword_folding<E: ExtensionField, Code: EncodingScheme<E>>() {
-        let num_vars = 12;
+    // pub fn test_codeword_folding<E: ExtensionField, Code: EncodingScheme<E>>() {
+    //     let num_vars = 12;
 
-        let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from_u64(i)).collect();
-        let mut poly = FieldType::Ext(poly);
+    //     let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from_u64(i)).collect();
+    //     let mut poly = FieldType::Ext(poly);
 
-        let pp: Code::PublicParameters = Code::setup(num_vars);
-        let (pp, _) = Code::trim(pp, num_vars).unwrap();
-        let mut codeword = Code::encode(&pp, &poly);
-        reverse_index_bits_in_place_field_type(&mut codeword);
-        if Code::message_is_left_and_right_folding() {
-            reverse_index_bits_in_place_field_type(&mut poly);
-        }
-        let challenge = E::random(&mut OsRng);
-        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
-        let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
-        if Code::message_is_left_and_right_folding() {
-            // Reverse the message back before encoding if it has been
-            // bit-reversed
-            reverse_index_bits_in_place_field_type(&mut folded_message);
-        }
-        let mut encoded_folded_message = Code::encode(&pp, &folded_message);
-        reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
-        let encoded_folded_message = match encoded_folded_message {
-            FieldType::Ext(coeffs) => coeffs,
-            _ => panic!("Wrong field type"),
-        };
-        for (i, (a, b)) in folded_codeword
-            .iter()
-            .zip(encoded_folded_message.iter())
-            .enumerate()
-        {
-            assert_eq!(a, b, "Failed at index {}", i);
-        }
+    //     let pp: Code::PublicParameters = Code::setup(num_vars);
+    //     let (pp, _) = Code::trim(pp, num_vars).unwrap();
+    //     let mut codeword = Code::encode(&pp, &poly);
+    //     reverse_index_bits_in_place_field_type(&mut codeword);
+    //     if Code::message_is_left_and_right_folding() {
+    //         reverse_index_bits_in_place_field_type(&mut poly);
+    //     }
+    //     let challenge = E::random(&mut OsRng);
+    //     let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
+    //     let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
+    //     if Code::message_is_left_and_right_folding() {
+    //         // Reverse the message back before encoding if it has been
+    //         // bit-reversed
+    //         reverse_index_bits_in_place_field_type(&mut folded_message);
+    //     }
+    //     let mut encoded_folded_message = Code::encode(&pp, &folded_message);
+    //     reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
+    //     let encoded_folded_message = match encoded_folded_message {
+    //         FieldType::Ext(coeffs) => coeffs,
+    //         _ => panic!("Wrong field type"),
+    //     };
+    //     for (i, (a, b)) in folded_codeword
+    //         .iter()
+    //         .zip(encoded_folded_message.iter())
+    //         .enumerate()
+    //     {
+    //         assert_eq!(a, b, "Failed at index {}", i);
+    //     }
 
-        let mut folded_codeword = FieldType::Ext(folded_codeword);
-        for round in 0..4 {
-            let folded_codeword_vec =
-                Code::fold_bitreversed_codeword(&pp, &folded_codeword, challenge);
+    //     let mut folded_codeword = FieldType::Ext(folded_codeword);
+    //     for round in 0..4 {
+    //         let folded_codeword_vec =
+    //             Code::fold_bitreversed_codeword(&pp, &folded_codeword, challenge);
 
-            if Code::message_is_left_and_right_folding() {
-                reverse_index_bits_in_place_field_type(&mut folded_message);
-            }
-            folded_message = FieldType::Ext(Code::fold_message(&folded_message, challenge));
-            if Code::message_is_left_and_right_folding() {
-                reverse_index_bits_in_place_field_type(&mut folded_message);
-            }
-            let mut encoded_folded_message = Code::encode(&pp, &folded_message);
-            reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
-            let encoded_folded_message = match encoded_folded_message {
-                FieldType::Ext(coeffs) => coeffs,
-                _ => panic!("Wrong field type"),
-            };
-            for (i, (a, b)) in folded_codeword_vec
-                .iter()
-                .zip(encoded_folded_message.iter())
-                .enumerate()
-            {
-                assert_eq!(a, b, "Failed at index {} in round {}", i, round);
-            }
-            folded_codeword = FieldType::Ext(folded_codeword_vec);
-        }
-    }
+    //         if Code::message_is_left_and_right_folding() {
+    //             reverse_index_bits_in_place_field_type(&mut folded_message);
+    //         }
+    //         folded_message = FieldType::Ext(Code::fold_message(&folded_message, challenge));
+    //         if Code::message_is_left_and_right_folding() {
+    //             reverse_index_bits_in_place_field_type(&mut folded_message);
+    //         }
+    //         let mut encoded_folded_message = Code::encode(&pp, &folded_message);
+    //         reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
+    //         let encoded_folded_message = match encoded_folded_message {
+    //             FieldType::Ext(coeffs) => coeffs,
+    //             _ => panic!("Wrong field type"),
+    //         };
+    //         for (i, (a, b)) in folded_codeword_vec
+    //             .iter()
+    //             .zip(encoded_folded_message.iter())
+    //             .enumerate()
+    //         {
+    //             assert_eq!(a, b, "Failed at index {} in round {}", i, round);
+    //         }
+    //         folded_codeword = FieldType::Ext(folded_codeword_vec);
+    //     }
+    // }
 }

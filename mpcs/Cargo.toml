@@ -61,10 +61,6 @@ name = "basefold"
 
 [[bench]]
 harness = false
-name = "basecode"
-
-[[bench]]
-harness = false
 name = "rscode"
 
 [[bench]]

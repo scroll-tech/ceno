@@ -5,7 +5,7 @@ use ff_ext::GoldilocksExt2;
 
 use itertools::Itertools;
 use mpcs::{
-    Basefold, BasefoldBasecodeParams, BasefoldRSParams, PolynomialCommitmentScheme,
+    Basefold, BasefoldRSParams, PolynomialCommitmentScheme,
     test_util::{get_point_from_challenge, setup_pcs},
 };
 
@@ -15,7 +15,6 @@ use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 
 type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
-type PcsGoldilocksBasecode = Basefold<GoldilocksExt2, BasefoldBasecodeParams>;
 type T = BasicTranscript<GoldilocksExt2>;
 type E = GoldilocksExt2;
 

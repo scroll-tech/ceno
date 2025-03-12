@@ -51,7 +51,7 @@ mod query_phase;
 // it deals only with the special case of the form \sum eq(r_i)f_i().
 mod sumcheck;
 
-enum PolyEvalsCodeword<E: ExtensionField> {
+pub enum PolyEvalsCodeword<E: ExtensionField> {
     Normal(Box<DenseMatrix<E::BaseField>>),
     TooSmall(Box<DenseMatrix<E::BaseField>>), // The polynomial is too small to apply FRI
     TooBig(usize),

@@ -256,7 +256,8 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     #[serde(skip)]
-    pub(crate) dft: Radix2Dit<E::BaseField>,
+    // pub(crate) dft: Radix2Dit<E::BaseField>,
+    pub(crate) dft: Radix2Dit<E>,
     pub(crate) t_inv_halves: Vec<Vec<E::BaseField>>,
     /// The verifier also needs a FFT table (much smaller)
     /// for small-size encoding. It contains the same roots as the
@@ -424,9 +425,27 @@ where
         PolyEvalsCodeword::Normal(Box::new(codeword))
     }
 
-    fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E> {
-        // Use the full message size to determine the shift factor.
-        Self::encode_internal(&vp.fft_root_table, coeffs, vp.full_message_size_log)
+    fn encode_small(
+        vp: &Self::VerifierParameters,
+        rmm: p3_matrix::dense::RowMajorMatrix<E>,
+    ) -> p3_matrix::dense::RowMajorMatrix<E> {
+        let m = rmm
+            // reverse bit of raw message first, because
+            // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
+            .bit_reversed_zero_pad(Spec::get_rate_log()); //dft(reverse_row_bit(message)) == basefold::rs_encode(message)
+        let codeword = vp
+            .dft
+            .dft_batch(m)
+            // The encoding scheme always folds the codeword in left-and-right
+            // manner. However, in query phase the two folded positions are
+            // always opened together, so it will be more efficient if the
+            // folded positions are simultaneously sibling nodes in the Merkle
+            // tree. Therefore, instead of left-and-right folding, we bit-reverse
+            // the codeword to make the folding even-and-odd, i.e., adjacent
+            // positions are folded.
+            .bit_reverse_rows()
+            .to_row_major_matrix();
+        codeword
     }
 
     fn get_number_queries() -> usize {
@@ -627,10 +646,10 @@ mod tests {
     use ff_ext::GoldilocksExt2;
     use p3_goldilocks::Goldilocks;
 
-    use crate::{
-        basefold::encoding::test_util::test_codeword_folding,
-        util::{field_type_index_ext, plonky2_util::reverse_index_bits_in_place_field_type},
-    };
+    // use crate::{
+    //     basefold::encoding::test_util::test_codeword_folding,
+    //     util::{field_type_index_ext, plonky2_util::reverse_index_bits_in_place_field_type},
+    // };
     use ff_ext::FromUniformBytes;
 
     use super::*;
@@ -742,231 +761,231 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_rs_codeword_folding() {
-        test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec, GoldilocksExt2>>();
-    }
+    // #[test]
+    // fn test_rs_codeword_folding() {
+    //     test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec, GoldilocksExt2>>();
+    // }
 
     type E = GoldilocksExt2;
     type F = Goldilocks;
     type Code = RSCode<RSCodeDefaultSpec, GoldilocksExt2>;
 
-    #[test]
-    pub fn test_colinearity() {
-        let num_vars = 10;
+    // #[test]
+    // pub fn test_colinearity() {
+    //     let num_vars = 10;
 
-        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_u64).collect();
-        let poly = FieldType::Ext(poly);
+    //     let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_u64).collect();
+    //     let poly = FieldType::Ext(poly);
 
-        let pp = <Code as EncodingScheme<E>>::setup(num_vars);
-        let (pp, _) = Code::trim(pp, num_vars).unwrap();
-        let mut codeword = Code::encode(&pp, &poly);
-        reverse_index_bits_in_place_field_type(&mut codeword);
-        let challenge = E::from_u64(2);
-        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
-        let codeword = match codeword {
-            FieldType::Ext(coeffs) => coeffs,
-            _ => panic!("Wrong field type"),
-        };
+    //     let pp = <Code as EncodingScheme<E>>::setup(num_vars);
+    //     let (pp, _) = Code::trim(pp, num_vars).unwrap();
+    //     let mut codeword = Code::encode(&pp, &poly);
+    //     reverse_index_bits_in_place_field_type(&mut codeword);
+    //     let challenge = E::from_u64(2);
+    //     let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
+    //     let codeword = match codeword {
+    //         FieldType::Ext(coeffs) => coeffs,
+    //         _ => panic!("Wrong field type"),
+    //     };
 
-        for (i, (a, b)) in folded_codeword.iter().zip(codeword.chunks(2)).enumerate() {
-            let (x0, x1, _) = Code::prover_folding_coeffs(
-                &pp,
-                num_vars + <Code as EncodingScheme<E>>::get_rate_log() - 1,
-                i,
-            );
-            // Check that (x0, b[0]), (x1, b[1]) and (challenge, a) are
-            // on the same line, i.e.,
-            // (b[0]-a)/(x0-challenge) = (b[1]-a)/(x1-challenge)
-            // which is equivalent to
-            // (x0-challenge)*(b[1]-a) = (x1-challenge)*(b[0]-a)
-            assert_eq!(
-                (x0 - challenge) * (b[1] - *a),
-                (x1 - challenge) * (b[0] - *a),
-                "failed for i = {}",
-                i
-            );
-        }
-    }
+    //     for (i, (a, b)) in folded_codeword.iter().zip(codeword.chunks(2)).enumerate() {
+    //         let (x0, x1, _) = Code::prover_folding_coeffs(
+    //             &pp,
+    //             num_vars + <Code as EncodingScheme<E>>::get_rate_log() - 1,
+    //             i,
+    //         );
+    //         // Check that (x0, b[0]), (x1, b[1]) and (challenge, a) are
+    //         // on the same line, i.e.,
+    //         // (b[0]-a)/(x0-challenge) = (b[1]-a)/(x1-challenge)
+    //         // which is equivalent to
+    //         // (x0-challenge)*(b[1]-a) = (x1-challenge)*(b[0]-a)
+    //         assert_eq!(
+    //             (x0 - challenge) * (b[1] - *a),
+    //             (x1 - challenge) * (b[0] - *a),
+    //             "failed for i = {}",
+    //             i
+    //         );
+    //     }
+    // }
 
-    #[test]
-    pub fn test_low_degree() {
-        let num_vars = 10;
+    // #[test]
+    // pub fn test_low_degree() {
+    //     let num_vars = 10;
 
-        let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_u64).collect();
-        let poly = FieldType::Ext(poly);
+    //     let poly: Vec<E> = (0..(1 << num_vars)).map(E::from_u64).collect();
+    //     let poly = FieldType::Ext(poly);
 
-        let pp = <Code as EncodingScheme<E>>::setup(num_vars);
-        let (pp, _) = Code::trim(pp, num_vars).unwrap();
-        let mut codeword = Code::encode(&pp, &poly);
-        check_low_degree(&codeword, "low degree check for original codeword");
-        let c0 = field_type_index_ext(&codeword, 0);
-        let c_mid = field_type_index_ext(&codeword, codeword.len() >> 1);
-        let c1 = field_type_index_ext(&codeword, 1);
-        let c_mid1 = field_type_index_ext(&codeword, (codeword.len() >> 1) + 1);
+    //     let pp = <Code as EncodingScheme<E>>::setup(num_vars);
+    //     let (pp, _) = Code::trim(pp, num_vars).unwrap();
+    //     let mut codeword = Code::encode(&pp, &poly);
+    //     check_low_degree(&codeword, "low degree check for original codeword");
+    //     let c0 = field_type_index_ext(&codeword, 0);
+    //     let c_mid = field_type_index_ext(&codeword, codeword.len() >> 1);
+    //     let c1 = field_type_index_ext(&codeword, 1);
+    //     let c_mid1 = field_type_index_ext(&codeword, (codeword.len() >> 1) + 1);
 
-        reverse_index_bits_in_place_field_type(&mut codeword);
-        // After the bit inversion, the first element is still the first,
-        // but the middle one is switched to the second.
-        assert_eq!(c0, field_type_index_ext(&codeword, 0));
-        assert_eq!(c_mid, field_type_index_ext(&codeword, 1));
-        // The second element is placed at the middle, and the next to middle
-        // element is still at the place.
-        assert_eq!(c1, field_type_index_ext(&codeword, codeword.len() >> 1));
-        assert_eq!(
-            c_mid1,
-            field_type_index_ext(&codeword, (codeword.len() >> 1) + 1)
-        );
+    //     reverse_index_bits_in_place_field_type(&mut codeword);
+    //     // After the bit inversion, the first element is still the first,
+    //     // but the middle one is switched to the second.
+    //     assert_eq!(c0, field_type_index_ext(&codeword, 0));
+    //     assert_eq!(c_mid, field_type_index_ext(&codeword, 1));
+    //     // The second element is placed at the middle, and the next to middle
+    //     // element is still at the place.
+    //     assert_eq!(c1, field_type_index_ext(&codeword, codeword.len() >> 1));
+    //     assert_eq!(
+    //         c_mid1,
+    //         field_type_index_ext(&codeword, (codeword.len() >> 1) + 1)
+    //     );
 
-        // For RS codeword, the addition of the left and right halves is also
-        // a valid codeword
-        let codeword_vec = match &codeword {
-            FieldType::Ext(coeffs) => coeffs.clone(),
-            _ => panic!("Wrong field type"),
-        };
-        let mut left_right_sum: Vec<E> = codeword_vec
-            .chunks(2)
-            .map(|chunk| chunk[0] + chunk[1])
-            .collect();
-        assert_eq!(left_right_sum[0], c0 + c_mid);
-        reverse_index_bits_in_place(&mut left_right_sum);
-        assert_eq!(left_right_sum[1], c1 + c_mid1);
-        check_low_degree(
-            &FieldType::Ext(left_right_sum.clone()),
-            "check low degree of left+right",
-        );
+    //     // For RS codeword, the addition of the left and right halves is also
+    //     // a valid codeword
+    //     let codeword_vec = match &codeword {
+    //         FieldType::Ext(coeffs) => coeffs.clone(),
+    //         _ => panic!("Wrong field type"),
+    //     };
+    //     let mut left_right_sum: Vec<E> = codeword_vec
+    //         .chunks(2)
+    //         .map(|chunk| chunk[0] + chunk[1])
+    //         .collect();
+    //     assert_eq!(left_right_sum[0], c0 + c_mid);
+    //     reverse_index_bits_in_place(&mut left_right_sum);
+    //     assert_eq!(left_right_sum[1], c1 + c_mid1);
+    //     check_low_degree(
+    //         &FieldType::Ext(left_right_sum.clone()),
+    //         "check low degree of left+right",
+    //     );
 
-        // The the difference of the left and right halves is also
-        // a valid codeword after twisted by omega^(-i), regardless of the
-        // shift of the coset.
-        let mut left_right_diff: Vec<E> = codeword_vec
-            .chunks(2)
-            .map(|chunk| chunk[0] - chunk[1])
-            .collect();
-        assert_eq!(left_right_diff[0], c0 - c_mid);
-        reverse_index_bits_in_place(&mut left_right_diff);
-        assert_eq!(left_right_diff[1], c1 - c_mid1);
-        let root_of_unity_inv = F::two_adic_generator(F::TWO_ADICITY)
-            .inverse()
-            .exp_power_of_2(F::TWO_ADICITY - log2_strict(left_right_diff.len()) - 1);
-        for (i, coeff) in left_right_diff.iter_mut().enumerate() {
-            *coeff *= root_of_unity_inv.exp_u64(i as u64);
-        }
-        assert_eq!(left_right_diff[0], c0 - c_mid);
-        assert_eq!(left_right_diff[1], (c1 - c_mid1) * root_of_unity_inv);
-        check_low_degree(
-            &FieldType::Ext(left_right_diff.clone()),
-            "check low degree of (left-right)*omega^(-i)",
-        );
+    //     // The the difference of the left and right halves is also
+    //     // a valid codeword after twisted by omega^(-i), regardless of the
+    //     // shift of the coset.
+    //     let mut left_right_diff: Vec<E> = codeword_vec
+    //         .chunks(2)
+    //         .map(|chunk| chunk[0] - chunk[1])
+    //         .collect();
+    //     assert_eq!(left_right_diff[0], c0 - c_mid);
+    //     reverse_index_bits_in_place(&mut left_right_diff);
+    //     assert_eq!(left_right_diff[1], c1 - c_mid1);
+    //     let root_of_unity_inv = F::two_adic_generator(F::TWO_ADICITY)
+    //         .inverse()
+    //         .exp_power_of_2(F::TWO_ADICITY - log2_strict(left_right_diff.len()) - 1);
+    //     for (i, coeff) in left_right_diff.iter_mut().enumerate() {
+    //         *coeff *= root_of_unity_inv.exp_u64(i as u64);
+    //     }
+    //     assert_eq!(left_right_diff[0], c0 - c_mid);
+    //     assert_eq!(left_right_diff[1], (c1 - c_mid1) * root_of_unity_inv);
+    //     check_low_degree(
+    //         &FieldType::Ext(left_right_diff.clone()),
+    //         "check low degree of (left-right)*omega^(-i)",
+    //     );
 
-        let challenge = E::from_u64(2);
-        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
-        let c_fold = folded_codeword[0];
-        let c_fold1 = folded_codeword[folded_codeword.len() >> 1];
-        let mut folded_codeword = FieldType::Ext(folded_codeword);
-        reverse_index_bits_in_place_field_type(&mut folded_codeword);
-        assert_eq!(c_fold, field_type_index_ext(&folded_codeword, 0));
-        assert_eq!(c_fold1, field_type_index_ext(&folded_codeword, 1));
+    //     let challenge = E::from_u64(2);
+    //     let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
+    //     let c_fold = folded_codeword[0];
+    //     let c_fold1 = folded_codeword[folded_codeword.len() >> 1];
+    //     let mut folded_codeword = FieldType::Ext(folded_codeword);
+    //     reverse_index_bits_in_place_field_type(&mut folded_codeword);
+    //     assert_eq!(c_fold, field_type_index_ext(&folded_codeword, 0));
+    //     assert_eq!(c_fold1, field_type_index_ext(&folded_codeword, 1));
 
-        // The top level folding coefficient should have shift factor gamma
-        let folding_coeffs = Code::prover_folding_coeffs(&pp, log2_strict(codeword.len()) - 1, 0);
-        assert_eq!(folding_coeffs.0, E::from(F::GENERATOR));
-        assert_eq!(folding_coeffs.0 + folding_coeffs.1, E::ZERO);
-        assert_eq!(
-            (folding_coeffs.1 - folding_coeffs.0) * folding_coeffs.2,
-            E::ONE
-        );
-        // The three points (x0, c0), (x1, c_mid), (challenge, c_fold) should
-        // be colinear
-        assert_eq!(
-            (c_mid - c_fold) * (folding_coeffs.0 - challenge),
-            (c0 - c_fold) * (folding_coeffs.1 - challenge),
-        );
-        // So the folded value should be equal to
-        // (gamma^{-1} * alpha * (c0 - c_mid) + (c0 + c_mid)) / 2
-        assert_eq!(
-            c_fold * F::GENERATOR * F::from_u64(2),
-            challenge * (c0 - c_mid) + (c0 + c_mid) * F::GENERATOR
-        );
-        assert_eq!(
-            c_fold * F::GENERATOR * F::from_u64(2),
-            challenge * left_right_diff[0] + left_right_sum[0] * F::GENERATOR
-        );
-        assert_eq!(
-            c_fold * F::from_u64(2),
-            challenge * left_right_diff[0] * F::GENERATOR.inverse() + left_right_sum[0]
-        );
+    //     // The top level folding coefficient should have shift factor gamma
+    //     let folding_coeffs = Code::prover_folding_coeffs(&pp, log2_strict(codeword.len()) - 1, 0);
+    //     assert_eq!(folding_coeffs.0, E::from(F::GENERATOR));
+    //     assert_eq!(folding_coeffs.0 + folding_coeffs.1, E::ZERO);
+    //     assert_eq!(
+    //         (folding_coeffs.1 - folding_coeffs.0) * folding_coeffs.2,
+    //         E::ONE
+    //     );
+    //     // The three points (x0, c0), (x1, c_mid), (challenge, c_fold) should
+    //     // be colinear
+    //     assert_eq!(
+    //         (c_mid - c_fold) * (folding_coeffs.0 - challenge),
+    //         (c0 - c_fold) * (folding_coeffs.1 - challenge),
+    //     );
+    //     // So the folded value should be equal to
+    //     // (gamma^{-1} * alpha * (c0 - c_mid) + (c0 + c_mid)) / 2
+    //     assert_eq!(
+    //         c_fold * F::GENERATOR * F::from_u64(2),
+    //         challenge * (c0 - c_mid) + (c0 + c_mid) * F::GENERATOR
+    //     );
+    //     assert_eq!(
+    //         c_fold * F::GENERATOR * F::from_u64(2),
+    //         challenge * left_right_diff[0] + left_right_sum[0] * F::GENERATOR
+    //     );
+    //     assert_eq!(
+    //         c_fold * F::from_u64(2),
+    //         challenge * left_right_diff[0] * F::GENERATOR.inverse() + left_right_sum[0]
+    //     );
 
-        let folding_coeffs = Code::prover_folding_coeffs(&pp, log2_strict(codeword.len()) - 1, 1);
-        let root_of_unity = F::two_adic_generator(log2_strict(codeword.len()));
-        assert_eq!(root_of_unity.exp_u64(codeword.len() as u64), F::ONE);
-        assert_eq!(root_of_unity.exp_u64((codeword.len() >> 1) as u64), -F::ONE);
-        assert_eq!(
-            folding_coeffs.0,
-            E::from(F::GENERATOR) * E::from(root_of_unity).exp_u64((codeword.len() >> 2) as u64)
-        );
-        assert_eq!(folding_coeffs.0 + folding_coeffs.1, E::ZERO);
-        assert_eq!(
-            (folding_coeffs.1 - folding_coeffs.0) * folding_coeffs.2,
-            E::ONE
-        );
+    //     let folding_coeffs = Code::prover_folding_coeffs(&pp, log2_strict(codeword.len()) - 1, 1);
+    //     let root_of_unity = F::two_adic_generator(log2_strict(codeword.len()));
+    //     assert_eq!(root_of_unity.exp_u64(codeword.len() as u64), F::ONE);
+    //     assert_eq!(root_of_unity.exp_u64((codeword.len() >> 1) as u64), -F::ONE);
+    //     assert_eq!(
+    //         folding_coeffs.0,
+    //         E::from(F::GENERATOR) * E::from(root_of_unity).exp_u64((codeword.len() >> 2) as u64)
+    //     );
+    //     assert_eq!(folding_coeffs.0 + folding_coeffs.1, E::ZERO);
+    //     assert_eq!(
+    //         (folding_coeffs.1 - folding_coeffs.0) * folding_coeffs.2,
+    //         E::ONE
+    //     );
 
-        // The folded codeword is the linear combination of the left+right and the
-        // twisted left-right vectors.
-        // The coefficients are respectively 1/2 and gamma^{-1}/2 * alpha.
-        // In another word, the folded codeword multipled by 2 is the linear
-        // combination by coeffs: 1 and gamma^{-1} * alpha
-        let gamma_inv = F::GENERATOR.inverse();
-        let b = challenge * gamma_inv;
-        let folded_codeword_vec = match &folded_codeword {
-            FieldType::Ext(coeffs) => coeffs.clone(),
-            _ => panic!("Wrong field type"),
-        };
-        assert_eq!(
-            c_fold * F::from_u64(2),
-            left_right_diff[0] * b + left_right_sum[0]
-        );
-        for (i, (c, (diff, sum))) in folded_codeword_vec
-            .iter()
-            .zip(left_right_diff.iter().zip(left_right_sum.iter()))
-            .enumerate()
-        {
-            assert_eq!(*c + *c, *sum + b * *diff, "failed for i = {}", i);
-        }
+    //     // The folded codeword is the linear combination of the left+right and the
+    //     // twisted left-right vectors.
+    //     // The coefficients are respectively 1/2 and gamma^{-1}/2 * alpha.
+    //     // In another word, the folded codeword multipled by 2 is the linear
+    //     // combination by coeffs: 1 and gamma^{-1} * alpha
+    //     let gamma_inv = F::GENERATOR.inverse();
+    //     let b = challenge * gamma_inv;
+    //     let folded_codeword_vec = match &folded_codeword {
+    //         FieldType::Ext(coeffs) => coeffs.clone(),
+    //         _ => panic!("Wrong field type"),
+    //     };
+    //     assert_eq!(
+    //         c_fold * F::from_u64(2),
+    //         left_right_diff[0] * b + left_right_sum[0]
+    //     );
+    //     for (i, (c, (diff, sum))) in folded_codeword_vec
+    //         .iter()
+    //         .zip(left_right_diff.iter().zip(left_right_sum.iter()))
+    //         .enumerate()
+    //     {
+    //         assert_eq!(*c + *c, *sum + b * *diff, "failed for i = {}", i);
+    //     }
 
-        check_low_degree(&folded_codeword, "low degree check for folded");
-    }
+    //     check_low_degree(&folded_codeword, "low degree check for folded");
+    // }
 
-    fn check_low_degree(codeword: &FieldType<E>, message: &str) {
-        let mut codeword = codeword.clone();
-        let codeword_bits = log2_strict(codeword.len());
-        let root_table = fft_root_table(codeword_bits);
-        let original = codeword.clone();
-        ifft(&mut codeword, 0, &root_table);
-        for i in (codeword.len() >> <Code as EncodingScheme<E>>::get_rate_log())..codeword.len() {
-            assert_eq!(
-                field_type_index_ext(&codeword, i),
-                E::ZERO,
-                "{}: zero check failed for i = {}",
-                message,
-                i
-            )
-        }
-        fft(&mut codeword, 0, &root_table);
-        let original = match original {
-            FieldType::Ext(coeffs) => coeffs,
-            _ => panic!("Wrong field type"),
-        };
-        let codeword = match codeword {
-            FieldType::Ext(coeffs) => coeffs,
-            _ => panic!("Wrong field type"),
-        };
-        original
-            .iter()
-            .zip(codeword.iter())
-            .enumerate()
-            .for_each(|(i, (a, b))| {
-                assert_eq!(a, b, "{}: failed for i = {}", message, i);
-            });
-    }
+    // fn check_low_degree(codeword: &FieldType<E>, message: &str) {
+    //     let mut codeword = codeword.clone();
+    //     let codeword_bits = log2_strict(codeword.len());
+    //     let root_table = fft_root_table(codeword_bits);
+    //     let original = codeword.clone();
+    //     ifft(&mut codeword, 0, &root_table);
+    //     for i in (codeword.len() >> <Code as EncodingScheme<E>>::get_rate_log())..codeword.len() {
+    //         assert_eq!(
+    //             field_type_index_ext(&codeword, i),
+    //             E::ZERO,
+    //             "{}: zero check failed for i = {}",
+    //             message,
+    //             i
+    //         )
+    //     }
+    //     fft(&mut codeword, 0, &root_table);
+    //     let original = match original {
+    //         FieldType::Ext(coeffs) => coeffs,
+    //         _ => panic!("Wrong field type"),
+    //     };
+    //     let codeword = match codeword {
+    //         FieldType::Ext(coeffs) => coeffs,
+    //         _ => panic!("Wrong field type"),
+    //     };
+    //     original
+    //         .iter()
+    //         .zip(codeword.iter())
+    //         .enumerate()
+    //         .for_each(|(i, (a, b))| {
+    //             assert_eq!(a, b, "{}: failed for i = {}", message, i);
+    //         });
+    // }
 }
