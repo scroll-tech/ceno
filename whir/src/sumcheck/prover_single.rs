@@ -207,13 +207,13 @@ where
     pub fn compress(
         &mut self,
         combination_randomness: E, // Scale the initial point
-        folding_randomness: &Vec<E>,
+        folding_randomness: &[E],
         sumcheck_poly: &SumcheckPolynomial<E>,
     ) {
-        assert_eq!(folding_randomness.n_variables(), 1);
+        assert_eq!(folding_randomness.len(), 1);
         assert!(self.num_variables >= 1);
 
-        let randomness = folding_randomness.0[0];
+        let randomness = folding_randomness[0];
         let (evaluations_of_p, evaluations_of_eq) = join(
             || {
                 self.evaluation_of_p

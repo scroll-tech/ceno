@@ -35,20 +35,22 @@ impl<E: ExtensionField> SumcheckProverNotSkipping<E> {
     pub fn compute_sumcheck_polynomials<T: Transcript<E>>(
         &mut self,
         transcript: &mut T,
-        sumcheck_polys: &mut Vec<SumcheckPolynomial<E>>,
+        sumcheck_polys: &mut Vec<[E; 3]>,
         folding_factor: usize,
     ) -> Result<Vec<E>, Error> {
         let mut res = Vec::with_capacity(folding_factor);
 
         for _ in 0..folding_factor {
             let sumcheck_poly = self.sumcheck_prover.compute_sumcheck_polynomial();
-            sumcheck_polys.push(sumcheck_poly);
-            transcript.add_scalars(sumcheck_poly.evaluations())?;
-            let [folding_randomness]: [E; 1] = transcript.challenge_scalars()?;
+            sumcheck_polys.push(sumcheck_poly.evaluations_3());
+            transcript.append_field_element_exts(sumcheck_poly.evaluations());
+            let folding_randomness = transcript
+                .sample_and_append_challenge(b"folding_randomness")
+                .elements;
             res.push(folding_randomness);
 
             self.sumcheck_prover
-                .compress(E::ONE, &folding_randomness.into(), &sumcheck_poly);
+                .compress(E::ONE, &[folding_randomness], &sumcheck_poly);
         }
 
         res.reverse();

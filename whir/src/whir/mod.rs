@@ -28,6 +28,7 @@ where
     pub(crate) sumcheck_poly_evals: Vec<[E; 3]>,
     pub(crate) merkle_roots: Vec<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
     pub(crate) ood_answers: Vec<Vec<E>>,
+    pub(crate) final_poly: Vec<E>,
 }
 
 #[cfg(test)]

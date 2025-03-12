@@ -12,7 +12,7 @@ use crate::{
     whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
 };
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3_commit::Mmcs;
 use transcript::Transcript;
 
@@ -131,10 +131,9 @@ where
             // If there is no initial statement, there is no need to run the
             // initial rounds of the sum-check, and the verifier directly sends
             // the initial folding randomnesses.
-            let mut folding_randomness = (0..self.0.folding_factor.at_round(0))
+            (0..self.0.folding_factor.at_round(0))
                 .map(|_| transcript.read_challenge().elements)
-                .collect();
-            folding_randomness
+                .collect()
         };
 
         let round_state = RoundState {
@@ -174,18 +173,23 @@ where
         // Fold the coefficients
         let folded_coefficients = round_state
             .coefficients
-            .fold(&round_state.folding_randomness);
+            .fix_variables(&round_state.folding_randomness);
+        let folded_coefficients_evals = match folded_coefficients.evaluations() {
+            FieldType::Ext(evals) => evals,
+            _ => {
+                panic!("Impossible after folding");
+            }
+        };
 
         let num_variables = self.0.mv_parameters.num_variables
             - self.0.folding_factor.total_number(round_state.round);
         // num_variables should match the folded_coefficients here.
-        assert_eq!(num_variables, folded_coefficients.num_variables());
+        assert_eq!(1 << num_variables, folded_coefficients_evals.len());
 
         // Base case
         if round_state.round == self.0.n_rounds() {
             // Directly send coefficients of the polynomial to the verifier.
-            transcript.add_scalars(folded_coefficients.coeffs())?;
-            sumcheck_poly_evals.push(folded_coefficients);
+            transcript.append_field_element_exts(folded_coefficients_evals);
 
             // Final verifier queries and answers. The indices are over the
             // *folded* domain.
@@ -198,8 +202,7 @@ where
 
             let merkle_proof = round_state
                 .prev_merkle
-                .generate_multi_proof(final_challenge_indexes.clone())
-                .unwrap();
+                .generate_multi_proof(&final_challenge_indexes);
             // Every query requires opening these many in the previous Merkle tree
             let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
             let answers = final_challenge_indexes
@@ -226,9 +229,10 @@ where
 
             return Ok(WhirProof {
                 merkle_answers: round_state.merkle_proofs,
-                sumcheck_poly_evals,
-                merkle_roots,
-                ood_answers,
+                sumcheck_poly_evals: sumcheck_poly_evals.clone(),
+                merkle_roots: merkle_roots.clone(),
+                ood_answers: ood_answers.clone(),
+                final_poly: folded_coefficients_evals.clone(),
             });
         }
 
@@ -236,8 +240,8 @@ where
 
         // Fold the coefficients, and compute fft of polynomial (and commit)
         let new_domain = round_state.domain.scale(2);
-        let expansion = new_domain.size() / folded_coefficients.num_coeffs();
-        let evals = expand_from_coeff(folded_coefficients.coeffs(), expansion);
+        let expansion = new_domain.size() / folded_coefficients_evals.len();
+        let evals = expand_from_coeff(folded_coefficients_evals, expansion);
         // Group the evaluations into leaves by the *next* round folding factor
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
         // They also partially overlap and undo one another. We should merge them.
@@ -249,37 +253,29 @@ where
             folded_evals,
             self.0.fold_optimisation,
             new_domain.backing_domain_group_gen(),
-            new_domain.backing_domain.group_gen_inv(),
+            new_domain.backing_domain_group_gen().inverse(),
             self.0.folding_factor.at_round(round_state.round + 1),
         );
 
-        #[cfg(not(feature = "parallel"))]
-        let leafs_iter = folded_evals.chunks_exact(
-            1 << self
-                .0
-                .folding_factor
-                .get_folding_factor_of_round(round_state.round + 1),
+        let merkle_tree = MerkleTree::new(
+            &self.0.hash_params,
+            &folded_evals,
+            1 << self.0.folding_factor.at_round(round_state.round + 1),
         );
-        #[cfg(feature = "parallel")]
-        let leafs_iter = folded_evals
-            .par_chunks_exact(1 << self.0.folding_factor.at_round(round_state.round + 1));
-        let merkle_tree = MerkleTree::<MerkleConfig>::new(
-            &self.0.leaf_hash_params,
-            &self.0.two_to_one_params,
-            leafs_iter,
-        )
-        .unwrap();
 
         let root = merkle_tree.root();
-        transcript.add_digest(root)?;
+        transcript.append_message(&bincode::serialize(&root).unwrap());
         merkle_roots.push(root);
 
-        let (ood_points, ood_answers) = if round_params.ood_samples > 0 {
+        let (ood_points, ood_answers_round) = if round_params.ood_samples > 0 {
             let ood_points =
                 transcript.sample_and_append_vec(b"ood_points", round_params.ood_samples);
-            let ood_answers = ood_points.iter().map(|ood_point| {
-                folded_coefficients.evaluate(&expand_from_univariate(*ood_point, num_variables))
-            });
+            let ood_answers = ood_points
+                .iter()
+                .map(|ood_point| {
+                    folded_coefficients.evaluate(&expand_from_univariate(*ood_point, num_variables))
+                })
+                .collect::<Vec<_>>();
             transcript.append_field_element_exts(&ood_answers);
             (ood_points, ood_answers)
         } else {
@@ -299,35 +295,33 @@ where
         // Compute the generator of the folded domain, in the extension field
         let domain_scaled_gen = round_state
             .domain
-            .backing_domain
-            .element(1 << self.0.folding_factor.at_round(round_state.round));
+            .backing_domain_element_pow_of_2(self.0.folding_factor.at_round(round_state.round));
         let stir_challenges: Vec<_> = ood_points
             .into_iter()
             .chain(
                 stir_challenges_indexes
                     .iter()
-                    .map(|i| domain_scaled_gen.pow([*i as u64])),
+                    .map(|i| domain_scaled_gen.exp_u64(*i as u64)),
             )
             .map(|univariate| expand_from_univariate(univariate, num_variables))
             .collect();
 
         let merkle_proof = round_state
             .prev_merkle
-            .generate_multi_proof(stir_challenges_indexes.clone())
-            .unwrap();
+            .generate_multi_proof(&stir_challenges_indexes);
         let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
         let answers: Vec<_> = stir_challenges_indexes
             .iter()
             .map(|i| round_state.prev_merkle_answers[i * fold_size..(i + 1) * fold_size].to_vec())
             .collect();
         // Evaluate answers in the folding randomness.
-        let mut stir_evaluations = ood_answers.clone();
+        let mut stir_evaluations = ood_answers_round.clone();
         match self.0.fold_optimisation {
             FoldType::Naive => {
                 // See `Verifier::compute_folds_full`
                 let domain_size = round_state.domain.size();
-                let domain_gen = round_state.domain.backing_domain.element(1);
-                let domain_gen_inv = domain_gen.inverse().unwrap();
+                let domain_gen = round_state.domain.backing_domain_group_gen();
+                let domain_gen_inv = domain_gen.inverse();
                 let coset_domain_size = 1 << self.0.folding_factor.at_round(round_state.round);
                 // The domain (before folding) is split into cosets of size
                 // `coset_domain_size` (which is just `fold_size`). Each coset
@@ -342,12 +336,12 @@ where
                 // The second coset would be w * <w^(N/16)>, the third coset would be
                 // w^2 * <w^(N/16)>, and so on. Until w^(N/16-1) * <w^(N/16)>.
                 let coset_generator_inv =
-                    domain_gen_inv.pow([(domain_size / coset_domain_size) as u64]);
+                    domain_gen_inv.exp_u64((domain_size / coset_domain_size) as u64);
                 stir_evaluations.extend(stir_challenges_indexes.iter().zip(&answers).map(
                     |(index, answers)| {
                         // The coset is w^index * <w_coset_generator>
                         // let _coset_offset = domain_gen.pow(&[*index as u64]);
-                        let coset_offset_inv = domain_gen_inv.pow([*index as u64]);
+                        let coset_offset_inv = domain_gen_inv.exp_u64(*index as u64);
 
                         // In the Naive mode, the oracle consists directly of the
                         // evaluations of E over the domain. We leverage an
@@ -356,10 +350,10 @@ where
                         // coset_offset^fold_size).
                         compute_fold(
                             answers,
-                            &round_state.folding_randomness.0,
+                            &round_state.folding_randomness,
                             coset_offset_inv,
                             coset_generator_inv,
-                            E::from(2).inverse().unwrap(),
+                            E::from_u64(2).inverse(),
                             self.0.folding_factor.at_round(round_state.round),
                         )
                     },
@@ -370,14 +364,19 @@ where
                 // transformed such that they are exactly the coefficients of the
                 // multilinear polynomial whose evaluation at the folding randomness
                 // is just the folding of E evaluated at the folded point.
-                DenseMultilinearExtension::new(answers.to_vec())
-                    .evaluate(&round_state.folding_randomness)
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    p3_util::log2_strict_usize(answers.len()),
+                    answers.to_vec(),
+                )
+                .evaluate(&round_state.folding_randomness)
             })),
         }
         round_state.merkle_proofs.push((merkle_proof, answers));
 
         // Randomness for combination
-        let [combination_randomness_gen] = transcript.challenge_scalars()?;
+        let combination_randomness_gen = transcript
+            .sample_and_append_challenge(b"combination_randomness_gen")
+            .elements;
         let combination_randomness =
             expand_randomness(combination_randomness_gen, stir_challenges.len());
 
@@ -401,7 +400,7 @@ where
                 )
             });
 
-        let folding_randomness = sumcheck_prover.compute_sumcheck_polynomials::<Transcript>(
+        let folding_randomness = sumcheck_prover.compute_sumcheck_polynomials::<T>(
             transcript,
             sumcheck_poly_evals,
             self.0.folding_factor.at_round(round_state.round + 1),
@@ -417,6 +416,8 @@ where
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
         };
+
+        ood_answers.push(ood_answers_round);
 
         self.round(
             transcript,

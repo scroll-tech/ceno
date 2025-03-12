@@ -70,4 +70,13 @@ where
     pub fn backing_domain_group_gen(&self) -> E {
         E::two_adic_generator(self.backing_domain.log_n)
     }
+
+    pub fn backing_domain_element(&self, index: usize) -> E {
+        E::two_adic_generator(self.backing_domain.log_n).exp_u64(index as u64)
+    }
+
+    pub fn backing_domain_element_pow_of_2(&self, exp: usize) -> E {
+        assert!(exp <= self.backing_domain.log_n);
+        E::two_adic_generator(self.backing_domain.log_n - exp)
+    }
 }

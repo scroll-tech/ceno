@@ -33,6 +33,14 @@ where
         &self.evaluations
     }
 
+    pub fn evaluations_3(&self) -> [F; 3] {
+        [
+            self.evaluations[0],
+            self.evaluations[1],
+            self.evaluations[2],
+        ]
+    }
+
     // TODO(Gotti): Rename to sum_over_binary_hypercube for clarity?
     // TODO(Gotti): Make more efficient; the base_decomposition and filtering is unneccessary.
 

@@ -3101,6 +3101,7 @@ dependencies = [
 name = "whir"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "blake2",
  "blake3",
  "clap",

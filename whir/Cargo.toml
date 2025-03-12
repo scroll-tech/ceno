@@ -13,6 +13,7 @@ version = "0.1.0"
 default-run = "main"
 
 [dependencies]
+bincode = "1.3.3"
 blake2 = "0.10"
 blake3 = "1.5.0"
 clap = { version = "4.4.17", features = ["derive"] }
