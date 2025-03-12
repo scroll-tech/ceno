@@ -220,7 +220,7 @@ where
         if round_state.round == self.0.n_rounds() {
             // Coefficients of the polynomial
             sumcheck_poly_evals.push(folded_coefficients.coeffs());
-            transcript.add_scalars(folded_coefficients.coeffs())?;
+            transcript.append_field_element_ext(folded_coefficients.coeffs())?;
 
             // Final verifier queries and answers
             let final_challenge_indexes = get_challenge_stir_queries(
@@ -309,7 +309,7 @@ where
             ood_answers.extend(ood_points.iter().map(|ood_point| {
                 folded_coefficients.evaluate(&expand_from_univariate(*ood_point, num_variables))
             }));
-            transcript.add_scalars(&ood_answers)?;
+            transcript.append_field_element_ext(&ood_answers)?;
         }
 
         // STIR queries
@@ -500,7 +500,7 @@ where
             0.,
         )?;
         let folded_evals = sumcheck_prover.get_folded_polys();
-        transcript.add_scalars(&folded_evals)?;
+        transcript.append_field_element_ext(&folded_evals)?;
         end_timer!(sumcheck_timer);
         // Problem now reduced to the polys(folded_point) =?= folded_evals
 

@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{PrimeCharacteristicRing, TwoAdicField};
 
 #[derive(Debug, Clone)]
 pub struct Domain<E>
@@ -69,6 +69,10 @@ where
 
     pub fn backing_domain_group_gen(&self) -> E {
         E::two_adic_generator(self.backing_domain.log_n)
+    }
+
+    pub fn base_domain_group_gen(&self) -> E::BaseField {
+        E::BaseField::two_adic_generator(self.backing_domain.log_n)
     }
 
     pub fn backing_domain_element(&self, index: usize) -> E {

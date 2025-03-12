@@ -161,7 +161,7 @@ where
                         ood_answers[j] = eval;
                     }
                 });
-            transcript.add_scalars(&ood_answers)?;
+            transcript.append_field_element_ext(&ood_answers)?;
         }
 
         let polys = polys

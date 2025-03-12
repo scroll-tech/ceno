@@ -45,7 +45,7 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
 
         for _ in 0..folding_factor {
             let sumcheck_poly = self.sumcheck_prover.compute_sumcheck_polynomial();
-            transcript.add_scalars(sumcheck_poly.evaluations())?;
+            transcript.append_field_element_ext(sumcheck_poly.evaluations())?;
             let [folding_randomness]: [F; 1] = transcript.challenge_scalars()?;
             res.push(folding_randomness);
 
