@@ -1,7 +1,7 @@
 #![deny(clippy::cargo)]
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::{BasicTranscript, Transcript};
@@ -54,6 +54,208 @@ pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::batch_commit(pp, polys)
 }
 
+// Express Value as binary in big-endian
+fn compute_binary_with_length(length: usize, mut value: usize) -> Vec<bool> {
+    assert!(2 >> length >= value);
+    let mut bin = Vec::new();
+    for _ in 0..length {
+        bin.insert(0, value % 2 == 1);
+        value <<= 1;
+    }
+    bin
+}
+
+// Pack polynomials of different sizes into the same, returns
+// 0: A list of packed polys
+// 1: The final packed poly, if of different size
+// 2: For each component poly of each packed poly, record its position in tree as binary
+// 3: Same as 2 but for the final packed poly only
+fn pack_poly_prover<E: ExtensionField>(
+    polys: &[DenseMultilinearExtension<E>],
+) -> (
+    Vec<DenseMultilinearExtension<E>>, 
+    Option<DenseMultilinearExtension<E>>,
+    Vec<Vec<Vec<bool>>>,
+    Option<Vec<Vec<bool>>>,
+) {
+    // Assert that polys are sorted by size in decreasing order
+    assert!(polys.len() > 0);
+    for i in 0..polys.len() - 1 {
+        assert!(polys[i].num_vars >= polys[i + 1].num_vars);
+    }
+    // Use depth and index to track the position of the last poly
+    let mut depth = 0;
+    let mut index = 0;
+    // Packed polynomials of various sizes into packed polynomials of the same size
+    let max_poly_num_vars = polys[0].num_vars;
+    let mut packed_polys = Vec::new();
+    let mut packed_comps = Vec::new();
+    let mut next_packed_poly = polys[0].clone();
+    let mut next_packed_comp = vec![compute_binary_with_length(depth, index)];
+    for i in 1..polys.len() {
+        let p = &polys[i];
+        // Update comp and packed_poly
+        if next_packed_poly.num_vars == max_poly_num_vars && next_packed_poly.evaluations.len() == 2 << next_packed_poly.num_vars {
+            // If full and reached max poly size, initialize a new packed poly
+            packed_comps.push(next_packed_comp);
+            depth = 0;
+            index = 0;
+            next_packed_comp = vec![compute_binary_with_length(depth, index)];
+            packed_polys.push(next_packed_poly);
+            next_packed_poly = p.clone();
+        } else {
+            // Find the next empty slot
+            if next_packed_poly.num_vars == max_poly_num_vars {
+                // If full and not reached max poly size, add a new right subtree
+                for c in &mut next_packed_comp {
+                    c.insert(0, false);
+                }
+                depth = 1;
+                index = 1;
+            } else {
+                while index % 2 == 1 {
+                    assert!(depth > 1); // If depth == 1 and index == 1, then the tree is full and should be handled in the case above
+                    index /= 2;
+                    depth -= 1;
+                }
+                index += 1;
+            }
+            // If next poly is smaller than the slot, keep branching
+            while p.num_vars < next_packed_poly.num_vars - depth {
+                depth += 1;
+                index *= 2;
+            }
+            next_packed_comp.push(compute_binary_with_length(depth, index));
+            next_packed_poly.merge(p.clone());
+        }
+    }
+    // Final packed poly
+    if next_packed_poly.num_vars == max_poly_num_vars {
+        packed_polys.push(next_packed_poly);
+        packed_comps.push(next_packed_comp);
+        (packed_polys, None, packed_comps, None)
+    } else {
+        (packed_polys, Some(next_packed_poly), packed_comps, Some(next_packed_comp))
+    }
+}
+
+// Given only the number of variables of each polynomial, returns num_vars of the packed poly 
+// and deduce the structure of the packed binary tree
+fn pack_poly_verifier(
+    poly_num_vars: &[usize]
+) -> (
+    usize,
+    Option<usize>,
+    Vec<Vec<Vec<bool>>>,
+    Option<Vec<Vec<bool>>>,
+) {
+    // Use depth and index to track the position of the last poly
+    let mut depth = 0;
+    let mut index = 0;
+    // Packed polynomials of various sizes into packed polynomials of the same size
+    let max_poly_num_vars = poly_num_vars[0];
+    let mut packed_comps = Vec::new();
+    let mut next_packed_comp = vec![compute_binary_with_length(depth, index)];
+    let mut next_pack_num_vars = poly_num_vars[0];
+    let mut next_pack_eval_size = 2 << next_pack_num_vars;
+    for i in 1..poly_num_vars.len() {
+        let next_num_vars = poly_num_vars[i];
+        // Update comp and packed_poly
+        if next_pack_num_vars == max_poly_num_vars && next_pack_eval_size == 2 << next_pack_num_vars {
+            // If full and reached max poly size, initialize a new packed poly
+            packed_comps.push(next_packed_comp);
+            depth = 0;
+            index = 0;
+            next_packed_comp = vec![compute_binary_with_length(depth, index)];
+            next_pack_num_vars = next_num_vars;
+            next_pack_eval_size = 2 << next_num_vars;
+        } else {
+            // Find the next empty slot
+            if next_pack_num_vars == max_poly_num_vars {
+                // If full and not reached max poly size, add a new right subtree
+                for c in &mut next_packed_comp {
+                    c.insert(0, false);
+                }
+                depth = 1;
+                index = 1;
+            } else {
+                while index % 2 == 1 {
+                    assert!(depth > 1); // If depth == 1 and index == 1, then the tree is full and should be handled in the case above
+                    index /= 2;
+                    depth -= 1;
+                }
+                index += 1;
+            }
+            // If next poly is smaller than the slot, keep branching
+            while next_num_vars < next_pack_num_vars - depth {
+                depth += 1;
+                index *= 2;
+            }
+            next_packed_comp.push(compute_binary_with_length(depth, index));
+            next_pack_eval_size += 2 << next_num_vars;
+        }
+    }
+    // Final packed poly
+    if next_pack_num_vars == max_poly_num_vars {
+        packed_comps.push(next_packed_comp);
+        (max_poly_num_vars, None, packed_comps, None)
+    } else {
+        (max_poly_num_vars, Some(next_pack_num_vars), packed_comps, Some(next_packed_comp))
+    }
+}
+
+// Compute evaluation on packed poly from individual evals and the pack binary tree
+fn compute_packed_eval<E: ExtensionField>(
+    packed_point: &[E],
+    final_point: &[E],
+    evals: &[Evaluation<E>],
+    packed_comps: &[Vec<Vec<bool>>],
+    final_comp: &Option<Vec<Vec<bool>>>,
+) -> (Vec<Evaluation<E>>, Option<E>) {
+    // Use comps to compute evals for packed polys from regular evals
+    let mut packed_evals = Vec::new();
+    let mut next_orig_poly = 0;
+    for (i, next_packed_comp) in packed_comps.iter().enumerate() {
+        let mut packed_eval = E::ZERO;
+        for next_index in next_packed_comp {
+            let mut next_eval = evals[next_orig_poly].value;
+            for (j, b) in next_index.iter().enumerate() {
+                if *b { next_eval *= packed_point[j] }
+            }
+            packed_eval *= next_eval;
+            next_orig_poly += 1;
+        }
+        packed_evals.push(Evaluation::new(i, 0, packed_eval));
+    }
+    if let Some(final_comp) = final_comp {
+        let mut final_eval = E::ZERO;
+        for next_index in final_comp {
+            let mut next_eval = evals[next_orig_poly].value;
+            for (j, b) in next_index.iter().enumerate() {
+                if *b { next_eval *= final_point[j] }
+            }
+            final_eval *= next_eval;
+            next_orig_poly += 1;
+        }
+        (packed_evals, Some(final_eval))
+    } else {
+        (packed_evals, None)
+    }
+}
+
+pub fn pcs_batch_commit_diff_size<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+    pp: &Pcs::ProverParam,
+    polys: &[DenseMultilinearExtension<E>],
+) -> Result<(Pcs::CommitmentWithWitness, Option<Pcs::CommitmentWithWitness>), Error> {
+    let (packed_polys, final_poly, _, _) = pack_poly_prover(polys);
+    // Final packed poly
+    if let Some(final_poly) = final_poly {
+        Ok((Pcs::batch_commit(pp, &packed_polys)?, Some(Pcs::batch_commit(pp, &[final_poly])?)))
+    } else {
+        Ok((Pcs::batch_commit(pp, &packed_polys)?, None))
+    }
+} 
+
 pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     polys: &[DenseMultilinearExtension<E>],
@@ -84,6 +286,37 @@ pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::batch_open(pp, polys, comms, points, evals, transcript)
 }
 
+pub fn pcs_batch_open_diff_size<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+    pp: &Pcs::ProverParam,
+    polys: &[DenseMultilinearExtension<E>],
+    packed_comms: &[Pcs::CommitmentWithWitness],
+    final_comm: Option<&Pcs::CommitmentWithWitness>,
+    points: &[Vec<E>],
+    evals: &[Evaluation<E>],
+    transcript: &mut impl Transcript<E>,
+) -> Result<(Pcs::Proof, Option<Pcs::Proof>), Error> {
+    // TODO: Sort the polys by decreasing size
+    // TODO: The prover should be able to avoid packing the polys again
+    let (packed_polys, final_poly, packed_comps, final_comp) = pack_poly_prover(polys);
+    // TODO: Add unifying sumcheck if the points do not match
+    // For now, assume that all polys are evaluated on the same points
+    let packed_point = points[0].clone();
+    let final_point = if let Some(final_poly) = &final_poly { packed_point[packed_point.len() - final_poly.num_vars..packed_point.len()].to_vec() } else { Vec::new() };
+    // Use comps to compute evals for packed polys from regular evals
+    let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, evals, &packed_comps, &final_comp);
+    if let Some(final_eval) = final_eval {
+        Ok((
+            Pcs::batch_open(pp, &packed_polys, packed_comms, &[packed_point], &packed_evals, transcript)?,
+            Some(Pcs::open(pp, &final_poly.unwrap(), final_comm.unwrap(), &final_point, &final_eval, transcript)?)
+        ))
+    } else {
+        Ok((
+            Pcs::batch_open(pp, &packed_polys, packed_comms, &[packed_point], &packed_evals, transcript)?,
+            None
+        ))
+    }
+}
+
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     vp: &Pcs::VerifierParam,
     comm: &Pcs::Commitment,
@@ -108,6 +341,37 @@ where
 {
     Pcs::batch_verify(vp, comms, points, evals, proof, transcript)
 }
+
+pub fn pcs_batch_verify_diff_size<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+    vp: &Pcs::VerifierParam,
+    poly_num_vars: &[usize], // Size of the original polynomials, for reproducing results
+    packed_comms: &[Pcs::Commitment],
+    final_comm: Option<&Pcs::Commitment>,
+    points: &[Vec<E>],
+    evals: &[Evaluation<E>],
+    packed_proof: &Pcs::Proof,
+    final_proof: Option<&Pcs::Proof>,
+    transcript: &mut impl Transcript<E>,
+) -> Result<(), Error>
+where
+    Pcs::Commitment: 'a,
+{
+    // Replicate packing
+    let (_, final_poly_num_vars, packed_comps, final_comp) = pack_poly_verifier(poly_num_vars);
+    // TODO: Add unifying sumcheck if the points do not match
+    // For now, assume that all polys are evaluated on the same points
+    let packed_point = points[0].clone();
+    let final_point = if let Some(final_poly_num_vars) = &final_poly_num_vars { packed_point[packed_point.len() - final_poly_num_vars..packed_point.len()].to_vec() } else { Vec::new() };
+    // Use comps to compute evals for packed polys from regular evals
+    let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, evals, &packed_comps, &final_comp);
+    if let Some(final_eval) = final_eval {
+        Pcs::batch_verify(vp, packed_comms, &[packed_point], &packed_evals, packed_proof, transcript)?;
+        Pcs::verify(vp, final_comm.unwrap(), &final_point, &final_eval, final_proof.unwrap(), transcript)
+    } else {
+        Pcs::batch_verify(vp, packed_comms, &[packed_point], &packed_evals, packed_proof, transcript)
+    }
+}
+
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
