@@ -20,12 +20,13 @@ use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 use std::marker::PhantomData;
 
-pub type Digest<E: ExtensionField> = P3Hash<E::BaseField, E::BaseField, DIGEST_WIDTH>;
+pub type Digest<E> =
+    P3Hash<<E as ExtensionField>::BaseField, <E as ExtensionField>::BaseField, DIGEST_WIDTH>;
 pub type MerkleTree<F> = P3MerkleTree<F, F, RowMajorMatrix<F>, DIGEST_WIDTH>;
-pub type MerkleTreeExt<E: ExtensionField> = P3MerkleTree<
-    E::BaseField,
-    E::BaseField,
-    FlatMatrixView<E::BaseField, E, RowMajorMatrix<E>>,
+pub type MerkleTreeExt<E> = P3MerkleTree<
+    <E as ExtensionField>::BaseField,
+    <E as ExtensionField>::BaseField,
+    FlatMatrixView<<E as ExtensionField>::BaseField, E, RowMajorMatrix<E>>,
     DIGEST_WIDTH,
 >;
 
@@ -209,7 +210,7 @@ impl<E: ExtensionField> BasefoldSpec<E> for BasefoldRSParams
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    type EncodingScheme = RSCode<RSCodeDefaultSpec, E>;
+    type EncodingScheme = RSCode<RSCodeDefaultSpec>;
 }
 
 #[derive(Debug)]
@@ -233,9 +234,9 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
 }
 
 pub type MerkleProofWithLeafs<F1, F2> = (Vec<F1>, Vec<[F2; DIGEST_WIDTH]>);
-pub type QueryOpeningProofs<E: ExtensionField> = Vec<(
-    MerkleProofWithLeafs<E::BaseField, E::BaseField>,
-    Vec<MerkleProofWithLeafs<E, E::BaseField>>,
+pub type QueryOpeningProofs<E> = Vec<(
+    MerkleProofWithLeafs<<E as ExtensionField>::BaseField, <E as ExtensionField>::BaseField>,
+    Vec<MerkleProofWithLeafs<E, <E as ExtensionField>::BaseField>>,
 )>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

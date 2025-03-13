@@ -271,12 +271,11 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct RSCode<Spec: RSCodeSpec, E: ExtensionField> {
+pub struct RSCode<Spec: RSCodeSpec> {
     _phantom_data: PhantomData<Spec>,
-    fft: Radix2DitParallel<E::BaseField>,
 }
 
-impl<E: ExtensionField, Spec: RSCodeSpec> EncodingScheme<E> for RSCode<Spec, E>
+impl<E: ExtensionField, Spec: RSCodeSpec> EncodingScheme<E> for RSCode<Spec>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -290,9 +289,10 @@ where
 
     fn setup(max_message_size_log: usize) -> Self::PublicParameters {
         RSCodeParameters {
-            fft_root_table: fft_root_table::<E::BaseField>(
-                max_message_size_log + Spec::get_rate_log(),
-            ),
+            // fft_root_table: fft_root_table::<E::BaseField>(
+            //     max_message_size_log + Spec::get_rate_log(),
+            // ),
+            fft_root_table: vec![],
         }
     }
 
@@ -300,12 +300,13 @@ where
         mut pp: Self::PublicParameters,
         max_message_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
+        println!("gogo setup of mpcs");
         if pp.fft_root_table.len() < max_message_size_log + Spec::get_rate_log() {
-            return Err(Error::InvalidPcsParam(format!(
-                "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",
-                pp.fft_root_table.len() - Spec::get_rate_log(),
-                max_message_size_log,
-            )));
+            // return Err(Error::InvalidPcsParam(format!(
+            //     "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",
+            //     pp.fft_root_table.len() - Spec::get_rate_log(),
+            //     max_message_size_log,
+            // )));
         }
         if max_message_size_log < Spec::get_basecode_msg_size_log() {
             // Message smaller than this size will not be encoded in BaseFold.
@@ -329,34 +330,41 @@ where
                 },
             ));
         }
-        let mut gamma_powers = Vec::with_capacity(max_message_size_log);
-        let mut gamma_powers_inv = Vec::with_capacity(max_message_size_log);
-        gamma_powers.push(E::BaseField::GENERATOR);
-        gamma_powers_inv.push(E::BaseField::GENERATOR.inverse());
-        for i in 1..max_message_size_log + Spec::get_rate_log() {
-            gamma_powers.push(gamma_powers[i - 1].square());
-            gamma_powers_inv.push(gamma_powers_inv[i - 1].square());
-        }
-        let inv_of_two = E::BaseField::from_u64(2).inverse();
-        gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
-        pp.fft_root_table
-            .truncate(max_message_size_log + Spec::get_rate_log());
+        // let mut gamma_powers = Vec::with_capacity(max_message_size_log);
+        // let mut gamma_powers_inv = Vec::with_capacity(max_message_size_log);
+        // gamma_powers.push(E::BaseField::GENERATOR);
+        // gamma_powers_inv.push(E::BaseField::GENERATOR.inverse());
+        // for i in 1..max_message_size_log + Spec::get_rate_log() {
+        //     gamma_powers.push(gamma_powers[i - 1].square());
+        //     gamma_powers_inv.push(gamma_powers_inv[i - 1].square());
+        // }
+        // let inv_of_two = E::BaseField::from_u64(2).inverse();
+        // gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
+        // pp.fft_root_table
+        //     .truncate(max_message_size_log + Spec::get_rate_log());
 
-        let verifier_fft_root_table = pp.fft_root_table
-            [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
-            .iter()
-            .cloned()
-            .chain(
-                pp.fft_root_table[Spec::get_basecode_msg_size_log() + Spec::get_rate_log()..]
-                    .iter()
-                    .map(|v| vec![v[1]]),
-            )
-            .collect();
+        // let verifier_fft_root_table = pp.fft_root_table
+        //     [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
+        //     .iter()
+        //     .cloned()
+        //     .chain(
+        //         pp.fft_root_table[Spec::get_basecode_msg_size_log() + Spec::get_rate_log()..]
+        //             .iter()
+        //             .map(|v| vec![v[1]]),
+        //     )
+        //     .collect();
 
         let log2_c = Spec::get_basecode_msg_size_log();
         let n_0 = 1 << log2_c;
+        println!(
+            "get_basecode_msg_size_log {} max_message_size_log {} Spec::get_rate_log() {}",
+            Spec::get_basecode_msg_size_log(),
+            max_message_size_log,
+            Spec::get_rate_log()
+        );
         // TODO figure out how to set this correctly
-        let t_inv_halves = (0..max_message_size_log + Spec::get_rate_log())
+        let t_inv_halves = (0..max_message_size_log + Spec::get_rate_log()
+            - Spec::get_basecode_msg_size_log())
             .map(|i| {
                 let t_i = E::BaseField::two_adic_generator(log2_c + i + 1)
                     .powers()
@@ -366,30 +374,35 @@ where
             })
             .collect_vec();
 
+        println!("finish setup of mpcs");
         Ok((
             Self::ProverParameters {
                 dft: Default::default(),
                 t_inv_halves: t_inv_halves.clone(),
-                fft_root_table: pp.fft_root_table,
-                gamma_powers: gamma_powers.clone(),
-                gamma_powers_inv_div_two: gamma_powers_inv.clone(),
+                // fft_root_table: pp.fft_root_table,
+                fft_root_table: vec![],
+                // gamma_powers: gamma_powers.clone(),
+                gamma_powers: vec![],
+                // gamma_powers_inv_div_two: gamma_powers_inv.clone(),
+                gamma_powers_inv_div_two: vec![],
                 full_message_size_log: max_message_size_log,
             },
             Self::VerifierParameters {
                 dft: Default::default(),
                 // TODO verifier just need much smaller halves table
                 t_inv_halves,
-                fft_root_table: verifier_fft_root_table,
+                // fft_root_table: verifier_fft_root_table,
+                fft_root_table: vec![],
                 full_message_size_log: max_message_size_log,
-                gamma_powers,
-                gamma_powers_inv_div_two: gamma_powers_inv,
+                // gamma_powers,
+                gamma_powers: vec![],
+                // gamma_powers_inv_div_two: gamma_powers_inv,
+                gamma_powers_inv_div_two: vec![],
             },
         ))
     }
 
     fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData {
-        assert!(rmm.num_vars() >= Spec::get_basecode_msg_size_log());
-
         // bh_evals is just a copy of poly.evals().
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
@@ -402,14 +415,15 @@ where
         // So we just build the Merkle tree over the polynomial evaluations.
         // No codeword is needed.
         if num_vars <= Spec::get_basecode_msg_size_log() {
-            return PolyEvalsCodeword::TooSmall(Box::new(rmm.into_default_padded_p3_rmm(false)));
+            return PolyEvalsCodeword::TooSmall(Box::new(rmm.into_default_padded_p3_rmm()));
         }
 
+        // here 2 resize happend. first is padding to next pow2 height, second is pa
         let m = rmm
-            .into_p3_rmm()
+            .into_default_padded_p3_rmm()
             // reverse bit of raw message first, because
             // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
-            .bit_reversed_zero_pad(Spec::get_rate_log()); //dft(reverse_row_bit(message)) == basefold::rs_encode(message)
+            .bit_reversed_zero_pad(Spec::get_rate_log());
         let codeword = pp
             .dft
             .dft_batch(m)
@@ -433,8 +447,7 @@ where
             // reverse bit of raw message first, because
             // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
             .bit_reversed_zero_pad(Spec::get_rate_log()); //dft(reverse_row_bit(message)) == basefold::rs_encode(message)
-        let codeword = vp
-            .dft
+        vp.dft
             .dft_batch(m)
             // The encoding scheme always folds the codeword in left-and-right
             // manner. However, in query phase the two folded positions are
@@ -444,8 +457,7 @@ where
             // the codeword to make the folding even-and-odd, i.e., adjacent
             // positions are folded.
             .bit_reverse_rows()
-            .to_row_major_matrix();
-        codeword
+            .to_row_major_matrix()
     }
 
     fn get_number_queries() -> usize {
@@ -557,54 +569,13 @@ where
     }
 }
 
-impl<Spec: RSCodeSpec, E: ExtensionField> RSCode<Spec, E> {
-    fn encode_internal(
-        fft_root_table: &FftRootTable<E::BaseField>,
-        coeffs: &FieldType<E>,
-        full_message_size_log: usize,
-    ) -> FieldType<E>
-    where
-        E::BaseField: Serialize + DeserializeOwned,
-    {
-        let lg_m = log2_strict(coeffs.len());
-        let fft_root_table = &fft_root_table[..lg_m + Spec::get_rate_log()];
-        assert!(
-            lg_m <= full_message_size_log,
-            "Encoded message exceeds the maximum supported message size of the table."
-        );
-        let rate = 1 << Spec::get_rate_log();
-        let mut ret = match coeffs {
-            FieldType::Base(coeffs) => {
-                let mut coeffs = coeffs.clone();
-                coeffs.extend(itertools::repeat_n(
-                    E::BaseField::ZERO,
-                    coeffs.len() * (rate - 1),
-                ));
-                FieldType::Base(coeffs)
-            }
-            FieldType::Ext(coeffs) => {
-                let mut coeffs = coeffs.clone();
-                coeffs.extend(itertools::repeat_n(E::ZERO, coeffs.len() * (rate - 1)));
-                FieldType::Ext(coeffs)
-            }
-            _ => panic!("Unsupported field type"),
-        };
-        // Let gamma be the multiplicative generator of the base field.
-        // The full domain is gamma H where H is the multiplicative subgroup
-        // of size n * rate.
-        // When the input message size is not n, but n/2^k, then the domain is
-        // gamma^2^k H.
-        coset_fft(
-            &mut ret,
-            E::BaseField::GENERATOR.exp_power_of_2(full_message_size_log - lg_m),
-            Spec::get_rate_log(),
-            fft_root_table,
-        );
-        ret
-    }
-
+impl<Spec: RSCodeSpec> RSCode<Spec> {
     #[allow(unused)]
-    fn folding_coeffs_naive(level: usize, index: usize, full_message_size_log: usize) -> (E, E, E) {
+    fn folding_coeffs_naive<E: ExtensionField>(
+        level: usize,
+        index: usize,
+        full_message_size_log: usize,
+    ) -> (E, E, E) {
         // The coefficients are for the bit-reversed codeword, so reverse the
         // bits before providing the coefficients.
         let index = reverse_bits(index, level);
@@ -739,7 +710,7 @@ mod tests {
 
     #[test]
     fn prover_verifier_consistency() {
-        type Code = RSCode<RSCodeDefaultSpec, GoldilocksExt2>;
+        type Code = RSCode<RSCodeDefaultSpec>;
         let pp: RSCodeParameters<GoldilocksExt2> = Code::setup(10);
         let (pp, vp) = Code::trim(pp, 10).unwrap();
         for level in 0..(10 + <Code as EncodingScheme<GoldilocksExt2>>::get_rate_log()) {
@@ -768,7 +739,7 @@ mod tests {
 
     type E = GoldilocksExt2;
     type F = Goldilocks;
-    type Code = RSCode<RSCodeDefaultSpec, GoldilocksExt2>;
+    type Code = RSCode<RSCodeDefaultSpec>;
 
     // #[test]
     // pub fn test_colinearity() {

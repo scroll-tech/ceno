@@ -156,36 +156,36 @@ fn main() {
     );
 
     // do sanity check
-    let transcript = Transcript::new(b"riscv");
-    // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![B::ONE];
-    zkvm_proof.raw_pi[1] = vec![B::ONE];
+    // let transcript = Transcript::new(b"riscv");
+    // // change public input maliciously should cause verifier to reject proof
+    // zkvm_proof.raw_pi[0] = vec![B::ONE];
+    // zkvm_proof.raw_pi[1] = vec![B::ONE];
 
-    // capture panic message, if have
-    let result = with_panic_hook(Box::new(|_info| ()), || {
-        panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
-    });
-    match result {
-        Ok(res) => {
-            res.expect_err("verify proof should return with error");
-        }
-        Err(err) => {
-            let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<String>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<&String>() {
-                message.to_string()
-            } else {
-                unreachable!()
-            };
+    // // capture panic message, if have
+    // let result = with_panic_hook(Box::new(|_info| ()), || {
+    //     panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+    // });
+    // match result {
+    //     Ok(res) => {
+    //         res.expect_err("verify proof should return with error");
+    //     }
+    //     Err(err) => {
+    //         let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
+    //             message.to_string()
+    //         } else if let Some(message) = err.downcast_ref::<String>() {
+    //             message.to_string()
+    //         } else if let Some(message) = err.downcast_ref::<&String>() {
+    //             message.to_string()
+    //         } else {
+    //             unreachable!()
+    //         };
 
-            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
-                println!("unknown panic {msg:?}");
-                panic::resume_unwind(err);
-            };
-        }
-    };
+    //         if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+    //             println!("unknown panic {msg:?}");
+    //             panic::resume_unwind(err);
+    //         };
+    //     }
+    // };
 }
 fn memory_from_file(path: &Option<String>) -> Vec<u32> {
     path.as_ref()

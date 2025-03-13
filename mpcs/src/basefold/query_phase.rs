@@ -53,19 +53,32 @@ where
             let odd = idx | 1;
             let even = odd - 1;
 
+            println!("start commit proof with id {even}");
             let opening = {
+                println!(
+                    "index {even}, tree leafs {}, overall len {}",
+                    mmcs.get_matrices(&comm.codeword)[0].values.len(),
+                    mmcs.get_matrices(&comm.codeword).len()
+                );
                 let (mut values, proof) = mmcs.open_batch(even, &comm.codeword);
                 let leafs = values.pop().unwrap();
                 // leaf length equal to number of polynomial
                 debug_assert_eq!(leafs.len(), mmcs.get_matrices(&comm.codeword)[0].width());
                 (leafs, proof)
             };
+            println!("end commit proof");
+
             let (_, opening_ext) =
                 trees
                     .iter()
                     .fold((idx >> 1, vec![]), |(idx, mut proofs), tree| {
                         let odd = idx | 1;
                         let even = odd - 1;
+                        println!(
+                            "index {even}, tree leafs {}, overall len {}",
+                            mmcs_ext.get_matrices(tree)[0].values.len(),
+                            mmcs_ext.get_matrices(tree).len()
+                        );
                         let (mut values, proof) = mmcs_ext.open_batch(even, tree);
                         let leafs = values.pop().unwrap();
                         debug_assert_eq!(leafs.len(), 2);
@@ -73,6 +86,7 @@ where
                         proofs.push((leafs, proof));
                         (idx >> 1, proofs)
                     });
+            println!("end query with id {idx}");
             (opening, opening_ext)
         })
         .collect_vec()

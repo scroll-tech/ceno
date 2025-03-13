@@ -52,21 +52,12 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
             padding_strategy: InstancePaddingStrategy::Default,
         }
     }
-    pub fn into_default_padded_p3_rmm(
-        self,
-        is_bit_reserse: bool,
-    ) -> p3_matrix::dense::RowMajorMatrix<T> {
+    /// convert into the p3 RowMajorMatrix, with padded to next power of 2 height filling with T::default value
+    pub fn into_default_padded_p3_rmm(self) -> p3_matrix::dense::RowMajorMatrix<T> {
         let padded_height = next_pow2_instance_padding(self.num_instances());
         let mut inner = self.inner;
-        if is_bit_reserse {
-            inner = inner.bit_reverse_rows().to_row_major_matrix();
-        }
         inner.pad_to_height(padded_height, T::default());
         inner
-    }
-
-    pub fn into_p3_rmm(self) -> p3_matrix::dense::RowMajorMatrix<T> {
-        self.inner
     }
 
     pub fn n_col(&self) -> usize {
