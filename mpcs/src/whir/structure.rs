@@ -4,16 +4,14 @@ use super::{
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
-use whir::ceno_binding::{InnerDigestOf as InnerDigestOfInner, Whir as WhirInner};
-
-type InnerDigestOf<Spec, E> = InnerDigestOfInner<<Spec as WhirSpec<E>>::Spec, FieldWrapper<E>>;
+use whir::crypto::Digest;
 
 #[derive(Default, Clone, Debug)]
-pub struct WhirDigest<E: ExtensionField, Spec: WhirSpec<E>> {
-    pub(crate) inner: InnerDigestOf<Spec, E>,
+pub struct WhirDigest<E: ExtensionField> {
+    pub(crate) inner: Option<Digest<E>>,
 }
 
-impl<E: ExtensionField, Spec: WhirSpec<E>> Serialize for WhirDigest<E, Spec> {
+impl<E: ExtensionField> Serialize for WhirDigest<E> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -26,7 +24,7 @@ impl<E: ExtensionField, Spec: WhirSpec<E>> Serialize for WhirDigest<E, Spec> {
     }
 }
 
-impl<'de, E: ExtensionField, Spec: WhirSpec<E>> Deserialize<'de> for WhirDigest<E, Spec> {
+impl<'de, E: ExtensionField> Deserialize<'de> for WhirDigest<E> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -62,13 +60,8 @@ pub type WhirDefault<E> = Whir<E, WhirDefaultSpec>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_ff::Field;
     use ff_ext::GoldilocksExt2;
     use rand::Rng;
-    use whir::{
-        ceno_binding::{PolynomialCommitmentScheme, WhirDefaultSpec as WhirDefaultSpecInner},
-        poly_utils::{Vec, coeffs::DenseMultilinearExtension},
-    };
 
     type F = super::super::field_wrapper::ExtensionFieldWrapper<GoldilocksExt2>;
 
