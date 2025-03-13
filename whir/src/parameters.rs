@@ -1,9 +1,9 @@
 use std::{fmt::Display, marker::PhantomData, str::FromStr};
 
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::MerkleConfig as Config;
+use crate::crypto::{Poseidon2ExtMerkleMmcs, Poseidon2MerkleMmcs};
 
 pub fn default_max_pow(num_variables: usize, log_inv_rate: usize) -> usize {
     num_variables + log_inv_rate - 3
@@ -175,7 +175,7 @@ impl FoldingFactor {
 }
 
 #[derive(Clone)]
-pub struct WhirParameters<E: ExtensionField, MerkleConfig: Config<E>> {
+pub struct WhirParameters<E: ExtensionField> {
     pub initial_statement: bool,
     pub starting_log_inv_rate: usize,
     pub folding_factor: FoldingFactor,
@@ -185,10 +185,10 @@ pub struct WhirParameters<E: ExtensionField, MerkleConfig: Config<E>> {
 
     pub fold_optimisation: FoldType,
     // Merkle tree parameters
-    pub hash_params: MerkleConfig::Mmcs,
+    pub hash_params: Poseidon2ExtMerkleMmcs<E>,
 }
 
-impl<E: ExtensionField, MerkleConfig: Config<E>> Display for WhirParameters<E, MerkleConfig> {
+impl<E: ExtensionField> Display for WhirParameters<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,

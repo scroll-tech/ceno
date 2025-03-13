@@ -78,7 +78,7 @@ mod tests {
         let num_coeffs = 1 << poly_size;
         WhirInner::<F, WhirDefaultSpecInner>::setup(num_coeffs as usize);
 
-        let poly = DenseMultilinearExtension::new(
+        let poly = DenseMultilinearExtension::from_evaluations_ext_vec(
             (0..num_coeffs)
                 .map(<F as Field>::BasePrimeField::from)
                 .collect(),

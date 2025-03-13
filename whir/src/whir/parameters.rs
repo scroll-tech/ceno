@@ -1,22 +1,18 @@
 use core::{fmt, panic};
 use derive_more::Debug;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use std::{f64::consts::LOG2_10, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::MerkleConfig as Config,
+    crypto::{Poseidon2ExtMerkleMmcs, Poseidon2MerkleMmcs},
     domain::Domain,
     parameters::{FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters},
 };
 
 #[derive(Clone, Debug)]
-pub struct WhirConfig<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+pub struct WhirConfig<E: ExtensionField> {
     pub(crate) mv_parameters: MultivariateParameters<E>,
     pub(crate) soundness_type: SoundnessType,
     pub(crate) security_level: usize,
@@ -46,7 +42,7 @@ where
 
     // Merkle tree parameters
     #[debug(skip)]
-    pub(crate) hash_params: MerkleConfig::Mmcs,
+    pub(crate) hash_params: Poseidon2ExtMerkleMmcs<E>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,14 +54,10 @@ pub(crate) struct RoundConfig {
     pub(crate) log_inv_rate: usize,
 }
 
-impl<E, MerkleConfig> WhirConfig<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+impl<E: ExtensionField> WhirConfig<E> {
     pub fn new(
         mut mv_parameters: MultivariateParameters<E>,
-        whir_parameters: WhirParameters<E, MerkleConfig>,
+        whir_parameters: WhirParameters<E>,
     ) -> Self {
         // Pad the number of variables to folding factor
         if mv_parameters.num_variables < whir_parameters.folding_factor.at_round(0) {
@@ -434,11 +426,7 @@ where
     }
 }
 
-impl<E, MerkleConfig> Display for WhirConfig<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+impl<E: ExtensionField> Display for WhirConfig<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt::Display::fmt(&self.mv_parameters, f)?;
         writeln!(f, ", folding factor: {:?}", self.folding_factor)?;

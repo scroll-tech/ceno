@@ -98,8 +98,8 @@ impl<F: Field> NttEngine<F> {
     pub fn new(order: usize, omega_order: F) -> Self {
         assert!(order.trailing_zeros() > 0, "Order must be a multiple of 2.");
         // TODO: Assert that omega factors into 2s and 3s.
-        assert_eq!(omega_order.pow([order as u64]), F::ONE);
-        assert_ne!(omega_order.pow([order as u64 / 2]), F::ONE);
+        assert_eq!(omega_order.exp_u64(order as u64), F::ONE);
+        assert_ne!(omega_order.exp_u64(order as u64 / 2), F::ONE);
         let mut res = NttEngine {
             order,
             omega_order,
@@ -117,20 +117,20 @@ impl<F: Field> NttEngine<F> {
             let omega_3_1 = res.root(3);
             let omega_3_2 = omega_3_1 * omega_3_1;
             // Note: char F cannot be 2 and so division by 2 works, because primitive roots of unity with even order exist.
-            res.half_omega_3_1_min_2 = (omega_3_1 - omega_3_2) / F::from(2u64);
-            res.half_omega_3_1_plus_2 = (omega_3_1 + omega_3_2) / F::from(2u64);
+            res.half_omega_3_1_min_2 = (omega_3_1 - omega_3_2) / F::from_u64(2u64);
+            res.half_omega_3_1_plus_2 = (omega_3_1 + omega_3_2) / F::from_u64(2u64);
         }
         if order % 4 == 0 {
             res.omega_4_1 = res.root(4);
         }
         if order % 8 == 0 {
             res.omega_8_1 = res.root(8);
-            res.omega_8_3 = res.omega_8_1.pow([3]);
+            res.omega_8_3 = res.omega_8_1.exp_u64(3);
         }
         if order % 16 == 0 {
             res.omega_16_1 = res.root(16);
-            res.omega_16_3 = res.omega_16_1.pow([3]);
-            res.omega_16_9 = res.omega_16_1.pow([9]);
+            res.omega_16_3 = res.omega_16_1.exp_u64(3);
+            res.omega_16_9 = res.omega_16_1.exp_u64(9);
         }
         res
     }
@@ -173,7 +173,7 @@ impl<F: Field> NttEngine<F> {
             self.order % order == 0,
             "Subgroup of requested order does not exist."
         );
-        self.omega_order.pow([(self.order / order) as u64])
+        self.omega_order.exp_u64((self.order / order) as u64)
     }
 
     /// Returns a cached table of roots of unity of the given order.
@@ -209,7 +209,7 @@ impl<F: Field> NttEngine<F> {
                 #[cfg(feature = "parallel")]
                 roots.par_extend((0..size).into_par_iter().map_with(F::ZERO, |root_i, i| {
                     if root_i.is_zero() {
-                        *root_i = root.pow([i as u64]);
+                        *root_i = root.exp_u64(i as u64);
                     } else {
                         *root_i *= root;
                     }

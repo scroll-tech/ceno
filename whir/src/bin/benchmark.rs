@@ -210,7 +210,7 @@ fn main() {
     }
 }
 
-fn run_whir<F, MerkleConfig>(
+fn run_whir<F>(
     args: Args,
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
@@ -254,7 +254,7 @@ fn run_whir<F, MerkleConfig>(
         starting_log_inv_rate: starting_rate,
     };
 
-    let polynomial = DenseMultilinearExtension::new(
+    let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
         (0..num_coeffs)
             .map(<F as Field>::BasePrimeField::from)
             .collect(),
@@ -277,7 +277,7 @@ fn run_whir<F, MerkleConfig>(
             initial_statement: false,
             ..whir_params.clone()
         };
-        let params = WhirConfig::<F, MerkleConfig>::new(mv_params, whir_params.clone());
+        let params = WhirConfig::<F>::new(mv_params, whir_params.clone());
         if !params.check_pow_bits() {
             println!("WARN: more PoW bits required than what specified.");
         }
@@ -348,7 +348,7 @@ fn run_whir<F, MerkleConfig>(
             },
         };
 
-        let params = WhirConfig::<F, MerkleConfig>::new(mv_params, whir_params);
+        let params = WhirConfig::<F>::new(mv_params, whir_params);
         if !params.check_pow_bits() {
             println!("WARN: more PoW bits required than what specified.");
         }
@@ -361,7 +361,7 @@ fn run_whir<F, MerkleConfig>(
         let mut transcript = io.to_transcript();
 
         let points: Vec<_> = (0..args.num_evaluations)
-            .map(|i| Vec(vec![F::from(i as u64); num_variables]))
+            .map(|i| Vec(vec![F::from_u64(i as u64); num_variables]))
             .collect();
         let evaluations = points
             .iter()

@@ -1,17 +1,16 @@
 use std::iter;
 
-use ff_ext::ExtensionField;
+use crate::crypto::{Digest, verify_multi_proof};
+use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3_commit::Mmcs;
 use p3_field::{Field, PrimeCharacteristicRing};
 use transcript::Transcript;
 
 use super::{Statement, WhirProof, fold::expand_from_univariate, parameters::WhirConfig};
 use crate::{
-    crypto::MerkleConfig as Config,
     error::Error,
     parameters::FoldType,
     sumcheck::proof::SumcheckPolynomial,
@@ -19,18 +18,14 @@ use crate::{
     whir::{fold::compute_fold, fs_utils::get_challenge_stir_queries},
 };
 
-pub struct Verifier<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
-    pub(crate) params: WhirConfig<E, MerkleConfig>,
+pub struct Verifier<E: ExtensionField> {
+    pub(crate) params: WhirConfig<E>,
     pub(crate) two_inv: E::BaseField,
 }
 
 #[derive(Clone)]
-pub(crate) struct WhirCommitmentInTranscript<E: ExtensionField, MerkleConfig: Config<E>> {
-    pub(crate) root: <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
+pub(crate) struct WhirCommitmentInTranscript<E: ExtensionField> {
+    pub(crate) root: Digest<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
@@ -63,12 +58,8 @@ pub(crate) struct ParsedRound<E> {
     pub(crate) domain_gen_inv: E,
 }
 
-impl<E, MerkleConfig> Verifier<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
-    pub fn new(params: WhirConfig<E, MerkleConfig>) -> Self {
+impl<E: ExtensionField> Verifier<E> {
+    pub fn new(params: WhirConfig<E>) -> Self {
         Verifier {
             params,
             two_inv: E::BaseField::from_u64(2).inverse(), // The only inverse in the entire code :)
@@ -77,7 +68,7 @@ where
 
     fn write_commitment_to_transcript<T: Transcript<E>>(
         &self,
-        commitment: &mut WhirCommitmentInTranscript<E, MerkleConfig>,
+        commitment: &mut WhirCommitmentInTranscript<E>,
         transcript: &mut T,
     ) {
         if self.params.committment_ood_samples > 0 {
@@ -91,9 +82,9 @@ where
     fn write_proof_to_transcript<T: Transcript<E>>(
         &self,
         transcript: &mut T,
-        parsed_commitment: &WhirCommitmentInTranscript<E, MerkleConfig>,
+        parsed_commitment: &WhirCommitmentInTranscript<E>,
         statement: &Statement<E>, // Will be needed later
-        whir_proof: &WhirProof<MerkleConfig, E>,
+        whir_proof: &WhirProof<E>,
     ) -> Result<ParsedProof<E>, Error> {
         let mut sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
@@ -146,7 +137,7 @@ where
         let mut rounds = vec![];
 
         for r in 0..self.params.n_rounds() {
-            let (merkle_proof, answers) = &whir_proof.merkle_answers[r];
+            let (merkle_proof_with_answers, answers) = &whir_proof.merkle_answers[r];
             let round_params = &self.params.round_parameters[r];
 
             let new_root = whir_proof.merkle_roots[r].clone();
@@ -176,20 +167,20 @@ where
                 .map(|index| exp_domain_gen.exp_u64(*index as u64))
                 .collect();
 
-            if !merkle_proof
-                .verify(
-                    &self.params.hash_params,
-                    &prev_root,
-                    p3_util::log2_strict_usize(domain_size),
-                    1,
-                    &stir_challenges_indexes,
-                    answers
-                        .iter()
-                        .map(|a| a.clone())
-                        .collect::<Vec<Vec<E>>>()
-                        .as_slice(),
-                )
-                .is_ok()
+            if !verify_multi_proof(
+                &self.params.hash_params,
+                &prev_root,
+                &stir_challenges_indexes,
+                answers
+                    .iter()
+                    .map(|a| a.clone())
+                    .collect::<Vec<Vec<E>>>()
+                    .as_slice(),
+                merkle_proof_with_answers,
+                1,
+                p3_util::log2_strict_usize(domain_size),
+            )
+            .is_ok()
             {
                 return Err(Error::InvalidProof("Merkle proof failed".to_string()));
             }
@@ -239,10 +230,7 @@ where
             domain_size /= 2;
         }
 
-        let final_coefficients = transcript.sample_and_append_vec(
-            b"final_coefficients",
-            1 << self.params.final_sumcheck_rounds,
-        );
+        let final_coefficients = whir_proof.final_poly.clone();
         let final_coefficients = DenseMultilinearExtension::from_evaluations_ext_vec(
             self.params.final_sumcheck_rounds,
             final_coefficients,
@@ -262,20 +250,20 @@ where
 
         let (final_merkle_proof, final_randomness_answers) =
             &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
-        if !final_merkle_proof
-            .verify(
-                &self.params.hash_params,
-                &prev_root,
-                p3_util::log2_strict_usize(domain_size),
-                1,
-                &final_randomness_indexes,
-                final_randomness_answers
-                    .iter()
-                    .map(|a| a.clone())
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            )
-            .is_ok()
+        if !verify_multi_proof(
+            &self.params.hash_params,
+            &prev_root,
+            &final_randomness_indexes,
+            final_randomness_answers
+                .iter()
+                .map(|a| a.clone())
+                .collect::<Vec<_>>()
+                .as_slice(),
+            final_merkle_proof,
+            1,
+            p3_util::log2_strict_usize(domain_size),
+        )
+        .is_ok()
         {
             return Err(Error::InvalidProof("Final Merkle proof failed".to_string()));
         }
@@ -317,7 +305,7 @@ where
 
     fn compute_v_poly(
         &self,
-        parsed_commitment: &WhirCommitmentInTranscript<E, MerkleConfig>,
+        parsed_commitment: &WhirCommitmentInTranscript<E>,
         statement: &Statement<E>,
         proof: &ParsedProof<E>,
     ) -> E {
@@ -489,10 +477,10 @@ where
 
     pub fn verify<T: Transcript<E>>(
         &self,
-        commitment: &WhirCommitmentInTranscript<E, MerkleConfig>,
+        commitment: &WhirCommitmentInTranscript<E>,
         transcript: &mut T,
         statement: &Statement<E>,
-        whir_proof: &WhirProof<MerkleConfig, E>,
+        whir_proof: &WhirProof<E>,
     ) -> Result<(), Error> {
         let mut parsed_commitment = commitment.clone();
         self.write_commitment_to_transcript(&mut parsed_commitment, transcript);

@@ -1,5 +1,4 @@
 use crate::{
-    crypto::MerkleConfig as Config,
     end_timer,
     error::Error,
     ntt::{transpose, transpose_test},
@@ -7,6 +6,7 @@ use crate::{
     utils::expand_randomness,
 };
 use ff_ext::ExtensionField;
+use multilinear_extensions::mle::FieldType;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use transcript::Transcript;
@@ -63,35 +63,35 @@ pub fn horizontal_stacking<E: ExtensionField>(
 }
 
 // generate a random vector for batching open
-pub fn generate_random_vector_batch_open<E: ExtensionField, T: Transcript<E>, MerkleConfig>(
+pub fn generate_random_vector_batch_open<E: ExtensionField, T: Transcript<E>>(
     transcript: &mut T,
     size: usize,
-) -> Result<Vec<E>, Error>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+) -> Result<Vec<E>, Error> {
     if size == 1 {
-        return Ok(vec![E::one()]);
+        return Ok(vec![E::ONE]);
     }
-    let [gamma] = transcript.challenge_scalars()?;
+    let gamma = transcript.sample_and_append_challenge(b"gamma").elements;
     let res = expand_randomness(gamma, size);
     Ok(res)
 }
 
 // generate a random vector for batching verify
-pub fn generate_random_vector_batch_verify<E: ExtensionField, T: Transcript<E>, MerkleConfig>(
-    arthur: &mut T,
+pub fn generate_random_vector_batch_verify<E: ExtensionField, T: Transcript<E>>(
+    transcript: &mut T,
     size: usize,
-) -> Result<Vec<E>, Error>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+) -> Result<Vec<E>, Error> {
     if size == 1 {
-        return Ok(vec![E::one()]);
+        return Ok(vec![E::ONE]);
     }
-    let [gamma] = arthur.challenge_scalars()?;
+    let gamma = transcript.sample_and_append_challenge(b"gamma").elements;
     let res = expand_randomness(gamma, size);
     Ok(res)
+}
+
+pub fn field_type_index_ext<E: ExtensionField>(poly: &FieldType<E>, index: usize) -> E {
+    match &poly {
+        FieldType::Ext(coeffs) => coeffs[index],
+        FieldType::Base(coeffs) => E::from(coeffs[index]),
+        _ => unreachable!(),
+    }
 }

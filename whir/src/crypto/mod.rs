@@ -1,224 +1,95 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use lazy_static::lazy_static;
-use p3_commit::Mmcs;
-use p3_field::PrimeCharacteristicRing;
-use p3_matrix::{Dimensions, dense::RowMajorMatrix};
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher, Permutation};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::sync::atomic::AtomicUsize;
+use p3_commit::{ExtensionMmcs, Mmcs};
+use p3_matrix::{Dimensions, dense::RowMajorMatrix, extension::FlatMatrixView};
+use p3_merkle_tree::{MerkleTree as P3MerkleTree, MerkleTreeMmcs};
+use p3_symmetric::{Hash as P3Hash, PaddingFreeSponge, TruncatedPermutation};
+use poseidon::digest::DIGEST_WIDTH;
+use transcript::Transcript;
 
-pub trait MerkleConfig<E: ExtensionField> {
-    type Mmcs: Mmcs<E>;
+use crate::error::Error;
+
+pub(crate) type Poseidon2Sponge<P> = PaddingFreeSponge<P, 8, 4, 4>;
+// TODO investigate compression setting legibility
+pub(crate) type Poseidon2Compression<P> = TruncatedPermutation<P, 2, 4, 8>;
+pub(crate) type Poseidon2MerkleMmcs<F> = MerkleTreeMmcs<
+    F,
+    F,
+    Poseidon2Sponge<<F as PoseidonField>::T>,
+    Poseidon2Compression<<F as PoseidonField>::T>,
+    DIGEST_WIDTH,
+>;
+pub(crate) type Poseidon2ExtMerkleMmcs<E: ExtensionField> =
+    ExtensionMmcs<E::BaseField, E, Poseidon2MerkleMmcs<E::BaseField>>;
+
+pub fn poseidon2_merkle_tree<E: ExtensionField>() -> Poseidon2MerkleMmcs<E::BaseField> {
+    MerkleTreeMmcs::new(
+        Poseidon2Sponge::new(<E::BaseField as PoseidonField>::get_perm()),
+        Poseidon2Compression::new(<E::BaseField as PoseidonField>::get_perm()),
+    )
 }
 
-pub struct MerkleTree<E: ExtensionField, Config: MerkleConfig<E>> {
-    pub mmcs: <Config::Mmcs as Mmcs<E>>::ProverData<RowMajorMatrix<E>>,
+pub fn poseidon2_ext_merkle_tree<E: ExtensionField>() -> Poseidon2ExtMerkleMmcs<E> {
+    ExtensionMmcs::new(poseidon2_merkle_tree::<E>())
 }
 
-impl<E: ExtensionField, Config: MerkleConfig<E>> MerkleTree<E, Config> {
-    pub fn new(params: &Config::Mmcs, leaves: &[E], leaf_size: usize) -> Self {}
+pub type Digest<E: ExtensionField> = P3Hash<E::BaseField, E::BaseField, DIGEST_WIDTH>;
+pub type MerkleTree<F> = P3MerkleTree<F, F, RowMajorMatrix<F>, DIGEST_WIDTH>;
+pub type MerkleTreeExt<E: ExtensionField> = P3MerkleTree<
+    E::BaseField,
+    E::BaseField,
+    FlatMatrixView<E::BaseField, E, RowMajorMatrix<E>>,
+    DIGEST_WIDTH,
+>;
+pub type MerklePathExt<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Proof;
+pub type MultiPath<E> = Vec<(Vec<Vec<E>>, MerklePathExt<E>)>;
 
-    pub fn root(&self) -> <Config::Mmcs as Mmcs<E>>::Commitment {}
-
-    pub fn generate_multi_proof(&self, indices: &[usize]) -> MultiPath<E, Config> {}
+pub fn write_digest_to_transcript<E: ExtensionField>(
+    digest: &Digest<E>,
+    transcript: &mut impl Transcript<E>,
+) {
+    digest
+        .as_ref()
+        .iter()
+        .for_each(|x| transcript.append_field_element(x));
 }
 
-/// A padding-free, overwrite-mode sponge function.
-///
-/// `WIDTH` is the sponge's rate plus the sponge's capacity.
-#[derive(Clone)]
-pub struct WhirHasher<E: ExtensionField, const RATE: usize, const OUT: usize> {
-    permutation: <E::BaseField as PoseidonField>::T,
+pub fn generate_multi_proof<E: ExtensionField>(
+    hash_params: &Poseidon2ExtMerkleMmcs<E>,
+    merkle_tree: &MerkleTreeExt<E>,
+    indices: &[usize],
+) -> MultiPath<E> {
+    indices
+        .iter()
+        .map(|index| hash_params.open_batch(*index, merkle_tree))
+        .collect()
 }
 
-#[derive(Clone)]
-pub struct WhirHasherBase<E: ExtensionField, const RATE: usize, const OUT: usize> {
-    permutation: <E::BaseField as PoseidonField>::T,
-}
-
-impl<E: ExtensionField, const RATE: usize, const OUT: usize> WhirHasher<E, RATE, OUT> {
-    pub const fn new(permutation: <E::BaseField as PoseidonField>::T) -> Self {
-        Self { permutation }
-    }
-}
-
-impl<E: ExtensionField, const RATE: usize, const OUT: usize> WhirHasherBase<E, RATE, OUT> {
-    pub const fn new(permutation: <E::BaseField as PoseidonField>::T) -> Self {
-        Self { permutation }
-    }
-}
-
-impl<E: ExtensionField, const RATE: usize, const OUT: usize>
-    CryptographicHasher<E, [E::BaseField; OUT]> for WhirHasher<E, RATE, OUT>
-{
-    fn hash_iter<I>(&self, input: I) -> [E::BaseField; OUT]
-    where
-        I: IntoIterator<Item = E>,
-    {
-        // static_assert(RATE < WIDTH)
-        let mut state = [E::BaseField::ZERO; 8];
-        let mut input = input
-            .into_iter()
-            .flat_map(|x| x.as_bases().iter().map(|x| *x).collect::<Vec<_>>());
-
-        // Itertools' chunks() is more convenient, but seems to add more overhead,
-        // hence the more manual loop.
-        'outer: loop {
-            for i in 0..RATE {
-                if let Some(x) = input.next() {
-                    state[i] = x;
-                } else {
-                    if i != 0 {
-                        self.permutation.permute_mut(&mut state);
-                    }
-                    break 'outer;
-                }
-            }
-            self.permutation.permute_mut(&mut state);
-        }
-
-        state[..OUT].try_into().unwrap()
-    }
-}
-
-impl<E: ExtensionField, const RATE: usize, const OUT: usize>
-    CryptographicHasher<E::BaseField, [E::BaseField; OUT]> for WhirHasherBase<E, RATE, OUT>
-{
-    fn hash_iter<I>(&self, input: I) -> [E::BaseField; OUT]
-    where
-        I: IntoIterator<Item = E::BaseField>,
-    {
-        // static_assert(RATE < WIDTH)
-        let mut state = [E::BaseField::ZERO; 8];
-        let mut input = input.into_iter();
-
-        // Itertools' chunks() is more convenient, but seems to add more overhead,
-        // hence the more manual loop.
-        'outer: loop {
-            for i in 0..RATE {
-                if let Some(x) = input.next() {
-                    state[i] = x;
-                } else {
-                    if i != 0 {
-                        self.permutation.permute_mut(&mut state);
-                    }
-                    break 'outer;
-                }
-            }
-            self.permutation.permute_mut(&mut state);
-        }
-
-        state[..OUT].try_into().unwrap()
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct MultiPath<E: ExtensionField, Config: MerkleConfig<E>>
-where
-    E: Serialize + DeserializeOwned,
-{
-    pub path: Vec<<Config::Mmcs as Mmcs<E>>::Proof>,
-}
-
-impl<E: ExtensionField, Config: MerkleConfig<E>> MultiPath<E, Config> {
-    pub fn verify(
-        &self,
-        hasher: &Config::Mmcs,
-        commit: &<Config::Mmcs as Mmcs<E>>::Commitment,
-        merkle_height: usize,
-        leaf_size: usize,
-        indices: &[usize],
-        opened_values: &[Vec<E>],
-    ) -> Result<(), crate::error::Error> {
-        for (i, index) in indices.iter().enumerate() {
-            Config::Mmcs::verify_batch(
-                hasher,
-                commit,
-                &[Dimensions {
-                    height: 1 << merkle_height,
-                    width: leaf_size,
-                }],
-                *index,
-                &[opened_values[i].clone()],
-                &self.path[i],
-            )
-            .map_err(|err| crate::error::Error::MmcsError(format!("{:?}", err)))?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub struct MerkleDefaultConfig<E: ExtensionField>
-where
-    E::BaseField: PoseidonField,
-{
-    pub(crate) hasher: <E::BaseField as PoseidonField>::T,
-    pub(crate) mmcs: MerkleTreeMmcs<
-        E,
-        E::BaseField,
-        WhirHasher<E, 4, 4>,
-        CompressionFunctionFromHasher<WhirHasherBase<E, 4, 4>, 2, 4>,
-        4,
-    >,
-}
-
-impl<E: ExtensionField> MerkleConfig<E> for MerkleDefaultConfig<E>
-where
-    E::BaseField: PoseidonField,
-{
-    type Mmcs = MerkleTreeMmcs<
-        E,
-        E::BaseField,
-        WhirHasher<E, 4, 4>,
-        CompressionFunctionFromHasher<WhirHasherBase<E, 4, 4>, 2, 4>,
-        4,
-    >;
-}
-
-impl<E: ExtensionField> MerkleDefaultConfig<E>
-where
-    E::BaseField: PoseidonField,
-{
-    pub fn new() -> Self {
-        Self {
-            hasher: <E::BaseField as PoseidonField>::get_perm(),
-            mmcs: MerkleTreeMmcs::new(
-                WhirHasher::new(<E::BaseField as PoseidonField>::get_perm()),
-                CompressionFunctionFromHasher::new(WhirHasherBase::new(
-                    <E::BaseField as PoseidonField>::get_perm(),
-                )),
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct HashCounter {
-    counter: AtomicUsize,
-}
-
-lazy_static! {
-    static ref HASH_COUNTER: HashCounter = HashCounter::default();
-}
-
-impl HashCounter {
-    pub(crate) fn add() -> usize {
-        HASH_COUNTER
-            .counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    }
-
-    pub fn reset() {
-        HASH_COUNTER
-            .counter
-            .store(0, std::sync::atomic::Ordering::SeqCst)
-    }
-
-    pub fn get() -> usize {
-        HASH_COUNTER
-            .counter
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
+pub fn verify_multi_proof<E: ExtensionField>(
+    hash_params: &Poseidon2ExtMerkleMmcs<E>,
+    root: &Digest<E>,
+    indices: &[usize],
+    values: &[Vec<E>],
+    proof: &MultiPath<E>,
+    leaf_size: usize,
+    matrix_height: usize,
+) -> Result<(), Error> {
+    indices
+        .iter()
+        .zip(proof.iter())
+        .all(|(index, path)| {
+            hash_params
+                .verify_batch(
+                    root,
+                    &[Dimensions {
+                        width: leaf_size,
+                        height: 1 << matrix_height,
+                    }],
+                    *index,
+                    &[values[*index].clone()],
+                    &path.1,
+                )
+                .is_ok()
+        })
+        .then_some(())
+        .ok_or(Error::MmcsError("Failed to verify proof".to_string()))
 }

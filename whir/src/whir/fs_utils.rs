@@ -1,4 +1,4 @@
-use crate::{crypto::MerkleConfig as Config, error::Error, utils::dedup};
+use crate::{crypto::Digest, error::Error, utils::dedup};
 use ff_ext::{ExtensionField, SmallField};
 use p3_commit::Mmcs;
 use transcript::Transcript;
@@ -18,13 +18,10 @@ pub fn get_challenge_stir_queries<E: ExtensionField, T: Transcript<E>>(
     Ok(dedup(indices))
 }
 
-pub trait MmcsCommitmentWriter<E: ExtensionField, MerkleConfig: Config<E>> {
-    fn add_digest(
-        &mut self,
-        digest: <MerkleConfig::Mmcs as Mmcs<E>>::Commitment,
-    ) -> Result<(), Error>;
+pub trait MmcsCommitmentWriter<E: ExtensionField> {
+    fn add_digest(&mut self, digest: Digest<E>) -> Result<(), Error>;
 }
 
-pub trait MmcsCommitmentReader<E: ExtensionField, MerkleConfig: Config<E>> {
-    fn read_digest(&mut self) -> Result<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment, Error>;
+pub trait MmcsCommitmentReader<E: ExtensionField> {
+    fn read_digest(&mut self) -> Result<Digest<E>, Error>;
 }

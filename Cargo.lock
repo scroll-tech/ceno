@@ -3122,6 +3122,7 @@ dependencies = [
  "p3-merkle-tree",
  "p3-symmetric",
  "p3-util",
+ "poseidon",
  "rand",
  "rand_chacha",
  "rayon",

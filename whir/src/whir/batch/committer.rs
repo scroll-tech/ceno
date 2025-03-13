@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{MerkleConfig as Config, MerkleTree},
+    crypto::{MerkleTreeExt, write_digest_to_transcript},
     end_timer,
     error::Error,
     ntt::expand_from_coeff,
@@ -11,30 +11,27 @@ use crate::{
 };
 use derive_more::Debug;
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use p3_commit::Mmcs;
+use p3_matrix::dense::RowMajorMatrix;
 use transcript::Transcript;
 
 use crate::whir::fs_utils::MmcsCommitmentWriter;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-#[derive(Debug, Clone)]
-pub struct Witnesses<E: ExtensionField, MerkleConfig>
-where
-    MerkleConfig: Config<E>,
-{
+#[derive(Debug)]
+pub struct Witnesses<E: ExtensionField> {
     pub(crate) polys: Vec<DenseMultilinearExtension<E>>,
     #[debug(skip)]
-    pub(crate) merkle_tree: MerkleTree<E, MerkleConfig>,
+    pub(crate) merkle_tree: MerkleTreeExt<E>,
     pub(crate) merkle_leaves: Vec<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
 
-impl<E: ExtensionField, MerkleConfig: Config<E>> From<Witness<E, MerkleConfig>>
-    for Witnesses<E, MerkleConfig>
-{
-    fn from(witness: Witness<E, MerkleConfig>) -> Self {
+impl<E: ExtensionField> From<Witness<E>> for Witnesses<E> {
+    fn from(witness: Witness<E>) -> Self {
         Self {
             polys: vec![witness.polynomial],
             merkle_tree: witness.merkle_tree,
@@ -45,10 +42,8 @@ impl<E: ExtensionField, MerkleConfig: Config<E>> From<Witness<E, MerkleConfig>>
     }
 }
 
-impl<E: ExtensionField, MerkleConfig: Config<E>> From<Witnesses<E, MerkleConfig>>
-    for Witness<E, MerkleConfig>
-{
-    fn from(witness: Witnesses<E, MerkleConfig>) -> Self {
+impl<E: ExtensionField> From<Witnesses<E>> for Witness<E> {
+    fn from(witness: Witnesses<E>) -> Self {
         Self {
             polynomial: witness.polys[0].clone(),
             merkle_tree: witness.merkle_tree,
@@ -59,27 +54,35 @@ impl<E: ExtensionField, MerkleConfig: Config<E>> From<Witnesses<E, MerkleConfig>
     }
 }
 
-impl<E, MerkleConfig> Committer<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+impl<E: ExtensionField> Committer<E> {
     pub fn batch_commit<T: Transcript<E>>(
         &self,
         transcript: &mut T,
         polys: &[DenseMultilinearExtension<E>],
-    ) -> Result<Witnesses<E, MerkleConfig>, Error> {
+    ) -> Result<Witnesses<E>, Error> {
         let timer = start_timer!(|| "Batch Commit");
         let base_domain = self.0.starting_domain.base_domain.unwrap();
-        let expansion = base_domain.size() / polys[0].num_coeffs();
+        let expansion = self.0.starting_domain.size() / polys[0].evaluations().len();
         let expand_timer = start_timer!(|| "Batch Expand");
         let evals = polys
             .par_iter()
-            .map(|poly| expand_from_coeff(poly.coeffs(), expansion))
+            .map(|poly| {
+                expand_from_coeff(
+                    &match poly.evaluations() {
+                        FieldType::Base(evals) => evals
+                            .iter()
+                            .map(|e| E::from_bases(&[*e]))
+                            .collect::<Vec<_>>(),
+                        FieldType::Ext(evals) => evals.clone(),
+                        _ => panic!("Invalid field type"),
+                    },
+                    expansion,
+                )
+            })
             .collect::<Vec<Vec<_>>>();
         end_timer!(expand_timer);
 
-        assert_eq!(base_domain.size(), evals[0].len());
+        assert_eq!(self.0.starting_domain.size(), evals[0].len());
 
         // These stacking operations are bottleneck of the commitment process.
         // Try to finish the tasks with as few allocations as possible.
@@ -92,19 +95,18 @@ where
                 end_timer!(sub_stack_evaluations_timer);
                 ret
             })
-            .map(|evals| {
+            .flat_map(|evals| {
                 let restructure_evaluations_timer = start_timer!(|| "Restructure Evaluations");
                 let ret = restructure_evaluations(
                     evals,
                     self.0.fold_optimisation,
-                    base_domain.group_gen(),
-                    base_domain.group_gen_inv(),
+                    self.0.starting_domain.backing_domain_group_gen(),
+                    self.0.starting_domain.backing_domain_group_gen().inverse(),
                     self.0.folding_factor.at_round(0),
                 );
                 end_timer!(restructure_evaluations_timer);
                 ret
             })
-            .flat_map(|evals| evals.into_par_iter().map(E::from_base_prime_field))
             .collect::<Vec<_>>();
         end_timer!(stack_evaluations_timer);
 
@@ -119,7 +121,7 @@ where
         let horizontal_stacking_timer = start_timer!(|| "Horizontal Stacking");
         let folded_evals = super::utils::horizontal_stacking(
             folded_evals,
-            base_domain.size(),
+            self.0.starting_domain.size(),
             self.0.folding_factor.at_round(0),
             buffer.as_mut_slice(),
         );
@@ -127,46 +129,56 @@ where
 
         // Group folds together as a leaf.
         let fold_size = 1 << self.0.folding_factor.at_round(0);
-        #[cfg(not(feature = "parallel"))]
-        let leafs_iter = folded_evals.chunks_exact(fold_size * polys.len());
-        #[cfg(feature = "parallel")]
-        let leafs_iter = folded_evals.par_chunks_exact(fold_size * polys.len());
-
         let merkle_build_timer = start_timer!(|| "Build Merkle Tree");
-        let merkle_tree = MerkleTree::<MerkleConfig>::new(
-            &self.0.leaf_hash_params,
-            &self.0.two_to_one_params,
-            leafs_iter,
-        )
-        .unwrap();
+
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix(RowMajorMatrix::new(
+            folded_evals.clone(),
+            fold_size * polys.len(),
+        ));
         end_timer!(merkle_build_timer);
 
         let root = merkle_tree.root();
 
-        transcript.add_digest(root)?;
+        write_digest_to_transcript(&root, transcript);
 
-        let mut ood_points = vec![E::ZERO; self.0.committment_ood_samples];
-        let mut ood_answers = vec![E::ZERO; polys.len() * self.0.committment_ood_samples];
-        if self.0.committment_ood_samples > 0 {
-            transcript.fill_challenge_scalars(&mut ood_points)?;
-            ood_points
-                .par_iter()
-                .zip(ood_answers.par_chunks_mut(polys.len()))
-                .for_each(|(ood_point, ood_answers)| {
-                    for j in 0..polys.len() {
-                        let eval = polys[j].evaluate_at_extension(&expand_from_univariate(
+        let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
+            let ood_points =
+                transcript.sample_and_append_vec(b"ood_points", self.0.committment_ood_samples);
+            let ood_answers = ood_points
+                .iter()
+                .flat_map(|ood_point| {
+                    polys.iter().map(|poly| {
+                        poly.evaluate(&expand_from_univariate(
                             *ood_point,
                             self.0.mv_parameters.num_variables,
-                        ));
-                        ood_answers[j] = eval;
-                    }
-                });
-            transcript.append_field_element_ext(&ood_answers)?;
-        }
+                        ))
+                    })
+                })
+                .collect::<Vec<_>>();
+            transcript.append_field_element_exts(&ood_answers);
+            (ood_points, ood_answers)
+        } else {
+            (
+                vec![E::ZERO; self.0.committment_ood_samples],
+                vec![E::ZERO; self.0.committment_ood_samples],
+            )
+        };
 
         let polys = polys
             .into_par_iter()
-            .map(|poly| poly.clone().to_extension())
+            .map(|poly| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    poly.num_vars(),
+                    match poly.evaluations() {
+                        FieldType::Base(evals) => evals
+                            .iter()
+                            .map(|e| E::from_bases(&[*e]))
+                            .collect::<Vec<_>>(),
+                        FieldType::Ext(evals) => evals.clone(),
+                        _ => panic!("Invalid field type"),
+                    },
+                )
+            })
             .collect::<Vec<_>>();
 
         end_timer!(timer);

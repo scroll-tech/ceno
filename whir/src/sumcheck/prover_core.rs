@@ -29,7 +29,7 @@ where
 
         let mut prover = SumcheckCore {
             evaluation_of_p: coeffs.into(), // transform coefficient form -> evaluation form
-            evaluation_of_equality: DenseMultilinearExtension::new(vec![
+            evaluation_of_equality: DenseMultilinearExtension::from_evaluations_ext_vec(vec![
                 F::ZERO;
                 1 << num_variables
             ]),
@@ -72,10 +72,10 @@ where
             let indexes: Vec<_> = (0..suffix_len)
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
-            let left_poly = DenseMultilinearExtension::new(
+            let left_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
                 indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
             );
-            let right_poly = DenseMultilinearExtension::new(
+            let right_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
                 indexes
                     .iter()
                     .map(|&i| self.evaluation_of_equality[i])
@@ -122,10 +122,10 @@ where
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
 
-            let left_poly = DenseMultilinearExtension::new(
+            let left_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
                 indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
             );
-            let right_poly = DenseMultilinearExtension::new(
+            let right_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
                 indexes
                     .iter()
                     .map(|&i| self.evaluation_of_equality[i])
@@ -139,7 +139,7 @@ where
 
         // Update
         self.num_variables -= folding_factor;
-        self.evaluation_of_p = DenseMultilinearExtension::new(evaluations_of_p);
-        self.evaluation_of_equality = DenseMultilinearExtension::new(evaluations_of_eq);
+        self.evaluation_of_p = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
+        self.evaluation_of_equality = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
     }
 }

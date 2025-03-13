@@ -23,7 +23,7 @@ pub fn poly2whir<E: ExtensionField>(
         }
         multilinear_extensions::mle::FieldType::Base(coeffs) => {
             reverse_index_bits_in_place(coeffs.as_mut_slice());
-            DenseMultilinearExtension::new(coeffs.par_iter().map(|x| BaseFieldWrapper(*x)).collect())
+            DenseMultilinearExtension::from_evaluations_ext_vec(coeffs.par_iter().map(|x| BaseFieldWrapper(*x)).collect())
         }
         _ => unreachable!(),
     }

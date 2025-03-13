@@ -1,5 +1,5 @@
-use crate::crypto::{MerkleConfig as Config, MultiPath};
-use ff_ext::ExtensionField;
+use crate::crypto::{Digest, MultiPath};
+use ff_ext::{ExtensionField, PoseidonField};
 use p3_commit::Mmcs;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -19,31 +19,28 @@ pub struct Statement<E> {
 
 // Only includes the authentication paths
 #[derive(Clone, Serialize, Deserialize)]
-pub struct WhirProof<MerkleConfig, E>
+pub struct WhirProof<E>
 where
-    MerkleConfig: Config<E>,
     E: ExtensionField + Serialize + DeserializeOwned,
 {
-    pub(crate) merkle_answers: Vec<(MultiPath<E, MerkleConfig>, Vec<Vec<E>>)>,
+    pub(crate) merkle_answers: Vec<(MultiPath<E>, Vec<Vec<E>>)>,
     pub(crate) sumcheck_poly_evals: Vec<[E; 3]>,
-    pub(crate) merkle_roots: Vec<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
+    pub(crate) merkle_roots: Vec<Digest<E>>,
     pub(crate) ood_answers: Vec<Vec<E>>,
     pub(crate) final_poly: Vec<E>,
+    pub(crate) folded_evals: Vec<E>,
 }
 
 #[cfg(test)]
 mod tests {
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use nimue::{DefaultHash, IOPattern};
-    use nimue_pow::blake3::Blake3PoW;
     use p3_field::PrimeCharacteristicRing;
-    use p3_goldilocks::Goldilocks;
     use rand::rngs::OsRng;
     use transcript::BasicTranscript;
 
     use crate::{
-        crypto::MerkleDefaultConfig,
+        crypto::poseidon2_ext_merkle_tree,
         parameters::{
             FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
         },
@@ -56,8 +53,6 @@ mod tests {
         },
     };
 
-    type MerkleConfig = MerkleDefaultConfig<E>;
-    type PowStrategy = Blake3PoW;
     type E = GoldilocksExt2;
     type T = BasicTranscript<E>;
 
@@ -72,11 +67,11 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = MerkleDefaultConfig::<E>::new().mmcs;
+        let hash_params = poseidon2_ext_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<E, MerkleConfig> {
+        let whir_params = WhirParameters::<E> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
@@ -87,7 +82,7 @@ mod tests {
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
+        let params = WhirConfig::<E>::new(mv_params, whir_params);
 
         let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, vec![
                 <E as p3_field::PrimeCharacteristicRing>::from_u64(1);
@@ -109,7 +104,7 @@ mod tests {
         let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
-        let (witness, commitment): (_, WhirCommitmentInTranscript<_, _>) =
+        let (witness, commitment): (_, WhirCommitmentInTranscript<_>) =
             committer.commit(&mut transcript, polynomial).unwrap();
 
         let prover = Prover(params.clone());
@@ -142,11 +137,11 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = MerkleDefaultConfig::<E>::new().mmcs;
+        let hash_params = poseidon2_ext_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<E, MerkleConfig> {
+        let whir_params = WhirParameters::<E> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
@@ -157,7 +152,7 @@ mod tests {
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
+        let params = WhirConfig::<E>::new(mv_params, whir_params);
 
         let polynomials: Vec<DenseMultilinearExtension<E>> =
             (0..num_polynomials)
@@ -226,11 +221,11 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
-        let hash_params = MerkleDefaultConfig::new().mmcs;
+        let hash_params = poseidon2_ext_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-        let whir_params = WhirParameters::<E, MerkleConfig> {
+        let whir_params = WhirParameters::<E> {
             initial_statement: true,
             security_level: 32,
             pow_bits,
@@ -241,7 +236,7 @@ mod tests {
             fold_optimisation: fold_type,
         };
 
-        let params = WhirConfig::<E, MerkleConfig>::new(mv_params, whir_params);
+        let params = WhirConfig::<E>::new(mv_params, whir_params);
 
         let polynomials: Vec<DenseMultilinearExtension<E>> =
             (0..num_polynomials)

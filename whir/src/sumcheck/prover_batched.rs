@@ -39,7 +39,7 @@ where
         let mut prover = SumcheckBatched {
             evaluations_of_p: coeffs.into_iter().map(|c| c.into()).collect(),
             evaluations_of_equality: vec![
-                DenseMultilinearExtension::new(vec![
+                DenseMultilinearExtension::from_evaluations_ext_vec(vec![
                     F::ZERO;
                     1 << num_variables
                 ]);
@@ -56,7 +56,7 @@ where
             SumcheckSingle::eval_eq(
                 &point.0,
                 prover.evaluations_of_equality[i].evals_mut(),
-                F::from(1),
+                F::from_u64(1),
             );
             prover.sum += poly_comb_coeff[i] * evals[i];
         }
@@ -188,8 +188,8 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p = DenseMultilinearExtension::new(evaluations_of_p);
-        self.evaluation_of_equality = DenseMultilinearExtension::new(evaluations_of_eq);
+        self.evaluation_of_p = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
+        self.evaluation_of_equality = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 
@@ -197,7 +197,7 @@ where
     pub fn compress(
         &mut self,
         combination_randomness: F, // Scale the initial point
-        folding_randomness: &Vec<F>,
+        folding_randomness: &[F],
         sumcheck_poly: &SumcheckPolynomial<F>,
     ) {
         assert_eq!(folding_randomness.n_variables(), 1);
@@ -226,8 +226,8 @@ where
                     },
                 );
                 (
-                    DenseMultilinearExtension::new(evaluation_of_p),
-                    DenseMultilinearExtension::new(evaluation_of_eq),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(evaluation_of_p),
+                    DenseMultilinearExtension::from_evaluations_ext_vec(evaluation_of_eq),
                 )
             })
             .collect();
@@ -253,12 +253,25 @@ mod tests {
     #[test]
     fn test_sumcheck_folding_factor_1() {
         let num_rounds = 2;
-        let eval_points = vec![vec![F::from(10), F::from(11)], vec![F::from(7), F::from(8)]];
+        let eval_points = vec![vec![F::from_u64(10), F::from_u64(11)], vec![
+            F::from_u64(7),
+            F::from_u64(8),
+        ]];
         let polynomials = vec![
-            DenseMultilinearExtension::new(vec![F::from(1), F::from(5), F::from(10), F::from(14)]),
-            DenseMultilinearExtension::new(vec![F::from(2), F::from(6), F::from(11), F::from(13)]),
+            DenseMultilinearExtension::from_evaluations_ext_vec(vec![
+                F::from_u64(1),
+                F::from_u64(5),
+                F::from_u64(10),
+                F::from_u64(14),
+            ]),
+            DenseMultilinearExtension::from_evaluations_ext_vec(vec![
+                F::from_u64(2),
+                F::from_u64(6),
+                F::from_u64(11),
+                F::from_u64(13),
+            ]),
         ];
-        let poly_comb_coeffs = vec![F::from(2), F::from(3)];
+        let poly_comb_coeffs = vec![F::from_u64(2), F::from_u64(3)];
 
         let evals: Vec<F> = polynomials
             .iter()
@@ -268,7 +281,9 @@ mod tests {
         let mut claimed_value: F = evals
             .iter()
             .zip(&poly_comb_coeffs)
-            .fold(F::from(0), |sum, (eval, poly_rand)| eval * poly_rand + sum);
+            .fold(F::from_u64(0), |sum, (eval, poly_rand)| {
+                eval * poly_rand + sum
+            });
 
         let mut prover =
             SumcheckBatched::new(polynomials.clone(), &eval_points, &poly_comb_coeffs, &evals);
@@ -281,8 +296,8 @@ mod tests {
             // First, check that is sums to the right value over the hypercube
             assert_eq!(poly.sum_over_hypercube(), claimed_value);
 
-            let next_comb_randomness = F::from(100101);
-            let next_fold_randomness = vec![F::from(4999)];
+            let next_comb_randomness = F::from_u64(100101);
+            let next_fold_randomness = vec![F::from_u64(4999)];
 
             prover.compress(next_comb_randomness, &next_fold_randomness, &poly);
             claimed_value = next_comb_randomness * poly.evaluate_at_point(&next_fold_randomness);

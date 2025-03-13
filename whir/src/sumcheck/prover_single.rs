@@ -1,14 +1,14 @@
 use super::proof::SumcheckPolynomial;
 
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
 
 pub struct SumcheckSingle<E: ExtensionField> {
     // The evaluation of p
-    evaluation_of_p: DenseMultilinearExtension<E>,
-    evaluation_of_equality: DenseMultilinearExtension<E>,
+    evaluation_of_p: Vec<E>,
+    evaluation_of_equality: Vec<E>,
     num_variables: usize,
     sum: E,
 }
@@ -28,14 +28,19 @@ where
     ) -> Self {
         assert_eq!(points.len(), combination_randomness.len());
         assert_eq!(points.len(), evaluations.len());
-        let num_variables = coeffs.num_variables();
+        let num_variables = coeffs.num_vars();
 
         let mut prover = SumcheckSingle {
-            evaluation_of_p: coeffs.into(),
-            evaluation_of_equality: DenseMultilinearExtension::new(vec![
-                E::ZERO;
-                1 << num_variables
-            ]),
+            evaluation_of_p: match coeffs.evaluations() {
+                FieldType::Base(evals) => evals
+                    .iter()
+                    .map(|e| E::from_bases(&[*e]))
+                    .collect::<Vec<_>>(),
+                FieldType::Ext(evals) => evals.clone(),
+                _ => panic!("Invalid field type"),
+            },
+            evaluation_of_equality: vec![E::ZERO; 1 << num_variables],
+
             num_variables,
             sum: E::ZERO,
         };
@@ -80,8 +85,8 @@ where
         assert!(self.num_variables >= 1);
 
         // Compute coefficients of the quadratic result polynomial
-        let eval_p_iter = self.evaluation_of_p.evals().par_chunks_exact(2);
-        let eval_eq_iter = self.evaluation_of_equality.evals().par_chunks_exact(2);
+        let eval_p_iter = self.evaluation_of_p.par_chunks_exact(2);
+        let eval_eq_iter = self.evaluation_of_equality.par_chunks_exact(2);
         let (c0, c2) = eval_p_iter
             .zip(eval_eq_iter)
             .map(|(p_at, eq_at)| {
@@ -162,12 +167,12 @@ where
         for (point, rand) in points.iter().zip(combination_randomness) {
             // TODO: We might want to do all points simultaneously so we
             // do only a single pass over the data.
-            Self::eval_eq(&point.0, self.evaluation_of_equality.evals_mut(), *rand);
+            Self::eval_eq(&point, &mut self.evaluation_of_equality, *rand);
         }
 
         // Update the sum
         for (rand, eval) in combination_randomness.iter().zip(evaluations.iter()) {
-            self.sum += *rand * eval;
+            self.sum += *rand * *eval;
         }
     }
 
@@ -198,8 +203,10 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p = DenseMultilinearExtension::new(evaluations_of_p);
-        self.evaluation_of_equality = DenseMultilinearExtension::new(evaluations_of_eq);
+        self.evaluation_of_p =
+            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
+        self.evaluation_of_equality =
+            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 
@@ -217,14 +224,12 @@ where
         let (evaluations_of_p, evaluations_of_eq) = join(
             || {
                 self.evaluation_of_p
-                    .evals()
                     .par_chunks_exact(2)
                     .map(|at| (at[1] - at[0]) * randomness + at[0])
                     .collect()
             },
             || {
                 self.evaluation_of_equality
-                    .evals()
                     .par_chunks_exact(2)
                     .map(|at| (at[1] - at[0]) * randomness + at[0])
                     .collect()
@@ -233,39 +238,45 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p = DenseMultilinearExtension::new(evaluations_of_p);
-        self.evaluation_of_equality = DenseMultilinearExtension::new(evaluations_of_eq);
+        self.evaluation_of_p = evaluations_of_p;
+        self.evaluation_of_equality = evaluations_of_eq;
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use ff_ext::GoldilocksExt2;
     use goldilocks::Goldilocks;
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use p3_field::PrimeCharacteristicRing;
 
     use super::SumcheckSingle;
 
-    type E = Goldilocks;
+    type E = GoldilocksExt2;
 
     #[test]
     fn test_sumcheck_folding_factor_1() {
-        let eval_point = vec![E::from(10), E::from(11)];
-        let polynomial =
-            DenseMultilinearExtension::new(vec![E::from(1), E::from(5), E::from(10), E::from(14)]);
+        let eval_point = vec![E::from_u64(10), E::from_u64(11)];
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
+            E::from_u64(1),
+            E::from_u64(5),
+            E::from_u64(10),
+            E::from_u64(14),
+        ]);
 
         let claimed_value = polynomial.evaluate(&eval_point);
 
         let eval = polynomial.evaluate(&eval_point);
-        let mut prover = SumcheckSingle::new(polynomial, &[eval_point], &[E::from(1)], &[eval]);
+        let mut prover = SumcheckSingle::new(polynomial, &[eval_point], &[E::from_u64(1)], &[eval]);
 
         let poly_1 = prover.compute_sumcheck_polynomial();
 
         // First, check that is sums to the right value over the hypercube
         assert_eq!(poly_1.sum_over_hypercube(), claimed_value);
 
-        let combination_randomness = E::from(100101);
-        let folding_randomness = vec![E::from(4999)];
+        let combination_randomness = E::from_u64(100101);
+        let folding_randomness = vec![E::from_u64(4999)];
 
         prover.compress(combination_randomness, &folding_randomness, &poly_1);
 

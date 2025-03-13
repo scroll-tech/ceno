@@ -181,7 +181,7 @@ fn main() {
     }
 }
 
-fn run_whir<F, MerkleConfig>(
+fn run_whir<F>(
     args: Args,
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
@@ -194,14 +194,12 @@ fn run_whir<F, MerkleConfig>(
     for<'a> Arthur<'a>: DigestReader<MerkleConfig>,
 {
     match args.protocol_type {
-        WhirType::PCS => run_whir_pcs::<F, MerkleConfig>(args, leaf_hash_params, two_to_one_params),
-        WhirType::LDT => {
-            run_whir_as_ldt::<F, MerkleConfig>(args, leaf_hash_params, two_to_one_params)
-        }
+        WhirType::PCS => run_whir_pcs::<F>(args, leaf_hash_params, two_to_one_params),
+        WhirType::LDT => run_whir_as_ldt::<F>(args, leaf_hash_params, two_to_one_params),
     }
 }
 
-fn run_whir_as_ldt<F, MerkleConfig>(
+fn run_whir_as_ldt<F>(
     args: Args,
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
@@ -253,7 +251,7 @@ fn run_whir_as_ldt<F, MerkleConfig>(
         starting_log_inv_rate: starting_rate,
     };
 
-    let params = WhirConfig::<F, MerkleConfig>::new(mv_params, whir_params.clone());
+    let params = WhirConfig::<F>::new(mv_params, whir_params.clone());
 
     let io = IOPattern::<DefaultHash>::new("🌪️")
         .commit_statement(&params)
@@ -270,7 +268,7 @@ fn run_whir_as_ldt<F, MerkleConfig>(
     }
 
     use ark_ff::Field;
-    let polynomial = DenseMultilinearExtension::new(
+    let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
         (0..num_coeffs)
             .map(<F as Field>::BasePrimeField::from)
             .collect(),
@@ -312,7 +310,7 @@ fn run_whir_as_ldt<F, MerkleConfig>(
     dbg!(HashCounter::get() as f64 / reps as f64);
 }
 
-fn run_whir_pcs<F, MerkleConfig>(
+fn run_whir_pcs<F>(
     args: Args,
     leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
     two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
@@ -365,7 +363,7 @@ fn run_whir_pcs<F, MerkleConfig>(
         starting_log_inv_rate: starting_rate,
     };
 
-    let params = WhirConfig::<F, MerkleConfig>::new(mv_params, whir_params);
+    let params = WhirConfig::<F>::new(mv_params, whir_params);
 
     let io = IOPattern::<DefaultHash>::new("🌪️")
         .commit_statement(&params)
@@ -383,13 +381,13 @@ fn run_whir_pcs<F, MerkleConfig>(
     }
 
     use ark_ff::Field;
-    let polynomial = DenseMultilinearExtension::new(
+    let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
         (0..num_coeffs)
             .map(<F as Field>::BasePrimeField::from)
             .collect(),
     );
     let points: Vec<_> = (0..num_evaluations)
-        .map(|i| Vec(vec![F::from(i as u64); num_variables]))
+        .map(|i| Vec(vec![F::from_u64(i as u64); num_variables]))
         .collect();
     let evaluations = points
         .iter()

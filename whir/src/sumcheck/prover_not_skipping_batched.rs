@@ -35,22 +35,25 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
         self.sumcheck_prover.get_folded_eqs()
     }
 
-    pub fn compute_sumcheck_polynomials<T: Transcript>(
+    pub fn compute_sumcheck_polynomials<T: Transcript<E>>(
         &mut self,
         transcript: &mut T,
+        sumcheck_polys: &mut Vec<[E; 3]>,
         folding_factor: usize,
-        pow_bits: f64,
     ) -> Result<Vec<E>, Error> {
         let mut res = Vec::with_capacity(folding_factor);
 
         for _ in 0..folding_factor {
             let sumcheck_poly = self.sumcheck_prover.compute_sumcheck_polynomial();
-            transcript.append_field_element_ext(sumcheck_poly.evaluations())?;
-            let [folding_randomness]: [F; 1] = transcript.challenge_scalars()?;
+            sumcheck_polys.push(sumcheck_poly.evaluations_3());
+            transcript.append_field_element_exts(sumcheck_poly.evaluations());
+            let folding_randomness = transcript
+                .sample_and_append_challenge(b"folding_randomness")
+                .elements;
             res.push(folding_randomness);
 
             self.sumcheck_prover
-                .compress(F::ONE, &folding_randomness.into(), &sumcheck_poly);
+                .compress(E::ONE, &[folding_randomness], &sumcheck_poly);
         }
 
         res.reverse();
@@ -60,61 +63,75 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
 
 #[cfg(test)]
 mod tests {
+    use ff_ext::{ExtensionField, GoldilocksExt2};
     use goldilocks::Goldilocks;
-    use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
-    use nimue::{
-        Result,
-        plugins::ark::{FieldChallenges, FieldIOPattern, FieldReader},
+    use multilinear_extensions::{
+        mle::{DenseMultilinearExtension, FieldType, MultilinearExtension as _},
+        virtual_poly::eq_eval,
     };
     use nimue_pow::blake3::Blake3PoW;
-    use transcript::Transcript;
+    use p3_field::PrimeCharacteristicRing;
+    use transcript::{BasicTranscript, Transcript};
 
-    use crate::sumcheck::{
-        proof::SumcheckPolynomial, prover_not_skipping_batched::SumcheckProverNotSkippingBatched,
+    use crate::{
+        error::Error,
+        sumcheck::{
+            proof::SumcheckPolynomial,
+            prover_not_skipping_batched::SumcheckProverNotSkippingBatched,
+        },
+        whir::fold::expand_from_univariate,
     };
 
-    type F = Goldilocks;
+    type F = GoldilocksExt2;
+    type T = BasicTranscript<F>;
 
     #[test]
-    fn test_e2e_short() -> Result<()> {
+    fn test_e2e_short() -> Result<(), Error> {
         let num_variables = 2;
         let folding_factor = 2;
         let polynomials = vec![
-            DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect()),
-            DenseMultilinearExtension::new((1..(1 << num_variables) + 1).map(F::from).collect()),
+            DenseMultilinearExtension::from_evaluations_ext_vec(
+                num_variables,
+                (0..1 << num_variables).map(F::from_u64).collect(),
+            ),
+            DenseMultilinearExtension::from_evaluations_ext_vec(
+                num_variables,
+                (1..(1 << num_variables) + 1).map(F::from_u64).collect(),
+            ),
         ];
 
         // Initial stuff
         let statement_points = vec![
-            expand_from_univariate(F::from(97), num_variables),
-            expand_from_univariate(F::from(75), num_variables),
+            expand_from_univariate(F::from_u64(97), num_variables),
+            expand_from_univariate(F::from_u64(75), num_variables),
         ];
 
         // Poly randomness
-        let [alpha_1, alpha_2] = [F::from(15), F::from(32)];
+        let [alpha_1, alpha_2] = [F::from_u64(15), F::from_u64(32)];
 
         // Prover part
-        let mut transcript = Transcript::new();
+        let mut transcript = T::new(b"test");
         let mut prover = SumcheckProverNotSkippingBatched::new(
             polynomials.clone(),
             &statement_points,
             &[alpha_1, alpha_2],
             &[
-                polynomials[0].evaluate_at_extension(&statement_points[0]),
-                polynomials[1].evaluate_at_extension(&statement_points[1]),
+                polynomials[0].evaluate(&statement_points[0]),
+                polynomials[1].evaluate(&statement_points[1]),
             ],
         );
+        let mut sumcheck_polys = Vec::new();
 
-        let folding_randomness_1 = prover.compute_sumcheck_polynomials::<Blake3PoW>(
+        let folding_randomness_1 = prover.compute_sumcheck_polynomials(
             &mut transcript,
+            &mut sumcheck_polys,
             folding_factor,
-            0.,
         )?;
 
         // Compute the answers
         let folded_polys_1: Vec<_> = polynomials
             .iter()
-            .map(|poly| poly.fold(&folding_randomness_1))
+            .map(|poly| poly.fix_variables(&folding_randomness_1))
             .collect();
 
         let statement_answers: Vec<F> = polynomials
@@ -124,13 +141,18 @@ mod tests {
             .collect();
 
         // Verifier part
-        let mut transcript = Transcript::new();
-        let sumcheck_poly_11: [F; 3] = transcript.next_scalars()?;
+        let mut sumcheck_polys_iter = sumcheck_polys.into_iter();
+        let mut transcript = T::new(b"test");
+        let sumcheck_poly_11: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
-        let [folding_randomness_11]: [F; 1] = transcript.challenge_scalars()?;
-        let sumcheck_poly_12: [F; 3] = transcript.next_scalars()?;
+        let folding_randomness_11 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
+        let sumcheck_poly_12: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
-        let [folding_randomness_12]: [F; 1] = transcript.challenge_scalars()?;
+        let folding_randomness_12 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
 
         assert_eq!(
             sumcheck_poly_11.sum_over_hypercube(),
@@ -139,14 +161,23 @@ mod tests {
 
         assert_eq!(
             sumcheck_poly_12.sum_over_hypercube(),
-            sumcheck_poly_11.evaluate_at_point(&folding_randomness_11.into())
+            sumcheck_poly_11.evaluate_at_point(&[folding_randomness_11])
         );
 
         let full_folding = vec![folding_randomness_12, folding_randomness_11];
 
-        let eval_coeff = [folded_polys_1[0].coeffs()[0], folded_polys_1[1].coeffs()[0]];
+        let eval_coeff = match (
+            folded_polys_1[0].evaluations(),
+            folded_polys_1[1].evaluations(),
+        ) {
+            (FieldType::Base(evals_0), FieldType::Base(evals_1)) => {
+                [F::from_bases(&[evals_0[0]]), F::from_bases(&[evals_1[0]])]
+            }
+            (FieldType::Ext(evals_0), FieldType::Ext(evals_1)) => [evals_0[0], evals_1[0]],
+            _ => panic!("Invalid folded polynomial"),
+        };
         assert_eq!(
-            sumcheck_poly_12.evaluate_at_point(&folding_randomness_12.into()),
+            sumcheck_poly_12.evaluate_at_point(&[folding_randomness_12]),
             eval_coeff[0] * alpha_1 * eq_eval(&full_folding, &statement_points[0])
                 + eval_coeff[1] * alpha_2 * eq_eval(&full_folding, &statement_points[1])
         );

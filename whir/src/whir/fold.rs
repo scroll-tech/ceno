@@ -2,6 +2,7 @@ use crate::{ntt::intt_batch, parameters::FoldType};
 
 use ff_ext::ExtensionField;
 use p3_field::Field;
+use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 

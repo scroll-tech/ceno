@@ -13,22 +13,22 @@ use crate::whir::parameters::WhirConfig;
 pub trait WhirBatchIOPattern<F: TwoAdicField, MerkleConfig: Config> {
     fn commit_batch_statement<PowStrategy>(
         self,
-        params: &WhirConfig<F, MerkleConfig>,
+        params: &WhirConfig<F>,
         batch_size: usize,
     ) -> Self;
     fn add_whir_unify_proof<PowStrategy>(
         self,
-        params: &WhirConfig<F, MerkleConfig>,
+        params: &WhirConfig<F>,
         batch_size: usize,
     ) -> Self;
     fn add_whir_batch_proof<PowStrategy>(
         self,
-        params: &WhirConfig<F, MerkleConfig>,
+        params: &WhirConfig<F>,
         batch_size: usize,
     ) -> Self;
 }
 
-impl<F, MerkleConfig, IOPattern> WhirBatchIOPattern<F, MerkleConfig> for IOPattern
+impl<F, MerkleConfig, IOPattern> WhirBatchIOPattern<F> for IOPattern
 where
     F: TwoAdicField,
     MerkleConfig: Config,
@@ -41,7 +41,7 @@ where
 {
     fn commit_batch_statement<PowStrategy>(
         self,
-        params: &WhirConfig<F, MerkleConfig>,
+        params: &WhirConfig<F>,
         batch_size: usize,
     ) -> Self {
         // TODO: Add params
@@ -57,7 +57,7 @@ where
 
     fn add_whir_unify_proof<PowStrategy>(
         mut self,
-        params: &WhirConfig<F, MerkleConfig>,
+        params: &WhirConfig<F>,
         batch_size: usize,
     ) -> Self {
         if batch_size > 1 {
@@ -71,7 +71,7 @@ where
 
     fn add_whir_batch_proof<PowStrategy>(
         mut self,
-        params: &WhirConfig<F, MerkleConfig>,
+        params: &WhirConfig<F>,
         batch_size: usize,
     ) -> Self {
         if batch_size > 1 {

@@ -1,6 +1,6 @@
 use super::{Statement, WhirProof, committer::Witness, parameters::WhirConfig};
 use crate::{
-    crypto::{MerkleConfig as Config, MerkleTree, MultiPath},
+    crypto::{Digest, MerkleTree, MerkleTreeExt, MultiPath, generate_multi_proof},
     domain::Domain,
     end_timer,
     error::Error,
@@ -11,25 +11,19 @@ use crate::{
     utils::{self, expand_randomness},
     whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
 };
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3_commit::Mmcs;
+use p3_commit::{ExtensionMmcs, Mmcs};
+use p3_matrix::dense::RowMajorMatrix;
 use transcript::Transcript;
 
 use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-pub struct Prover<E, MerkleConfig>(pub WhirConfig<E, MerkleConfig>)
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>;
+pub struct Prover<E: ExtensionField>(pub WhirConfig<E>);
 
-impl<E, MerkleConfig> Prover<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+impl<E: ExtensionField> Prover<E> {
     pub(crate) fn validate_parameters(&self) -> bool {
         self.0.mv_parameters.num_variables
             == self.0.folding_factor.total_number(self.0.n_rounds()) + self.0.final_sumcheck_rounds
@@ -52,7 +46,7 @@ where
         true
     }
 
-    fn validate_witness(&self, witness: &Witness<E, MerkleConfig>) -> bool {
+    fn validate_witness(&self, witness: &Witness<E>) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         if !self.0.initial_statement {
             assert!(witness.ood_points.is_empty());
@@ -64,8 +58,8 @@ where
         &self,
         transcript: &mut T,
         mut statement: Statement<E>,
-        witness: Witness<E, MerkleConfig>,
-    ) -> Result<WhirProof<MerkleConfig, E>, Error> {
+        witness: Witness<E>,
+    ) -> Result<WhirProof<E>, Error> {
         // If any evaluation point is shorter than the folding factor, pad with 0 in front
         let mut sumcheck_poly_evals = Vec::new();
         let mut ood_answers = Vec::new();
@@ -142,7 +136,7 @@ where
             sumcheck_prover,
             folding_randomness,
             coefficients: witness.polynomial,
-            prev_merkle: witness.merkle_tree,
+            prev_merkle: Some(witness.merkle_tree),
             prev_merkle_answers: witness.merkle_leaves,
             merkle_proofs: vec![],
         };
@@ -167,9 +161,9 @@ where
         transcript: &mut T,
         sumcheck_poly_evals: &mut Vec<[E; 3]>,
         ood_answers: &mut Vec<Vec<E>>,
-        merkle_roots: &mut Vec<<MerkleConfig::Mmcs as Mmcs<E>>::Commitment>,
-        mut round_state: RoundState<E, MerkleConfig>,
-    ) -> Result<WhirProof<MerkleConfig, E>, Error> {
+        merkle_roots: &mut Vec<Digest<E>>,
+        mut round_state: RoundState<E>,
+    ) -> Result<WhirProof<E>, Error> {
         // Fold the coefficients
         let folded_coefficients = round_state
             .coefficients
@@ -200,9 +194,11 @@ where
                 transcript,
             )?;
 
-            let merkle_proof = round_state
-                .prev_merkle
-                .generate_multi_proof(&final_challenge_indexes);
+            let merkle_proof_with_leaves = generate_multi_proof(
+                &self.0.hash_params,
+                &round_state.prev_merkle.unwrap(),
+                &final_challenge_indexes,
+            );
             // Every query requires opening these many in the previous Merkle tree
             let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
             let answers = final_challenge_indexes
@@ -211,7 +207,9 @@ where
                     round_state.prev_merkle_answers[i * fold_size..(i + 1) * fold_size].to_vec()
                 })
                 .collect();
-            round_state.merkle_proofs.push((merkle_proof, answers));
+            round_state
+                .merkle_proofs
+                .push((merkle_proof_with_leaves, answers));
 
             // Final sumcheck
             if self.0.final_sumcheck_rounds > 0 {
@@ -233,6 +231,7 @@ where
                 merkle_roots: merkle_roots.clone(),
                 ood_answers: ood_answers.clone(),
                 final_poly: folded_coefficients_evals.clone(),
+                folded_evals: Vec::new(),
             });
         }
 
@@ -257,13 +256,11 @@ where
             self.0.folding_factor.at_round(round_state.round + 1),
         );
 
-        let merkle_tree = MerkleTree::new(
-            &self.0.hash_params,
-            &folded_evals,
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix(RowMajorMatrix::new(
+            folded_evals.clone(),
             1 << self.0.folding_factor.at_round(round_state.round + 1),
-        );
+        ));
 
-        let root = merkle_tree.root();
         transcript.append_message(&bincode::serialize(&root).unwrap());
         merkle_roots.push(root);
 
@@ -306,9 +303,11 @@ where
             .map(|univariate| expand_from_univariate(univariate, num_variables))
             .collect();
 
-        let merkle_proof = round_state
-            .prev_merkle
-            .generate_multi_proof(&stir_challenges_indexes);
+        let merkle_proof_with_leaves = generate_multi_proof(
+            &self.0.hash_params,
+            &round_state.prev_merkle.unwrap(),
+            &stir_challenges_indexes,
+        );
         let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
         let answers: Vec<_> = stir_challenges_indexes
             .iter()
@@ -371,7 +370,9 @@ where
                 .evaluate(&round_state.folding_randomness)
             })),
         }
-        round_state.merkle_proofs.push((merkle_proof, answers));
+        round_state
+            .merkle_proofs
+            .push((merkle_proof_with_leaves, answers));
 
         // Randomness for combination
         let combination_randomness_gen = transcript
@@ -412,7 +413,7 @@ where
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
             coefficients: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
-            prev_merkle: merkle_tree,
+            prev_merkle: Some(merkle_tree),
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
         };
@@ -429,17 +430,13 @@ where
     }
 }
 
-pub(crate) struct RoundState<E, MerkleConfig>
-where
-    E: ExtensionField,
-    MerkleConfig: Config<E>,
-{
+pub(crate) struct RoundState<E: ExtensionField> {
     pub(crate) round: usize,
     pub(crate) domain: Domain<E>,
     pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<E>>,
     pub(crate) folding_randomness: Vec<E>,
     pub(crate) coefficients: DenseMultilinearExtension<E>,
-    pub(crate) prev_merkle: MerkleTree<E, MerkleConfig>,
+    pub(crate) prev_merkle: Option<MerkleTreeExt<E>>,
     pub(crate) prev_merkle_answers: Vec<E>,
-    pub(crate) merkle_proofs: Vec<(MultiPath<E, MerkleConfig>, Vec<Vec<E>>)>,
+    pub(crate) merkle_proofs: Vec<(MultiPath<E>, Vec<Vec<E>>)>,
 }

@@ -71,9 +71,14 @@ impl<E: ExtensionField> SumcheckProverNotSkipping<E> {
 #[cfg(test)]
 mod tests {
     use crate::whir::fold::expand_from_univariate;
+    use ff_ext::{ExtensionField, GoldilocksExt2};
     use goldilocks::Goldilocks;
-    use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
+    use multilinear_extensions::{
+        mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
+        virtual_poly::eq_eval,
+    };
     use nimue_pow::blake3::Blake3PoW;
+    use p3_field::PrimeCharacteristicRing;
     use transcript::{BasicTranscript, Transcript};
 
     use crate::{
@@ -81,55 +86,63 @@ mod tests {
         sumcheck::{proof::SumcheckPolynomial, prover_not_skipping::SumcheckProverNotSkipping},
     };
 
-    type F = Goldilocks;
+    type F = GoldilocksExt2;
     type T = BasicTranscript<F>;
 
     #[test]
     fn test_e2e_short() -> Result<(), Error> {
         let num_variables = 2;
         let folding_factor = 2;
-        let polynomial =
-            DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect());
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_variables,
+            (0..1 << num_variables).map(F::from_u64).collect(),
+        );
 
         // Initial stuff
-        let ood_point = expand_from_univariate(F::from(42), num_variables);
-        let statement_point = expand_from_univariate(F::from(97), num_variables);
+        let ood_point = expand_from_univariate(F::from_u64(42), num_variables);
+        let statement_point = expand_from_univariate(F::from_u64(97), num_variables);
 
         // All the randomness
-        let [epsilon_1, epsilon_2] = [F::from(15), F::from(32)];
+        let [epsilon_1, epsilon_2] = [F::from_u64(15), F::from_u64(32)];
 
         // Prover part
-        let mut transcript = Transcript::new();
+        let mut transcript = T::new(b"test");
         let mut prover = SumcheckProverNotSkipping::new(
             polynomial.clone(),
             &[ood_point.clone(), statement_point.clone()],
             &[epsilon_1, epsilon_2],
             &[
-                polynomial.evaluate_at_extension(&ood_point),
-                polynomial.evaluate_at_extension(&statement_point),
+                polynomial.evaluate(&ood_point),
+                polynomial.evaluate(&statement_point),
             ],
         );
 
-        let folding_randomness_1 = prover.compute_sumcheck_polynomials::<Blake3PoW>(
+        let mut sumcheck_polys = Vec::new();
+        let folding_randomness_1 = prover.compute_sumcheck_polynomials(
             &mut transcript,
+            &mut sumcheck_polys,
             folding_factor,
-            0.,
         )?;
 
         // Compute the answers
-        let folded_poly_1 = polynomial.fold(&folding_randomness_1);
+        let folded_poly_1 = polynomial.fix_variables(&folding_randomness_1);
 
         let ood_answer = polynomial.evaluate(&ood_point);
         let statement_answer = polynomial.evaluate(&statement_point);
 
         // Verifier part
-        let transcript = Transcript::new();
-        let sumcheck_poly_11: [F; 3] = transcript.next_scalars()?;
+        let mut transcript = T::new(b"test");
+        let mut sumcheck_polys_iter = sumcheck_polys.into_iter();
+        let sumcheck_poly_11: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
-        let [folding_randomness_11]: [F; 1] = transcript.challenge_scalars()?;
-        let sumcheck_poly_12: [F; 3] = transcript.next_scalars()?;
+        let folding_randomness_11 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
+        let sumcheck_poly_12: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
-        let [folding_randomness_12]: [F; 1] = transcript.challenge_scalars()?;
+        let folding_randomness_12 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
 
         assert_eq!(
             sumcheck_poly_11.sum_over_hypercube(),
@@ -138,14 +151,18 @@ mod tests {
 
         assert_eq!(
             sumcheck_poly_12.sum_over_hypercube(),
-            sumcheck_poly_11.evaluate_at_point(&folding_randomness_11.into())
+            sumcheck_poly_11.evaluate_at_point(&[folding_randomness_11])
         );
 
         let full_folding = vec![folding_randomness_12, folding_randomness_11];
 
-        let eval_coeff = folded_poly_1.coeffs()[0];
+        let eval_coeff = match folded_poly_1.evaluations() {
+            FieldType::Base(evals) => F::from_bases(&[evals[0]]),
+            FieldType::Ext(evals) => evals[0],
+            _ => panic!("Invalid folded polynomial"),
+        };
         assert_eq!(
-            sumcheck_poly_12.evaluate_at_point(&folding_randomness_12.into()),
+            sumcheck_poly_12.evaluate_at_point(&[folding_randomness_12]),
             eval_coeff
                 * (epsilon_1 * eq_eval(&full_folding, &ood_point)
                     + epsilon_2 * eq_eval(&full_folding, &statement_point))
@@ -158,17 +175,19 @@ mod tests {
     fn test_e2e() -> Result<(), Error> {
         let num_variables = 4;
         let folding_factor = 2;
-        let polynomial =
-            DenseMultilinearExtension::new((0..1 << num_variables).map(F::from).collect());
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_variables,
+            (0..1 << num_variables).map(F::from_u64).collect(),
+        );
 
         // Initial stuff
-        let ood_point = expand_from_univariate(F::from(42), num_variables);
-        let statement_point = expand_from_univariate(F::from(97), num_variables);
+        let ood_point = expand_from_univariate(F::from_u64(42), num_variables);
+        let statement_point = expand_from_univariate(F::from_u64(97), num_variables);
 
         // All the randomness
-        let [epsilon_1, epsilon_2] = [F::from(15), F::from(32)];
-        let fold_point = vec![F::from(31), F::from(15)];
-        let combination_randomness = vec![F::from(1000)];
+        let [epsilon_1, epsilon_2] = [F::from_u64(15), F::from_u64(32)];
+        let fold_point = vec![F::from_u64(31), F::from_u64(15)];
+        let combination_randomness = vec![F::from_u64(1000)];
 
         // Prover part
         let mut transcript = T::new(b"test-transcript");
@@ -177,46 +196,59 @@ mod tests {
             &[ood_point.clone(), statement_point.clone()],
             &[epsilon_1, epsilon_2],
             &[
-                polynomial.evaluate_at_extension(&ood_point),
-                polynomial.evaluate_at_extension(&statement_point),
+                polynomial.evaluate(&ood_point),
+                polynomial.evaluate(&statement_point),
             ],
         );
 
-        let folding_randomness_1 = prover.compute_sumcheck_polynomials::<Blake3PoW>(
+        let mut sumcheck_polys = Vec::new();
+        let folding_randomness_1 = prover.compute_sumcheck_polynomials(
             &mut transcript,
+            &mut sumcheck_polys,
             folding_factor,
-            0.,
         )?;
 
-        let folded_poly_1 = polynomial.fold(&folding_randomness_1);
-        let fold_eval = folded_poly_1.evaluate_at_extension(&fold_point);
+        let folded_poly_1 = polynomial.fix_variables(&folding_randomness_1);
+        let fold_eval = folded_poly_1.evaluate(&fold_point);
         prover.add_new_equality(&[fold_point.clone()], &combination_randomness, &[fold_eval]);
 
-        let folding_randomness_2 =
-            prover.compute_sumcheck_polynomials::<T>(&mut transcript, folding_factor, 0.)?;
+        let folding_randomness_2 = prover.compute_sumcheck_polynomials::<T>(
+            &mut transcript,
+            &mut sumcheck_polys,
+            folding_factor,
+        )?;
 
         // Compute the answers
-        let folded_poly_1 = polynomial.fold(&folding_randomness_1);
-        let folded_poly_2 = folded_poly_1.fold(&folding_randomness_2);
+        let folded_poly_1 = polynomial.fix_variables(&folding_randomness_1);
+        let folded_poly_2 = folded_poly_1.fix_variables(&folding_randomness_2);
 
         let ood_answer = polynomial.evaluate(&ood_point);
         let statement_answer = polynomial.evaluate(&statement_point);
         let fold_answer = folded_poly_1.evaluate(&fold_point);
 
+        let mut sumcheck_polys_iter = sumcheck_polys.into_iter();
         // Verifier part
-        let mut transcript = Transcript::new();
-        let sumcheck_poly_11: [F; 3] = transcript.next_scalars()?;
+        let mut transcript = T::new(b"test");
+        let sumcheck_poly_11: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
-        let [folding_randomness_11]: [F; 1] = transcript.challenge_scalars()?;
-        let sumcheck_poly_12: [F; 3] = transcript.next_scalars()?;
+        let folding_randomness_11 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
+        let sumcheck_poly_12: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
-        let [folding_randomness_12]: [F; 1] = transcript.challenge_scalars()?;
-        let sumcheck_poly_21: [F; 3] = transcript.next_scalars()?;
+        let folding_randomness_12 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
+        let sumcheck_poly_21: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_21 = SumcheckPolynomial::new(sumcheck_poly_21.to_vec(), 1);
-        let [folding_randomness_21]: [F; 1] = transcript.challenge_scalars()?;
-        let sumcheck_poly_22: [F; 3] = transcript.next_scalars()?;
+        let folding_randomness_21 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
+        let sumcheck_poly_22: [F; 3] = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_22 = SumcheckPolynomial::new(sumcheck_poly_22.to_vec(), 1);
-        let [folding_randomness_22]: [F; 1] = transcript.challenge_scalars()?;
+        let folding_randomness_22 = transcript
+            .sample_and_append_challenge(b"folding_randomness")
+            .elements;
 
         assert_eq!(
             sumcheck_poly_11.sum_over_hypercube(),
@@ -225,18 +257,18 @@ mod tests {
 
         assert_eq!(
             sumcheck_poly_12.sum_over_hypercube(),
-            sumcheck_poly_11.evaluate_at_point(&folding_randomness_11.into())
+            sumcheck_poly_11.evaluate_at_point(&[folding_randomness_11])
         );
 
         assert_eq!(
             sumcheck_poly_21.sum_over_hypercube(),
-            sumcheck_poly_12.evaluate_at_point(&folding_randomness_12.into())
+            sumcheck_poly_12.evaluate_at_point(&[folding_randomness_12])
                 + combination_randomness[0] * fold_answer
         );
 
         assert_eq!(
             sumcheck_poly_22.sum_over_hypercube(),
-            sumcheck_poly_21.evaluate_at_point(&folding_randomness_21.into())
+            sumcheck_poly_21.evaluate_at_point(&[folding_randomness_21])
         );
 
         let full_folding = vec![
@@ -248,9 +280,13 @@ mod tests {
 
         let partial_folding = vec![folding_randomness_22, folding_randomness_21];
 
-        let eval_coeff = folded_poly_2.coeffs()[0];
+        let eval_coeff = match folded_poly_2.evaluations() {
+            FieldType::Base(evals) => F::from_bases(&[evals[0]]),
+            FieldType::Ext(evals) => evals[0],
+            _ => panic!("Invalid folded polynomial"),
+        };
         assert_eq!(
-            sumcheck_poly_22.evaluate_at_point(&folding_randomness_22.into()),
+            sumcheck_poly_22.evaluate_at_point(&[folding_randomness_22]),
             eval_coeff
                 * ((epsilon_1 * eq_eval(&full_folding, &ood_point)
                     + epsilon_2 * eq_eval(&full_folding, &statement_point))

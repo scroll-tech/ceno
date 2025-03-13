@@ -1,1 +1,1 @@
-pub(crate) const DIGEST_WIDTH: usize = 4;
+pub const DIGEST_WIDTH: usize = 4;
