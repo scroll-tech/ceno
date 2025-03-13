@@ -15,7 +15,7 @@ use p3_dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{
     Field, PrimeCharacteristicRing, PrimeField, TwoAdicField, batch_multiplicative_inverse,
 };
-use p3_matrix::{Matrix, bitrev::BitReversableMatrix};
+use p3_matrix::{Matrix, bitrev::BitReversableMatrix, dense::DenseMatrix};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
 
@@ -407,6 +407,7 @@ where
         // Note that this function implicitly assumes that the size of poly.evals() is a
         // power of two. Otherwise, the function crashes with index out of bound.
         let num_vars = rmm.num_vars();
+        let num_polys = rmm.width();
         if num_vars > pp.get_max_message_size_log() {
             return PolyEvalsCodeword::TooBig(num_vars);
         }
@@ -435,7 +436,12 @@ where
             // the codeword to make the folding even-and-odd, i.e., adjacent
             // positions are folded.
             .bit_reverse_rows()
-            .to_row_major_matrix();
+            .to_row_major_matrix()
+            .values;
+        // to make 2 consecutive position to be open together, we need "concat" 2 consecutive leafs
+        // so both can be open under same row index
+        let codeword = DenseMatrix::new(codeword, num_polys * 2);
+
         PolyEvalsCodeword::Normal(Box::new(codeword))
     }
 

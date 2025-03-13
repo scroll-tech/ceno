@@ -1,3 +1,5 @@
+use std::iter::repeat_with;
+
 use crate::{
     basefold::structure::MerkleTreeExt,
     util::{
@@ -7,6 +9,7 @@ use crate::{
         },
         ext_to_usize,
         merkle_tree::poseidon2_merkle_tree,
+        plonky2_util::reverse_bits,
     },
 };
 use ark_std::{end_timer, start_timer};
@@ -36,12 +39,12 @@ pub fn simple_batch_prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
-
     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
     let mmcs = poseidon2_merkle_tree::<E>();
 
     // Transform the challenge queries from field elements into integers
+    // TODO simplify with sample_bit
+    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
     let queries_usize: Vec<usize> = queries
         .iter()
         .map(|x_index| ext_to_usize(x_index) % comm.codeword_size())
@@ -50,24 +53,32 @@ where
     queries_usize
         .iter()
         .map(|idx| {
-            let odd = idx | 1;
-            let even = odd - 1;
-
-            println!("start commit proof with id {even}");
+            println!("start commit proof with id {idx}");
             let opening = {
+                let odd = idx | 1;
+                let even = odd - 1; // get even part of idx
+                // n_d_1 represent n_{d-1} oracle length
+                // codeword matrix width is 2 * num_polys, because we concat them into leafs and commit
+                // thus, n_d_1 match the length of next oracle p_{i-1}, which length is p_i / 2
+                let n_d_1 = mmcs.get_matrices(&comm.codeword)[0].height();
+                let idx = even % n_d_1;
                 println!(
-                    "index {even}, tree leafs {}, overall len {}",
+                    "index {idx}, tree width {}, tree leafs {}, overall len {}",
+                    mmcs.get_matrices(&comm.codeword)[0].width(),
                     mmcs.get_matrices(&comm.codeword)[0].values.len(),
                     mmcs.get_matrices(&comm.codeword).len()
                 );
-                let (mut values, proof) = mmcs.open_batch(even, &comm.codeword);
+                // Soundness: is it ok we only open on one index, and rely on next layer to provide another sibling witness?
+                let (mut values, proof) = mmcs.open_batch(idx, &comm.codeword);
                 let leafs = values.pop().unwrap();
-                // leaf length equal to number of polynomial
-                debug_assert_eq!(leafs.len(), mmcs.get_matrices(&comm.codeword)[0].width());
+                // leaf length equal to num poly * 2
+                debug_assert_eq!(
+                    leafs.len(),
+                    mmcs.get_matrices(&comm.codeword)[0].width() * 2
+                );
                 (leafs, proof)
             };
             println!("end commit proof");
-
             let (_, opening_ext) =
                 trees
                     .iter()
