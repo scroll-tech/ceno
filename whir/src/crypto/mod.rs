@@ -18,7 +18,7 @@ pub(crate) type Poseidon2MerkleMmcs<F> = MerkleTreeMmcs<
     Poseidon2Compression<<F as PoseidonField>::T>,
     DIGEST_WIDTH,
 >;
-pub(crate) type Poseidon2ExtMerkleMmcs<E: ExtensionField> =
+pub type Poseidon2ExtMerkleMmcs<E: ExtensionField> =
     ExtensionMmcs<E::BaseField, E, Poseidon2MerkleMmcs<E::BaseField>>;
 
 pub fn poseidon2_merkle_tree<E: ExtensionField>() -> Poseidon2MerkleMmcs<E::BaseField> {

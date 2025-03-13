@@ -7,6 +7,7 @@ use crate::{
     whir::{
         committer::{Committer, Witness},
         fold::{expand_from_univariate, restructure_evaluations},
+        verifier::WhirCommitmentInTranscript,
     },
 };
 use derive_more::Debug;
@@ -59,7 +60,7 @@ impl<E: ExtensionField> Committer<E> {
         &self,
         transcript: &mut T,
         polys: &[DenseMultilinearExtension<E>],
-    ) -> Result<Witnesses<E>, Error> {
+    ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let timer = start_timer!(|| "Batch Commit");
         let base_domain = self.0.starting_domain.base_domain.unwrap();
         let expansion = self.0.starting_domain.size() / polys[0].evaluations().len();
@@ -183,12 +184,20 @@ impl<E: ExtensionField> Committer<E> {
 
         end_timer!(timer);
 
-        Ok(Witnesses {
-            polys,
-            merkle_tree,
-            merkle_leaves: folded_evals,
-            ood_points,
-            ood_answers,
-        })
+        let commitment = WhirCommitmentInTranscript {
+            root,
+            ood_points: ood_points.clone(),
+            ood_answers: ood_answers.clone(),
+        };
+        Ok((
+            Witnesses {
+                polys,
+                merkle_tree,
+                merkle_leaves: folded_evals,
+                ood_points,
+                ood_answers,
+            },
+            commitment,
+        ))
     }
 }

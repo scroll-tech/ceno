@@ -1,30 +1,18 @@
 use std::time::Instant;
 
-use ark_crypto_primitives::{
-    crh::{CRHScheme, TwoToOneCRHScheme},
-    merkle_tree::Config,
-};
-use ark_ff::TwoAdicField;
-use ark_serialize::CanonicalSerialize;
-use nimue::{Arthur, DefaultHash, IOPattern, transcript};
+use rand::thread_rng;
 use whir::{
     cmdline_utils::{AvailableFields, AvailableMerkle, WhirType},
-    crypto::{
-        fields,
-        merkle_tree::{self, HashCounter},
-    },
+    crypto::{Poseidon2ExtMerkleMmcs, poseidon2_ext_merkle_tree},
     parameters::*,
-    poly_utils::{Vec, coeffs::DenseMultilinearExtension},
     whir::Statement,
 };
 
 use nimue_pow::blake3::Blake3PoW;
 
 use clap::Parser;
-use whir::whir::{
-    fs_utils::{DigestReader, DigestWriter},
-    iopattern::DigestIOPattern,
-};
+
+type E = ff_ext::GoldilocksExt2;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -73,147 +61,25 @@ type PowStrategy = Blake3PoW;
 
 fn main() {
     let mut args = Args::parse();
-    let field = args.field;
-    let merkle = args.merkle_tree;
 
     if args.pow_bits.is_none() {
         args.pow_bits = Some(default_max_pow(args.num_variables, args.rate));
     }
 
-    let mut rng = ark_std::test_rng();
-
-    match (field, merkle) {
-        (AvailableFields::Goldilocks1, AvailableMerkle::Blake3) => {
-            use fields::Field64 as F;
-            use merkle_tree::blake3 as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Goldilocks1, AvailableMerkle::Keccak256) => {
-            use fields::Field64 as F;
-            use merkle_tree::keccak as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Goldilocks2, AvailableMerkle::Blake3) => {
-            use fields::Field64_2 as F;
-            use merkle_tree::blake3 as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Goldilocks2, AvailableMerkle::Keccak256) => {
-            use fields::Field64_2 as F;
-            use merkle_tree::keccak as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Goldilocks3, AvailableMerkle::Blake3) => {
-            use fields::Field64_3 as F;
-            use merkle_tree::blake3 as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Goldilocks3, AvailableMerkle::Keccak256) => {
-            use fields::Field64_3 as F;
-            use merkle_tree::keccak as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Field128, AvailableMerkle::Blake3) => {
-            use fields::Field128 as F;
-            use merkle_tree::blake3 as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Field128, AvailableMerkle::Keccak256) => {
-            use fields::Field128 as F;
-            use merkle_tree::keccak as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Field192, AvailableMerkle::Blake3) => {
-            use fields::Field192 as F;
-            use merkle_tree::blake3 as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Field192, AvailableMerkle::Keccak256) => {
-            use fields::Field192 as F;
-            use merkle_tree::keccak as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Field256, AvailableMerkle::Blake3) => {
-            use fields::Field256 as F;
-            use merkle_tree::blake3 as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-
-        (AvailableFields::Field256, AvailableMerkle::Keccak256) => {
-            use fields::Field256 as F;
-            use merkle_tree::keccak as mt;
-
-            let (leaf_hash_params, two_to_one_params) = mt::default_config::<F>(&mut rng);
-            run_whir::<F, mt::MerkleTreeParams<F>>(args, leaf_hash_params, two_to_one_params);
-        }
-    }
+    let hash_params = poseidon2_ext_merkle_tree();
+    run_whir(args, hash_params);
 }
 
-fn run_whir<F>(
-    args: Args,
-    leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
-    two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
-) where
-    F: TwoAdicField + CanonicalSerialize,
-    MerkleConfig: Config<Leaf = [F]> + Clone,
-    MerkleConfig::InnerDigest: AsRef<[u8]> + From<[u8; 32]>,
-    IOPattern: DigestIOPattern<MerkleConfig>,
-    transcript: DigestWriter<MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<MerkleConfig>,
-{
+fn run_whir(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     match args.protocol_type {
-        WhirType::PCS => run_whir_pcs::<F>(args, leaf_hash_params, two_to_one_params),
-        WhirType::LDT => run_whir_as_ldt::<F>(args, leaf_hash_params, two_to_one_params),
+        WhirType::PCS => run_whir_pcs(args, hash_params),
+        WhirType::LDT => run_whir_as_ldt(args, hash_params),
     }
 }
 
-fn run_whir_as_ldt<F>(
-    args: Args,
-    leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
-    two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
-) where
-    F: TwoAdicField + CanonicalSerialize,
-    MerkleConfig: Config<Leaf = [F]> + Clone,
-    MerkleConfig::InnerDigest: AsRef<[u8]> + From<[u8; 32]>,
-    IOPattern: DigestIOPattern<MerkleConfig>,
-    transcript: DigestWriter<MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<MerkleConfig>,
-{
+fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     use whir::whir::{
-        committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig, prover::Prover,
-        verifier::Verifier,
+        committer::Committer, parameters::WhirConfig, prover::Prover, verifier::Verifier,
     };
 
     // Runs as a LDT
@@ -233,9 +99,9 @@ fn run_whir_as_ldt<F>(
 
     let num_coeffs = 1 << num_variables;
 
-    let mv_params = MultivariateParameters::<F>::new(num_variables);
+    let mv_params = MultivariateParameters::<E>::new(num_variables);
 
-    let whir_params = WhirParameters::<MerkleConfig> {
+    let whir_params = WhirParameters {
         initial_statement: false,
         security_level,
         pow_bits,
@@ -243,19 +109,13 @@ fn run_whir_as_ldt<F>(
             first_round_folding_factor,
             folding_factor,
         ),
-        leaf_hash_params,
-        two_to_one_params,
+        hash_params,
         soundness_type,
         fold_optimisation,
-        _pow_parameters: Default::default(),
         starting_log_inv_rate: starting_rate,
     };
 
-    let params = WhirConfig::<F>::new(mv_params, whir_params.clone());
-
-    let io = IOPattern::<DefaultHash>::new("🌪️")
-        .commit_statement(&params)
-        .add_whir_proof(&params);
+    let params = WhirConfig::<E>::new(mv_params, whir_params.clone());
 
     let mut transcript = io.to_transcript();
 
@@ -310,21 +170,10 @@ fn run_whir_as_ldt<F>(
     dbg!(HashCounter::get() as f64 / reps as f64);
 }
 
-fn run_whir_pcs<F>(
-    args: Args,
-    leaf_hash_params: <<MerkleConfig as Config>::LeafHash as CRHScheme>::Parameters,
-    two_to_one_params: <<MerkleConfig as Config>::TwoToOneHash as TwoToOneCRHScheme>::Parameters,
-) where
-    F: TwoAdicField + CanonicalSerialize,
-    MerkleConfig: Config<Leaf = [F]> + Clone,
-    MerkleConfig::InnerDigest: AsRef<[u8]> + From<[u8; 32]>,
-    IOPattern: DigestIOPattern<MerkleConfig>,
-    transcript: DigestWriter<MerkleConfig>,
-    for<'a> Arthur<'a>: DigestReader<MerkleConfig>,
-{
+fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     use whir::whir::{
-        Statement, committer::Committer, iopattern::WhirIOPattern, parameters::WhirConfig,
-        prover::Prover, verifier::Verifier, whir_proof_size,
+        Statement, committer::Committer, parameters::WhirConfig, prover::Prover,
+        verifier::Verifier, whir_proof_size,
     };
 
     // Runs as a PCS
@@ -380,7 +229,6 @@ fn run_whir_pcs<F>(
         println!("WARN: more PoW bits required than what specified.");
     }
 
-    use ark_ff::Field;
     let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
         (0..num_coeffs)
             .map(<F as Field>::BasePrimeField::from)

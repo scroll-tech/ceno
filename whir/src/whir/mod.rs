@@ -19,9 +19,14 @@ pub struct Statement<E> {
 
 // Only includes the authentication paths
 #[derive(Clone, Serialize, Deserialize)]
-pub struct WhirProof<E>
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct WhirProof<E: ExtensionField>
 where
-    E: ExtensionField + Serialize + DeserializeOwned,
+    E: Serialize + DeserializeOwned,
+    E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) merkle_answers: Vec<(MultiPath<E>, Vec<Vec<E>>)>,
     pub(crate) sumcheck_poly_evals: Vec<[E; 3]>,
@@ -180,7 +185,7 @@ mod tests {
         let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
-        let witnesses = committer
+        let (witnesses, commitment) = committer
             .batch_commit(&mut transcript, &polynomials)
             .unwrap();
 
@@ -195,6 +200,7 @@ mod tests {
         assert!(
             verifier
                 .simple_batch_verify(
+                    &commitment,
                     &mut transcript,
                     num_polynomials,
                     &points,
@@ -260,7 +266,7 @@ mod tests {
         let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
-        let witnesses = committer
+        let (witnesses, commitment) = committer
             .batch_commit(&mut transcript, &polynomials)
             .unwrap();
 
@@ -274,6 +280,7 @@ mod tests {
         let mut transcript = T::new(b"test");
         verifier
             .same_size_batch_verify(
+                &commitment,
                 &mut transcript,
                 num_polynomials,
                 &point_per_poly,

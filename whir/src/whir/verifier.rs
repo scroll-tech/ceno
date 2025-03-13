@@ -24,7 +24,7 @@ pub struct Verifier<E: ExtensionField> {
 }
 
 #[derive(Clone)]
-pub(crate) struct WhirCommitmentInTranscript<E: ExtensionField> {
+pub struct WhirCommitmentInTranscript<E: ExtensionField> {
     pub(crate) root: Digest<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
