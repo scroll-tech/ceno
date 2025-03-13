@@ -1,6 +1,9 @@
 use std::time::Instant;
 
+use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+use p3_field::PrimeCharacteristicRing;
 use rand::thread_rng;
+use transcript::BasicTranscript;
 use whir::{
     cmdline_utils::{AvailableFields, AvailableMerkle, WhirType},
     crypto::{Poseidon2ExtMerkleMmcs, poseidon2_ext_merkle_tree},
@@ -13,6 +16,7 @@ use nimue_pow::blake3::Blake3PoW;
 use clap::Parser;
 
 type E = ff_ext::GoldilocksExt2;
+type T = BasicTranscript<E>;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -117,7 +121,7 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
 
     let params = WhirConfig::<E>::new(mv_params, whir_params.clone());
 
-    let mut transcript = io.to_transcript();
+    let mut transcript = T::new(b"main");
 
     println!("=========================================");
     println!("Whir (LDT) 🌪️");
@@ -127,17 +131,15 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
         println!("WARN: more PoW bits required than what specified.");
     }
 
-    use ark_ff::Field;
     let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
-        (0..num_coeffs)
-            .map(<F as Field>::BasePrimeField::from)
-            .collect(),
+        num_variables,
+        (0..num_coeffs).map(E::from_u64).collect(),
     );
 
     let whir_prover_time = Instant::now();
 
     let committer = Committer::new(params.clone());
-    let witness = committer.commit(&mut transcript, polynomial).unwrap();
+    let (witness, commitment) = committer.commit(&mut transcript, polynomial).unwrap();
 
     let prover = Prover(params.clone());
 
@@ -148,32 +150,27 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     dbg!(whir_prover_time.elapsed());
 
     // Serialize proof
-    let transcript = transcript.transcript().to_vec();
-    let mut proof_bytes = vec![];
-    proof.serialize_compressed(&mut proof_bytes).unwrap();
+    let proof_bytes = bincode::serialize(&proof).unwrap();
 
-    let proof_size = transcript.len() + proof_bytes.len();
+    let proof_size = proof_bytes.len();
     dbg!(proof_size);
 
     // Just not to count that initial inversion (which could be precomputed)
     let verifier = Verifier::new(params.clone());
 
-    HashCounter::reset();
     let whir_verifier_time = Instant::now();
     for _ in 0..reps {
-        let mut arthur = io.to_arthur(&transcript);
+        let mut transcript = T::new(b"main");
         verifier
-            .verify(&mut arthur, &Statement::default(), &proof)
+            .verify(&commitment, &mut transcript, &Statement::default(), &proof)
             .unwrap();
     }
     dbg!(whir_verifier_time.elapsed() / reps as u32);
-    dbg!(HashCounter::get() as f64 / reps as f64);
 }
 
 fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     use whir::whir::{
-        Statement, committer::Committer, parameters::WhirConfig, prover::Prover,
-        verifier::Verifier, whir_proof_size,
+        Statement, committer::Committer, parameters::WhirConfig, prover::Prover, verifier::Verifier,
     };
 
     // Runs as a PCS
@@ -194,9 +191,9 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
 
     let num_coeffs = 1 << num_variables;
 
-    let mv_params = MultivariateParameters::<F>::new(num_variables);
+    let mv_params = MultivariateParameters::new(num_variables);
 
-    let whir_params = WhirParameters::<MerkleConfig> {
+    let whir_params = WhirParameters {
         initial_statement: true,
         security_level,
         pow_bits,
@@ -204,22 +201,15 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
             first_round_folding_factor,
             folding_factor,
         ),
-        leaf_hash_params,
-        two_to_one_params,
+        hash_params,
         soundness_type,
         fold_optimisation,
-        _pow_parameters: Default::default(),
         starting_log_inv_rate: starting_rate,
     };
 
-    let params = WhirConfig::<F>::new(mv_params, whir_params);
+    let params = WhirConfig::<E>::new(mv_params, whir_params);
 
-    let io = IOPattern::<DefaultHash>::new("🌪️")
-        .commit_statement(&params)
-        .add_whir_proof(&params)
-        .clone();
-
-    let mut transcript = io.to_transcript();
+    let mut transcript = T::new(b"main");
 
     println!("=========================================");
     println!("Whir (PCS) 🌪️");
@@ -230,16 +220,15 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     }
 
     let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
-        (0..num_coeffs)
-            .map(<F as Field>::BasePrimeField::from)
-            .collect(),
+        num_variables,
+        (0..num_coeffs).map(E::from_u64).collect(),
     );
     let points: Vec<_> = (0..num_evaluations)
-        .map(|i| Vec(vec![F::from_u64(i as u64); num_variables]))
+        .map(|i| vec![E::from_u64(i as u64); num_variables])
         .collect();
     let evaluations = points
         .iter()
-        .map(|point| polynomial.evaluate_at_extension(point))
+        .map(|point| polynomial.evaluate(point))
         .collect();
 
     let statement = Statement {
@@ -250,7 +239,7 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     let whir_prover_time = Instant::now();
 
     let committer = Committer::new(params.clone());
-    let witness = committer.commit(&mut transcript, polynomial).unwrap();
+    let (witness, commitment) = committer.commit(&mut transcript, polynomial).unwrap();
 
     let prover = Prover(params.clone());
 
@@ -261,24 +250,21 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     println!("Prover time: {:.1?}", whir_prover_time.elapsed());
     println!(
         "Proof size: {:.1} KiB",
-        whir_proof_size(transcript.transcript(), &proof) as f64 / 1024.0
+        bincode::serialized_size(&proof).unwrap() as f64 / 1024.0
     );
 
     // Just not to count that initial inversion (which could be precomputed)
     let verifier = Verifier::new(params);
 
-    HashCounter::reset();
     let whir_verifier_time = Instant::now();
     for _ in 0..reps {
-        let mut arthur = io.to_arthur(transcript.transcript());
-        verifier.verify(&mut arthur, &statement, &proof).unwrap();
+        let mut transcript = T::new(b"main");
+        verifier
+            .verify(&commitment, &mut transcript, &statement, &proof)
+            .unwrap();
     }
     println!(
         "Verifier time: {:.1?}",
         whir_verifier_time.elapsed() / reps as u32
-    );
-    println!(
-        "Average hashes: {:.1}k",
-        (HashCounter::get() as f64 / reps as f64) / 1000.0
     );
 }
