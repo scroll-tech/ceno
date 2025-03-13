@@ -30,6 +30,7 @@ num-traits.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
 p3-matrix.workspace = true
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-mds.workspace = true
 paste.workspace = true
 poseidon.workspace = true

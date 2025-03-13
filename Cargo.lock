@@ -586,6 +586,7 @@ dependencies = [
  "p3-field",
  "p3-goldilocks",
  "p3-matrix",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/plonky3/plonky3?rev=8d2be81)",
  "p3-mds",
  "parse-size",
  "paste",
@@ -1535,6 +1536,7 @@ dependencies = [
  "p3-field",
  "p3-goldilocks",
  "p3-matrix",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/plonky3/plonky3?rev=8d2be81)",
  "p3-mds",
  "p3-merkle-tree",
  "p3-symmetric",
@@ -1800,7 +1802,7 @@ version = "0.1.0"
 source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
 dependencies = [
  "p3-field",
- "p3-maybe-rayon",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/scroll-tech/plonky3?rev=8d2be81)",
  "p3-symmetric",
  "p3-util",
  "tracing",
@@ -1828,7 +1830,7 @@ dependencies = [
  "itertools 0.14.0",
  "p3-field",
  "p3-matrix",
- "p3-maybe-rayon",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/scroll-tech/plonky3?rev=8d2be81)",
  "p3-util",
  "tracing",
 ]
@@ -1844,7 +1846,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "nums",
- "p3-maybe-rayon",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/scroll-tech/plonky3?rev=8d2be81)",
  "p3-util",
  "paste",
  "rand",
@@ -1877,12 +1879,20 @@ source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c12
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
- "p3-maybe-rayon",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/scroll-tech/plonky3?rev=8d2be81)",
  "p3-util",
  "rand",
  "serde",
  "tracing",
  "transpose",
+]
+
+[[package]]
+name = "p3-maybe-rayon"
+version = "0.1.0"
+source = "git+https://github.com/plonky3/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
@@ -1913,7 +1923,7 @@ dependencies = [
  "p3-commit",
  "p3-field",
  "p3-matrix",
- "p3-maybe-rayon",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/scroll-tech/plonky3?rev=8d2be81)",
  "p3-symmetric",
  "p3-util",
  "rand",
