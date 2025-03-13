@@ -511,11 +511,12 @@ impl<E: ExtensionField> Prover<E> {
             eval_per_poly,
         );
 
+        let mut sumcheck_polys = Vec::new();
         // Perform the entire sumcheck
         let folded_point = sumcheck_prover.compute_sumcheck_polynomials::<T>(
             transcript,
+            &mut sumcheck_polys,
             self.0.mv_parameters.num_variables,
-            0.,
         )?;
         let folded_evals = sumcheck_prover.get_folded_polys();
         transcript.append_field_element_exts(&folded_evals);
@@ -524,8 +525,10 @@ impl<E: ExtensionField> Prover<E> {
 
         let timer = start_timer!(|| "simple_batch");
         // perform simple_batch on folded_point and folded_evals
-        let result =
+        let mut result =
             self.simple_batch_prove(transcript, &[folded_point], &[folded_evals], witness)?;
+        sumcheck_polys.extend(result.sumcheck_poly_evals);
+        result.sumcheck_poly_evals = sumcheck_polys;
         end_timer!(timer);
         end_timer!(prove_timer);
 

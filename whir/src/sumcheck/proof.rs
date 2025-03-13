@@ -67,7 +67,7 @@ where
     ///
     /// We assert that point.n_variables() == self.n_variables
     pub fn evaluate_at_point(&self, point: &[F]) -> F {
-        assert!(point.n_variables() == self.n_variables);
+        assert!(point.len() == self.n_variables);
         let num_evaluation_points = 3_usize.pow(self.n_variables as u32);
 
         let mut evaluation = F::ZERO;
@@ -82,26 +82,28 @@ where
 
 #[cfg(test)]
 mod tests {
-    use goldilocks::Goldilocks;
+
+    use ff_ext::GoldilocksExt2;
+    use p3_field::PrimeCharacteristicRing;
 
     use crate::utils::base_decomposition;
 
     use super::SumcheckPolynomial;
 
-    type F = Goldilocks;
+    type F = GoldilocksExt2;
 
     #[test]
     fn test_evaluation() {
         let num_variables = 2;
 
         let num_evaluation_points = 3_usize.pow(num_variables as u32);
-        let evaluations = (0..num_evaluation_points as u64).map(F::from).collect();
+        let evaluations = (0..num_evaluation_points as u64).map(F::from_u64).collect();
 
         let poly = SumcheckPolynomial::new(evaluations, num_variables);
 
         for i in 0..num_evaluation_points {
             let decomp = base_decomposition(i, 3, num_variables);
-            let point = decomp.into_iter().map(F::from).collect();
+            let point = decomp.into_iter().map(F::from_u8).collect::<Vec<_>>();
             assert_eq!(poly.evaluate_at_point(&point), poly.evaluations()[i]);
         }
     }

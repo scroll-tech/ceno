@@ -8,18 +8,24 @@ pub mod prover_single;
 #[cfg(test)]
 mod tests {
 
-    use goldilocks::Goldilocks;
-    use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::eq_eval};
+    use ff_ext::{ExtensionField, GoldilocksExt2};
+    use multilinear_extensions::{
+        mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
+        virtual_poly::eq_eval,
+    };
+    use p3_field::PrimeCharacteristicRing;
+
+    use crate::whir::fold::expand_from_univariate;
 
     use super::prover_core::SumcheckCore;
 
-    type F = Goldilocks;
+    type F = GoldilocksExt2;
 
     #[test]
     fn test_sumcheck_folding_factor_1() {
         let folding_factor = 1;
         let eval_point = vec![F::from_u64(10), F::from_u64(11)];
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(vec![
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
             F::from_u64(1),
             F::from_u64(5),
             F::from_u64(10),
@@ -52,7 +58,7 @@ mod tests {
     fn test_single_folding() {
         let num_variables = 2;
         let folding_factor = 2;
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(vec![
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
             F::from_u64(1),
             F::from_u64(2),
             F::from_u64(3),
@@ -98,8 +104,10 @@ mod tests {
         let num_variables = 6;
         let folding_factor = 2;
         let eval_point = vec![F::from_u64(97); num_variables];
-        let polynomial =
-            DenseMultilinearExtension::from_evaluations_ext_vec((0..1 << num_variables).map(F::from).collect());
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_variables,
+            (0..1 << num_variables).map(F::from_u64).collect(),
+        );
 
         let claimed_value = polynomial.evaluate(&eval_point);
 
@@ -114,7 +122,7 @@ mod tests {
         let folding_randomness = vec![F::from_u64(335), F::from_u64(222)];
 
         let new_eval_point = vec![F::from_u64(32); num_variables - folding_factor];
-        let folded_polynomial = polynomial.fold(&folding_randomness);
+        let folded_polynomial = polynomial.fix_variables(&folding_randomness);
         let new_fold_eval = folded_polynomial.evaluate(&new_eval_point);
 
         prover.compress(
@@ -147,8 +155,10 @@ mod tests {
     fn test_e2e() {
         let num_variables = 4;
         let folding_factor = 2;
-        let polynomial =
-            DenseMultilinearExtension::from_evaluations_ext_vec((0..1 << num_variables).map(F::from).collect());
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_variables,
+            (0..1 << num_variables).map(F::from_u64).collect(),
+        );
 
         // Initial stuff
         let ood_point = expand_from_univariate(F::from_u64(42), num_variables);
@@ -169,7 +179,7 @@ mod tests {
 
         let sumcheck_poly_1 = prover.compute_sumcheck_polynomial(folding_factor);
 
-        let folded_poly_1 = polynomial.fold(&folding_randomness_1.clone());
+        let folded_poly_1 = polynomial.fix_variables(&folding_randomness_1.clone());
         prover.compress(
             folding_factor,
             combination_randomness[0],
@@ -195,8 +205,15 @@ mod tests {
                 + combination_randomness[1] * fold_answer
         );
 
-        let full_folding = [folding_randomness_2.0.clone(), folding_randomness_1.0].concat();
-        let eval_coeff = folded_poly_1.fold(&folding_randomness_2).coeffs()[0];
+        let full_folding = [folding_randomness_2.clone(), folding_randomness_1].concat();
+        let eval_coeff = match folded_poly_1
+            .fix_variables(&folding_randomness_2)
+            .evaluations()
+        {
+            FieldType::Base(evals) => F::from_bases(&[evals[0]]),
+            FieldType::Ext(evals) => evals[0],
+            _ => panic!("Invalid folded polynomial"),
+        };
         assert_eq!(
             sumcheck_poly_2.evaluate_at_point(&folding_randomness_2),
             eval_coeff
@@ -211,8 +228,10 @@ mod tests {
     fn test_e2e_larger() {
         let num_variables = 6;
         let folding_factor = 2;
-        let polynomial =
-            DenseMultilinearExtension::from_evaluations_ext_vec((0..1 << num_variables).map(F::from).collect());
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            num_variables,
+            (0..1 << num_variables).map(F::from_u64).collect(),
+        );
 
         // Initial stuff
         let ood_point = expand_from_univariate(F::from_u64(42), num_variables);
@@ -247,7 +266,7 @@ mod tests {
 
         let sumcheck_poly_1 = prover.compute_sumcheck_polynomial(folding_factor);
 
-        let folded_poly_1 = polynomial.fold(&folding_randomness_1.clone());
+        let folded_poly_1 = polynomial.fix_variables(&folding_randomness_1.clone());
         prover.compress(
             folding_factor,
             combination_randomness_1[0],
@@ -260,7 +279,7 @@ mod tests {
 
         let sumcheck_poly_2 = prover.compute_sumcheck_polynomial(folding_factor);
 
-        let folded_poly_2 = folded_poly_1.fold(&folding_randomness_2.clone());
+        let folded_poly_2 = folded_poly_1.fix_variables(&folding_randomness_2.clone());
         prover.compress(
             folding_factor,
             combination_randomness_2[0],
@@ -269,7 +288,14 @@ mod tests {
         prover.add_new_equality(&[fold_point_2.clone()], &combination_randomness_2[1..]);
 
         let sumcheck_poly_3 = prover.compute_sumcheck_polynomial(folding_factor);
-        let final_coeff = folded_poly_2.fold(&folding_randomness_3.clone()).coeffs()[0];
+        let final_coeff = match folded_poly_2
+            .fix_variables(&folding_randomness_3.clone())
+            .evaluations()
+        {
+            FieldType::Base(evals) => F::from_bases(&[evals[0]]),
+            FieldType::Ext(evals) => evals[0],
+            _ => panic!("Invalid folded polynomial"),
+        };
 
         // Compute all evaluations
         let ood_answer = polynomial.evaluate(&ood_point);
@@ -297,9 +323,9 @@ mod tests {
         );
 
         let full_folding = [
-            folding_randomness_3.0.clone(),
-            folding_randomness_2.0.clone(),
-            folding_randomness_1.0,
+            folding_randomness_3.clone(),
+            folding_randomness_2.clone(),
+            folding_randomness_1,
         ]
         .concat();
 
@@ -313,16 +339,13 @@ mod tests {
                         + combination_randomness_1[1]
                             * eq_eval(
                                 &fold_point_11,
-                                &[
-                                    folding_randomness_3.0.clone(),
-                                    folding_randomness_2.0.clone()
-                                ]
-                                .concat()
+                                &[folding_randomness_3.clone(), folding_randomness_2.clone()]
+                                    .concat()
                             )
                         + combination_randomness_1[2]
                             * eq_eval(
                                 &fold_point_12,
-                                &[folding_randomness_3.0.clone(), folding_randomness_2.0].concat()
+                                &[folding_randomness_3.clone(), folding_randomness_2].concat()
                             ))
                     + combination_randomness_2[1] * eq_eval(&folding_randomness_3, &fold_point_2))
         )

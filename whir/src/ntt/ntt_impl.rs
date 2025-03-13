@@ -8,7 +8,7 @@ use super::{
     utils::{lcm, sqrt_factor, workload_size},
 };
 use ff_ext::ExtensionField;
-use p3_field::Field;
+use p3_field::{Field, TwoAdicField};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -81,11 +81,14 @@ impl<F: ExtensionField> NttEngine<F> {
     /// Construct a new engine from the field's `ExtensionField` trait.
     fn new_from_extension_field() -> Self {
         // TODO: Support SMALL_SUBGROUP
-        if F::TWO_ADICITY <= 63 {
-            Self::new(1 << F::TWO_ADICITY, F::TWO_ADIC_ROOT_OF_UNITY)
+        if <F as TwoAdicField>::TWO_ADICITY <= 63 {
+            Self::new(
+                1 << <F as TwoAdicField>::TWO_ADICITY,
+                F::TWO_ADIC_ROOT_OF_UNITY,
+            )
         } else {
             let mut generator = F::TWO_ADIC_ROOT_OF_UNITY;
-            for _ in 0..(F::TWO_ADICITY - 63) {
+            for _ in 0..(<F as TwoAdicField>::TWO_ADICITY - 63) {
                 generator = generator.square();
             }
             Self::new(1 << 63, generator)

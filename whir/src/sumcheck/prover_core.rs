@@ -1,21 +1,19 @@
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use ff_ext::ExtensionField;
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3_field::Field;
 
 use crate::{utils::base_decomposition, whir::fold::LagrangePolynomialIterator};
 
 use super::proof::SumcheckPolynomial;
 
-pub struct SumcheckCore<F> {
+pub struct SumcheckCore<F: ExtensionField> {
     // The evaluation of p
-    evaluation_of_p: DenseMultilinearExtension<F>,
-    evaluation_of_equality: DenseMultilinearExtension<F>,
+    evaluation_of_p: Vec<F>,
+    evaluation_of_equality: Vec<F>,
     num_variables: usize,
 }
 
-impl<F> SumcheckCore<F>
-where
-    F: Field,
-{
+impl<F: ExtensionField> SumcheckCore<F> {
     // Get the coefficient of polynomial p and a list of points
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p(X_1, ... X_n) * (epsilon_1 eq_z_1(X) + epsilon_2 eq_z_2(X) ...)
@@ -25,14 +23,19 @@ where
         combination_randomness: &[F],
     ) -> Self {
         assert_eq!(points.len(), combination_randomness.len());
-        let num_variables = coeffs.num_variables();
+        let num_variables = coeffs.num_vars();
 
         let mut prover = SumcheckCore {
-            evaluation_of_p: coeffs.into(), // transform coefficient form -> evaluation form
-            evaluation_of_equality: DenseMultilinearExtension::from_evaluations_ext_vec(vec![
-                F::ZERO;
-                1 << num_variables
-            ]),
+            evaluation_of_p: match coeffs.evaluations() {
+                FieldType::Base(evals) => evals
+                    .iter()
+                    .map(|e| F::from_bases(&[*e]))
+                    .collect::<Vec<_>>(),
+                FieldType::Ext(evals) => evals.clone(),
+                _ => panic!("Invalid field type"),
+            }, // transform coefficient form -> evaluation form
+            evaluation_of_equality: vec![F::ZERO; 1 << num_variables],
+
             num_variables,
         };
 
@@ -50,7 +53,7 @@ where
         let prefix_len = (1 << self.num_variables) / suffix_len;
 
         // sets evaluation_points to the set of all {0,1,2}^folding_factor
-        let evaluation_points: Vec<_> = (0..num_evaluation_points)
+        let evaluation_points: Vec<Vec<F>> = (0..num_evaluation_points)
             .map(|point| {
                 base_decomposition(point, 3, folding_factor)
                     .into_iter()
@@ -73,9 +76,11 @@ where
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
             let left_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+                folding_factor,
                 indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
             );
             let right_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+                folding_factor,
                 indexes
                     .iter()
                     .map(|&i| self.evaluation_of_equality[i])
@@ -96,7 +101,7 @@ where
         assert_eq!(combination_randomness.len(), points.len());
         for (point, rand) in points.iter().zip(combination_randomness) {
             for (prefix, lag) in LagrangePolynomialIterator::new(point) {
-                self.evaluation_of_equality.evals_mut()[prefix.0] += *rand * lag;
+                self.evaluation_of_equality[prefix] += *rand * lag;
             }
         }
     }
@@ -108,7 +113,7 @@ where
         combination_randomness: F, // Scale the initial point
         folding_randomness: &Vec<F>,
     ) {
-        assert_eq!(folding_randomness.n_variables(), folding_factor);
+        assert_eq!(folding_randomness.len(), 1 << folding_factor);
         assert!(self.num_variables >= folding_factor);
 
         let suffix_len = 1 << folding_factor;
@@ -123,9 +128,11 @@ where
                 .collect();
 
             let left_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+                folding_factor,
                 indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
             );
             let right_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+                folding_factor,
                 indexes
                     .iter()
                     .map(|&i| self.evaluation_of_equality[i])
@@ -139,7 +146,7 @@ where
 
         // Update
         self.num_variables -= folding_factor;
-        self.evaluation_of_p = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
-        self.evaluation_of_equality = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
+        self.evaluation_of_p = evaluations_of_p;
+        self.evaluation_of_equality = evaluations_of_eq;
     }
 }

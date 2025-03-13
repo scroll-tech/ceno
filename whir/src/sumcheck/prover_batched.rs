@@ -1,21 +1,22 @@
 use super::proof::SumcheckPolynomial;
 use crate::sumcheck::prover_single::SumcheckSingle;
-use multilinear_extensions::mle::DenseMultilinearExtension;
+use ff_ext::ExtensionField;
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3_field::Field;
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
 
-pub struct SumcheckBatched<F> {
+pub struct SumcheckBatched<F: ExtensionField> {
     // The evaluation on each p and eq
-    evaluations_of_p: Vec<DenseMultilinearExtension<F>>,
-    evaluations_of_equality: Vec<DenseMultilinearExtension<F>>,
+    evaluations_of_p: Vec<Vec<F>>,
+    evaluations_of_equality: Vec<Vec<F>>,
     comb_coeff: Vec<F>,
     num_polys: usize,
     num_variables: usize,
     sum: F,
 }
 
-impl<F> SumcheckBatched<F>
+impl<F: ExtensionField> SumcheckBatched<F>
 where
     F: Field,
 {
@@ -34,17 +35,21 @@ where
         assert_eq!(poly_comb_coeff.len(), num_polys);
         assert_eq!(points.len(), num_polys);
         assert_eq!(evals.len(), num_polys);
-        let num_variables = coeffs[0].num_variables();
+        let num_variables = coeffs[0].num_vars();
 
         let mut prover = SumcheckBatched {
-            evaluations_of_p: coeffs.into_iter().map(|c| c.into()).collect(),
-            evaluations_of_equality: vec![
-                DenseMultilinearExtension::from_evaluations_ext_vec(vec![
-                    F::ZERO;
-                    1 << num_variables
-                ]);
-                num_polys
-            ],
+            evaluations_of_p: coeffs
+                .into_iter()
+                .map(|c| match c.evaluations() {
+                    FieldType::Base(evals) => evals
+                        .iter()
+                        .map(|e| F::from_bases(&[*e]))
+                        .collect::<Vec<_>>(),
+                    FieldType::Ext(evals) => evals.clone(),
+                    _ => panic!("Invalid field type"),
+                })
+                .collect(),
+            evaluations_of_equality: vec![vec![F::ZERO; 1 << num_variables]; num_polys],
             comb_coeff: poly_comb_coeff.to_vec(),
             num_polys,
             num_variables,
@@ -54,8 +59,8 @@ where
         // Eval points
         for (i, point) in points.iter().enumerate() {
             SumcheckSingle::eval_eq(
-                &point.0,
-                prover.evaluations_of_equality[i].evals_mut(),
+                &point,
+                &mut prover.evaluations_of_equality[i],
                 F::from_u64(1),
             );
             prover.sum += poly_comb_coeff[i] * evals[i];
@@ -67,8 +72,8 @@ where
         self.evaluations_of_p
             .iter()
             .map(|e| {
-                assert_eq!(e.num_variables(), 0);
-                e.evals()[0]
+                assert_eq!(e.len(), 1);
+                e[0]
             })
             .collect()
     }
@@ -77,8 +82,8 @@ where
         self.evaluations_of_equality
             .iter()
             .map(|e| {
-                assert_eq!(e.num_variables(), 0);
-                e.evals()[0]
+                assert_eq!(e.len(), 1);
+                e[0]
             })
             .collect()
     }
@@ -89,8 +94,8 @@ where
         assert!(self.num_variables >= 1);
 
         // Compute coefficients of the quadratic result polynomial
-        let eval_p_iter = self.evaluation_of_p.evals().chunks_exact(2);
-        let eval_eq_iter = self.evaluation_of_equality.evals().chunks_exact(2);
+        let eval_p_iter = self.evaluation_of_p.chunks_exact(2);
+        let eval_eq_iter = self.evaluation_of_equality.chunks_exact(2);
         let (c0, c2) = eval_p_iter
             .zip(eval_eq_iter)
             .map(|(p_at, eq_at)| {
@@ -126,8 +131,8 @@ where
             .zip(&self.evaluations_of_p)
             .zip(&self.evaluations_of_equality)
             .map(|((rand, eval_p), eval_eq)| {
-                let eval_p_iter = eval_p.evals().par_chunks_exact(2);
-                let eval_eq_iter = eval_eq.evals().par_chunks_exact(2);
+                let eval_p_iter = eval_p.par_chunks_exact(2);
+                let eval_eq_iter = eval_eq.par_chunks_exact(2);
                 let (c0, c2) = eval_p_iter
                     .zip(eval_eq_iter)
                     .map(|(p_at, eq_at)| {
@@ -188,8 +193,10 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
-        self.evaluation_of_equality = DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
+        self.evaluation_of_p =
+            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
+        self.evaluation_of_equality =
+            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 
@@ -200,10 +207,10 @@ where
         folding_randomness: &[F],
         sumcheck_poly: &SumcheckPolynomial<F>,
     ) {
-        assert_eq!(folding_randomness.n_variables(), 1);
+        assert_eq!(folding_randomness.len(), 2);
         assert!(self.num_variables >= 1);
 
-        let randomness = folding_randomness.0[0];
+        let randomness = folding_randomness[0];
         let evaluations: Vec<_> = self
             .evaluations_of_p
             .par_iter()
@@ -212,23 +219,18 @@ where
                 let (evaluation_of_p, evaluation_of_eq) = join(
                     || {
                         eval_p
-                            .evals()
                             .par_chunks_exact(2)
                             .map(|at| (at[1] - at[0]) * randomness + at[0])
-                            .collect()
+                            .collect::<Vec<_>>()
                     },
                     || {
                         eval_eq
-                            .evals()
                             .par_chunks_exact(2)
                             .map(|at| (at[1] - at[0]) * randomness + at[0])
-                            .collect()
+                            .collect::<Vec<_>>()
                     },
                 );
-                (
-                    DenseMultilinearExtension::from_evaluations_ext_vec(evaluation_of_p),
-                    DenseMultilinearExtension::from_evaluations_ext_vec(evaluation_of_eq),
-                )
+                (evaluation_of_p, evaluation_of_eq)
             })
             .collect();
         let (evaluations_of_p, evaluations_of_eq) = evaluations.into_iter().unzip();
@@ -243,12 +245,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use goldilocks::Goldilocks;
-    use multilinear_extensions::mle::DenseMultilinearExtension;
+    use ff_ext::GoldilocksExt2;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use p3_field::PrimeCharacteristicRing;
 
     use super::SumcheckBatched;
 
-    type F = Goldilocks;
+    type F = GoldilocksExt2;
 
     #[test]
     fn test_sumcheck_folding_factor_1() {
@@ -258,13 +261,13 @@ mod tests {
             F::from_u64(8),
         ]];
         let polynomials = vec![
-            DenseMultilinearExtension::from_evaluations_ext_vec(vec![
+            DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
                 F::from_u64(1),
                 F::from_u64(5),
                 F::from_u64(10),
                 F::from_u64(14),
             ]),
-            DenseMultilinearExtension::from_evaluations_ext_vec(vec![
+            DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
                 F::from_u64(2),
                 F::from_u64(6),
                 F::from_u64(11),
@@ -282,7 +285,7 @@ mod tests {
             .iter()
             .zip(&poly_comb_coeffs)
             .fold(F::from_u64(0), |sum, (eval, poly_rand)| {
-                eval * poly_rand + sum
+                *eval * *poly_rand + sum
             });
 
         let mut prover =
@@ -303,7 +306,7 @@ mod tests {
             claimed_value = next_comb_randomness * poly.evaluate_at_point(&next_fold_randomness);
 
             comb_randomness_list.push(next_comb_randomness);
-            fold_randomness_list.extend(next_fold_randomness.0);
+            fold_randomness_list.extend(next_fold_randomness);
         }
         println!("CLAIM:");
         for poly in prover.evaluations_of_p {

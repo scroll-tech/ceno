@@ -219,7 +219,7 @@ impl<F: Field> Iterator for LagrangePolynomialIterator<F> {
 /// eq3(coords, point) is the unique polynomial of degree <=2 in each variable, s.t.
 /// for coords, point in {0,1,2}^n, we have:
 /// eq3(coords,point) = 1 if coords == point and 0 otherwise.
-pub fn eq_poly3<F>(coords: &Vec<F>, mut point: usize) -> F
+pub fn eq_poly3<F>(coords: &[F], mut point: usize) -> F
 where
     F: Field,
 {
