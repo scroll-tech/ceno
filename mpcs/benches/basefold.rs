@@ -202,16 +202,8 @@ fn bench_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
     bench_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, "rs");
 }
 
-fn bench_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
-    bench_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, "basecode");
-}
-
 fn bench_simple_batch_commit_open_verify_goldilocks_base_rs(c: &mut Criterion) {
     bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksRSCode>(c, "rs");
-}
-
-fn bench_simple_batch_commit_open_verify_goldilocks_base_basecode(c: &mut Criterion) {
-    bench_simple_batch_commit_open_verify_goldilocks::<PcsGoldilocksBasecode>(c, "basecode");
 }
 
 criterion_group! {
@@ -220,7 +212,6 @@ criterion_group! {
   targets =
   bench_simple_batch_commit_open_verify_goldilocks_base_rs,
    bench_commit_open_verify_goldilocks_base_rs,
-  bench_simple_batch_commit_open_verify_goldilocks_base_basecode, bench_commit_open_verify_goldilocks_base_basecode,
 }
 
 criterion_main!(bench_basefold);
