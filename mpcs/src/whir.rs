@@ -1,35 +1,44 @@
-mod field_wrapper;
 mod spec;
 mod structure;
-mod utils;
+
+use std::marker::PhantomData;
 
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
-use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
+use multilinear_extensions::mle::MultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 pub use structure::{Whir, WhirDefault};
-use structure::{WhirDigest, WhirInnerT, digest_to_bytes};
-use utils::{poly2whir, polys2whir};
-pub use whir::ceno_binding::Error;
-use whir::ceno_binding::PolynomialCommitmentScheme as WhirPCS;
+use structure::{WhirCommitment, digest_to_bytes};
+use transcript::BasicTranscript;
+use whir_external::{
+    crypto::write_digest_to_transcript,
+    parameters::MultivariateParameters,
+    whir::{
+        Statement, WhirProof,
+        batch::Witnesses,
+        committer::Committer,
+        parameters::WhirConfig,
+        prover::Prover,
+        verifier::{Verifier, WhirCommitmentInTranscript},
+    },
+};
+
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
 {
-    type Param = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
-    type ProverParam = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
-    type VerifierParam = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Param;
-    type Commitment = WhirDigest<E, Spec>;
-    type Proof = <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::Proof;
-    type CommitmentWithWitness =
-        <WhirInnerT<E, Spec> as WhirPCS<FieldWrapper<E>>>::CommitmentWithWitness;
-    type CommitmentChunk = WhirDigest<E, Spec>;
+    type Param = ();
+    type ProverParam = ();
+    type VerifierParam = ();
+    type Commitment = WhirCommitment<E>;
+    type Proof = WhirProof<E>;
+    type CommitmentWithWitness = Witnesses<E>;
+    type CommitmentChunk = WhirCommitment<E>;
 
     fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
-        WhirInnerT::<E, Spec>::setup(poly_size);
         Ok(())
     }
 
@@ -43,40 +52,48 @@ where
     fn commit(
         pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let witness =
-            WhirInnerT::<E, Spec>::commit(pp, &poly2whir(poly)).map_err(crate::Error::WhirError)?;
+        let parameters = Spec::get_whir_parameters(false);
+        let whir_config = WhirConfig::new(MultivariateParameters::new(poly.num_vars()), parameters);
+        let (witness, _commitment) = Committer::new(whir_config)
+            .commit(transcript, poly.clone())
+            .map_err(crate::Error::WhirError)?;
 
-        Ok(witness)
+        Ok(witness.into())
     }
 
     fn write_commitment(
         comm: &Self::Commitment,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        transcript.append_message(&digest_to_bytes::<Spec, E>(&comm.inner)?);
+        let parameters = Spec::get_whir_parameters(false);
+        let whir_config = WhirConfig::new(MultivariateParameters::new(comm.num_vars), parameters);
+        Verifier::new(whir_config)
+            .write_commitment_to_transcript(comm.inner.as_ref().unwrap(), transcript);
         Ok(())
     }
 
     fn open(
         pp: &Self::ProverParam,
-        _poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
-        _transcript: &mut impl transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        WhirInnerT::<E, Spec>::open(
-            pp,
-            comm,
-            point
-                .iter()
-                .map(|x| FieldWrapper(*x))
-                .collect::<Vec<_>>()
-                .as_slice(),
-            &FieldWrapper(*eval),
-        )
-        .map_err(crate::Error::WhirError)
+        let parameters = Spec::get_whir_parameters(false);
+        let whir_config = WhirConfig::new(MultivariateParameters::new(poly.num_vars()), parameters);
+        Prover(whir_config)
+            .prove(
+                transcript,
+                Statement {
+                    points: vec![point.to_vec()],
+                    evaluations: vec![*eval],
+                },
+                comm,
+            )
+            .map_err(crate::Error::WhirError)
     }
 
     fn verify(
@@ -85,32 +102,44 @@ where
         point: &[E],
         eval: &E,
         proof: &Self::Proof,
-        _transcript: &mut impl transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        WhirInnerT::<E, Spec>::verify(
-            vp,
-            &comm.inner,
-            &point.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
-            &FieldWrapper(*eval),
-            proof,
-        )
-        .map_err(crate::Error::WhirError)
+        let parameters = Spec::get_whir_parameters(false);
+        let whir_config = WhirConfig::new(MultivariateParameters::new(comm.num_vars), parameters);
+        assert_eq!(comm.num_vars, point.len());
+        Verifier::new(whir_config)
+            .verify(
+                comm.inner.as_ref().unwrap(),
+                transcript,
+                &Statement {
+                    points: vec![point.to_vec()],
+                    evaluations: vec![*eval],
+                },
+                proof,
+            )
+            .map_err(crate::Error::WhirError)
     }
 
     fn get_pure_commitment(comm: &Self::CommitmentWithWitness) -> Self::Commitment {
         Self::Commitment {
-            inner: comm.commitment.clone(),
+            inner: Some(comm.to_commitment_in_transcript()),
+            num_vars: comm.num_vars(),
         }
     }
 
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(polys))
+        let parameters = Spec::get_whir_parameters(false);
+        let whir_config =
+            WhirConfig::new(MultivariateParameters::new(polys[0].num_vars()), parameters);
+        let (witness, _commitment) = Committer::new(whir_config)
+            .batch_commit(transcript, polys)
             .map_err(crate::Error::WhirError)?;
 
-        Ok(witness)
+        Ok(witness.into())
     }
 
     fn batch_open(
@@ -126,23 +155,18 @@ where
 
     fn simple_batch_open(
         pp: &Self::ProverParam,
-        _polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
+        polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],
-        _transcript: &mut impl transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        WhirInnerT::<E, Spec>::simple_batch_open(
-            pp,
-            comm,
-            point
-                .iter()
-                .map(|x| FieldWrapper(*x))
-                .collect::<Vec<_>>()
-                .as_slice(),
-            &evals.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
-        )
-        .map_err(crate::Error::WhirError)
+        let parameters = Spec::get_whir_parameters(false);
+        let whir_config =
+            WhirConfig::new(MultivariateParameters::new(polys[0].num_vars()), parameters);
+        Prover(whir_config)
+            .simple_batch_prove(transcript, &[point.to_vec()], &[evals.to_vec()], comm)
+            .map_err(crate::Error::WhirError)
     }
 
     fn batch_verify(
@@ -162,16 +186,21 @@ where
         point: &[E],
         evals: &[E],
         proof: &Self::Proof,
-        _transcript: &mut impl transcript::Transcript<E>,
+        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        WhirInnerT::<E, Spec>::simple_batch_verify(
-            vp,
-            &comm.inner,
-            &point.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
-            &evals.iter().map(|x| FieldWrapper(*x)).collect::<Vec<_>>(),
-            proof,
-        )
-        .map_err(crate::Error::WhirError)
+        let parameters = Spec::get_whir_parameters(false);
+        let whir_config = WhirConfig::new(MultivariateParameters::new(comm.num_vars), parameters);
+        assert_eq!(comm.num_vars, point.len());
+        Verifier::new(whir_config)
+            .simple_batch_verify(
+                comm.inner.as_ref().unwrap(),
+                transcript,
+                evals.len(),
+                &[point.to_vec()],
+                &[evals.to_vec()],
+                proof,
+            )
+            .map_err(crate::Error::WhirError)
     }
 }
 

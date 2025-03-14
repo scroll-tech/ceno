@@ -1,4 +1,3 @@
-use super::field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 use ff_ext::ExtensionField;
 use serde::Serialize;
 use whir::{

@@ -60,13 +60,18 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
         };
 
         let mut transcript = T::new(b"BaseFold");
+        let transcript_for_bench = transcript.clone();
         let poly = (switch.gen_rand_poly)(num_vars);
-        let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
+        let comm = Pcs::commit(&pp, &poly, &mut transcript).unwrap();
 
         group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
-            b.iter(|| {
-                Pcs::commit(&pp, &poly).unwrap();
-            })
+            b.iter_batched(
+                || transcript_for_bench.clone(),
+                |mut transcript| {
+                    Pcs::commit(&pp, &poly, &mut transcript).unwrap();
+                },
+                BatchSize::SmallInput,
+            )
         });
 
         let point = get_point_from_challenge(num_vars, &mut transcript);
@@ -246,15 +251,20 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
+            let transcript_for_bench = transcript.clone();
             let polys = gen_rand_polys(|_| num_vars, batch_size, switch.gen_rand_poly);
-            let comm = Pcs::batch_commit_and_write(&pp, &polys, &mut transcript).unwrap();
+            let comm = Pcs::batch_commit(&pp, &polys, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
                 |b| {
-                    b.iter(|| {
-                        Pcs::batch_commit(&pp, &polys).unwrap();
-                    })
+                    b.iter_batched(
+                        || transcript_for_bench.clone(),
+                        |mut transcript| {
+                            Pcs::batch_commit(&pp, &polys, &mut transcript).unwrap();
+                        },
+                        BatchSize::SmallInput,
+                    )
                 },
             );
             let point = get_point_from_challenge(num_vars, &mut transcript);

@@ -30,7 +30,7 @@ use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
 use rayon::prelude::*;
 
 struct RoundStateBatch<'a, E: ExtensionField> {
-    round_state: RoundState<E>,
+    round_state: RoundState<'a, E>,
     batching_randomness: Vec<E>,
     prev_merkle: &'a MerkleTreeExt<E>,
     prev_merkle_answers: &'a Vec<E>,
@@ -450,7 +450,7 @@ impl<E: ExtensionField> Prover<E> {
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
             coefficients: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
-            prev_merkle: Some(merkle_tree),
+            prev_merkle: Some(&merkle_tree),
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
         };

@@ -35,7 +35,7 @@ rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
-whir = { path = "../whir", features = ["ceno"] }
+whir = { path = "../whir" }
 zeroize = "1.8"
 
 [dev-dependencies]

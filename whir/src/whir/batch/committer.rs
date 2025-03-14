@@ -1,11 +1,11 @@
 use crate::{
-    crypto::{MerkleTreeExt, write_digest_to_transcript},
+    crypto::{Digest, MerkleTreeExt, write_digest_to_transcript},
     end_timer,
     error::Error,
     ntt::expand_from_coeff,
     start_timer, utils,
     whir::{
-        committer::{Committer, Witness},
+        committer::Committer,
         fold::{expand_from_univariate, restructure_evaluations},
         verifier::WhirCommitmentInTranscript,
     },
@@ -31,27 +31,25 @@ pub struct Witnesses<E: ExtensionField> {
     pub(crate) ood_answers: Vec<E>,
 }
 
-impl<E: ExtensionField> From<Witness<E>> for Witnesses<E> {
-    fn from(witness: Witness<E>) -> Self {
-        Self {
-            polys: vec![witness.polynomial],
-            merkle_tree: witness.merkle_tree,
-            merkle_leaves: witness.merkle_leaves,
-            ood_points: witness.ood_points,
-            ood_answers: witness.ood_answers,
+impl<E: ExtensionField> Witnesses<E> {
+    pub fn merkle_tree(&self) -> &MerkleTreeExt<E> {
+        &self.merkle_tree
+    }
+
+    pub fn root(&self) -> Digest<E> {
+        self.merkle_tree.root()
+    }
+
+    pub fn to_commitment_in_transcript(&self) -> WhirCommitmentInTranscript<E> {
+        WhirCommitmentInTranscript {
+            root: self.root(),
+            ood_points: self.ood_points.clone(),
+            ood_answers: self.ood_answers.clone(),
         }
     }
-}
 
-impl<E: ExtensionField> From<Witnesses<E>> for Witness<E> {
-    fn from(witness: Witnesses<E>) -> Self {
-        Self {
-            polynomial: witness.polys[0].clone(),
-            merkle_tree: witness.merkle_tree,
-            merkle_leaves: witness.merkle_leaves,
-            ood_points: witness.ood_points,
-            ood_answers: witness.ood_answers,
-        }
+    pub fn num_vars(&self) -> usize {
+        self.polys[0].num_vars()
     }
 }
 

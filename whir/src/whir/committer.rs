@@ -1,4 +1,4 @@
-use super::parameters::WhirConfig;
+use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
     crypto::{MerkleTree, MerkleTreeExt, write_digest_to_transcript},
     end_timer,
@@ -21,16 +21,6 @@ use p3_commit::Mmcs;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-#[derive(Debug)]
-pub struct Witness<E: ExtensionField> {
-    pub(crate) polynomial: DenseMultilinearExtension<E>,
-    #[debug(skip)]
-    pub(crate) merkle_tree: MerkleTreeExt<E>,
-    pub(crate) merkle_leaves: Vec<E>,
-    pub(crate) ood_points: Vec<E>,
-    pub(crate) ood_answers: Vec<E>,
-}
-
 pub struct Committer<E: ExtensionField>(pub(crate) WhirConfig<E>);
 
 impl<E: ExtensionField> Committer<E> {
@@ -42,7 +32,7 @@ impl<E: ExtensionField> Committer<E> {
         &self,
         transcript: &mut T,
         mut polynomial: DenseMultilinearExtension<E>,
-    ) -> Result<(Witness<E>, WhirCommitmentInTranscript<E>), Error> {
+    ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let timer = start_timer!(|| "Single Commit");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
         let mut coeffs = match polynomial.evaluations() {
@@ -116,8 +106,8 @@ impl<E: ExtensionField> Committer<E> {
         };
 
         Ok((
-            Witness {
-                polynomial,
+            Witnesses {
+                polys: vec![polynomial],
                 merkle_tree,
                 merkle_leaves: folded_evals,
                 ood_points,

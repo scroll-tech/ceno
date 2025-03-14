@@ -144,7 +144,7 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     let prover = Prover(params.clone());
 
     let proof = prover
-        .prove(&mut transcript, Statement::default(), witness)
+        .prove(&mut transcript, Statement::default(), &witness)
         .unwrap();
 
     dbg!(whir_prover_time.elapsed());
@@ -161,6 +161,7 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     let whir_verifier_time = Instant::now();
     for _ in 0..reps {
         let mut transcript = T::new(b"main");
+        verifier.write_commitment_to_transcript(&commitment, &mut transcript);
         verifier
             .verify(&commitment, &mut transcript, &Statement::default(), &proof)
             .unwrap();
@@ -244,7 +245,7 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     let prover = Prover(params.clone());
 
     let proof = prover
-        .prove(&mut transcript, statement.clone(), witness)
+        .prove(&mut transcript, statement.clone(), &witness)
         .unwrap();
 
     println!("Prover time: {:.1?}", whir_prover_time.elapsed());
@@ -259,6 +260,7 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     let whir_verifier_time = Instant::now();
     for _ in 0..reps {
         let mut transcript = T::new(b"main");
+        verifier.write_commitment_to_transcript(&commitment, &mut transcript);
         verifier
             .verify(&commitment, &mut transcript, &statement, &proof)
             .unwrap();

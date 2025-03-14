@@ -51,8 +51,7 @@ debug = true
 
 [features]
 asm = []
-ceno = []
-default = ["parallel", "ceno"]
+default = ["parallel"]
 parallel = [
   "dep:rayon",
 ]

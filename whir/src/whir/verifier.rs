@@ -7,6 +7,7 @@ use multilinear_extensions::{
     virtual_poly::eq_eval,
 };
 use p3_field::{Field, PrimeCharacteristicRing};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use super::{Statement, WhirProof, fold::expand_from_univariate, parameters::WhirConfig};
@@ -23,7 +24,11 @@ pub struct Verifier<E: ExtensionField> {
     pub(crate) two_inv: E::BaseField,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct WhirCommitmentInTranscript<E: ExtensionField> {
     pub(crate) root: Digest<E>,
     pub(crate) ood_points: Vec<E>,
@@ -66,15 +71,18 @@ impl<E: ExtensionField> Verifier<E> {
         }
     }
 
-    fn write_commitment_to_transcript<T: Transcript<E>>(
+    pub fn write_commitment_to_transcript<T: Transcript<E>>(
         &self,
-        commitment: &mut WhirCommitmentInTranscript<E>,
+        commitment: &WhirCommitmentInTranscript<E>,
         transcript: &mut T,
     ) {
         if self.params.committment_ood_samples > 0 {
-            commitment.ood_points = (0..self.params.committment_ood_samples)
-                .map(|_| transcript.read_challenge().elements)
-                .collect::<Vec<_>>();
+            assert_eq!(
+                commitment.ood_points,
+                (0..self.params.committment_ood_samples)
+                    .map(|_| transcript.read_challenge().elements)
+                    .collect::<Vec<_>>()
+            );
             transcript.append_field_element_exts(&commitment.ood_answers);
         }
     }
@@ -482,10 +490,15 @@ impl<E: ExtensionField> Verifier<E> {
         statement: &Statement<E>,
         whir_proof: &WhirProof<E>,
     ) -> Result<(), Error> {
-        let mut parsed_commitment = commitment.clone();
-        self.write_commitment_to_transcript(&mut parsed_commitment, transcript);
+        let parsed_commitment = commitment;
+
+        // It is possible that the committing and the opening of the polynomial
+        // is separated in the protocol. So it doesn't make sense to write
+        // commitment to transcript preceding the verification.
+        // self.write_commitment_to_transcript(&mut parsed_commitment, transcript);
+
         let parsed =
-            self.write_proof_to_transcript(transcript, &parsed_commitment, statement, whir_proof)?;
+            self.write_proof_to_transcript(transcript, parsed_commitment, statement, whir_proof)?;
 
         let computed_folds = self.compute_folds(&parsed);
 

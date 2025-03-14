@@ -36,15 +36,17 @@ impl<E: ExtensionField> Verifier<E> {
         for evals in evals_per_point {
             assert_eq!(num_polys, evals.len());
         }
-        let mut parsed_commitment = commitment.clone();
+        let parsed_commitment = commitment;
         let mut sumcheck_poly_evals_iter = whir_proof
             .sumcheck_poly_evals
             .iter()
             .map(|[a, b, c]| [a.clone(), b.clone(), c.clone()]);
 
-        // We first do a pass in which we rederive all the FS challenges
-        // Then we will check the algebraic part (so to optimise inversions)
-        self.write_commitment_to_transcript_batch(&mut parsed_commitment, transcript, num_polys);
+        // It is possible that the committing and the opening of the polynomial
+        // is separated in the protocol. So it doesn't make sense to write
+        // commitment to transcript preceding the verification.
+        // self.write_commitment_to_transcript(&mut parsed_commitment, transcript);
+
         self.batch_verify_internal(
             transcript,
             num_polys,
@@ -74,10 +76,11 @@ impl<E: ExtensionField> Verifier<E> {
             .iter()
             .map(|[a, b, c]| [*a, *b, *c]);
 
-        // We first do a pass in which we rederive all the FS challenges
-        // Then we will check the algebraic part (so to optimise inversions)
-        let mut parsed_commitment = commitment.clone();
-        self.write_commitment_to_transcript_batch(&mut parsed_commitment, transcript, num_polys);
+        // It is possible that the committing and the opening of the polynomial
+        // is separated in the protocol. So it doesn't make sense to write
+        // commitment to transcript preceding the verification.
+        let parsed_commitment = commitment;
+        // self.write_commitment_to_transcript(&mut parsed_commitment, transcript);
 
         // parse proof
         let poly_comb_randomness =
@@ -107,7 +110,7 @@ impl<E: ExtensionField> Verifier<E> {
         num_polys: usize,
         points: &[Vec<E>],
         evals_per_point: &[Vec<E>],
-        parsed_commitment: WhirCommitmentInTranscript<E>,
+        parsed_commitment: &WhirCommitmentInTranscript<E>,
         whir_proof: &WhirProof<E>,
         sumcheck_poly_evals_iter: &mut impl Iterator<Item = [E; 3]>,
     ) -> Result<(), Error> {
@@ -294,20 +297,6 @@ impl<E: ExtensionField> Verifier<E> {
         Ok(())
     }
 
-    fn write_commitment_to_transcript_batch<T: Transcript<E>>(
-        &self,
-        commitment: &mut WhirCommitmentInTranscript<E>,
-        transcript: &mut T,
-        num_polys: usize,
-    ) {
-        if self.params.committment_ood_samples > 0 {
-            commitment.ood_points = (0..self.params.committment_ood_samples)
-                .map(|_| transcript.read_challenge().elements)
-                .collect::<Vec<_>>();
-            transcript.append_field_element_exts(&commitment.ood_answers);
-        }
-    }
-
     fn parse_unify_sumcheck<T: Transcript<E>>(
         &self,
         transcript: &mut T,
@@ -345,7 +334,7 @@ impl<E: ExtensionField> Verifier<E> {
             .zip(&poly_comb_randomness)
             .map(|(point, randomness)| *randomness * eq_eval(point, &folded_point))
             .collect();
-        let mut folded_evals = whir_proof.folded_evals.clone();
+        let folded_evals = whir_proof.folded_evals.clone();
         let sumcheck_claim = sumcheck_rounds[num_variables - 1]
             .0
             .evaluate_at_point(&vec![sumcheck_rounds[num_variables - 1].1]);

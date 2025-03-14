@@ -18,7 +18,7 @@ pub struct Statement<E> {
 }
 
 // Only includes the authentication paths
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -115,7 +115,7 @@ mod tests {
         let prover = Prover(params.clone());
 
         let proof = prover
-            .prove(&mut transcript, statement.clone(), witness)
+            .prove(&mut transcript, statement.clone(), &witness)
             .unwrap();
 
         let verifier = Verifier::new(params);

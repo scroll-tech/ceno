@@ -303,6 +303,7 @@ where
     fn commit(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         let timer = start_timer!(|| "Basefold::commit");
 
@@ -323,38 +324,41 @@ where
 
                 // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
-                Ok(Self::CommitmentWithWitness {
+                Self::CommitmentWithWitness {
                     codeword_tree,
                     polynomials_bh_evals: vec![bh_evals],
                     num_vars: poly.num_vars,
                     is_base,
                     num_polys: 1,
-                })
+                }
             }
             PolyEvalsCodeword::TooSmall(evals) => {
                 let codeword_tree = MerkleTree::<E>::from_leaves(evals.clone());
 
                 // All these values are stored in the `CommitmentWithWitness` because
                 // they are useful in opening, and we don't want to recompute them.
-                Ok(Self::CommitmentWithWitness {
+                Self::CommitmentWithWitness {
                     codeword_tree,
                     polynomials_bh_evals: vec![evals],
                     num_vars: poly.num_vars,
                     is_base,
                     num_polys: 1,
-                })
+                }
             }
-            PolyEvalsCodeword::TooBig(num_vars) => Err(Error::PolynomialTooLarge(num_vars)),
+            PolyEvalsCodeword::TooBig(num_vars) => return Err(Error::PolynomialTooLarge(num_vars)),
         };
 
         end_timer!(timer);
 
-        ret
+        Self::write_commitment(&ret.to_commitment(), transcript);
+
+        Ok(ret)
     }
 
     fn batch_commit(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
+        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         // assumptions
         // 1. there must be at least one polynomial
@@ -441,6 +445,8 @@ where
         };
 
         end_timer!(timer);
+
+        Self::write_commitment(&ret.to_commitment(), transcript);
 
         Ok(ret)
     }
@@ -838,7 +844,6 @@ where
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         let timer = start_timer!(|| "Basefold::verify");
-
         if proof.is_trivial() {
             let trivial_proof = &proof.trivial_proof;
             let merkle_tree = MerkleTree::<E>::from_batch_leaves(trivial_proof.clone());

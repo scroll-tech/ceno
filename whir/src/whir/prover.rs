@@ -1,4 +1,4 @@
-use super::{Statement, WhirProof, committer::Witness, parameters::WhirConfig};
+use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
     crypto::{Digest, MerkleTree, MerkleTreeExt, MultiPath, generate_multi_proof},
     domain::Domain,
@@ -46,19 +46,19 @@ impl<E: ExtensionField> Prover<E> {
         true
     }
 
-    fn validate_witness(&self, witness: &Witness<E>) -> bool {
+    fn validate_witness(&self, witness: &Witnesses<E>) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         if !self.0.initial_statement {
             assert!(witness.ood_points.is_empty());
         }
-        witness.polynomial.num_vars() == self.0.mv_parameters.num_variables
+        witness.polys[0].num_vars() == self.0.mv_parameters.num_variables
     }
 
     pub fn prove<T: Transcript<E>>(
         &self,
         transcript: &mut T,
         mut statement: Statement<E>,
-        witness: Witness<E>,
+        witness: &Witnesses<E>,
     ) -> Result<WhirProof<E>, Error> {
         // If any evaluation point is shorter than the folding factor, pad with 0 in front
         let mut sumcheck_poly_evals = Vec::new();
@@ -77,14 +77,16 @@ impl<E: ExtensionField> Prover<E> {
         let timer = start_timer!(|| "Single Prover");
         let initial_claims: Vec<_> = witness
             .ood_points
-            .into_iter()
+            .iter()
+            .copied()
             .map(|ood_point| expand_from_univariate(ood_point, self.0.mv_parameters.num_variables))
             .chain(statement.points)
             .collect();
         let initial_answers: Vec<_> = witness
             .ood_answers
-            .into_iter()
-            .chain(statement.evaluations)
+            .iter()
+            .chain(statement.evaluations.iter())
+            .copied()
             .collect();
 
         if !self.0.initial_statement {
@@ -107,7 +109,7 @@ impl<E: ExtensionField> Prover<E> {
                 expand_randomness(combination_randomness_gen, initial_claims.len());
 
             sumcheck_prover = Some(SumcheckProverNotSkipping::new(
-                witness.polynomial.clone(),
+                witness.polys[0].clone(),
                 &initial_claims,
                 &combination_randomness,
                 &initial_answers,
@@ -135,9 +137,9 @@ impl<E: ExtensionField> Prover<E> {
             round: 0,
             sumcheck_prover,
             folding_randomness,
-            coefficients: witness.polynomial,
-            prev_merkle: Some(witness.merkle_tree),
-            prev_merkle_answers: witness.merkle_leaves,
+            coefficients: witness.polys[0].clone(),
+            prev_merkle: Some(&witness.merkle_tree),
+            prev_merkle_answers: witness.merkle_leaves.clone(),
             merkle_proofs: vec![],
         };
 
@@ -413,7 +415,7 @@ impl<E: ExtensionField> Prover<E> {
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
             coefficients: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
-            prev_merkle: Some(merkle_tree),
+            prev_merkle: Some(&merkle_tree),
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
         };
@@ -430,13 +432,13 @@ impl<E: ExtensionField> Prover<E> {
     }
 }
 
-pub(crate) struct RoundState<E: ExtensionField> {
+pub(crate) struct RoundState<'a, E: ExtensionField> {
     pub(crate) round: usize,
     pub(crate) domain: Domain<E>,
     pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<E>>,
     pub(crate) folding_randomness: Vec<E>,
     pub(crate) coefficients: DenseMultilinearExtension<E>,
-    pub(crate) prev_merkle: Option<MerkleTreeExt<E>>,
+    pub(crate) prev_merkle: Option<&'a MerkleTreeExt<E>>,
     pub(crate) prev_merkle_answers: Vec<E>,
     pub(crate) merkle_proofs: Vec<(MultiPath<E>, Vec<Vec<E>>)>,
 }
