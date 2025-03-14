@@ -1114,8 +1114,7 @@ mod test {
     use crate::{
         basefold::Basefold,
         test_util::{
-            gen_rand_poly_base, gen_rand_poly_ext, run_batch_commit_open_verify,
-            run_commit_open_verify, run_simple_batch_commit_open_verify,
+            gen_rand_poly_base, gen_rand_poly_ext, run_batch_commit_open_verify, run_commit_open_verify, run_diff_size_batch_commit_open_verify, run_simple_batch_commit_open_verify
         },
     };
 
@@ -1214,5 +1213,16 @@ mod test {
                 11,
             );
         }
+    }
+
+    #[test]
+    fn batch_commit_diff_size_open_verify() {
+        let gen_rand_poly = gen_rand_poly_base;
+        run_diff_size_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            gen_rand_poly,
+            17,
+            3,
+            5,
+        );
     }
 }
