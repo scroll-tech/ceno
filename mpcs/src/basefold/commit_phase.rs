@@ -58,11 +58,6 @@ where
         .par_chunks(comm.num_polys)
         .map(|row| dot_product(batch_coeffs.iter().copied(), row.iter().copied()))
         .collect::<Vec<_>>();
-    println!(
-        "initial_oracle len {}, comm.num_polys {}",
-        initial_oracle.len(),
-        comm.num_polys
-    );
     let initial_oracle = RowMajorMatrix::new_col(initial_oracle);
     end_timer!(batch_codewords_timer);
 

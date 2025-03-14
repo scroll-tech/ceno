@@ -1,4 +1,4 @@
-use std::iter::repeat_with;
+use std::{iter::repeat_with, slice};
 
 use crate::{
     basefold::structure::MerkleTreeExt,
@@ -13,10 +13,12 @@ use crate::{
     },
 };
 use ark_std::{end_timer, start_timer};
+use ceno_sumcheck::macros::{entered_span, exit_span};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip, zip};
 use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_matrix::Matrix;
+use p3_field::dot_product;
+use p3_matrix::{Dimensions, Matrix};
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -53,51 +55,36 @@ where
     queries_usize
         .iter()
         .map(|idx| {
-            println!("start commit proof with id {idx}");
             let opening = {
-                let odd = idx | 1;
-                let even = odd - 1; // get even part of idx
-                // n_d_1 represent n_{d-1} oracle length
-                // codeword matrix width is 2 * num_polys, because we concat them into leafs and commit
-                // thus, n_d_1 match the length of next oracle p_{i-1}, which length is p_i / 2
-                let n_d_1 = mmcs.get_matrices(&comm.codeword)[0].height();
-                let idx = even % n_d_1;
-                println!(
-                    "index {idx}, tree width {}, tree leafs {}, overall len {}",
-                    mmcs.get_matrices(&comm.codeword)[0].width(),
-                    mmcs.get_matrices(&comm.codeword)[0].values.len(),
-                    mmcs.get_matrices(&comm.codeword).len()
-                );
-                // Soundness: is it ok we only open on one index, and rely on next layer to provide another sibling witness?
+                // extract the even part of `idx`
+                // ---------------------------------
+                // the oracle values are committed in a row-bit-reversed format.
+                // rounding `idx` to an even value is equivalent to retrieving the "left-hand" side `j` index
+                // in the original (non-row-bit-reversed) format.
+                //
+                // however, since `p_d[j]` and `p_d[j + n_{d-1}]` are already concatenated in the same merkle leaf,
+                // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
+                let idx = idx >> 1;
                 let (mut values, proof) = mmcs.open_batch(idx, &comm.codeword);
                 let leafs = values.pop().unwrap();
-                // leaf length equal to num poly * 2
-                debug_assert_eq!(
-                    leafs.len(),
-                    mmcs.get_matrices(&comm.codeword)[0].width() * 2
-                );
                 (leafs, proof)
             };
-            println!("end commit proof");
-            let (_, opening_ext) =
-                trees
-                    .iter()
-                    .fold((idx >> 1, vec![]), |(idx, mut proofs), tree| {
-                        let odd = idx | 1;
-                        let even = odd - 1;
-                        println!(
-                            "index {even}, tree leafs {}, overall len {}",
-                            mmcs_ext.get_matrices(tree)[0].values.len(),
-                            mmcs_ext.get_matrices(tree).len()
-                        );
-                        let (mut values, proof) = mmcs_ext.open_batch(even, tree);
-                        let leafs = values.pop().unwrap();
-                        debug_assert_eq!(leafs.len(), 2);
-                        // TODO we can keep only one of the leafs, as the other can be interpolate from previous layer
-                        proofs.push((leafs, proof));
-                        (idx >> 1, proofs)
-                    });
-            println!("end query with id {idx}");
+            // this is equivalent with "idx = idx % n_{d-1}" operation in non row bit reverse format
+            let idx = idx >> 1;
+            let (_, opening_ext) = trees.iter().fold((idx, vec![]), |(idx, mut proofs), tree| {
+                // mask the least significant bit (LSB) for the same reason as above:
+                // 1. we only need the even part of the index.
+                // 2. since even and odd parts are concatenated in the same leaf,
+                //    the overall merkle tree height is effectively halved,
+                //    so we divide by 2.
+                let idx = idx >> 1;
+                let (mut values, proof) = mmcs_ext.open_batch(idx, tree);
+                let leafs = values.pop().unwrap();
+                debug_assert_eq!(leafs.len(), 2);
+                // TODO we can keep only one of the leafs, as the other can be interpolate from previous layer
+                proofs.push((leafs, proof));
+                (idx >> 1, proofs)
+            });
             (opening, opening_ext)
         })
         .collect_vec()
@@ -121,7 +108,6 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    unimplemented!()
     // let timer = start_timer!(|| "Verifier query phase");
 
     // let encode_timer = start_timer!(|| "Encode final codeword");
@@ -138,6 +124,59 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     // };
     // reverse_index_bits_in_place(&mut final_codeword);
     // end_timer!(encode_timer);
+
+    let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
+    let mmcs = poseidon2_merkle_tree::<E>();
+
+    let span = entered_span!("check queries");
+    // izip!(indices, queries).try_for_each(|(idx, (opening, opening_ext))| {
+    //     mmcs.verify_batch(
+    //         todo!(),
+    //         &[Dimensions {
+    //             width: 0,
+    //             height: todo!(),
+    //         }],
+    //         *idx,
+    //         slice::from_ref(&opening.0),
+    //         &opening.1,
+    //     )
+    //     .expect("verify batch failed");
+    //     let (left, right) = opening.0.split_at(opening.0.len() / 2);
+    // let (value_0, value_1) = (
+    //     dot_product(batch_coeffs.iter().copied(), left.iter().copied()),
+    //     dot_product(batch_coeffs.iter().copied(), right.iter().copied()),
+    // );
+    //// interlopate left, right with dit_butterfly params
+    // let leave = xxx
+
+    // let folded = izip!(rev(0..self.code.d()), rev(&r), &proof.pi_comms, opening_ext).try_fold(
+    //     leave,
+    //     |folded, (i, r_i, comm, opening_ext)| {
+    //         let sibling = ((idx / self.code.n_i(i)) & 1) ^ 1;
+    //         let idx = idx % self.code.n_i(i);
+    //         let mut values = vec![folded; 2];
+    //         values[sibling] = opening_ext.0;
+    //         self.mmcs_ext
+    //             .verify_batch(
+    //                 comm,
+    //                 &[Dimensions {
+    //                     width: 0,
+    //                     height: self.code.n_i(i),
+    //                 }],
+    //                 idx,
+    //                 slice::from_ref(&values),
+    //                 &opening_ext.1,
+    //             )
+    //             .map_err(Self::Error::Mmcs)?;
+    //         Ok(self.code.interpolate(i, idx, values[0], values[1], *r_i))
+    //     },
+    // )?;
+    // if pi_0[idx % self.code.n_0()] != folded {
+    //     return Err(Self::Error::InvalidQuery);
+    // }
+    // Ok(())
+    // });
+    exit_span!(span);
 
     // // For computing the weights on the fly, because the verifier is incapable of storing
     // // the weights.
@@ -181,4 +220,5 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     // end_timer!(final_timer);
 
     // end_timer!(timer);
+    // unimplemented!()
 }

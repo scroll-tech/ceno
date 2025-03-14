@@ -354,31 +354,33 @@ where
         //     )
         //     .collect();
 
-        let log2_c = Spec::get_basecode_msg_size_log();
-        let n_0 = 1 << log2_c;
-        println!(
-            "get_basecode_msg_size_log {} max_message_size_log {} Spec::get_rate_log() {}",
-            Spec::get_basecode_msg_size_log(),
-            max_message_size_log,
-            Spec::get_rate_log()
-        );
-        // TODO figure out how to set this correctly
-        let t_inv_halves = (0..max_message_size_log + Spec::get_rate_log()
-            - Spec::get_basecode_msg_size_log())
+        // directly return bit reverse format, matching with codeword index
+        let t_inv_halves_prover = (0..max_message_size_log + Spec::get_rate_log())
             .map(|i| {
-                let t_i = E::BaseField::two_adic_generator(log2_c + i + 1)
-                    .powers()
-                    .take(n_0 << i)
-                    .collect_vec();
-                batch_multiplicative_inverse(&t_i.iter().map(E::BaseField::double).collect_vec())
+                if i < Spec::get_basecode_msg_size_log() {
+                    vec![]
+                } else {
+                    let t_i = E::BaseField::two_adic_generator(i)
+                        .powers()
+                        .take(1 << i)
+                        .collect_vec();
+                    p3_matrix::dense::RowMajorMatrix::new(
+                        batch_multiplicative_inverse(
+                            &t_i.iter().map(E::BaseField::double).collect_vec(),
+                        ),
+                        1,
+                    )
+                    .bit_reverse_rows()
+                    .to_row_major_matrix()
+                    .values
+                }
             })
             .collect_vec();
 
-        println!("finish setup of mpcs");
         Ok((
             Self::ProverParameters {
                 dft: Default::default(),
-                t_inv_halves: t_inv_halves.clone(),
+                t_inv_halves: t_inv_halves_prover.clone(),
                 // fft_root_table: pp.fft_root_table,
                 fft_root_table: vec![],
                 // gamma_powers: gamma_powers.clone(),
@@ -389,8 +391,8 @@ where
             },
             Self::VerifierParameters {
                 dft: Default::default(),
-                // TODO verifier just need much smaller halves table
-                t_inv_halves,
+                // TODO make verifier calculate fft root by itself
+                t_inv_halves: t_inv_halves_prover,
                 // fft_root_table: verifier_fft_root_table,
                 fft_root_table: vec![],
                 full_message_size_log: max_message_size_log,
