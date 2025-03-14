@@ -176,8 +176,7 @@ mod tests {
         mle::IntoMLE,
         virtual_poly::{ArcMultilinearExtension, VPAuxInfo, VirtualPolynomial},
     };
-    use p3_field::PrimeCharacteristicRing;
-    use p3_goldilocks::Goldilocks;
+    use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
     use sumcheck::structs::{IOPProverState, IOPVerifierState};
     use transcript::BasicTranscript as Transcript;
 

@@ -23,7 +23,7 @@ use multilinear_extensions::{
 
 pub(crate) use coeff::Coefficients;
 pub use coeff::CoefficientsProver;
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 #[derive(Debug)]
 pub struct ProverState<'a, E: ExtensionField> {
@@ -325,7 +325,7 @@ mod tests {
 
     use super::*;
     use ff_ext::GoldilocksExt2 as E;
-    use p3_goldilocks::Goldilocks as Fr;
+    use p3::goldilocks::Goldilocks as Fr;
 
     #[test]
     fn test_sum_check_protocol() {

@@ -17,7 +17,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
@@ -203,7 +203,7 @@ mod tests {
     use ceno_emul::encode_rv32;
 
     use ff_ext::GoldilocksExt2 as E;
-    use p3_goldilocks::Goldilocks as F;
+    use p3::goldilocks::Goldilocks as F;
 
     #[test]
     fn test_program_padding() {

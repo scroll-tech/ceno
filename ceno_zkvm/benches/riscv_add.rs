@@ -14,7 +14,7 @@ use ff_ext::{FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 use multilinear_extensions::mle::IntoMLE;
-use p3_goldilocks::Goldilocks;
+use p3::goldilocks::Goldilocks;
 use transcript::{BasicTranscript, Transcript};
 
 cfg_if::cfg_if! {

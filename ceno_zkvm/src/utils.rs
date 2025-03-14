@@ -8,7 +8,7 @@ use std::{
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::util::max_usable_threads;
-use p3_field::Field;
+use p3::field::Field;
 use transcript::Transcript;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {

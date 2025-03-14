@@ -24,10 +24,7 @@ itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-mds.workspace = true
-p3-symmetric.workspace = true
+p3 = { path = "../p3" }
 plonky2.workspace = true
 poseidon.workspace = true
 rand.workspace = true

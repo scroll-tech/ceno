@@ -12,7 +12,7 @@ use crate::{
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize)]

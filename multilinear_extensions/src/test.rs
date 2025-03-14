@@ -1,7 +1,9 @@
 use ark_std::test_rng;
 use ff_ext::{ExtensionField, FromUniformBytes};
-use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
-use p3_goldilocks::Goldilocks;
+use p3::{
+    field::{PrimeCharacteristicRing, extension::BinomialExtensionField},
+    goldilocks::Goldilocks,
+};
 
 type F = Goldilocks;
 type E = BinomialExtensionField<F, 2>;

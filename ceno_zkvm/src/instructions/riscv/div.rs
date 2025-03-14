@@ -64,7 +64,7 @@
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
-use p3_goldilocks::Goldilocks;
+use p3::goldilocks::Goldilocks;
 
 use super::{
     RIVInstruction,

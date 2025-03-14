@@ -1,9 +1,8 @@
 use itertools::izip;
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
-use p3_field::{Field, PrimeCharacteristicRing};
-use rayon::{
-    iter::{IntoParallelIterator, ParallelIterator},
-    slice::ParallelSliceMut,
+use p3::{
+    field::{Field, PrimeCharacteristicRing},
+    maybe_rayon::prelude::*,
 };
 use std::{
     cell::RefCell,
@@ -41,7 +40,7 @@ macro_rules! set_fixed_val {
 #[derive(Clone)]
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
-    values: Vec<T>,
+    pub values: Vec<T>,
     num_col: usize,
     padding_strategy: InstancePaddingStrategy,
 }

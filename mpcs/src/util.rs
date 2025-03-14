@@ -9,7 +9,7 @@ use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod merkle_tree;
 use crate::{Error, util::parallel::parallelize};
-use p3_field::{PrimeCharacteristicRing, PrimeField};
+use p3::field::{PrimeCharacteristicRing, PrimeField};
 pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
@@ -320,11 +320,11 @@ pub mod test {
     #[cfg(test)]
     use crate::util::{base_to_usize, u32_to_field};
     use ff_ext::FromUniformBytes;
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
     #[cfg(test)]
     type E = ff_ext::GoldilocksExt2;
     #[cfg(test)]
-    type F = p3_goldilocks::Goldilocks;
+    type F = p3::goldilocks::Goldilocks;
     use rand::{
         CryptoRng, RngCore, SeedableRng,
         rngs::{OsRng, StdRng},

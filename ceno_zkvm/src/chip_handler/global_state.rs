@@ -4,7 +4,7 @@ use super::GlobalStateRegisterMachineChipOperations;
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression, structs::RAMType,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'_, E> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {

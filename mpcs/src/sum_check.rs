@@ -12,7 +12,7 @@ use classic::{ClassicSumCheckRoundMessage, SumcheckProof};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use p3_field::Field;
+use p3::field::Field;
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
