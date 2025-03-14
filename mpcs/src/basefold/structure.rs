@@ -114,7 +114,8 @@ where
 
     pub fn codeword_size(&self) -> usize {
         let mmcs = poseidon2_merkle_tree::<E>();
-        mmcs.get_matrices(&self.codeword)[0].height()
+        // size = height * 2 because we concat pi[left]/pi[right] under same row index
+        mmcs.get_matrices(&self.codeword)[0].height() * 2
     }
 
     pub fn get_codewords(&self) -> &DenseMatrix<E::BaseField> {
