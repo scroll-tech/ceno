@@ -15,6 +15,7 @@ use ceno_emul::{
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::RMMCollections;

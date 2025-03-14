@@ -61,7 +61,7 @@ proptest.workspace = true
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow"]
+default = ["forbid_overflow", "p3-maybe-rayon/parallel"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 

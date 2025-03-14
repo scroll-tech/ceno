@@ -255,9 +255,7 @@ where
         let timer = start_timer!(|| "Basefold::batch commit");
         let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
-        println!("start encode");
         let evals_codewords = Spec::EncodingScheme::encode(&pp.encoding_params, rmm);
-        println!("end encode");
         exit_span!(span);
         end_timer!(encode_timer);
 
