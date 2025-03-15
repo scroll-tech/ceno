@@ -38,8 +38,8 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     /// to execute the encoding.
     fn encode_small(
         vp: &Self::VerifierParameters,
-        rmm: p3_matrix::dense::RowMajorMatrix<E>,
-    ) -> p3_matrix::dense::RowMajorMatrix<E>;
+        rmm: p3::matrix::dense::RowMajorMatrix<E>,
+    ) -> p3::matrix::dense::RowMajorMatrix<E>;
 
     fn get_number_queries() -> usize;
 

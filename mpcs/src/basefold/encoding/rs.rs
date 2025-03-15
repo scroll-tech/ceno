@@ -11,11 +11,13 @@ use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
-use p3_dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{
-    Field, PrimeCharacteristicRing, PrimeField, TwoAdicField, batch_multiplicative_inverse,
+use p3::{
+    dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft},
+    field::{
+        Field, PrimeCharacteristicRing, PrimeField, TwoAdicField, batch_multiplicative_inverse,
+    },
+    matrix::{Matrix, bitrev::BitReversableMatrix, dense::DenseMatrix},
 };
-use p3_matrix::{Matrix, bitrev::BitReversableMatrix, dense::DenseMatrix};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
 
@@ -364,7 +366,7 @@ where
                         .powers()
                         .take(1 << i)
                         .collect_vec();
-                    p3_matrix::dense::RowMajorMatrix::new(
+                    p3::matrix::dense::RowMajorMatrix::new(
                         batch_multiplicative_inverse(
                             &t_i.iter().map(E::BaseField::double).collect_vec(),
                         ),
@@ -449,8 +451,8 @@ where
 
     fn encode_small(
         vp: &Self::VerifierParameters,
-        rmm: p3_matrix::dense::RowMajorMatrix<E>,
-    ) -> p3_matrix::dense::RowMajorMatrix<E> {
+        rmm: p3::matrix::dense::RowMajorMatrix<E>,
+    ) -> p3::matrix::dense::RowMajorMatrix<E> {
         let m = rmm
             // reverse bit of raw message first, because
             // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
@@ -623,7 +625,7 @@ fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) ->
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
-    use p3_goldilocks::Goldilocks;
+    use p3::goldilocks::Goldilocks;
 
     // use crate::{
     //     basefold::encoding::test_util::test_codeword_folding,

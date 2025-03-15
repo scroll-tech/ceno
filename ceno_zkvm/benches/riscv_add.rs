@@ -12,6 +12,8 @@ use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 
+use multilinear_extensions::mle::IntoMLE;
+use p3::goldilocks::Goldilocks;
 use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;

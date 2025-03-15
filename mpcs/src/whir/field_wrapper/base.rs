@@ -7,7 +7,7 @@ use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use ff_ext::{ExtensionField as FfExtField, SmallField};
 use num_bigint::BigUint;
-use p3_field::{Field as FfField, PrimeCharacteristicRing};
+use p3::field::{Field as FfField, PrimeCharacteristicRing};
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -416,7 +416,7 @@ impl<E: FfExtField> Field for BaseFieldWrapper<E> {
 }
 
 impl<E: FfExtField> ark_ff::FftField for BaseFieldWrapper<E> {
-    const GENERATOR: Self = Self(<E::BaseField as p3_field::Field>::GENERATOR);
+    const GENERATOR: Self = Self(<E::BaseField as p3::field::Field>::GENERATOR);
     const TWO_ADICITY: u32 = <E as FfExtField>::TWO_ADICITY as u32;
     const TWO_ADIC_ROOT_OF_UNITY: Self = Self(E::BASE_TWO_ADIC_ROOT_OF_UNITY);
     const SMALL_SUBGROUP_BASE: Option<u32> = None;

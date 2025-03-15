@@ -1,6 +1,6 @@
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
-use p3_field::{Field, PrimeCharacteristicRing};
-use p3_matrix::{Matrix, bitrev::BitReversableMatrix};
+use p3::field::{Field, PrimeCharacteristicRing};
+use p3::matrix::{Matrix, bitrev::BitReversableMatrix};
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
@@ -32,7 +32,7 @@ pub enum InstancePaddingStrategy {
 
 #[derive(Clone)]
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
-    inner: p3_matrix::dense::RowMajorMatrix<T>,
+    inner: p3::matrix::dense::RowMajorMatrix<T>,
     padding_strategy: InstancePaddingStrategy,
 }
 
@@ -42,18 +42,18 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         Standard: Distribution<T>,
     {
         Self {
-            inner: p3_matrix::dense::RowMajorMatrix::rand(rng, rows, cols),
+            inner: p3::matrix::dense::RowMajorMatrix::rand(rng, rows, cols),
             padding_strategy: InstancePaddingStrategy::Default,
         }
     }
     pub fn empty() -> Self {
         Self {
-            inner: p3_matrix::dense::RowMajorMatrix::new(vec![], 0),
+            inner: p3::matrix::dense::RowMajorMatrix::new(vec![], 0),
             padding_strategy: InstancePaddingStrategy::Default,
         }
     }
     /// convert into the p3 RowMajorMatrix, with padded to next power of 2 height filling with T::default value
-    pub fn into_default_padded_p3_rmm(self) -> p3_matrix::dense::RowMajorMatrix<T> {
+    pub fn into_default_padded_p3_rmm(self) -> p3::matrix::dense::RowMajorMatrix<T> {
         let padded_height = next_pow2_instance_padding(self.num_instances());
         let mut inner = self.inner;
         inner.pad_to_height(padded_height, T::default());
@@ -74,13 +74,13 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
             .map(|_| T::default())
             .collect();
         RowMajorMatrix {
-            inner: p3_matrix::dense::RowMajorMatrix::new(value, num_col),
+            inner: p3::matrix::dense::RowMajorMatrix::new(value, num_col),
             padding_strategy,
         }
     }
 
     pub fn new_by_inner_matrix(
-        m: p3_matrix::dense::RowMajorMatrix<T>,
+        m: p3::matrix::dense::RowMajorMatrix<T>,
         padding_strategy: InstancePaddingStrategy,
     ) -> Self {
         RowMajorMatrix {
@@ -153,7 +153,7 @@ impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
 impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> Deref
     for RowMajorMatrix<T>
 {
-    type Target = p3_matrix::dense::DenseMatrix<T>;
+    type Target = p3::matrix::dense::DenseMatrix<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner

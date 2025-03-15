@@ -1,6 +1,8 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
+use p3::{
+    merkle_tree::MerkleTreeMmcs,
+    symmetric::{PaddingFreeSponge, TruncatedPermutation},
+};
 use poseidon::DIGEST_WIDTH;
 
 pub(crate) type Poseidon2Sponge<P> = PaddingFreeSponge<P, 8, 4, 4>;

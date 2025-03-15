@@ -9,7 +9,7 @@ use crate::{
     gadgets::AssertLtConfig,
     instructions::riscv::config::IsEqualConfig,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -694,7 +694,7 @@ mod tests {
         use multilinear_extensions::{
             mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
         };
-        use p3_field::PrimeCharacteristicRing;
+        use p3::field::PrimeCharacteristicRing;
 
         type E = GoldilocksExt2; // 18446744069414584321
 

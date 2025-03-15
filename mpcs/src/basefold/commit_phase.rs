@@ -11,9 +11,11 @@ use crate::util::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::izip;
-use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_field::dot_product;
-use p3_matrix::dense::RowMajorMatrix;
+use p3::{
+    commit::{ExtensionMmcs, Mmcs},
+    field::dot_product,
+    matrix::dense::RowMajorMatrix,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 

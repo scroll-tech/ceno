@@ -1,5 +1,5 @@
 use crate::constants::DIGEST_WIDTH;
-use p3_field::PrimeField;
+use p3::field::PrimeField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

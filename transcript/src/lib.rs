@@ -4,12 +4,13 @@
 #![feature(generic_arg_infer)]
 
 pub mod basic;
+
 mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
 use ff_ext::SmallField;
 use itertools::Itertools;
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]

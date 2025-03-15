@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::BTreeMap,

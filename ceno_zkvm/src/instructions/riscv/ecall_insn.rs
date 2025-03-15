@@ -12,7 +12,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 pub struct EcallInstructionConfig {
     pub pc: WitIn,

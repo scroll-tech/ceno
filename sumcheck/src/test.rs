@@ -7,7 +7,7 @@ use crate::{
 use ark_std::{rand::RngCore, test_rng};
 use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
 use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 

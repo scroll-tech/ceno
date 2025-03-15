@@ -583,11 +583,7 @@ dependencies = [
  "mpcs",
  "multilinear_extensions",
  "num-traits",
- "p3-field",
- "p3-goldilocks",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
+ "p3",
  "parse-size",
  "paste",
  "poseidon",
@@ -1070,10 +1066,7 @@ dependencies = [
 name = "ff_ext"
 version = "0.1.0"
 dependencies = [
- "p3-field",
- "p3-goldilocks",
- "p3-poseidon2",
- "p3-symmetric",
+ "p3",
  "rand_core",
  "serde",
 ]
@@ -1531,15 +1524,7 @@ dependencies = [
  "multilinear_extensions",
  "num-bigint",
  "num-integer",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-goldilocks",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
- "p3-merkle-tree",
- "p3-symmetric",
+ "p3",
  "plonky2",
  "poseidon",
  "rand",
@@ -1563,8 +1548,7 @@ dependencies = [
  "ff_ext",
  "itertools 0.13.0",
  "log",
- "p3-field",
- "p3-goldilocks",
+ "p3",
  "rayon",
  "serde",
  "tracing",
@@ -1795,6 +1779,24 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
+
+[[package]]
+name = "p3"
+version = "0.1.0"
+dependencies = [
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-mds",
+ "p3-merkle-tree",
+ "p3-poseidon",
+ "p3-poseidon2",
+ "p3-symmetric",
+]
 
 [[package]]
 name = "p3-challenger"
@@ -2101,12 +2103,7 @@ dependencies = [
  "ark-std",
  "criterion",
  "ff_ext",
- "p3-challenger",
- "p3-field",
- "p3-goldilocks",
- "p3-mds",
- "p3-poseidon2",
- "p3-symmetric",
+ "p3",
  "plonky2",
  "rand",
  "serde",
@@ -2709,9 +2706,7 @@ dependencies = [
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
- "p3-field",
- "p3-goldilocks",
- "p3-mds",
+ "p3",
  "poseidon",
  "rayon",
  "serde",
@@ -2727,10 +2722,9 @@ dependencies = [
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
- "p3-field",
+ "p3",
  "proc-macro2",
  "quote",
- "rayon",
  "sumcheck",
  "syn 2.0.98",
 ]
@@ -3001,10 +2995,7 @@ dependencies = [
  "crossbeam-channel",
  "ff_ext",
  "itertools 0.13.0",
- "p3-field",
- "p3-goldilocks",
- "p3-mds",
- "p3-symmetric",
+ "p3",
  "poseidon",
  "serde",
 ]
@@ -3227,6 +3218,7 @@ dependencies = [
  "lazy_static",
  "nimue",
  "nimue-pow",
+ "p3",
  "rand",
  "rand_chacha",
  "rayon",
@@ -3365,9 +3357,7 @@ version = "0.1.0"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
- "p3-field",
- "p3-goldilocks",
- "p3-matrix",
+ "p3",
  "rand",
  "rayon",
  "serde",

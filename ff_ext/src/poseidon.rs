@@ -1,5 +1,4 @@
-use p3_field::PrimeField;
-use p3_symmetric::CryptographicPermutation;
+use p3::{field::PrimeField, symmetric::CryptographicPermutation};
 
 use crate::SmallField;
 

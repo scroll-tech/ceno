@@ -6,7 +6,7 @@ use crate::{
     digest::Digest,
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use p3_challenger::{CanObserve, CanSample};
+use p3::challenger::{CanObserve, CanSample};
 
 pub struct PoseidonHash<F> {
     _phantom: PhantomData<F>,

@@ -5,14 +5,16 @@ use crate::{
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
 use itertools::izip;
-use p3_commit::Mmcs;
-use p3_matrix::{
-    Matrix,
-    dense::{DenseMatrix, RowMajorMatrix},
-    extension::FlatMatrixView,
+use p3::{
+    commit::Mmcs,
+    matrix::{
+        Matrix,
+        dense::{DenseMatrix, RowMajorMatrix},
+        extension::FlatMatrixView,
+    },
+    merkle_tree::MerkleTree as P3MerkleTree,
+    symmetric::Hash as P3Hash,
 };
-use p3_merkle_tree::MerkleTree as P3MerkleTree;
-use p3_symmetric::Hash as P3Hash;
 use poseidon::DIGEST_WIDTH;
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 

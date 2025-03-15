@@ -16,9 +16,11 @@ use ark_std::{end_timer, start_timer};
 use ceno_sumcheck::macros::{entered_span, exit_span};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip, zip};
-use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_field::dot_product;
-use p3_matrix::{Dimensions, Matrix};
+use p3::{
+    commit::{ExtensionMmcs, Mmcs},
+    field::dot_product,
+    matrix::{Dimensions, Matrix},
+};
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 

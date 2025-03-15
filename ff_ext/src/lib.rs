@@ -1,10 +1,12 @@
 #![deny(clippy::cargo)]
 
-use p3_field::{
-    ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField, TwoAdicField,
-    extension::BinomialExtensionField,
+use p3::{
+    field::{
+        ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField,
+        TwoAdicField, extension::BinomialExtensionField,
+    },
+    goldilocks::Goldilocks,
 };
-use p3_goldilocks::Goldilocks;
 use rand_core::RngCore;
 use serde::Serialize;
 use std::{array::from_fn, iter::repeat_with};
@@ -52,11 +54,11 @@ pub trait FromUniformBytes: Sized {
 
 macro_rules! impl_from_uniform_bytes_for_binomial_extension {
     ($base:ty, $degree:literal) => {
-        impl FromUniformBytes for p3_field::extension::BinomialExtensionField<$base, $degree> {
+        impl FromUniformBytes for p3::field::extension::BinomialExtensionField<$base, $degree> {
             type Bytes = [u8; <$base as FromUniformBytes>::Bytes::WIDTH * $degree];
 
             fn try_from_uniform_bytes(bytes: Self::Bytes) -> Option<Self> {
-                Some(p3_field::BasedVectorSpace::from_basis_coefficients_slice(
+                Some(p3::field::BasedVectorSpace::from_basis_coefficients_slice(
                     &array_try_from_uniform_bytes::<
                         $base,
                         { <$base as FromUniformBytes>::Bytes::WIDTH },
@@ -68,7 +70,7 @@ macro_rules! impl_from_uniform_bytes_for_binomial_extension {
     };
 }
 
-impl_from_uniform_bytes_for_binomial_extension!(p3_goldilocks::Goldilocks, 2);
+impl_from_uniform_bytes_for_binomial_extension!(p3::goldilocks::Goldilocks, 2);
 
 /// define a custom conversion trait like `From<T>`
 /// an util to simulate general from function
@@ -128,15 +130,17 @@ mod impl_goldilocks {
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
         poseidon::{PoseidonField, new_array},
     };
-    use p3_field::{
-        BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
-        extension::{BinomialExtensionField, BinomiallyExtendable},
+    use p3::{
+        field::{
+            BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
+            extension::{BinomialExtensionField, BinomiallyExtendable},
+        },
+        goldilocks::{
+            Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
+            HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
+        },
+        poseidon2::ExternalLayerConstants,
     };
-    use p3_goldilocks::{
-        Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
-        HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
-    };
-    use p3_poseidon2::ExternalLayerConstants;
 
     impl FieldFrom<u64> for Goldilocks {
         fn from_v(v: u64) -> Self {

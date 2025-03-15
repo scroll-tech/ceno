@@ -21,17 +21,13 @@ ceno_emul = { path = "../ceno_emul" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+p3.workspace = true
 sumcheck = { version = "0", path = "../sumcheck" }
 transcript = { path = "../transcript" }
 witness = { path = "../witness" }
 
 itertools.workspace = true
 num-traits.workspace = true
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-matrix.workspace = true
-p3-maybe-rayon = { workspace = true, features = ["parallel"] }
-p3-mds.workspace = true
 paste.workspace = true
 poseidon.workspace = true
 prettytable-rs.workspace = true
@@ -61,7 +57,7 @@ proptest.workspace = true
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow", "p3-maybe-rayon/parallel"]
+default = ["forbid_overflow"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 

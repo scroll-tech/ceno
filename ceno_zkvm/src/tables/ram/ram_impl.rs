@@ -442,8 +442,7 @@ mod tests {
     use ceno_emul::WORD_SIZE;
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
-    use p3_field::PrimeCharacteristicRing;
-    use p3_goldilocks::Goldilocks as F;
+    use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
     use witness::next_pow2_instance_padding;
 
     #[test]

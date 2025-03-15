@@ -13,7 +13,7 @@ members = [
   "sumcheck",
   "transcript",
   "whir",
-  "witness",
+  "p3",
 ]
 resolver = "2"
 
@@ -36,6 +36,7 @@ itertools = "0.13"
 num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
+p3 = { path = "p3", features = ["parallel"] }
 # p3-challenger = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 # p3-dft = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 # p3-field = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
@@ -46,7 +47,7 @@ num-traits = "0.2"
 # p3-poseidon2 = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 # p3-symmetric = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 # p3-merkle-tree = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
-# p3-maybe-rayon = { git = "https://github.com/plonky3/plonky3", rev = "8d2be81", features = ["parallel"] }
+# p3-maybe-rayon = { git = "https://github.com/plonky3/plonky3", rev = "8d2be81", features = ["parallel", "rayon"] }
 # p3-commit = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 
 p3-challenger = { path = "../Plonky3/challenger" }
@@ -59,8 +60,9 @@ p3-poseidon = { path = "../Plonky3/poseidon" }
 p3-poseidon2 = { path = "../Plonky3/poseidon2" }
 p3-symmetric = { path = "../Plonky3/symmetric" }
 p3-merkle-tree = { path = "../Plonky3/merkle-tree" }
-p3-maybe-rayon = { path = "../Plonky3/maybe-rayon", features = ["parallel"] }
+p3-maybe-rayon = { path = "../Plonky3/maybe-rayon" }
 p3-commit = { path = "../Plonky3/commit" }
+
 paste = "1"
 plonky2 = "0.2"
 poseidon = { path = "./poseidon" }

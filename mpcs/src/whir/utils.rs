@@ -39,8 +39,7 @@ pub fn polys2whir<E: ExtensionField>(
 mod tests {
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::{FieldType, MultilinearExtension};
-    use p3_field::PrimeCharacteristicRing;
-    use p3_goldilocks::Goldilocks;
+    use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
     use rand::rngs::OsRng;
 
     use crate::whir::field_wrapper::ExtensionFieldWrapper;

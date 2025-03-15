@@ -6,7 +6,7 @@ use ark_serialize::{
 use ark_std::{One as ArkOne, Zero};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use ff_ext::ExtensionField as FfExtField;
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
 use std::{

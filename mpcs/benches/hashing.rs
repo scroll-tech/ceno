@@ -2,7 +2,7 @@ use ark_std::test_rng;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use ff_ext::FromUniformBytes;
-use p3_goldilocks::Goldilocks;
+use p3::goldilocks::Goldilocks;
 use poseidon::poseidon_hash::PoseidonHash;
 
 fn random_ceno_goldy() -> Goldilocks {

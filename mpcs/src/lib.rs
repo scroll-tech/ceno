@@ -334,7 +334,7 @@ pub mod test_util {
     #[cfg(test)]
     use transcript::BasicTranscript;
 
-    use p3_field::Field;
+    use p3::field::Field;
     use rand::{distributions::Standard, prelude::Distribution, rngs::OsRng};
     use rayon::iter::{IntoParallelIterator, ParallelIterator};
     use transcript::Transcript;
