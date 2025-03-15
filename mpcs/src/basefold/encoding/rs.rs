@@ -302,7 +302,6 @@ where
         mut pp: Self::PublicParameters,
         max_message_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
-        println!("gogo setup of mpcs");
         if pp.fft_root_table.len() < max_message_size_log + Spec::get_rate_log() {
             // return Err(Error::InvalidPcsParam(format!(
             //     "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",

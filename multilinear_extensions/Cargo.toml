@@ -24,4 +24,4 @@ log = "0.4"
 
 [features]
 default = ["parallel"]
-parallel = ["p3/parallel"]
+parallel = []

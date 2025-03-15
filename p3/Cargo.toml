@@ -13,7 +13,7 @@ version.workspace = true
 p3-challenger.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
-p3-maybe-rayon.workspace = true
+p3-maybe-rayon = { workspace = true, features = ["parallel"]}
 p3-mds.workspace = true
 p3-poseidon.workspace = true
 p3-poseidon2.workspace = true
@@ -22,7 +22,3 @@ p3-dft.workspace = true
 p3-matrix.workspace = true
 p3-commit.workspace = true
 p3-merkle-tree.workspace = true
-
-[features]
-default = ["parallel"]
-parallel = ["p3-maybe-rayon/parallel", "p3-maybe-rayon/rayon"]
