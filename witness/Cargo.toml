@@ -1,0 +1,22 @@
+[package]
+categories.workspace = true
+description = "Witness for Ceno"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "witness"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+
+ff_ext = { path = "../ff_ext" }
+p3-field.workspace = true
+p3-goldilocks.workspace = true
+p3-matrix.workspace = true
+rayon.workspace = true
+serde.workspace = true
+
+rand.workspace = true
