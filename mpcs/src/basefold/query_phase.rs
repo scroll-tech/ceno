@@ -62,10 +62,6 @@ where
                 // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
                 let idx = idx >> 1;
                 let (mut values, proof) = mmcs.open_batch(idx, &comm.codeword);
-                if idx == 1360 {
-                    let m = mmcs.get_matrices(&comm.codeword)[0];
-                    println!("{idx} m.height {}, m.width {}", m.height(), m.width());
-                }
                 let leafs = values.pop().unwrap();
                 (leafs, proof)
             };
