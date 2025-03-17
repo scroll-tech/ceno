@@ -57,8 +57,9 @@ impl<E: ExtensionField> Committer<E> {
     pub fn batch_commit<T: Transcript<E>>(
         &self,
         transcript: &mut T,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: witness::RowMajorMatrix<E::BaseField>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
+        let polys = polys.to_mles();
         let timer = start_timer!(|| "Batch Commit");
         let base_domain = self.0.starting_domain.base_domain.unwrap();
         let expansion = self.0.starting_domain.size() / polys[0].evaluations().len();

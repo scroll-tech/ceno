@@ -6,11 +6,13 @@ use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, WhirDefault,
-    test_util::{gen_rand_poly_base, gen_rand_polys, get_point_from_challenge, setup_pcs},
+    test_util::{gen_rand_poly_base, get_point_from_challenge, setup_pcs},
 };
 
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
+use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
+use witness::RowMajorMatrix;
 
 type T = BasicTranscript<GoldilocksExt2>;
 type E = GoldilocksExt2;
@@ -99,23 +101,28 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
-            let mut transcript = T::new(b"BaseFold");
-            let transcript_for_bench = transcript.clone();
-            let polys = gen_rand_polys(|_| num_vars, batch_size, gen_rand_poly_base);
-            let comm = Pcs::batch_commit(&pp, &polys, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
                 |b| {
-                    b.iter_batched(
-                        || transcript_for_bench.clone(),
-                        |mut transcript| {
-                            Pcs::batch_commit(&pp, &polys, &mut transcript).unwrap();
-                        },
-                        BatchSize::SmallInput,
-                    )
+                    b.iter_custom(|iters| {
+                        let mut time = Duration::new(0, 0);
+                        for _ in 0..iters {
+                            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+                            let mut transcript = T::new(b"BaseFold");
+                            let instant = std::time::Instant::now();
+                            Pcs::batch_commit(&pp, rmm, &mut transcript).unwrap();
+                            let elapsed = instant.elapsed();
+                            time += elapsed;
+                        }
+                        time
+                    })
                 },
             );
+            let mut transcript = T::new(b"BaseFold");
+            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+            let polys = rmm.to_mles();
+            let comm = Pcs::batch_commit(&pp, rmm, &mut transcript).unwrap();
             let point = get_point_from_challenge(num_vars, &mut transcript);
             let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
             transcript.append_field_element_exts(&evals);

@@ -229,7 +229,7 @@ impl Report<CircuitStatsTrace> {
         let num_instances = zkvm_witnesses
             .clone()
             .into_iter_sorted()
-            .map(|(key, value)| (key, value.num_instances()))
+            .map(|(key, value)| (key, value[0].num_instances()))
             .collect::<BTreeMap<_, _>>();
         Self::new(static_report, num_instances, program_name)
     }
