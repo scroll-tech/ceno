@@ -12,5 +12,5 @@ allowed-duplicate-crates = [
   "wasi",
   "getrandom",
   "zerocopy",
-  "zerocopy-derive"
+  "zerocopy-derive",
 ]
