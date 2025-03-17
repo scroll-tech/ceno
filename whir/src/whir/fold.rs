@@ -108,9 +108,6 @@ pub fn expand_from_univariate<F: Field>(point: F, num_variables: usize) -> Vec<F
         cur = cur * cur;
     }
 
-    // Reverse so higher power is first
-    res.reverse();
-
     res
 }
 
@@ -136,6 +133,9 @@ pub struct LagrangePolynomialIterator<F: Field> {
 
 impl<F: Field> LagrangePolynomialIterator<F> {
     pub fn new(point: &Vec<F>) -> Self {
+        let mut point = point.clone();
+        point.reverse();
+
         let num_variables = point.len();
 
         // Initialize a stack with capacity for messages/ message_hats and the identity element

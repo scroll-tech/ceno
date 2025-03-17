@@ -54,7 +54,7 @@ pub fn base_decomposition(value: usize, base: u8, n_bits: usize) -> Vec<u8> {
 
     // Compute the base decomposition
     for i in 0..n_bits {
-        result[n_bits - 1 - i] = (value % (base as usize)) as u8;
+        result[i] = (value % (base as usize)) as u8;
         value /= base as usize;
     }
     // TODO: Should we assert!(value == 0) here to check that the orginally passed `value` is < base^n_bits ?

@@ -70,11 +70,16 @@ impl<F: ExtensionField> SumcheckCore<F> {
 
         // NOTE: This can probably be optimised a fair bit, there are a bunch of lagranges that can
         // be computed at the same time, some allocations to save ecc ecc.
+        // The outer loop is over the prefixes
         for beta_prefix in 0..prefix_len {
             // Gather the evaluations that we are concerned about
+            // The indexes all have the same prefix (in this loop), and loops
+            // over all possible suffixes
+            // indexes = [suffix_len * beta_prefix .. suffix_len * (beta_prefix + 1)].to_vec()
             let indexes: Vec<_> = (0..suffix_len)
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
+            // left_poly = self.evaluation_of_p[suffix_len * beta_prefix .. suffix_len * (beta_prefix + 1)].to_vec()
             let left_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
                 folding_factor,
                 indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
