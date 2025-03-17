@@ -13,6 +13,7 @@ members = [
   "sumcheck",
   "transcript",
   "whir",
+  "witness",
   "p3",
 ]
 resolver = "2"
@@ -43,7 +44,7 @@ p3-dft = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 p3-field = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 p3-goldilocks = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 p3-matrix = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
-p3-maybe-rayon = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81", features = ["parallel"] }
+p3-maybe-rayon = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 p3-mds = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 p3-merkle-tree = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }
 p3-poseidon = { git = "https://github.com/scroll-tech/plonky3", rev = "8d2be81" }

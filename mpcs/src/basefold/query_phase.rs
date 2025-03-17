@@ -15,7 +15,7 @@ use itertools::{Itertools, izip};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::dot_product,
-    matrix::{Dimensions, Matrix, dense::RowMajorMatrix},
+    matrix::{Dimensions, dense::RowMajorMatrix},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;

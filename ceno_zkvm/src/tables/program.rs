@@ -1,5 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use super::RMMCollections;
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
@@ -14,12 +15,9 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
-
-use super::RMMCollections;
 use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 6]);

@@ -291,13 +291,13 @@ pub mod test_util {
     use multilinear_extensions::{
         mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
     };
-
+    #[cfg(test)]
+    use rand::rngs::OsRng;
+    #[cfg(test)]
+    use rand::{distributions::Standard, prelude::Distribution};
     #[cfg(test)]
     use transcript::BasicTranscript;
 
-    use p3::field::Field;
-    use rand::{distributions::Standard, prelude::Distribution, rngs::OsRng};
-    use rayon::iter::{IntoParallelIterator, ParallelIterator};
     use transcript::Transcript;
     use witness::RowMajorMatrix;
 
@@ -307,19 +307,6 @@ pub mod test_util {
         let poly_size = 1 << num_vars;
         let param = Pcs::setup(poly_size).unwrap();
         Pcs::trim(param, poly_size).unwrap()
-    }
-
-    pub fn gen_rand_rmms<F: Field>(
-        num_vars: impl Fn(usize) -> usize + Sync,
-        batch_size: usize,
-    ) -> Vec<RowMajorMatrix<F>>
-    where
-        Standard: Distribution<F>,
-    {
-        (0..batch_size)
-            .into_par_iter()
-            .map(|i| RowMajorMatrix::rand(&mut OsRng, 1 << num_vars(i), 1))
-            .collect::<Vec<_>>()
     }
 
     pub fn get_point_from_challenge<E: ExtensionField>(
