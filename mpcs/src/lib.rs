@@ -55,13 +55,21 @@ pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::batch_commit(pp, polys)
 }
 
+pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+    pp: &Pcs::ProverParam,
+    polys: &[DenseMultilinearExtension<E>],
+    transcript: &mut impl Transcript<E>,
+) -> Result<Pcs::CommitmentWithWitness, Error> {
+    Pcs::batch_commit_and_write(pp, polys, transcript)
+}
+
 // Express Value as binary in big-endian
 fn compute_binary_with_length(length: usize, mut value: usize) -> Vec<bool> {
-    assert!(value < 1 << length);
+    assert!(value < (1 << length));
     let mut bin = Vec::new();
     for _ in 0..length {
         bin.insert(0, value % 2 == 1);
-        value <<= 1;
+        value >>= 1;
     }
     bin
 }
@@ -233,26 +241,32 @@ fn compute_packed_eval<E: ExtensionField>(
     // Use comps to compute evals for packed polys from regular evals
     let mut packed_evals = Vec::new();
     let mut next_orig_poly = 0;
+    let pack_num_vars = packed_point.len();
     for next_packed_comp in packed_comps {
         let mut packed_eval = E::ZERO;
         for next_index in next_packed_comp {
             let mut next_eval = evals[next_orig_poly];
+            // Note: the points are stored in reverse
             for (j, b) in next_index.iter().enumerate() {
-                if *b { next_eval *= packed_point[j] }
+                let next_point = packed_point[pack_num_vars - 1 - j];
+                if *b { next_eval *= next_point } else { next_eval *= E::ONE - next_point }
             }
-            packed_eval *= next_eval;
+            packed_eval += next_eval;
             next_orig_poly += 1;
         }
         packed_evals.push(packed_eval);
     }
     if let Some(final_comp) = final_comp {
         let mut final_eval = E::ZERO;
+        let final_num_vars = final_point.len();
         for next_index in final_comp {
             let mut next_eval = evals[next_orig_poly];
+            // Note: the points are stored in reverse
             for (j, b) in next_index.iter().enumerate() {
-                if *b { next_eval *= final_point[j] }
+                let next_point = final_point[final_num_vars - 1 - j];
+                if *b { next_eval *= next_point } else { next_eval *= E::ONE - next_point }
             }
-            final_eval *= next_eval;
+            final_eval += next_eval;
             next_orig_poly += 1;
         }
         (packed_evals, Some(final_eval))
@@ -262,25 +276,35 @@ fn compute_packed_eval<E: ExtensionField>(
 }
 
 pub fn pcs_batch_commit_diff_size<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
-    pp: &Pcs::ProverParam,
+    pack_pp: &Pcs::ProverParam,
+    final_pp: &Option<Pcs::ProverParam>,
     polys: &[DenseMultilinearExtension<E>],
 ) -> Result<(Pcs::CommitmentWithWitness, Option<Pcs::CommitmentWithWitness>), Error> {
     let (packed_polys, final_poly, _, _) = pack_poly_prover(polys);
     // Final packed poly
-    if let Some(final_poly) = final_poly {
-        Ok((Pcs::batch_commit(pp, &packed_polys)?, Some(Pcs::batch_commit(pp, &[final_poly])?)))
-    } else {
-        Ok((Pcs::batch_commit(pp, &packed_polys)?, None))
+    match (final_pp, final_poly) {
+        (Some(final_pp), Some(final_poly)) => Ok((Pcs::batch_commit(pack_pp, &packed_polys)?, Some(Pcs::batch_commit(final_pp, &[final_poly])?))),
+        (None, None) => Ok((Pcs::batch_commit(pack_pp, &packed_polys)?, None)),
+        _ => unreachable!()
     }
 } 
 
-pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+pub fn pcs_batch_commit_diff_size_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     polys: &[DenseMultilinearExtension<E>],
     transcript: &mut impl Transcript<E>,
-) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit_and_write(pp, polys, transcript)
-}
+) -> Result<(Pcs::CommitmentWithWitness, Option<Pcs::CommitmentWithWitness>), Error> {
+    let (packed_polys, final_poly, _, _) = pack_poly_prover(polys);
+    // Final packed poly
+    if let Some(final_poly) = final_poly {
+        Ok((
+            Pcs::batch_commit_and_write(pp, &packed_polys, transcript)?, 
+            Some(Pcs::commit_and_write(pp, &final_poly, transcript)?)
+        ))
+    } else {
+        Ok((Pcs::batch_commit_and_write(pp, &packed_polys, transcript)?, None))
+    }
+} 
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
@@ -316,18 +340,22 @@ pub fn pcs_batch_open_diff_size<E: ExtensionField, Pcs: PolynomialCommitmentSche
     // TODO: Sort the polys by decreasing size
     // TODO: The prover should be able to avoid packing the polys again
     let (packed_polys, final_poly, packed_comps, final_comp) = pack_poly_prover(polys);
-    let packed_polys: Vec<ArcMultilinearExtension<E>> = packed_polys.into_iter().map(|p| ArcMultilinearExtension::from(p)).collect();
     // TODO: Add unifying sumcheck if the points do not match
     // For now, assume that all polys are evaluated on the same points
     let packed_point = points[0].clone();
-    let final_point = if let Some(final_poly) = &final_poly { packed_point[packed_point.len() - final_poly.num_vars..packed_point.len()].to_vec() } else { Vec::new() };
+    // Note: the points are stored in reverse
+    let final_point = if let Some(final_poly) = &final_poly { packed_point[..final_poly.num_vars].to_vec() } else { Vec::new() };
     // Use comps to compute evals for packed polys from regular evals
     let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, evals, &packed_comps, &final_comp);
 
+    let packed_polys: Vec<ArcMultilinearExtension<E>> = packed_polys.into_iter().map(|p| ArcMultilinearExtension::from(p)).collect();
     let pack_proof = Pcs::simple_batch_open(pp, &packed_polys, packed_comm, &packed_point, &packed_evals, transcript)?;
     let final_proof = match (&final_poly, &final_comm, &final_eval) {
-        (Some(final_poly), Some(final_comm), Some(final_eval)) => Some(Pcs::open(pp, final_poly, final_comm, &final_point, final_eval, transcript)?),
-        _ => None,
+        (Some(final_poly), Some(final_comm), Some(final_eval)) => {
+            Some(Pcs::open(pp, final_poly, final_comm, &final_point, final_eval, transcript)?)
+        }
+        (None, None, None) => None,
+        _ => unreachable!(),
     };
     Ok((pack_proof, final_proof))
 }
@@ -376,13 +404,17 @@ where
     // TODO: Add unifying sumcheck if the points do not match
     // For now, assume that all polys are evaluated on the same points
     let packed_point = points[0].clone();
-    let final_point = if let Some(final_poly_num_vars) = &final_poly_num_vars { packed_point[packed_point.len() - final_poly_num_vars..packed_point.len()].to_vec() } else { Vec::new() };
+    let final_point = if let Some(final_poly_num_vars) = &final_poly_num_vars { packed_point[..*final_poly_num_vars].to_vec() } else { Vec::new() };
     // Use comps to compute evals for packed polys from regular evals
     let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, evals, &packed_comps, &final_comp);
+
     Pcs::simple_batch_verify(vp, packed_comm, &packed_point, &packed_evals, packed_proof, transcript)?;
     match (&final_comm, &final_eval, &final_proof) {
-        (Some(final_comm), Some(final_eval), Some(final_proof)) => Pcs::verify(vp, final_comm, &final_point, &final_eval, final_proof, transcript),
-        _ => Ok(()),
+        (Some(final_comm), Some(final_eval), Some(final_proof)) => {
+            Pcs::verify(vp, final_comm, &final_point, &final_eval, final_proof, transcript)
+        }
+        (None, None, None) => Ok(()),
+        _ => unreachable!(),
     }
 }
 
@@ -926,7 +958,7 @@ pub mod test_util {
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
     {
-        use crate::{pcs_batch_commit_diff_size, pcs_batch_open_diff_size, pcs_batch_verify_diff_size};
+        use crate::{pcs_batch_commit_diff_size_and_write, pcs_batch_open_diff_size, pcs_batch_verify_diff_size};
 
         for vars_gap in 1..=max_vars_gap {
             assert!(max_num_vars > vars_gap * batch_size);
@@ -934,16 +966,18 @@ pub mod test_util {
 
             let (poly_num_vars, packed_comm, final_comm, evals, packed_proof, final_proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
-                let polys: Vec<DenseMultilinearExtension<E>> = (0..batch_size).map(|i| gen_rand_polys(|_| max_num_vars - i * vars_gap, 1, gen_rand_poly)).flatten().collect();
-                let (packed_comm, final_comm) = pcs_batch_commit_diff_size::<E, Pcs>(&pp, &polys).unwrap();
+                let polys: Vec<DenseMultilinearExtension<E>> = (0..batch_size).map(|i| 
+                    gen_rand_polys(|_| max_num_vars - i * vars_gap, 1, gen_rand_poly)
+                ).flatten().collect();
+                let (packed_comm, final_comm) = pcs_batch_commit_diff_size_and_write::<E, Pcs>(&pp, &polys, &mut transcript).unwrap();
                 let point = get_point_from_challenge(max_num_vars, &mut transcript);
-                let points: Vec<Vec<E>> = polys.iter().map(|p| point[max_num_vars - p.num_vars..].to_vec()).collect();
+                let points: Vec<Vec<E>> = polys.iter().map(|p| point[..p.num_vars].to_vec()).collect();
                 let evals = polys.iter().zip(&points).map(|(poly, point)| poly.evaluate(point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
 
                 let (packed_proof, final_proof) = pcs_batch_open_diff_size::<E, Pcs>(&pp, &polys, &packed_comm, &final_comm, &points, &evals, &mut transcript).unwrap();
                 (
-                    polys.iter().map(|p| p.num_vars).collect::<Vec<usize>>(),
+                    polys.iter().map(|p| p.num_vars()).collect::<Vec<_>>(),
                     Pcs::get_pure_commitment(&packed_comm),
                     if let Some(final_comm) = final_comm { Some(Pcs::get_pure_commitment(&final_comm)) } else { None },
                     evals,
@@ -961,7 +995,7 @@ pub mod test_util {
                 }
 
                 let point = get_point_from_challenge(max_num_vars, &mut transcript);
-                let points: Vec<Vec<E>> = poly_num_vars.iter().map(|n| point[max_num_vars - n..].to_vec()).collect();
+                let points: Vec<Vec<E>> = poly_num_vars.iter().map(|n| point[..*n].to_vec()).collect();
                 transcript.append_field_element_exts(&evals);
 
                 pcs_batch_verify_diff_size::<E, Pcs>(&vp, &poly_num_vars, &packed_comm, &final_comm, &points, &evals, &packed_proof, &final_proof, &mut transcript).unwrap();
@@ -980,6 +1014,12 @@ pub mod test_util {
 
 #[cfg(test)]
 mod test {
+    use ark_std::test_rng;
+    use ff_ext::GoldilocksExt2;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+    use p3_field::PrimeCharacteristicRing;
+    use p3_goldilocks::Goldilocks;
+    type E = GoldilocksExt2;
 
     #[test]
     fn test_packing() {
@@ -993,4 +1033,34 @@ mod test {
         println!("FINAL_COMP: {:?}", final_comp);
     }
 
+    #[test]
+    fn test_packing_eval() {
+        let mut rng = test_rng();
+        let poly0 = DenseMultilinearExtension::<E>::random(4, &mut rng);
+        let poly1 = DenseMultilinearExtension::<E>::random(3, &mut rng);
+        let poly2 = DenseMultilinearExtension::<E>::random(2, &mut rng);
+        let point = [E::from_i32(5), E::from_i32(7), E::from_i32(9), E::from_i32(11), E::from_i32(13)];
+        let eval0 = poly0.evaluate(&point[..4]);
+        let eval1 = poly1.evaluate(&point[..3]);
+        let eval2 = poly2.evaluate(&point[..2]);
+        let claim = 
+            (E::ONE - point[4]) * eval0 + 
+            point[4] * (E::ONE - point[3]) * eval1 + 
+            point[4] * point[3] * (E::ONE - point[2]) * eval2;
+
+        let mut poly = poly0.clone();
+        poly.merge(poly1.clone());
+        poly.merge(poly2.clone());
+        match &mut poly.evaluations {
+            FieldType::Base(e) => {
+                e.extend(vec![Goldilocks::ZERO; 4])
+            }
+            FieldType::Ext(e) => {
+                e.extend(vec![E::ZERO; 4])
+            }
+            _ => ()
+        }
+        let eval = poly.evaluate(&point);
+        println!("CLAIM: {:?}, EXPECTED: {:?}", claim, eval);
+    }
 }

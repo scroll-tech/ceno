@@ -179,7 +179,7 @@ where
 mod tests {
     use super::*;
     use crate::test_util::{
-        gen_rand_poly_base, run_commit_open_verify, run_simple_batch_commit_open_verify,
+        gen_rand_poly_base, run_commit_open_verify, run_diff_size_batch_commit_open_verify, run_simple_batch_commit_open_verify
     };
     use ff_ext::GoldilocksExt2;
     use spec::WhirDefaultSpec;
@@ -257,5 +257,16 @@ mod tests {
                 1,
             );
         }
+    }
+
+    #[test]
+    fn batch_commit_diff_size_open_verify() {
+        let gen_rand_poly = gen_rand_poly_base;
+        run_diff_size_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+            gen_rand_poly,
+            20,
+            3,
+            5,
+        );
     }
 }

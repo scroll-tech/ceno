@@ -1220,7 +1220,7 @@ mod test {
         let gen_rand_poly = gen_rand_poly_base;
         run_diff_size_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
             gen_rand_poly,
-            17,
+            20,
             3,
             5,
         );
