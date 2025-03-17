@@ -37,13 +37,7 @@ pub fn prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries: Vec<_> = (0..num_verifier_queries)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"query indices")
-                .elements
-        })
-        .collect();
+    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -74,13 +68,7 @@ pub fn batch_prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries: Vec<_> = (0..num_verifier_queries)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"query indices")
-                .elements
-        })
-        .collect();
+    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -110,13 +98,7 @@ pub fn simple_batch_prover_query_phase<E: ExtensionField>(
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let queries: Vec<_> = (0..num_verifier_queries)
-        .map(|_| {
-            transcript
-                .get_and_append_challenge(b"query indices")
-                .elements
-        })
-        .collect();
+    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
     // Transform the challenge queries from field elements into integers
     let queries_usize: Vec<usize> = queries
@@ -159,7 +141,7 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
     interpolate_over_boolean_hypercube(&mut message);
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     let final_codeword =
@@ -230,7 +212,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     interpolate_over_boolean_hypercube(&mut message);
@@ -307,7 +289,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     let encode_timer = start_timer!(|| "Encode final codeword");
     let mut message = final_message.to_vec();
-    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+    if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
         reverse_index_bits_in_place(&mut message);
     }
     interpolate_over_boolean_hypercube(&mut message);
@@ -528,6 +510,10 @@ where
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 enum CodewordPointPair<E: ExtensionField> {
     Ext(E, E),
     Base(E::BaseField, E::BaseField),
@@ -543,6 +529,10 @@ impl<E: ExtensionField> CodewordPointPair<E> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 enum SimpleBatchLeavesPair<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -588,6 +578,10 @@ where
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CodewordSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -630,6 +624,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CodewordSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -659,6 +657,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct OracleListQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -667,6 +669,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CommitmentsQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -675,6 +681,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct OracleListQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -683,6 +693,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct CommitmentsQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -804,6 +818,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -813,6 +831,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -909,6 +931,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct QueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -978,6 +1004,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct BatchedSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -987,6 +1017,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct BatchedSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1133,6 +1167,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct BatchedQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1202,6 +1240,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchCommitmentSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1246,6 +1288,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchCommitmentSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1283,6 +1329,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1292,6 +1342,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -1389,6 +1443,10 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,

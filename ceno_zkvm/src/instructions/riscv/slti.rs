@@ -20,6 +20,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use ff_ext::FieldInto;
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {
@@ -122,9 +123,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                     lkm,
                     *rs1_value.as_u16_limbs().last().unwrap() as u64,
                 )?;
+                let (rs1, imm) = (rs1 as SWord, imm as SWord);
                 config
                     .lt
-                    .assign_instance_signed(instance, lkm, rs1 as SWord, imm as SWord)?;
+                    .assign_instance_signed(instance, lkm, rs1 as i64, imm as i64)?;
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }
@@ -136,7 +138,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, PC_STEP_SIZE, StepRecord, encode_rv32};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use proptest::proptest;
 

@@ -1,4 +1,3 @@
-use ceno_emul::Addr;
 use itertools::{Itertools, chain};
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -9,10 +8,11 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, WitIn},
+    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
     witness::RowMajorMatrix,
 };
+use p3_field::PrimeCharacteristicRing;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -56,31 +56,18 @@ impl NameSpace {
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
-    pub table_len: usize,
-}
-
-// TODO encapsulate few information of table spec to SetTableAddrType value
-// once confirm syntax is friendly and parsed by recursive verifier
-#[derive(Clone, Debug)]
-pub enum SetTableAddrType {
-    FixedAddr,
-    DynamicAddr(DynamicAddr),
-}
-
-#[derive(Clone, Debug)]
-pub struct DynamicAddr {
-    pub addr_witin_id: usize,
-    pub offset: Addr,
+    pub table_spec: SetTableSpec,
 }
 
 #[derive(Clone, Debug)]
 pub struct SetTableSpec {
-    pub addr_type: SetTableAddrType,
-    pub len: usize,
+    pub len: Option<usize>,
+    pub structural_witins: Vec<StructuralWitIn>,
 }
 
 #[derive(Clone, Debug)]
 pub struct SetTableExpression<E: ExtensionField> {
+    /// table expression
     pub expr: Expression<E>,
 
     // TODO make decision to have enum/struct
@@ -92,9 +79,11 @@ pub struct SetTableExpression<E: ExtensionField> {
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
-    // pub platform: Platform,
     pub num_witin: WitnessId,
     pub witin_namespace_map: Vec<String>,
+
+    pub num_structural_witin: WitnessId,
+    pub structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
@@ -121,9 +110,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
-    pub lk_expressions_namespace_map: Vec<String>,
     pub lk_table_expressions: Vec<LogupTableExpression<E>>,
-    pub lk_table_expressions_namespace_map: Vec<String>,
+    pub lk_expressions_namespace_map: Vec<String>,
+    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     /// main constraints zero expression
     pub assert_zero_expressions: Vec<Expression<E>>,
@@ -141,7 +130,6 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_beta: Expression<E>,
 
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
-    pub lk_expressions_items_map: Vec<(ROMType, Vec<Expression<E>>)>,
 
     pub(crate) phantom: PhantomData<E>,
 }
@@ -152,6 +140,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_witin: 0,
             // platform,
             witin_namespace_map: vec![],
+            num_structural_witin: 0,
+            structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
@@ -167,9 +157,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             w_table_expressions: vec![],
             w_table_expressions_namespace_map: vec![],
             lk_expressions: vec![],
-            lk_expressions_namespace_map: vec![],
             lk_table_expressions: vec![],
-            lk_table_expressions_namespace_map: vec![],
+            lk_expressions_namespace_map: vec![],
+            lk_expressions_items_map: vec![],
             assert_zero_expressions: vec![],
             assert_zero_expressions_namespace_map: vec![],
             assert_zero_sumcheck_expressions: vec![],
@@ -179,7 +169,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
             debug_map: HashMap::new(),
-            lk_expressions_items_map: vec![],
 
             phantom: std::marker::PhantomData,
         }
@@ -209,16 +198,32 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     }
 
     pub fn create_witin<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> WitIn {
-        let wit_in = WitIn {
-            id: {
-                let id = self.num_witin;
-                self.num_witin = self.num_witin.strict_add(1);
-                id
-            },
-        };
+        let wit_in = WitIn { id: self.num_witin };
+        self.num_witin = self.num_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
         self.witin_namespace_map.push(path);
+
+        wit_in
+    }
+
+    pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+        max_len: usize,
+        offset: u32,
+        multi_factor: usize,
+    ) -> StructuralWitIn {
+        let wit_in = StructuralWitIn {
+            id: self.num_structural_witin,
+            max_len,
+            offset,
+            multi_factor,
+        };
+        self.num_structural_witin = self.num_structural_witin.strict_add(1);
+
+        let path = self.ns.compute_path(n().into());
+        self.structural_witin_namespace_map.push(path);
 
         wit_in
     }
@@ -264,9 +269,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
-            std::iter::once(Expression::Constant(E::BaseField::from(rom_type as u64)))
-                .chain(record.clone())
-                .collect(),
+            std::iter::once(Expression::Constant(E::BaseField::from_u64(
+                rom_type as u64,
+            )))
+            .chain(record.clone())
+            .collect(),
         );
         assert_eq!(
             rlc_record.degree(),
@@ -286,7 +293,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn lk_table_record<NR, N>(
         &mut self,
         name_fn: N,
-        table_len: usize,
+        table_spec: SetTableSpec,
         rom_type: ROMType,
         record: Vec<Expression<E>>,
         multiplicity: Expression<E>,
@@ -310,10 +317,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.lk_table_expressions.push(LogupTableExpression {
             values: rlc_record,
             multiplicity,
-            table_len,
+            table_spec,
         });
         let path = self.ns.compute_path(name_fn().into());
-        self.lk_table_expressions_namespace_map.push(path);
+        self.lk_expressions_namespace_map.push(path);
         // Since lk_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
         self.lk_expressions_items_map.push((rom_type, record));

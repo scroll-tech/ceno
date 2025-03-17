@@ -57,10 +57,11 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         _input: &(),
     ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
-        config.assign_instances(num_witin, multiplicity, OP::len())
+        config.assign_instances(num_witin, num_structural_witin, multiplicity, OP::len())
     }
 }

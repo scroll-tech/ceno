@@ -1,26 +1,21 @@
+use glob::glob;
 use std::{
-    fs::File,
+    fs::{File, read_dir},
     io::{self, Write},
     path::Path,
     process::Command,
 };
 
-/// Add each example to this list.
-///
-/// Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
-const EXAMPLES: &[&str] = &[
-    "ceno_rt_alloc",
-    "ceno_rt_io",
-    "ceno_rt_mem",
-    "ceno_rt_mini",
-    "ceno_rt_panic",
-    "hints",
-    "sorting",
-    "median",
-    "bubble_sorting",
-    "hashing",
-];
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+fn rerun_all_but_target(dir: &Path) {
+    for entry in read_dir(dir).unwrap().filter_map(Result::ok) {
+        if "target" == entry.file_name() {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", entry.path().to_string_lossy());
+    }
+}
 
 fn build_elfs() {
     let out_dir = std::env::var_os("OUT_DIR").unwrap();
@@ -30,7 +25,7 @@ fn build_elfs() {
     // TODO(Matthias): skip building the elfs if we are in clippy or check mode.
     // See git history for an attempt to do this.
     let output = Command::new("cargo")
-        .args(["build", "--release", "--examples"])
+        .args(["build", "--release", "--examples", "--target-dir", "target"])
         .current_dir("../examples")
         .env_clear()
         .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
@@ -41,7 +36,12 @@ fn build_elfs() {
         io::stderr().write_all(&output.stderr).unwrap();
         panic!("cargo build of examples failed.");
     }
-    for example in EXAMPLES {
+    // Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
+    for example in glob("../examples/examples/*.rs")
+        .unwrap()
+        .map(Result::unwrap)
+    {
+        let example = example.file_stem().unwrap().to_str().unwrap();
         writeln!(
             dest,
             r#"#[allow(non_upper_case_globals)]
@@ -49,10 +49,8 @@ fn build_elfs() {
                 include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
         ).expect("failed to write vars.rs");
     }
-    println!("cargo:rerun-if-changed=../examples/");
-    println!("cargo:rerun-if-changed=../ceno_rt/");
-    let elfs_path = "../examples/target/riscv32im-ceno-zkvm-elf/release/examples/";
-    println!("cargo:rerun-if-changed={elfs_path}");
+    rerun_all_but_target(Path::new("../examples"));
+    rerun_all_but_target(Path::new("../ceno_rt"));
 }
 
 fn main() {

@@ -1,8 +1,13 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt::Debug};
+use p3_field::PrimeCharacteristicRing;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Debug},
+    ops::Div,
+};
 use sumcheck::structs::IOPProverMessage;
 
 use crate::structs::TowerProofs;
@@ -45,6 +50,10 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // tower evaluation at layer 1
     pub r_out_evals: Vec<[E; 2]>,
@@ -98,15 +107,17 @@ impl PublicValues<u32> {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from((self.exit_code & 0xffff) as u64)],
-            vec![E::BaseField::from(((self.exit_code >> 16) & 0xffff) as u64)],
-            vec![E::BaseField::from(self.init_pc as u64)],
-            vec![E::BaseField::from(self.init_cycle as u64)],
-            vec![E::BaseField::from(self.end_pc as u64)],
-            vec![E::BaseField::from(self.end_cycle as u64)],
+            vec![E::BaseField::from_u64((self.exit_code & 0xffff) as u64)],
+            vec![E::BaseField::from_u64(
+                ((self.exit_code >> 16) & 0xffff) as u64,
+            )],
+            vec![E::BaseField::from_u64(self.init_pc as u64)],
+            vec![E::BaseField::from_u64(self.init_cycle as u64)],
+            vec![E::BaseField::from_u64(self.end_pc as u64)],
+            vec![E::BaseField::from_u64(self.end_cycle as u64)],
             self.public_io
                 .iter()
-                .map(|e| E::BaseField::from(*e as u64))
+                .map(|e| E::BaseField::from_u64(*e as u64))
                 .collect(),
         ]
     }
@@ -153,10 +164,126 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn update_pi_eval(&mut self, idx: usize, v: E) {
         self.pi_evals[idx] = v;
     }
-}
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn num_circuits(&self) -> usize {
         self.opcode_proofs.len() + self.table_proofs.len()
     }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Display
+    for ZKVMProof<E, PCS>
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // break down zkvm proof size
+        // opcode circuit mpcs size
+        let mpcs_opcode_commitment = self
+            .opcode_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.wits_commit))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        let mpcs_opcode_opening = self
+            .opcode_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.wits_opening_proof))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        // opcode circuit for tower proof size
+        let tower_proof_opcode = self
+            .opcode_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.tower_proof))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        // opcode circuit main sumcheck
+        let main_sumcheck_opcode = self
+            .opcode_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.main_sel_sumcheck_proofs))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        // table circuit mpcs size
+        let mpcs_table_commitment = self
+            .table_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.wits_commit))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        let mpcs_table_opening = self
+            .table_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.wits_opening_proof))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        let mpcs_table_fixed_opening = self
+            .table_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.fixed_opening_proof))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        // table circuit for tower proof size
+        let tower_proof_table = self
+            .table_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.tower_proof))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+        // table circuit same r sumcheck
+        let same_r_sumcheck_table = self
+            .table_proofs
+            .iter()
+            .map(|(_, (_, proof))| bincode::serialized_size(&proof.same_r_sumcheck_proofs))
+            .collect::<Result<Vec<u64>, _>>()
+            .expect("serialization error")
+            .iter()
+            .sum::<u64>();
+
+        // overall size
+        let overall_size = bincode::serialized_size(&self).expect("serialization error");
+
+        // let mpcs_size = bincode::serialized_size(&proof.).unwrap().len();
+        write!(
+            f,
+            "overall_size {:.2}mb. \n\
+            opcode mpcs commitment {:?}% \n\
+            opcode mpcs opening {:?}% \n\
+            opcode tower proof {:?}% \n\
+            opcode main sumcheck proof {:?}% \n\
+            table mpcs commitment {:?}% \n\
+            table mpcs opening {:?}% \n\
+            table mpcs fixed opening {:?}% \n\
+            table tower proof {:?}% \n\
+            table same r sumcheck proof {:?}%",
+            byte_to_mb(overall_size),
+            (mpcs_opcode_commitment * 100).div(overall_size),
+            (mpcs_opcode_opening * 100).div(overall_size),
+            (tower_proof_opcode * 100).div(overall_size),
+            (main_sumcheck_opcode * 100).div(overall_size),
+            (mpcs_table_commitment * 100).div(overall_size),
+            (mpcs_table_opening * 100).div(overall_size),
+            (mpcs_table_fixed_opening * 100).div(overall_size),
+            (tower_proof_table * 100).div(overall_size),
+            (same_r_sumcheck_table * 100).div(overall_size),
+        )
+    }
+}
+
+fn byte_to_mb(byte_size: u64) -> f64 {
+    byte_size as f64 / (1024.0 * 1024.0)
 }

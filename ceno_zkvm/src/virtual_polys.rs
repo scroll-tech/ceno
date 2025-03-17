@@ -9,14 +9,14 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     util::ceil_log2,
-    virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
 };
 
 use crate::{expression::Expression, utils::transpose};
 
 pub struct VirtualPolynomials<'a, E: ExtensionField> {
     num_threads: usize,
-    polys: Vec<VirtualPolynomialV2<'a, E>>,
+    polys: Vec<VirtualPolynomial<'a, E>>,
     /// a storage to keep thread based mles, specific to multi-thread logic
     thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
 }
@@ -26,7 +26,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         VirtualPolynomials {
             num_threads,
             polys: (0..num_threads)
-                .map(|_| VirtualPolynomialV2::new(max_num_variables - ceil_log2(num_threads)))
+                .map(|_| VirtualPolynomial::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
             thread_based_mles_storage: HashMap::new(),
         }
@@ -77,7 +77,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             });
     }
 
-    pub fn get_batched_polys(self) -> Vec<VirtualPolynomialV2<'a, E>> {
+    pub fn get_batched_polys(self) -> Vec<VirtualPolynomial<'a, E>> {
         self.polys
     }
 
@@ -96,10 +96,11 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         let monomial_terms = expr.evaluate(
             &|_| unreachable!(),
             &|witness_id| vec![(E::ONE, { vec![witness_id] })],
+            &|structural_witness_id, _, _, _| vec![(E::ONE, { vec![structural_witness_id] })],
             &|scalar| vec![(E::from(scalar), { vec![] })],
             &|challenge_id, pow, scalar, offset| {
                 let challenge = challenges[challenge_id as usize];
-                vec![(challenge.pow([pow as u64]) * scalar + offset, vec![])]
+                vec![(challenge.exp_u64(pow as u64) * scalar + offset, vec![])]
             },
             &|mut a, b| {
                 a.extend(b);
@@ -169,14 +170,15 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 mod tests {
 
     use ark_std::test_rng;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
+    use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         mle::IntoMLE,
-        virtual_poly::VPAuxInfo,
-        virtual_poly_v2::{ArcMultilinearExtension, VirtualPolynomialV2},
+        virtual_poly::{ArcMultilinearExtension, VPAuxInfo, VirtualPolynomial},
     };
-    use sumcheck::structs::{IOPProverStateV2, IOPVerifierState};
+    use p3_field::PrimeCharacteristicRing;
+    use p3_goldilocks::Goldilocks;
+    use sumcheck::structs::{IOPProverState, IOPVerifierState};
     use transcript::BasicTranscript as Transcript;
 
     use crate::{
@@ -184,7 +186,6 @@ mod tests {
         expression::{Expression, ToExpr},
         virtual_polys::VirtualPolynomials,
     };
-    use ff::Field;
     type E = GoldilocksExt2;
 
     #[test]
@@ -195,7 +196,7 @@ mod tests {
         let y = cb.create_witin(|| "y");
 
         let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
-            .map(|_| vec![Goldilocks::from(1)].into_mle().into())
+            .map(|_| vec![Goldilocks::from_u64(1)].into_mle().into())
             .collect();
 
         let mut virtual_polys = VirtualPolynomials::new(1, 0);
@@ -208,7 +209,7 @@ mod tests {
             wits_in.iter().collect_vec(),
             &expr,
             &[],
-            1.into(),
+            GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 2);
         assert!(virtual_polys.degree() == 2);
@@ -220,7 +221,7 @@ mod tests {
             wits_in.iter().collect_vec(),
             &expr,
             &[],
-            1.into(),
+            GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 1);
         assert!(virtual_polys.degree() == 3);
@@ -230,7 +231,7 @@ mod tests {
     fn test_sumcheck_different_degree() {
         let max_num_vars = 3;
         let fn_eval = |fs: &[ArcMultilinearExtension<E>]| -> E {
-            let base_2 = Goldilocks::from(2);
+            let base_2 = Goldilocks::from_u64(2);
 
             let evals = fs.iter().fold(
                 vec![Goldilocks::ONE; 1 << fs[0].num_vars()],
@@ -239,15 +240,15 @@ mod tests {
                         .iter_mut()
                         .zip(f.get_base_field_vec())
                         .for_each(|(e, v)| {
-                            *e *= v;
+                            *e *= *v;
                         });
                     evals
                 },
             );
 
             GoldilocksExt2::from(
-                evals.iter().sum::<Goldilocks>()
-                    * base_2.pow([(max_num_vars - fs[0].num_vars()) as u64]),
+                evals.iter().copied().sum::<Goldilocks>()
+                    * base_2.exp_u64((max_num_vars - fs[0].num_vars()) as u64),
             )
         };
         let num_threads = 1;
@@ -283,7 +284,7 @@ mod tests {
         virtual_polys.add_mle_list(f2.iter().collect(), E::ONE);
         virtual_polys.add_mle_list(f3.iter().collect(), E::ONE);
 
-        let (sumcheck_proofs, _) = IOPProverStateV2::prove_batch_polys(
+        let (sumcheck_proofs, _) = IOPProverState::prove_batch_polys(
             num_threads,
             virtual_polys.get_batched_polys(),
             &mut transcript,
@@ -295,13 +296,13 @@ mod tests {
             &sumcheck_proofs,
             &VPAuxInfo {
                 max_degree: 3,
-                num_variables: max_num_vars,
+                max_num_variables: max_num_vars,
                 phantom: std::marker::PhantomData,
             },
             &mut transcript,
         );
 
-        let mut verifier_poly = VirtualPolynomialV2::new(max_num_vars);
+        let mut verifier_poly = VirtualPolynomial::new(max_num_vars);
         verifier_poly.add_mle_list(f1.to_vec(), E::ONE);
         verifier_poly.add_mle_list(f2.to_vec(), E::ONE);
         verifier_poly.add_mle_list(f3.to_vec(), E::ONE);

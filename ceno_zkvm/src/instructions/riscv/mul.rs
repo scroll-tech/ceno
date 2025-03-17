@@ -78,17 +78,18 @@
 //! the high limb uniquely represent the product values for unsigned/unsigned
 //! and signed/unsigned products.
 
-use std::{fmt::Display, marker::PhantomData};
+use std::marker::PhantomData;
 
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
+use p3_field::PrimeCharacteristicRing;
+use p3_goldilocks::Goldilocks;
 
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     expression::Expression,
-    gadgets::{IsEqualConfig, SignedExtendConfig},
+    gadgets::{IsEqualConfig, Signed},
     instructions::{
         Instruction,
         riscv::{
@@ -173,7 +174,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(E::BaseField::MODULUS_U64, goldilocks::MODULUS);
+        assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
 
         // 0. Registers and instruction lookup
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
@@ -353,8 +354,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
-                let rd_f = E::BaseField::from(rd as u64);
-                let avoid_f = E::BaseField::from(u32::MAX.into());
+                let rd_f = E::BaseField::from_u64(rd as u64);
+                let avoid_f = E::BaseField::from_u32(u32::MAX);
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
                 // only take the low part of the product
@@ -366,8 +367,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 assert_eq!(prod_lo, rd);
 
                 let prod_hi = prod >> BIT_WIDTH;
-                let avoid_f = E::BaseField::from(u32::MAX.into());
-                constrain_rd.assign_instance(instance, E::BaseField::from(prod_hi), avoid_f)?;
+                let avoid_f = E::BaseField::from_u32(u32::MAX);
+                constrain_rd.assign_instance(instance, E::BaseField::from_u64(prod_hi), avoid_f)?;
                 prod_hi as u32
             }
             MulhSignDependencies::SU {
@@ -398,51 +399,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
     }
 }
 
-/// Transform a value represented as a `UInt` into a `WitIn` containing its
-/// corresponding signed value, interpreting the bits as a 2s-complement
-/// encoding.  Gadget allocates 2 `WitIn` values in total.
-struct Signed<E: ExtensionField> {
-    pub is_negative: SignedExtendConfig<E>,
-    val: Expression<E>,
-}
-
-impl<E: ExtensionField> Signed<E> {
-    pub fn construct_circuit<NR: Into<String> + Display + Clone, N: FnOnce() -> NR>(
-        cb: &mut CircuitBuilder<E>,
-        name_fn: N,
-        unsigned_val: &UInt<E>,
-    ) -> Result<Self, ZKVMError> {
-        cb.namespace(name_fn, |cb| {
-            let is_negative = unsigned_val.is_negative(cb)?;
-            let val = unsigned_val.value() - (1u64 << BIT_WIDTH) * is_negative.expr();
-
-            Ok(Self { is_negative, val })
-        })
-    }
-
-    pub fn assign_instance(
-        &self,
-        instance: &mut [E::BaseField],
-        lkm: &mut LkMultiplicity,
-        val: &Value<u32>,
-    ) -> Result<i32, ZKVMError> {
-        self.is_negative.assign_instance(
-            instance,
-            lkm,
-            *val.as_u16_limbs().last().unwrap() as u64,
-        )?;
-        Ok(i32::from(val))
-    }
-
-    pub fn expr(&self) -> Expression<E> {
-        self.val.clone()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, StepRecord, encode_rv32};
-    use goldilocks::GoldilocksExt2;
+    use ff_ext::GoldilocksExt2;
 
     use super::*;
     use crate::{

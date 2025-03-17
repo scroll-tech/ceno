@@ -7,7 +7,7 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType, IntoMLE},
     op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
-    virtual_poly_v2::ArcMultilinearExtension,
+    virtual_poly::ArcMultilinearExtension,
 };
 use rayon::{
     iter::{
@@ -97,8 +97,8 @@ macro_rules! tower_mle_4 {
             .zip($acc_q.par_iter_mut())
             .with_min_len(MIN_PAR_SIZE)
             .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
-                *p_eval = *q1 * p2 + *q2 * p1;
-                *q_eval = *q1 * q2;
+                *p_eval = *q1 * *p2 + *q2 * *p1;
+                *q_eval = *q1 * *q2;
             })
     };
 }
@@ -162,8 +162,8 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                             .for_each(|(((q1, q2), p_res), q_res)| {
                                 // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
                                 // p is numerator and q is denominator
-                                *p_res = *q1 + q2;
-                                *q_res = *q1 * q2;
+                                *p_res = *q1 + *q2;
+                                *q_res = *q1 * *q2;
                             }),
                         _ => unreachable!(),
                     };
@@ -240,6 +240,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
+    structual_witnesses: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E; N],
     expr: &Expression<E>,
@@ -247,6 +248,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
     expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
+        &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> =
@@ -260,7 +262,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             let challenge = challenges[challenge_id as usize];
             let challenge: ArcMultilinearExtension<E> = Arc::new(
                 DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
-                    challenge.pow([pow as u64]) * scalar + offset,
+                    challenge.exp_u64(pow as u64) * scalar + offset,
                 ]),
             );
             challenge
@@ -291,7 +293,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                         a.par_iter()
                             .zip(b.par_iter())
                             .with_min_len(MIN_PAR_SIZE)
-                            .map(|(a, b)| *a + b)
+                            .map(|(a, b)| *a + *b)
                             .collect(),
                     )),
                 }
@@ -327,7 +329,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                             a.par_iter()
                                 .zip(b.par_iter())
                                 .with_min_len(MIN_PAR_SIZE)
-                                .map(|(a, b)| *a * b)
+                                .map(|(a, b)| *a * *b)
                                 .collect(),
                         ))
                     }
@@ -343,7 +345,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                     ceil_log2(x.len()),
                     x.par_iter()
                         .with_min_len(MIN_PAR_SIZE)
-                        .map(|x| a * x + b)
+                        .map(|x| a * *x + b)
                         .collect(),
                 ))
             })
@@ -353,26 +355,29 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
 
 pub(crate) fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
+    structural_witnesses: &[E],
     challenges: &[E],
     expr: &Expression<E>,
 ) -> E {
-    eval_by_expr_with_fixed(&[], witnesses, challenges, expr)
+    eval_by_expr_with_fixed(&[], witnesses, structural_witnesses, challenges, expr)
 }
 
 pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
+    structural_witnesses: &[E],
     challenges: &[E],
     expr: &Expression<E>,
 ) -> E {
     expr.evaluate::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
+        &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
-            challenge.pow([pow as u64]) * scalar + offset
+            challenge.exp_u64(pow as u64) * scalar + offset
         },
         &|a, b| a + b,
         &|a, b| a * b,
@@ -383,6 +388,7 @@ pub(crate) fn eval_by_expr_with_fixed<E: ExtensionField>(
 pub fn eval_by_expr_with_instance<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],
+    structural_witnesses: &[E],
     instance: &[E],
     challenges: &[E],
     expr: &Expression<E>,
@@ -390,12 +396,13 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
     expr.evaluate_with_instance::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
+        &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
         &|i| instance[i.0],
         &|scalar| scalar.into(),
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
-            challenge.pow([pow as u64]) * scalar + offset
+            challenge.exp_u64(pow as u64) * scalar + offset
         },
         &|a, b| a + b,
         &|a, b| a * b,
@@ -405,15 +412,15 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
-    use ff::Field;
-    use goldilocks::{ExtensionField, GoldilocksExt2};
+    use ff_ext::{FieldInto, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         commutative_op_mle_pair,
         mle::{FieldType, IntoMLE},
         util::ceil_log2,
-        virtual_poly_v2::ArcMultilinearExtension,
+        virtual_poly::ArcMultilinearExtension,
     };
+    use p3_field::PrimeCharacteristicRing;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -430,8 +437,8 @@ mod tests {
         type E = GoldilocksExt2;
         let num_product_fanin = 2;
         let last_layer: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from(2u64)].into_mle().into(),
-            vec![E::from(3u64), E::from(4u64)].into_mle().into(),
+            vec![E::ONE, E::from_u64(2u64)].into_mle().into(),
+            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle().into(),
         ];
         let num_vars = ceil_log2(last_layer[0].evaluations().len()) + 1;
         let res = infer_tower_product_witness(num_vars, last_layer.clone(), 2);
@@ -441,7 +448,7 @@ mod tests {
                 assert!(left.len() == 1 && right.len() == 1);
                 left[0] * right[0]
             },
-            |out| E::from_base(&out)
+            |out| out.into()
         );
         let expected_final_product: E = last_layer
             .iter()
@@ -464,24 +471,24 @@ mod tests {
         let num_product_fanin = 2;
         // [[1, 2], [3, 4], [5, 6], [7, 8]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from(2u64)].into_mle().into(),
-            vec![E::from(3u64), E::from(4u64)].into_mle().into(),
-            vec![E::from(5u64), E::from(6u64)].into_mle().into(),
-            vec![E::from(7u64), E::from(8u64)].into_mle().into(),
+            vec![E::ONE, E::from_u64(2u64)].into_mle().into(),
+            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle().into(),
+            vec![E::from_u64(5u64), E::from_u64(6u64)].into_mle().into(),
+            vec![E::from_u64(7u64), E::from_u64(8u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ONE);
         // [[1, 3, 5, 7], [2, 4, 6, 8]]
         assert_eq!(res[0].get_ext_field_vec(), vec![
             E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::from(7u64)
+            E::from_u64(3u64),
+            E::from_u64(5u64),
+            E::from_u64(7u64)
         ],);
         assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(4u64),
-            E::from(6u64),
-            E::from(8u64)
+            E::from_u64(2u64),
+            E::from_u64(4u64),
+            E::from_u64(6u64),
+            E::from_u64(8u64)
         ],);
     }
 
@@ -493,38 +500,38 @@ mod tests {
         // case 1: test limb level padding
         // [[1,2],[3,4],[5,6]]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from(2u64)].into_mle().into(),
-            vec![E::from(3u64), E::from(4u64)].into_mle().into(),
-            vec![E::from(5u64), E::from(6u64)].into_mle().into(),
+            vec![E::ONE, E::from_u64(2u64)].into_mle().into(),
+            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle().into(),
+            vec![E::from_u64(5u64), E::from_u64(6u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ZERO);
         // [[1, 3, 5, 0], [2, 4, 6, 0]]
         assert_eq!(res[0].get_ext_field_vec(), vec![
             E::ONE,
-            E::from(3u64),
-            E::from(5u64),
-            E::from(0u64)
+            E::from_u64(3u64),
+            E::from_u64(5u64),
+            E::from_u64(0u64)
         ],);
         assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(4u64),
-            E::from(6u64),
-            E::from(0u64)
+            E::from_u64(2u64),
+            E::from_u64(4u64),
+            E::from_u64(6u64),
+            E::from_u64(0u64)
         ],);
 
         // case 2: test instance level padding
         // [[1,0],[3,0],[5,0]]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from(0u64)].into_mle().into(),
-            vec![E::from(3u64), E::from(0u64)].into_mle().into(),
-            vec![E::from(5u64), E::from(0u64)].into_mle().into(),
+            vec![E::ONE, E::from_u64(0u64)].into_mle().into(),
+            vec![E::from_u64(3u64), E::from_u64(0u64)].into_mle().into(),
+            vec![E::from_u64(5u64), E::from_u64(0u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[1, 3, 5, 1], [1, 1, 1, 1]]
         assert_eq!(res[0].get_ext_field_vec(), vec![
             E::ONE,
-            E::from(3u64),
-            E::from(5u64),
+            E::from_u64(3u64),
+            E::from_u64(5u64),
             E::ONE
         ],);
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE; 4],);
@@ -536,14 +543,14 @@ mod tests {
         let num_product_fanin = 2;
         // one instance, 2 mles: [[2], [3]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::from(2u64)].into_mle().into(),
-            vec![E::from(3u64)].into_mle().into(),
+            vec![E::from_u64(2u64)].into_mle().into(),
+            vec![E::from_u64(3u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[2, 3], [1, 1]]
         assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::from(2u64),
-            E::from(3u64)
+            E::from_u64(2u64),
+            E::from_u64(3u64)
         ],);
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE, E::ONE],);
     }
@@ -555,13 +562,13 @@ mod tests {
         let q: Vec<ArcMultilinearExtension<E>> = vec![
             vec![1, 2, 3, 4]
                 .into_iter()
-                .map(E::from)
+                .map(E::from_u64)
                 .collect_vec()
                 .into_mle()
                 .into(),
             vec![5, 6, 7, 8]
                 .into_iter()
-                .map(E::from)
+                .map(E::from_u64)
                 .collect_vec()
                 .into_mle()
                 .into(),
@@ -573,20 +580,20 @@ mod tests {
         // input layer p
         assert_eq!(
             layer[0].evaluations().clone(),
-            FieldType::Ext(vec![1.into(); 4])
+            FieldType::Ext(vec![1.into_f(); 4])
         );
         assert_eq!(
             layer[1].evaluations().clone(),
-            FieldType::Ext(vec![1.into(); 4])
+            FieldType::Ext(vec![1.into_f(); 4])
         );
         // input layer q is none
         assert_eq!(
             layer[2].evaluations().clone(),
-            FieldType::Ext(vec![1.into(), 2.into(), 3.into(), 4.into()])
+            FieldType::Ext(vec![1.into_f(), 2.into_f(), 3.into_f(), 4.into_f()])
         );
         assert_eq!(
             layer[3].evaluations().clone(),
-            FieldType::Ext(vec![5.into(), 6.into(), 7.into(), 8.into()])
+            FieldType::Ext(vec![5.into_f(), 6.into_f(), 7.into_f(), 8.into_f()])
         );
 
         // next layer
@@ -595,32 +602,32 @@ mod tests {
         assert_eq!(
             layer[0].evaluations().clone(),
             FieldType::<E>::Ext(vec![
-                vec![1 + 5].into_iter().map(E::from).sum::<E>(),
-                vec![2 + 6].into_iter().map(E::from).sum::<E>()
+                vec![1 + 5].into_iter().map(E::from_u64).sum::<E>(),
+                vec![2 + 6].into_iter().map(E::from_u64).sum::<E>()
             ])
         );
         // next layer p2
         assert_eq!(
             layer[1].evaluations().clone(),
             FieldType::<E>::Ext(vec![
-                vec![3 + 7].into_iter().map(E::from).sum::<E>(),
-                vec![4 + 8].into_iter().map(E::from).sum::<E>()
+                vec![3 + 7].into_iter().map(E::from_u64).sum::<E>(),
+                vec![4 + 8].into_iter().map(E::from_u64).sum::<E>()
             ])
         );
         // next layer q1
         assert_eq!(
             layer[2].evaluations().clone(),
             FieldType::<E>::Ext(vec![
-                vec![5].into_iter().map(E::from).sum::<E>(),
-                vec![2 * 6].into_iter().map(E::from).sum::<E>()
+                vec![5].into_iter().map(E::from_u64).sum::<E>(),
+                vec![2 * 6].into_iter().map(E::from_u64).sum::<E>()
             ])
         );
         // next layer q2
         assert_eq!(
             layer[3].evaluations().clone(),
             FieldType::<E>::Ext(vec![
-                vec![3 * 7].into_iter().map(E::from).sum::<E>(),
-                vec![4 * 8].into_iter().map(E::from).sum::<E>()
+                vec![3 * 7].into_iter().map(E::from_u64).sum::<E>(),
+                vec![4 * 8].into_iter().map(E::from_u64).sum::<E>()
             ])
         );
 
@@ -633,7 +640,7 @@ mod tests {
             FieldType::<E>::Ext(vec![
                 vec![(1 + 5) * (3 * 7) + (3 + 7) * 5]
                     .into_iter()
-                    .map(E::from)
+                    .map(E::from_u64)
                     .sum::<E>(),
             ])
         );
@@ -644,7 +651,7 @@ mod tests {
             FieldType::<E>::Ext(vec![
                 vec![(2 + 6) * (4 * 8) + (4 + 8) * (2 * 6)]
                     .into_iter()
-                    .map(E::from)
+                    .map(E::from_u64)
                     .sum::<E>(),
             ])
         );
@@ -652,22 +659,27 @@ mod tests {
         assert_eq!(
             layer[2].evaluations().clone(),
             // q12 * q11
-            FieldType::<E>::Ext(vec![vec![(3 * 7) * 5].into_iter().map(E::from).sum::<E>(),])
+            FieldType::<E>::Ext(vec![
+                vec![(3 * 7) * 5].into_iter().map(E::from_u64).sum::<E>(),
+            ])
         );
         // q2
         assert_eq!(
             layer[3].evaluations().clone(),
             // q22 * q22
             FieldType::<E>::Ext(vec![
-                vec![(4 * 8) * (2 * 6)].into_iter().map(E::from).sum::<E>(),
+                vec![(4 * 8) * (2 * 6)]
+                    .into_iter()
+                    .map(E::from_u64)
+                    .sum::<E>(),
             ])
         );
     }
 
     #[test]
     fn test_wit_infer_by_expr_base_field() {
-        type E = goldilocks::GoldilocksExt2;
-        type B = goldilocks::Goldilocks;
+        type E = ff_ext::GoldilocksExt2;
+        type B = p3_goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let a = cb.create_witin(|| "a");
@@ -679,10 +691,11 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from(1)].into_mle().into(),
-                vec![B::from(2)].into_mle().into(),
-                vec![B::from(3)].into_mle().into(),
+                vec![B::from_u64(1)].into_mle().into(),
+                vec![B::from_u64(2)].into_mle().into(),
+                vec![B::from_u64(3)].into_mle().into(),
             ],
+            &[],
             &[],
             &[],
             &expr,
@@ -692,8 +705,8 @@ mod tests {
 
     #[test]
     fn test_wit_infer_by_expr_ext_field() {
-        type E = goldilocks::GoldilocksExt2;
-        type B = goldilocks::Goldilocks;
+        type E = ff_ext::GoldilocksExt2;
+        type B = p3_goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let a = cb.create_witin(|| "a");
@@ -709,10 +722,11 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from(1)].into_mle().into(),
-                vec![B::from(2)].into_mle().into(),
-                vec![B::from(3)].into_mle().into(),
+                vec![B::from_u64(1)].into_mle().into(),
+                vec![B::from_u64(2)].into_mle().into(),
+                vec![B::from_u64(3)].into_mle().into(),
             ],
+            &[],
             &[],
             &[E::ONE],
             &expr,

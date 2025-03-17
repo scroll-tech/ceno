@@ -18,7 +18,7 @@ pub struct BasicTranscriptWithStat<'a, E: ExtensionField> {
 impl<'a, E: ExtensionField> BasicTranscriptWithStat<'a, E> {
     pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
         Self {
-            inner: BasicTranscript::<_>::new(label),
+            inner: BasicTranscript::new(label),
             stat,
         }
     }
@@ -53,6 +53,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
 
     fn commit_rolling(&mut self) {
         self.inner.commit_rolling()
+    }
+
+    fn sample_vec(&mut self, n: usize) -> Vec<E> {
+        self.inner.sample_vec(n)
     }
 }
 

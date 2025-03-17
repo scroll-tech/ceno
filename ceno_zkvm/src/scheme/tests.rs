@@ -1,21 +1,5 @@
 use std::marker::PhantomData;
 
-use ark_std::test_rng;
-use ceno_emul::{
-    CENO_PLATFORM,
-    InsnKind::{ADD, ECALL},
-    Platform, Program, StepRecord, VMState, encode_rv32,
-};
-use ff::Field;
-use ff_ext::ExtensionField;
-use goldilocks::GoldilocksExt2;
-use itertools::Itertools;
-use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly_v2::ArcMultilinearExtension,
-};
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
-
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -32,6 +16,20 @@ use crate::{
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
+use ark_std::test_rng;
+use ceno_emul::{
+    CENO_PLATFORM,
+    InsnKind::{ADD, ECALL},
+    Platform, Program, StepRecord, VMState, encode_rv32,
+};
+use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+use itertools::Itertools;
+use mpcs::{PolynomialCommitmentScheme, WhirDefault};
+use multilinear_extensions::{
+    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
+};
+use p3_field::PrimeCharacteristicRing;
+use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 
 use super::{
     PublicValues,
@@ -90,11 +88,11 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
         type E = GoldilocksExt2;
-        type Pcs = BasefoldDefault<E>;
+        type Pcs = WhirDefault<E>;
 
         // pcs setup
-        let param = Pcs::setup(1 << 13).unwrap();
-        let (pp, vp) = Pcs::trim(param, 1 << 13).unwrap();
+        Pcs::setup(1 << 8).unwrap();
+        let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
 
         // configure
         let name = TestCircuit::<E, RW, L>::name();
@@ -202,7 +200,7 @@ const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type Pcs = WhirDefault<E>;
 
     // set up program
     let program = Program::new(
@@ -212,8 +210,8 @@ fn test_single_add_instance_e2e() {
         Default::default(),
     );
 
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
@@ -280,7 +278,7 @@ fn test_single_add_instance_e2e() {
     zkvm_witness
         .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
         .unwrap();
-    zkvm_witness.finalize_lk_multiplicities();
+    zkvm_witness.finalize_lk_multiplicities(false);
     zkvm_witness
         .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
         .unwrap();
@@ -294,8 +292,7 @@ fn test_single_add_instance_e2e() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let encoded_bin = bincode::serialize(&zkvm_proof).unwrap();
-
+    println!("encoded zkvm proof {}", &zkvm_proof,);
     let stat_recorder = StatisticRecorder::default();
     {
         let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
@@ -306,8 +303,7 @@ fn test_single_add_instance_e2e() {
         );
     }
     println!(
-        "encoded zkvm proof size: {}, hash_num: {}",
-        encoded_bin.len(),
+        "hash_num: {}",
         stat_recorder.into_inner().field_appended_num
     );
 }

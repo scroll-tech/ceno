@@ -1,7 +1,7 @@
-use ceno_emul::{StepRecord, Word};
-use ff::Field;
-use ff_ext::ExtensionField;
+use ceno_emul::{Cycle, StepRecord, Word, WriteOp};
+use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
+use p3_field::{Field, PrimeCharacteristicRing};
 
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
@@ -221,6 +221,16 @@ impl<E: ExtensionField> WriteRD<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.rd().expect("rd op");
+        self.assign_op(instance, lk_multiplicity, step.cycle(), &op)
+    }
+
+    pub fn assign_op(
+        &self,
+        instance: &mut [E::BaseField],
+        lk_multiplicity: &mut LkMultiplicity,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) -> Result<(), ZKVMError> {
         set_val!(instance, self.id, op.register_index() as u64);
         set_val!(instance, self.prev_ts, op.previous_cycle);
 
@@ -235,7 +245,7 @@ impl<E: ExtensionField> WriteRD<E> {
             instance,
             lk_multiplicity,
             op.previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_RD,
+            cycle + Tracer::SUBCYCLE_RD,
         )?;
 
         Ok(())
@@ -331,17 +341,24 @@ impl WriteMEM {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        set_val!(
-            instance,
-            self.prev_ts,
-            step.memory_op().unwrap().previous_cycle
-        );
+        let op = step.memory_op().unwrap();
+        self.assign_op(instance, lk_multiplicity, step.cycle(), &op)
+    }
+
+    pub fn assign_op<F: SmallField>(
+        &self,
+        instance: &mut [F],
+        lk_multiplicity: &mut LkMultiplicity,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) -> Result<(), ZKVMError> {
+        set_val!(instance, self.prev_ts, op.previous_cycle);
 
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.memory_op().unwrap().previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            cycle + Tracer::SUBCYCLE_MEM,
         )?;
 
         Ok(())
@@ -419,9 +436,8 @@ impl<E: ExtensionField> MemAddr<E> {
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
-        let shift_right = E::BaseField::from(1 << Self::N_LOW_BITS)
-            .invert()
-            .unwrap()
+        let shift_right = E::BaseField::from_u64(1 << Self::N_LOW_BITS)
+            .inverse()
             .expr();
         let mid_u14 = (&limbs[0] - low_sum) * shift_right;
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
@@ -468,8 +484,9 @@ impl<E: ExtensionField> MemAddr<E> {
 
 #[cfg(test)]
 mod test {
-    use goldilocks::{Goldilocks as F, GoldilocksExt2 as E};
+    use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
+    use p3_goldilocks::Goldilocks as F;
 
     use crate::{
         ROMType,

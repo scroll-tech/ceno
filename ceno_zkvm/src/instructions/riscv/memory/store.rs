@@ -16,7 +16,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use std::marker::PhantomData;
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {

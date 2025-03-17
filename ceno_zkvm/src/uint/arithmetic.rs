@@ -1,5 +1,4 @@
-use ff_ext::ExtensionField;
-use goldilocks::SmallField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};
@@ -10,6 +9,7 @@ use crate::{
     gadgets::AssertLtConfig,
     instructions::riscv::config::IsEqualConfig,
 };
+use p3_field::PrimeCharacteristicRing;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -83,7 +83,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             // convert Expression::Constant to limbs
             let b_limbs = (0..Self::NUM_LIMBS)
                 .map(|i| {
-                    Expression::Constant(E::BaseField::from((b >> (C * i)) & Self::LIMB_BIT_MASK))
+                    Expression::Constant(E::BaseField::from_u64(
+                        (b >> (C * i)) & Self::LIMB_BIT_MASK,
+                    ))
                 })
                 .collect_vec();
 
@@ -298,8 +300,7 @@ mod tests {
             scheme::utils::eval_by_expr,
             uint::UIntLimbs,
         };
-        use ff_ext::ExtensionField;
-        use goldilocks::GoldilocksExt2;
+        use ff_ext::{ExtensionField, FieldInto, GoldilocksExt2};
         use itertools::Itertools;
 
         type E = GoldilocksExt2;
@@ -426,14 +427,13 @@ mod tests {
         ) {
             let mut cs = ConstraintSystem::new(|| "test_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
-            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
+            let challenges = vec![E::ONE; witness_values.len()];
             let uint_a = UIntLimbs::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
             let uint_c = if const_b.is_none() {
                 let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
                 uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
-                let const_b = Expression::Constant(const_b.unwrap().into());
+                let const_b = Expression::Constant(const_b.unwrap().into_f());
                 uint_a
                     .add_const(|| "uint_c", &mut cb, const_b, overflow)
                     .unwrap()
@@ -483,15 +483,19 @@ mod tests {
                 });
 
             // verify
-            let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
+            let wit: Vec<E> = witness_values
+                .iter()
+                .cloned()
+                .map(E::from_u64)
+                .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
             });
 
             // overflow
             if overflow {
                 let carries = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &carries), E::ONE);
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, &carries), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
@@ -506,8 +510,7 @@ mod tests {
             scheme::utils::eval_by_expr,
             uint::UIntLimbs,
         };
-        use ff_ext::ExtensionField;
-        use goldilocks::GoldilocksExt2;
+        use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
 
         type E = GoldilocksExt2; // 18446744069414584321
@@ -619,8 +622,7 @@ mod tests {
 
             let mut cs = ConstraintSystem::new(|| "test_mul");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
-            let challenges = (0..witness_values.len()).map(|_| 1.into()).collect_vec();
-
+            let challenges = vec![E::ONE; witness_values.len()];
             let mut uint_a = UIntLimbs::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
             let mut uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
             let uint_c: UIntLimbs<M, C, E> = uint_a
@@ -658,15 +660,19 @@ mod tests {
             });
 
             // verify
-            let wit: Vec<E> = witness_values.iter().map(|&w| w.into()).collect_vec();
+            let wit: Vec<E> = witness_values
+                .iter()
+                .cloned()
+                .map(E::from_u64)
+                .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &challenges, c), E::from(ret));
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
             });
 
             // overflow
             if overflow {
                 let overflow = uint_c.carries.unwrap().last().unwrap().expr();
-                assert_eq!(eval_by_expr(&wit, &challenges, &overflow), E::ONE);
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, &overflow), E::ONE);
             } else {
                 // non-overflow case, the len of carries should be (NUM_CELLS - 1)
                 assert_eq!(uint_c.carries.unwrap().len(), single_wit_size - 1)
@@ -683,12 +689,12 @@ mod tests {
             uint::UIntLimbs,
             witness::LkMultiplicity,
         };
-        use ff_ext::ExtensionField;
-        use goldilocks::GoldilocksExt2;
+        use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
         use multilinear_extensions::{
-            mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+            mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
         };
+        use p3_field::PrimeCharacteristicRing;
 
         type E = GoldilocksExt2; // 18446744069414584321
 
@@ -703,7 +709,7 @@ mod tests {
                     .map(|a| {
                         let mle: ArcMultilinearExtension<E> =
                             DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
-                                E::BaseField::from(*a),
+                                E::BaseField::from_u64(*a),
                             ])
                             .into();
                         mle

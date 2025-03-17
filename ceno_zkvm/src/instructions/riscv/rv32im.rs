@@ -7,7 +7,7 @@ use crate::{
             branch::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
-            div::DivuInstruction,
+            div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -24,18 +24,24 @@ use crate::{
     },
 };
 use ceno_emul::{
+    Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
+    Bn254FpMulSpec,
     InsnKind::{self, *},
-    Platform, StepRecord,
+    KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
+    Sha256ExtendSpec, StepRecord, SyscallSpec,
 };
-use div::{DivDummy, RemDummy, RemuDummy};
+use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use mul::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet},
+};
 use strum::IntoEnumIterator;
 
 use super::{
@@ -62,6 +68,9 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub mulhsu_config: <MulhsuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub mulhu_config: <MulhuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub divu_config: <DivuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub remu_config: <RemuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub div_config: <DivInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub rem_config: <RemInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // ALU with imm
     pub addi_config: <AddiInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -129,6 +138,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mulhsu_config = cs.register_opcode_circuit::<MulhsuInstruction<E>>();
         let mulhu_config = cs.register_opcode_circuit::<MulhuInstruction<E>>();
         let divu_config = cs.register_opcode_circuit::<DivuInstruction<E>>();
+        let remu_config = cs.register_opcode_circuit::<RemuInstruction<E>>();
+        let div_config = cs.register_opcode_circuit::<DivInstruction<E>>();
+        let rem_config = cs.register_opcode_circuit::<RemInstruction<E>>();
 
         // alu with imm opcodes
         let addi_config = cs.register_opcode_circuit::<AddiInstruction<E>>();
@@ -193,6 +205,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             mulhsu_config,
             mulhu_config,
             divu_config,
+            remu_config,
+            div_config,
+            rem_config,
             // alu with imm
             addi_config,
             andi_config,
@@ -258,6 +273,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs);
         fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs);
         fixed.register_opcode_circuit::<DivuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<RemuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<DivInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<RemInstruction<E>>(cs);
         // alu with imm
         fixed.register_opcode_circuit::<AddiInstruction<E>>(cs);
         fixed.register_opcode_circuit::<AndiInstruction<E>>(cs);
@@ -326,14 +344,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             }
         });
 
-        for (insn_kind, (_, records)) in InsnKind::iter()
-            .zip(all_records.iter())
-            .sorted_by(|a, b| Ord::cmp(&a.1.1.len(), &b.1.1.len()))
-            .rev()
+        for (insn_kind, (_, records)) in
+            izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))
         {
-            if !records.is_empty() {
-                tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
-            }
+            tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
         }
 
         macro_rules! assign_opcode {
@@ -361,6 +375,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
         assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
         assign_opcode!(DIVU, DivuInstruction<E>, divu_config);
+        assign_opcode!(REMU, RemuInstruction<E>, remu_config);
+        assign_opcode!(DIV, DivInstruction<E>, div_config);
+        assign_opcode!(REM, RemInstruction<E>, rem_config);
         // alu with imm
         assign_opcode!(ADDI, AddiInstruction<E>, addi_config);
         assign_opcode!(ANDI, AndiInstruction<E>, andi_config);
@@ -397,9 +414,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
-            [INVALID, DIV, REM, REMU, ECALL]
-                .into_iter()
-                .collect::<BTreeSet<_>>(),
+            [INVALID, ECALL].into_iter().collect::<BTreeSet<_>>(),
         );
         Ok(GroupedSteps(all_records))
     }
@@ -429,22 +444,62 @@ pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
     ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
-    div_config: <DivDummy<E> as Instruction<E>>::InstructionConfig,
-    rem_config: <RemDummy<E> as Instruction<E>>::InstructionConfig,
-    remu_config: <RemuDummy<E> as Instruction<E>>::InstructionConfig,
+    keccak_config: <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
+    secp256k1_add_config:
+        <LargeEcallDummy<E, Secp256k1AddSpec> as Instruction<E>>::InstructionConfig,
+    secp256k1_double_config:
+        <LargeEcallDummy<E, Secp256k1DoubleSpec> as Instruction<E>>::InstructionConfig,
+    secp256k1_decompress_config:
+        <LargeEcallDummy<E, Secp256k1DecompressSpec> as Instruction<E>>::InstructionConfig,
+    sha256_extend_config:
+        <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
+    bn254_add_config: <LargeEcallDummy<E, Bn254AddSpec> as Instruction<E>>::InstructionConfig,
+    bn254_double_config: <LargeEcallDummy<E, Bn254DoubleSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp_add_config: <LargeEcallDummy<E, Bn254FpAddSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp_mul_config: <LargeEcallDummy<E, Bn254FpMulSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp2_add_config:
+        <LargeEcallDummy<E, Bn254Fp2AddSpec> as Instruction<E>>::InstructionConfig,
+    bn254_fp2_mul_config:
+        <LargeEcallDummy<E, Bn254Fp2MulSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
-        let div_config = cs.register_opcode_circuit::<DivDummy<E>>();
-        let rem_config = cs.register_opcode_circuit::<RemDummy<E>>();
-        let remu_config = cs.register_opcode_circuit::<RemuDummy<E>>();
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
+        let keccak_config = cs.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>();
+        let secp256k1_add_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>();
+        let secp256k1_double_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>();
+        let secp256k1_decompress_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>();
+        let sha256_extend_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
+        let bn254_add_config = cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>();
+        let bn254_double_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>();
+        let bn254_fp_add_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>();
+        let bn254_fp_mul_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>();
+        let bn254_fp2_add_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>();
+        let bn254_fp2_mul_config =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>();
+
         Self {
-            div_config,
-            rem_config,
-            remu_config,
             ecall_config,
+            keccak_config,
+            secp256k1_add_config,
+            secp256k1_double_config,
+            secp256k1_decompress_config,
+            sha256_extend_config,
+            bn254_add_config,
+            bn254_double_config,
+            bn254_fp_add_config,
+            bn254_fp_mul_config,
+            bn254_fp2_add_config,
+            bn254_fp2_mul_config,
         }
     }
 
@@ -453,10 +508,18 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
-        fixed.register_opcode_circuit::<DivDummy<E>>(cs);
-        fixed.register_opcode_circuit::<RemDummy<E>>(cs);
-        fixed.register_opcode_circuit::<RemuDummy<E>>(cs);
         fixed.register_opcode_circuit::<EcallDummy<E>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>(cs);
     }
 
     pub fn assign_opcode_circuit(
@@ -467,20 +530,94 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     ) -> Result<(), ZKVMError> {
         let mut steps = steps.0;
 
-        macro_rules! assign_opcode {
-            ($insn_kind:ident,$instruction:ty,$config:ident) => {
-                witness.assign_opcode_circuit::<$instruction>(
-                    cs,
-                    &self.$config,
-                    steps.remove(&($insn_kind)).unwrap(),
-                )?;
-            };
+        let mut keccak_steps = Vec::new();
+        let mut secp256k1_add_steps = Vec::new();
+        let mut secp256k1_double_steps = Vec::new();
+        let mut secp256k1_decompress_steps = Vec::new();
+        let mut sha256_extend_steps = Vec::new();
+        let mut bn254_add_steps = Vec::new();
+        let mut bn254_double_steps = Vec::new();
+        let mut bn254_fp_add_steps = Vec::new();
+        let mut bn254_fp_mul_steps = Vec::new();
+        let mut bn254_fp2_add_steps = Vec::new();
+        let mut bn254_fp2_mul_steps = Vec::new();
+        let mut other_steps = Vec::new();
+
+        if let Some(ecall_steps) = steps.remove(&ECALL) {
+            for step in ecall_steps {
+                match step.rs1().unwrap().value {
+                    KeccakSpec::CODE => keccak_steps.push(step),
+                    Secp256k1AddSpec::CODE => secp256k1_add_steps.push(step),
+                    Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
+                    Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
+                    Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
+                    Bn254AddSpec::CODE => bn254_add_steps.push(step),
+                    Bn254DoubleSpec::CODE => bn254_double_steps.push(step),
+                    Bn254FpAddSpec::CODE => bn254_fp_add_steps.push(step),
+                    Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
+                    Bn254Fp2AddSpec::CODE => bn254_fp2_add_steps.push(step),
+                    Bn254Fp2MulSpec::CODE => bn254_fp2_mul_steps.push(step),
+                    _ => other_steps.push(step),
+                }
+            }
         }
 
-        assign_opcode!(DIV, DivDummy<E>, div_config);
-        assign_opcode!(REM, RemDummy<E>, rem_config);
-        assign_opcode!(REMU, RemuDummy<E>, remu_config);
-        assign_opcode!(ECALL, EcallDummy<E>, ecall_config);
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(
+            cs,
+            &self.keccak_config,
+            keccak_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
+            cs,
+            &self.secp256k1_add_config,
+            secp256k1_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(
+            cs,
+            &self.secp256k1_double_config,
+            secp256k1_double_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(
+            cs,
+            &self.secp256k1_decompress_config,
+            secp256k1_decompress_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
+            cs,
+            &self.sha256_extend_config,
+            sha256_extend_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(
+            cs,
+            &self.bn254_add_config,
+            bn254_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(
+            cs,
+            &self.bn254_double_config,
+            bn254_double_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(
+            cs,
+            &self.bn254_fp_add_config,
+            bn254_fp_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>(
+            cs,
+            &self.bn254_fp_mul_config,
+            bn254_fp_mul_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>(
+            cs,
+            &self.bn254_fp2_add_config,
+            bn254_fp2_add_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>(
+            cs,
+            &self.bn254_fp2_mul_config,
+            bn254_fp2_mul_steps,
+        )?;
+        witness.assign_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config, other_steps)?;
 
         let _ = steps.remove(&INVALID);
         let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();

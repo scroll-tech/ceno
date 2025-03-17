@@ -4,10 +4,11 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
-use ff_ext::ff::Field;
-use goldilocks::{Goldilocks, GoldilocksExt2};
+use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
+use p3_field::PrimeCharacteristicRing;
+use p3_goldilocks::Goldilocks;
 use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -17,6 +18,13 @@ use tracing_subscriber::{
 use transcript::{
     BasicTranscript as Transcript, BasicTranscriptWithStat as TranscriptWithStat, StatisticRecorder,
 };
+
+fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
+    parse_size::Config::new()
+        .with_binary()
+        .parse_size(s)
+        .map(|size| size as u32)
+}
 
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
@@ -45,11 +53,11 @@ struct Args {
     hints: Option<String>,
 
     /// Stack size in bytes.
-    #[arg(long, default_value = "32768")]
+    #[arg(long, default_value = "32k", value_parser = parse_size)]
     stack_size: u32,
 
     /// Heap size in bytes.
-    #[arg(long, default_value = "2097152")]
+    #[arg(long, default_value = "2M", value_parser = parse_size)]
     heap_size: u32,
 }
 
@@ -106,7 +114,7 @@ fn main() {
         args.heap_size,
         pub_io_size,
     );
-    tracing::info!("Running on platform {:?} {:?}", args.platform, platform);
+    tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
         args.stack_size,
@@ -138,13 +146,12 @@ fn main() {
     let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
     // do statistics
-    let serialize_size = bincode::serialize(&zkvm_proof).unwrap().len();
     let stat_recorder = StatisticRecorder::default();
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
     verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
+    println!("e2e proof stat: {}", zkvm_proof);
     println!(
-        "e2e proof stat: proof size = {}, hashes count = {}",
-        serialize_size,
+        "hashes count = {}",
         stat_recorder.into_inner().field_appended_num
     );
 

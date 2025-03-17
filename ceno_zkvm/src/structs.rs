@@ -12,9 +12,9 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension, virtual_poly_v2::ArcMultilinearExtension,
+    mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
@@ -22,6 +22,10 @@ use sumcheck::structs::IOPProverMessage;
 pub struct TowerProver;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct TowerProofs<E: ExtensionField> {
     pub proofs: Vec<Vec<IOPProverMessage<E>>>,
     // specs -> layers -> evals
@@ -254,6 +258,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses_tables.get(name).cloned()
     }
 
+    pub fn get_lk_mlt(&self, name: &String) -> Option<&LkMultiplicity> {
+        self.lk_mlts.get(name)
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
@@ -277,14 +285,24 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 
     // merge the multiplicities in each opcode circuit into one
-    pub fn finalize_lk_multiplicities(&mut self) {
+    pub fn finalize_lk_multiplicities(&mut self, is_keep_raw_lk_mlts: bool) {
         assert!(self.combined_lk_mlt.is_none());
         assert!(!self.lk_mlts.is_empty());
 
         let mut combined_lk_mlt = vec![];
         let keys = self.lk_mlts.keys().cloned().collect_vec();
         for name in keys {
-            let lk_mlt = self.lk_mlts.remove(&name).unwrap().into_finalize_result();
+            let lk_mlt = if is_keep_raw_lk_mlts {
+                // mock prover needs the lk_mlt for processing, so we do not remove it
+                self.lk_mlts
+                    .get(&name)
+                    .unwrap()
+                    .deep_clone()
+                    .into_finalize_result()
+            } else {
+                self.lk_mlts.remove(&name).unwrap().into_finalize_result()
+            };
+
             if combined_lk_mlt.is_empty() {
                 combined_lk_mlt = lk_mlt.to_vec();
             } else {
@@ -309,15 +327,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         input: &TC::WitnessInput,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
-
         let cs = cs.get_cs(&TC::name()).unwrap();
         let witness = TC::assign_instances(
             config,
             cs.num_witin as usize,
+            cs.num_structural_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
+
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
         Ok(())
