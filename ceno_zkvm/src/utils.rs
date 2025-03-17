@@ -64,7 +64,7 @@ pub fn get_challenge_pows<E: ExtensionField>(
 ) -> Vec<E> {
     // println!("alpha_pow");
     let alpha = transcript
-        .get_and_append_challenge(b"combine subset evals")
+        .sample_and_append_challenge(b"combine subset evals")
         .elements;
     (0..size)
         .scan(E::ONE, |state, _| {
