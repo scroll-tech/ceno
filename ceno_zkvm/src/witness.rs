@@ -40,7 +40,7 @@ macro_rules! set_fixed_val {
 #[derive(Clone)]
 pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     // represent 2D in 1D linear memory and avoid double indirection by Vec<Vec<T>> to improve performance
-    pub values: Vec<T>,
+    values: Vec<T>,
     num_col: usize,
     padding_strategy: InstancePaddingStrategy,
 }
