@@ -289,11 +289,8 @@ where
 
     type EncodedData = PolyEvalsCodeword<E>;
 
-    fn setup(max_message_size_log: usize) -> Self::PublicParameters {
+    fn setup(_max_message_size_log: usize) -> Self::PublicParameters {
         RSCodeParameters {
-            // fft_root_table: fft_root_table::<E::BaseField>(
-            //     max_message_size_log + Spec::get_rate_log(),
-            // ),
             fft_root_table: vec![],
         }
     }
@@ -302,13 +299,6 @@ where
         mut pp: Self::PublicParameters,
         max_message_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
-        if pp.fft_root_table.len() < max_message_size_log + Spec::get_rate_log() {
-            // return Err(Error::InvalidPcsParam(format!(
-            //     "Public parameter is setup for a smaller message size (log={}) than the trimmed message size (log={})",
-            //     pp.fft_root_table.len() - Spec::get_rate_log(),
-            //     max_message_size_log,
-            // )));
-        }
         if max_message_size_log < Spec::get_basecode_msg_size_log() {
             // Message smaller than this size will not be encoded in BaseFold.
             // So just give trivial parameters.
@@ -356,12 +346,12 @@ where
         //     .collect();
 
         // directly return bit reverse format, matching with codeword index
-        let t_inv_halves_prover = (0..max_message_size_log + Spec::get_rate_log())
+        let t_inv_halves_prover = (0..max_message_size_log)
             .map(|i| {
                 if i < Spec::get_basecode_msg_size_log() {
                     vec![]
                 } else {
-                    let t_i = E::BaseField::two_adic_generator(i)
+                    let t_i = E::BaseField::two_adic_generator(i + 1)
                         .powers()
                         .take(1 << i)
                         .collect_vec();

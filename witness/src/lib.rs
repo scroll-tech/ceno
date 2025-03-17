@@ -1,6 +1,8 @@
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
-use p3::field::{Field, PrimeCharacteristicRing};
-use p3::matrix::{Matrix, bitrev::BitReversableMatrix};
+use p3::{
+    field::{Field, PrimeCharacteristicRing},
+    matrix::{Matrix, bitrev::BitReversableMatrix},
+};
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},

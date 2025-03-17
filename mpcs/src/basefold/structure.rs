@@ -77,7 +77,7 @@ pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) comm: Digest<E>,
+    pub(crate) pi_d: Digest<E>,
     pub(crate) codeword: MerkleTree<E::BaseField>,
     pub(crate) polynomials_bh_evals: Vec<ArcMultilinearExtension<'static, E>>,
     pub(crate) num_vars: usize,
@@ -91,7 +91,7 @@ where
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
-            self.comm.clone(),
+            self.pi_d.clone(),
             self.num_vars,
             self.is_base,
             self.num_polys,
@@ -141,7 +141,7 @@ pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) root: Digest<E>,
+    pub(super) pi_d: Digest<E>,
     pub(super) num_vars: Option<usize>,
     pub(super) is_base: bool,
     pub(super) num_polys: Option<usize>,
@@ -153,7 +153,7 @@ where
 {
     pub fn new(root: Digest<E>, num_vars: usize, is_base: bool, num_polys: usize) -> Self {
         Self {
-            root,
+            pi_d: root,
             num_vars: Some(num_vars),
             is_base,
             num_polys: Some(num_polys),
@@ -161,7 +161,7 @@ where
     }
 
     pub fn root(&self) -> Digest<E> {
-        self.root.clone()
+        self.pi_d.clone()
     }
 
     pub fn num_vars(&self) -> Option<usize> {

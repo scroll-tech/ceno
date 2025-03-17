@@ -196,6 +196,11 @@ fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: Basefold
     values: &[E],
     challenge: E,
 ) -> RowMajorMatrix<E> {
+    // assume values in bit_reverse_format
+    // thus chunks(2) is equivalent to left, right traverse
+    let folding_coeffs =
+        <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level);
+    debug_assert_eq!(folding_coeffs.len(), 1 << level);
     RowMajorMatrix::new(
         values
             .par_chunks_exact(2)
@@ -203,7 +208,10 @@ fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: Basefold
                 <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level),
             )
             .map(|(ys, coeff)| {
-                let (lo, hi) = ((ys[0] + ys[1]).halve(), (ys[0] - ys[1]) * *coeff);
+                // original (left, right) = (a + bx, a - bx), a, b are codeword, but after times x it's not codeword
+                // recover left & right codeword via (c, d) = ((left + right) / 2, (left - right) / 2x)
+                let (lo, hi) = ((ys[0] + ys[1]).halve(), (ys[0] - ys[1]) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
+                // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
                 lo + (hi - lo) * challenge
             })
             .collect::<Vec<_>>(),

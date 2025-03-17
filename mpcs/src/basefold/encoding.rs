@@ -84,7 +84,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
 
     /// TODO add docs
     fn verifier_folding_coeffs_level(
-        pp: &Self::VerifierParameters,
+        vp: &Self::VerifierParameters,
         level: usize,
     ) -> &[E::BaseField];
 }

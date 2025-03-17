@@ -7,7 +7,7 @@ use crate::{
             degree_2_eval, degree_2_zero_plus_one, inner_product,
             interpolate_over_boolean_hypercube,
         },
-        ext_to_usize,
+        ext_to_usize, log2_strict,
         merkle_tree::poseidon2_merkle_tree,
         plonky2_util::reverse_bits,
     },
@@ -15,11 +15,11 @@ use crate::{
 use ark_std::{end_timer, start_timer};
 use ceno_sumcheck::macros::{entered_span, exit_span};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip, zip};
+use itertools::{Itertools, izip, rev, zip};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::dot_product,
-    matrix::{Dimensions, Matrix},
+    matrix::{Dimensions, Matrix, dense::RowMajorMatrix},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
@@ -68,6 +68,10 @@ where
                 // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
                 let idx = idx >> 1;
                 let (mut values, proof) = mmcs.open_batch(idx, &comm.codeword);
+                if idx == 1360 {
+                    let m = mmcs.get_matrices(&comm.codeword)[0];
+                    println!("{idx} m.height {}, m.width {}", m.height(), m.width());
+                }
                 let leafs = values.pop().unwrap();
                 (leafs, proof)
             };
@@ -79,8 +83,7 @@ where
                 // 2. since even and odd parts are concatenated in the same leaf,
                 //    the overall merkle tree height is effectively halved,
                 //    so we divide by 2.
-                let idx = idx >> 1;
-                let (mut values, proof) = mmcs_ext.open_batch(idx, tree);
+                let (mut values, proof) = mmcs_ext.open_batch(idx >> 1, tree);
                 let leafs = values.pop().unwrap();
                 debug_assert_eq!(leafs.len(), 2);
                 // TODO we can keep only one of the leafs, as the other can be interpolate from previous layer
@@ -110,108 +113,125 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    // let timer = start_timer!(|| "Verifier query phase");
+    let timer = start_timer!(|| "Verifier query phase");
+    let num_polys = evals.len();
 
-    // let encode_timer = start_timer!(|| "Encode final codeword");
-    // let mut message = final_message.to_vec();
+    let encode_timer = start_timer!(|| "Encode final codeword");
+    let message = final_message.to_vec();
     // if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
     //     reverse_index_bits_in_place(&mut message);
     // }
     // interpolate_over_boolean_hypercube(&mut message);
-    // let final_codeword =
-    //     <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(vp, &FieldType::Ext(message));
+    let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
+        vp,
+        RowMajorMatrix::new(message, 1),
+    );
     // let mut final_codeword = match final_codeword {
     //     FieldType::Ext(final_codeword) => final_codeword,
     //     _ => panic!("Final codeword must be extension field"),
     // };
     // reverse_index_bits_in_place(&mut final_codeword);
-    // end_timer!(encode_timer);
+    end_timer!(encode_timer);
 
     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
     let mmcs = poseidon2_merkle_tree::<E>();
 
     let span = entered_span!("check queries");
-    // izip!(indices, queries).try_for_each(|(idx, (opening, opening_ext))| {
-    //     mmcs.verify_batch(
-    //         todo!(),
-    //         &[Dimensions {
-    //             width: 0,
-    //             height: todo!(),
-    //         }],
-    //         *idx,
-    //         slice::from_ref(&opening.0),
-    //         &opening.1,
-    //     )
-    //     .expect("verify batch failed");
-    //     let (left, right) = opening.0.split_at(opening.0.len() / 2);
-    // let (value_0, value_1) = (
-    //     dot_product(batch_coeffs.iter().copied(), left.iter().copied()),
-    //     dot_product(batch_coeffs.iter().copied(), right.iter().copied()),
-    // );
-    //// interlopate left, right with dit_butterfly params
-    // let leave = xxx
+    izip!(indices, queries).for_each(|(idx, ((commit_leafs, commit_proof), opening_ext))| {
+        // refer to prover document for the reason of right shift by 1
+        let idx = idx >> 1;
+        // if idx == 1360 {
+        //     println!("{idx} num_vars {}, <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() {}, m.width {}", num_vars, <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(), num_polys * 2,);
+        // }
+        mmcs.verify_batch(
+            &comm.pi_d,
+            &[Dimensions {
+                // width size is double num_polys due to leaf + right leafs are concat
+                width: num_polys * 2,
+                height: 1
+                    << (num_vars + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() - 1),
+            }],
+            idx,
+            slice::from_ref(commit_leafs),
+            commit_proof,
+        )
+        .expect("verify batch failed");
+        let (left, right) = commit_leafs.split_at(commit_leafs.len() / 2);
+        let (left, right): (E, E) = (
+            dot_product(batch_coeffs.iter().copied(), left.iter().copied()),
+            dot_product(batch_coeffs.iter().copied(), right.iter().copied()),
+        );
+        let r = fold_challenges.last().unwrap();
+        let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+            vp,
+            num_vars + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() - 1,
+        )[idx];
+        let (lo, hi) = ((left + right).halve(), (left - right) * coeff);
+        let folded = lo + (hi - lo) * *r;
 
-    // let folded = izip!(rev(0..self.code.d()), rev(&r), &proof.pi_comms, opening_ext).try_fold(
-    //     leave,
-    //     |folded, (i, r_i, comm, opening_ext)| {
-    //         let sibling = ((idx / self.code.n_i(i)) & 1) ^ 1;
-    //         let idx = idx % self.code.n_i(i);
-    //         let mut values = vec![folded; 2];
-    //         values[sibling] = opening_ext.0;
-    //         self.mmcs_ext
-    //             .verify_batch(
-    //                 comm,
-    //                 &[Dimensions {
-    //                     width: 0,
-    //                     height: self.code.n_i(i),
-    //                 }],
-    //                 idx,
-    //                 slice::from_ref(&values),
-    //                 &opening_ext.1,
-    //             )
-    //             .map_err(Self::Error::Mmcs)?;
-    //         Ok(self.code.interpolate(i, idx, values[0], values[1], *r_i))
-    //     },
-    // )?;
-    // if pi_0[idx % self.code.n_0()] != folded {
-    //     return Err(Self::Error::InvalidQuery);
-    // }
-    // Ok(())
-    // });
+        let rounds =
+            num_vars - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log() - 1;
+        let n_d_next =
+            1 << (num_vars + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() - 1);
+        debug_assert_eq!(rounds, fold_challenges.len() - 1);
+        debug_assert_eq!(rounds, roots.len(),);
+        debug_assert_eq!(rounds, opening_ext.len(),);
+        let (idx, _foleded, _) = roots
+            .iter()
+            .zip_eq(fold_challenges.iter().rev().skip(1))
+            .zip_eq(opening_ext)
+            .fold(
+                (idx, folded, n_d_next),
+                |(idx, _folded, n_d_i), ((pi_comm, r), (leafs, proof))| {
+                    let idx = idx >> 1;
+                    mmcs_ext
+                        .verify_batch(
+                            pi_comm,
+                            &[Dimensions {
+                                width: 2,
+                                // width is 2, thus height divide by 2 via right shift
+                                height: n_d_i >> 1,
+                            }],
+                            idx,
+                            slice::from_ref(leafs),
+                            proof,
+                        )
+                        .expect("verify failed");
+                    println!("height * width = {}, idx {idx}", n_d_i);
+                    // TODO check folded value equal with one sibling value via replacing sibling value with folded value
+                    let coeff =
+                        <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+                            vp,
+                            log2_strict(n_d_i) - 1,
+                        )[idx];
+                    let (left, right) = (leafs[0], leafs[1]);
+                    let (lo, hi) = ((left + right).halve(), (left - right) * coeff);
+                    (idx, lo + (hi - lo) * *r, n_d_i >> 1)
+                },
+            );
+        assert!(
+            final_codeword.values[idx] == folded,
+            "final_codeword.values[idx >> 1] value {:?} != folded {:?}",
+            final_codeword.values[idx],
+            folded
+        );
+    });
     exit_span!(span);
 
-    // // For computing the weights on the fly, because the verifier is incapable of storing
-    // // the weights.
-    // let queries_timer = start_timer!(|| format!("Check {} queries", indices.len()));
-    // // queries.check::<Spec>(
-    // //     indices,
-    // //     vp,
-    // //     fold_challenges,
-    // //     batch_coeffs,
-    // //     num_rounds,
-    // //     num_vars,
-    // //     &final_codeword,
-    // //     roots,
-    // //     comm,
-    // // );
-    // end_timer!(queries_timer);
-
-    // let final_timer = start_timer!(|| "Final checks");
-    // assert_eq!(
-    //     &inner_product(batch_coeffs, evals),
-    //     &degree_2_zero_plus_one(&sum_check_messages[0])
-    // );
-
-    // // The sum-check part of the protocol
-    // for i in 0..fold_challenges.len() - 1 {
-    //     assert_eq!(
-    //         degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
-    //         degree_2_zero_plus_one(&sum_check_messages[i + 1])
-    //     );
-    // }
-
-    // // Finally, the last sumcheck poly evaluation should be the same as the sum of the polynomial
-    // // sent from the prover
+    // TODO
+    // 1. check initial claim match with first round sumcheck value
+    assert_eq!(
+        &dot_product::<E, _, _>(batch_coeffs.iter().copied(), evals.iter().copied()),
+        &degree_2_zero_plus_one(&sum_check_messages[0])
+    );
+    // 2. check every round of sumcheck match with prev claims
+    for i in 0..fold_challenges.len() - 1 {
+        assert_eq!(
+            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
+            degree_2_zero_plus_one(&sum_check_messages[i + 1])
+        );
+    }
+    // 3. check final evaluation are correct
     // assert_eq!(
     //     degree_2_eval(
     //         &sum_check_messages[fold_challenges.len() - 1],
@@ -221,6 +241,5 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     // );
     // end_timer!(final_timer);
 
-    // end_timer!(timer);
-    // unimplemented!()
+    end_timer!(timer);
 }
