@@ -487,14 +487,14 @@ mod test {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
     use p3::goldilocks::Goldilocks as F;
+    use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
     use crate::{
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
-        instructions::InstancePaddingStrategy,
         scheme::mock_prover::MockProver,
-        witness::{LkMultiplicity, RowMajorMatrix},
+        witness::LkMultiplicity,
     };
 
     use super::MemAddr;
@@ -562,7 +562,7 @@ mod test {
         MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
-                .into_mles()
+                .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),

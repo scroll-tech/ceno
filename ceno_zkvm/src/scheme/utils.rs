@@ -17,10 +17,9 @@ use rayon::{
     },
     prelude::ParallelSliceMut,
 };
+use witness::next_pow2_instance_padding;
 
-use crate::{
-    expression::Expression, scheme::constants::MIN_PAR_SIZE, utils::next_pow2_instance_padding,
-};
+use crate::{expression::Expression, scheme::constants::MIN_PAR_SIZE};
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3

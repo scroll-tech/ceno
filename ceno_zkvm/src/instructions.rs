@@ -1,30 +1,16 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use multilinear_extensions::util::max_usable_threads;
-use p3::maybe_rayon::prelude::*;
-use rayon::iter::IndexedParallelIterator;
-use std::sync::Arc;
-
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    witness::{LkMultiplicity, RowMajorMatrix},
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
 };
 
-pub mod riscv;
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::LkMultiplicity};
 
-#[derive(Clone)]
-pub enum InstancePaddingStrategy {
-    // Pads with default values of underlying type
-    // Usually zero, but check carefully
-    Default,
-    // Pads by repeating last row
-    RepeatLast,
-    // Custom strategy consists of a closure
-    // `pad(i, j) = padding value for cell at row i, column j`
-    // pad should be able to cross thread boundaries
-    Custom(Arc<dyn Fn(u64, u64) -> u64 + Send + Sync>),
-}
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
+
+pub mod riscv;
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;

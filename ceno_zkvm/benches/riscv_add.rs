@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use ark_std::test_rng;
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
@@ -10,12 +9,13 @@ use ceno_zkvm::{
 use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
-use ff_ext::{FromUniformBytes, GoldilocksExt2};
+use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
-use multilinear_extensions::mle::IntoMLE;
-use p3::goldilocks::Goldilocks;
+
+use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
+use witness::RowMajorMatrix;
 
 cfg_if::cfg_if! {
   if #[cfg(feature = "flamegraph")] {
@@ -74,22 +74,16 @@ fn bench_add(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
                         // generate mock witness
-                        let mut rng = test_rng();
                         let num_instances = 1 << instance_num_vars;
-                        let wits_in = (0..num_witin as usize)
-                            .map(|_| {
-                                (0..num_instances)
-                                    .map(|_| Goldilocks::random(&mut rng))
-                                    .collect::<Vec<Goldilocks>>()
-                                    .into_mle()
-                            })
-                            .collect_vec();
+                        let rmm =
+                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin as usize);
+                        let polys = rmm.to_mles();
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;
                         let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
-                            Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript)
+                            Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript)
                                 .unwrap();
                         let challenges = [
                             transcript.read_challenge().elements,
@@ -101,7 +95,7 @@ fn bench_add(c: &mut Criterion) {
                                 "ADD",
                                 &prover.pk.pp,
                                 &circuit_pk,
-                                wits_in.into_iter().map(|mle| mle.into()).collect_vec(),
+                                polys.into_iter().map(|mle| mle.into()).collect_vec(),
                                 commit,
                                 &[],
                                 num_instances,

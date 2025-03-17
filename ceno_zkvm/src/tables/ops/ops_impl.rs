@@ -2,18 +2,16 @@
 
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::collections::HashMap;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{Expression, Fixed, ToExpr, WitIn},
-    instructions::InstancePaddingStrategy,
-    scheme::constants::MIN_PAR_SIZE,
     set_fixed_val, set_val,
     structs::ROMType,
-    witness::RowMajorMatrix,
 };
 
 #[derive(Clone, Debug)]
@@ -59,15 +57,11 @@ impl OpTableConfig {
         let mut fixed =
             RowMajorMatrix::<F>::new(content.len(), num_fixed, InstancePaddingStrategy::Default);
 
-        fixed
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .zip(content.into_par_iter())
-            .for_each(|(row, abc)| {
-                for (col, val) in self.abc.iter().zip(abc.iter()) {
-                    set_fixed_val!(row, *col, F::from_v(*val));
-                }
-            });
+        fixed.par_rows_mut().zip(content).for_each(|(row, abc)| {
+            for (col, val) in self.abc.iter().zip(abc.iter()) {
+                set_fixed_val!(row, *col, F::from_v(*val));
+            }
+        });
 
         fixed
     }
@@ -78,26 +72,20 @@ impl OpTableConfig {
         num_structural_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut witness = RowMajorMatrix::<F>::new(
-            length,
-            num_witin + num_structural_witin,
-            InstancePaddingStrategy::Default,
-        );
+    ) -> Result<[RowMajorMatrix<F>; 2], ZKVMError> {
+        assert_eq!(num_structural_witin, 0);
+        let mut witness =
+            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {
             mlts[*idx as usize] = *mlt;
         }
 
-        witness
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .zip(mlts.into_par_iter())
-            .for_each(|(row, mlt)| {
-                set_val!(row, self.mlt, F::from_v(mlt as u64));
-            });
+        witness.par_rows_mut().zip(mlts).for_each(|(row, mlt)| {
+            set_val!(row, self.mlt, F::from_v(mlt as u64));
+        });
 
-        Ok(witness)
+        Ok([witness, RowMajorMatrix::empty()])
     }
 }
