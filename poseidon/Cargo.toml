@@ -20,7 +20,3 @@ unroll = "0.1"
 ark-std.workspace = true
 plonky2.workspace = true
 rand.workspace = true
-
-[[bench]]
-harness = false
-name = "hashing"

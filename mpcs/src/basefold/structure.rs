@@ -90,12 +90,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
-        BasefoldCommitment::new(
-            self.pi_d.clone(),
-            self.num_vars,
-            self.is_base,
-            self.num_polys,
-        )
+        BasefoldCommitment::new(self.pi_d, self.num_vars, self.is_base, self.num_polys)
     }
 
     pub fn poly_size(&self) -> usize {
@@ -161,7 +156,7 @@ where
     }
 
     pub fn root(&self) -> Digest<E> {
-        self.pi_d.clone()
+        self.pi_d
     }
 
     pub fn num_vars(&self) -> Option<usize> {

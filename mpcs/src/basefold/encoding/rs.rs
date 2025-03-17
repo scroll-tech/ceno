@@ -240,9 +240,6 @@ pub struct RSCodeProverParameters<E: ExtensionField> {
     #[serde(skip)]
     pub(crate) dft: Radix2DitParallel<E::BaseField>,
     pub(crate) t_inv_halves: Vec<Vec<E::BaseField>>,
-    pub(crate) fft_root_table: FftRootTable<E::BaseField>,
-    pub(crate) gamma_powers: Vec<E::BaseField>,
-    pub(crate) gamma_powers_inv_div_two: Vec<E::BaseField>,
     pub(crate) full_message_size_log: usize,
 }
 
@@ -261,15 +258,7 @@ where
     // pub(crate) dft: Radix2Dit<E::BaseField>,
     pub(crate) dft: Radix2Dit<E>,
     pub(crate) t_inv_halves: Vec<Vec<E::BaseField>>,
-    /// The verifier also needs a FFT table (much smaller)
-    /// for small-size encoding. It contains the same roots as the
-    /// prover's version for the first few levels (i < basecode_msg_size_log)
-    /// For the other levels (i >= basecode_msg_size_log),
-    /// it contains only the g^(2^i).
-    pub(crate) fft_root_table: FftRootTable<E::BaseField>,
     pub(crate) full_message_size_log: usize,
-    pub(crate) gamma_powers: Vec<E::BaseField>,
-    pub(crate) gamma_powers_inv_div_two: Vec<E::BaseField>,
 }
 
 #[derive(Debug, Clone)]
@@ -296,7 +285,7 @@ where
     }
 
     fn trim(
-        mut pp: Self::PublicParameters,
+        _pp: Self::PublicParameters,
         max_message_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error> {
         if max_message_size_log < Spec::get_basecode_msg_size_log() {
@@ -306,44 +295,15 @@ where
                 Self::ProverParameters {
                     dft: Default::default(),
                     t_inv_halves: Default::default(),
-                    fft_root_table: vec![],
-                    gamma_powers: vec![],
-                    gamma_powers_inv_div_two: vec![],
                     full_message_size_log: max_message_size_log,
                 },
                 Self::VerifierParameters {
                     dft: Default::default(),
                     t_inv_halves: Default::default(),
-                    fft_root_table: vec![],
-                    gamma_powers: vec![],
-                    gamma_powers_inv_div_two: vec![],
                     full_message_size_log: max_message_size_log,
                 },
             ));
         }
-        // let mut gamma_powers = Vec::with_capacity(max_message_size_log);
-        // let mut gamma_powers_inv = Vec::with_capacity(max_message_size_log);
-        // gamma_powers.push(E::BaseField::GENERATOR);
-        // gamma_powers_inv.push(E::BaseField::GENERATOR.inverse());
-        // for i in 1..max_message_size_log + Spec::get_rate_log() {
-        //     gamma_powers.push(gamma_powers[i - 1].square());
-        //     gamma_powers_inv.push(gamma_powers_inv[i - 1].square());
-        // }
-        // let inv_of_two = E::BaseField::from_u64(2).inverse();
-        // gamma_powers_inv.iter_mut().for_each(|x| *x *= inv_of_two);
-        // pp.fft_root_table
-        //     .truncate(max_message_size_log + Spec::get_rate_log());
-
-        // let verifier_fft_root_table = pp.fft_root_table
-        //     [..Spec::get_basecode_msg_size_log() + Spec::get_rate_log()]
-        //     .iter()
-        //     .cloned()
-        //     .chain(
-        //         pp.fft_root_table[Spec::get_basecode_msg_size_log() + Spec::get_rate_log()..]
-        //             .iter()
-        //             .map(|v| vec![v[1]]),
-        //     )
-        //     .collect();
 
         // directly return bit reverse format, matching with codeword index
         let t_inv_halves_prover = (0..max_message_size_log)
@@ -372,25 +332,13 @@ where
             Self::ProverParameters {
                 dft: Default::default(),
                 t_inv_halves: t_inv_halves_prover.clone(),
-                // fft_root_table: pp.fft_root_table,
-                fft_root_table: vec![],
-                // gamma_powers: gamma_powers.clone(),
-                gamma_powers: vec![],
-                // gamma_powers_inv_div_two: gamma_powers_inv.clone(),
-                gamma_powers_inv_div_two: vec![],
                 full_message_size_log: max_message_size_log,
             },
             Self::VerifierParameters {
                 dft: Default::default(),
                 // TODO make verifier calculate fft root by itself
                 t_inv_halves: t_inv_halves_prover,
-                // fft_root_table: verifier_fft_root_table,
-                fft_root_table: vec![],
                 full_message_size_log: max_message_size_log,
-                // gamma_powers,
-                gamma_powers: vec![],
-                // gamma_powers_inv_div_two: gamma_powers_inv,
-                gamma_powers_inv_div_two: vec![],
             },
         ))
     }
@@ -475,85 +423,20 @@ where
         false
     }
 
-    /// level goes from large domain to smaller domain
-    fn prover_folding_coeffs(pp: &Self::ProverParameters, level: usize, index: usize) -> (E, E, E) {
-        // The coefficients are for the bit-reversed codeword, so reverse the
-        // bits before providing the coefficients.
-        let index = reverse_bits(index, level);
-        // level is the logarithmic of the codeword size after folded.
-        // Therefore, the domain after folded is gamma^2^(full_log_n - level) H
-        // where H is the multiplicative subgroup of size 2^level.
-        // The element at index i in this domain is
-        // gamma^2^(full_log_n - level) * ((2^level)-th root of unity)^i
-        // The x0 and x1 are exactly the two square roots, i.e.,
-        // x0 = gamma^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^i
-        // Since root_table[i] stores the first half of the powers of
-        // the 2^(i+1)-th roots of unity, we can avoid recomputing them.
-        let x0 = if index < (1 << level) {
-            pp.fft_root_table[level][index]
-        } else {
-            -pp.fft_root_table[level][index - (1 << level)]
-        } * pp.gamma_powers[pp.full_message_size_log + Spec::get_rate_log() - level - 1];
-        let x1 = -x0;
-        // The weight is 1/(x1-x0) = -1/(2x0)
-        // = -1/2 * (gamma^{-1})^2^(full_codeword_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
-        let w = -pp.gamma_powers_inv_div_two
-            [pp.full_message_size_log + Spec::get_rate_log() - level - 1]
-            * if index == 0 {
-                E::BaseField::ONE
-            } else if index < (1 << level) {
-                -pp.fft_root_table[level][(1 << level) - index]
-            } else if index == 1 << level {
-                -E::BaseField::ONE
-            } else {
-                // index > (1 << level)
-                pp.fft_root_table[level][(1 << (level + 1)) - index]
-            };
-        (E::from(x0), E::from(x1), E::from(w))
+    fn prover_folding_coeffs(
+        _pp: &Self::ProverParameters,
+        _level: usize,
+        _index: usize,
+    ) -> (E, E, E) {
+        unimplemented!()
     }
 
     fn verifier_folding_coeffs(
-        vp: &Self::VerifierParameters,
-        level: usize,
-        index: usize,
+        _vp: &Self::VerifierParameters,
+        _level: usize,
+        _index: usize,
     ) -> (E, E, E) {
-        // The coefficients are for the bit-reversed codeword, so reverse the
-        // bits before providing the coefficients.
-        let index = reverse_bits(index, level);
-        // The same as prover_folding_coeffs, exept that the powers of
-        // g is computed on the fly for levels exceeding the root table.
-        let x0 = if level < Spec::get_basecode_msg_size_log() + Spec::get_rate_log() {
-            if index < (1 << level) {
-                vp.fft_root_table[level][index]
-            } else {
-                -vp.fft_root_table[level][index - (1 << level)]
-            }
-        } else {
-            // In this case, the level-th row of fft root table of the verifier
-            // only stores the first 2^(level+1)-th roots of unity.
-            vp.fft_root_table[level][0].exp_u64(index as u64)
-        } * vp.gamma_powers[vp.full_message_size_log + Spec::get_rate_log() - level - 1];
-        let x1 = -x0;
-        // The weight is 1/(x1-x0) = -1/(2x0)
-        // = -1/2 * (gamma^{-1})^2^(full_log_n - level - 1) * ((2^(level+1))-th root of unity)^{2^(level+1)-i}
-        let w = -vp.gamma_powers_inv_div_two
-            [vp.full_message_size_log + Spec::get_rate_log() - level - 1]
-            * if level < Spec::get_basecode_msg_size_log() + Spec::get_rate_log() {
-                if index == 0 {
-                    E::BaseField::ONE
-                } else if index < (1 << level) {
-                    -vp.fft_root_table[level][(1 << level) - index]
-                } else if index == 1 << level {
-                    -E::BaseField::ONE
-                } else {
-                    vp.fft_root_table[level][(1 << (level + 1)) - index]
-                }
-            } else {
-                // In this case, this level of fft root table of the verifier
-                // only stores the first 2^(level+1)-th root of unity.
-                vp.fft_root_table[level][0].exp_u64((1 << (level + 1)) - index as u64)
-            };
-        (E::from(x0), E::from(x1), E::from(w))
+        unimplemented!()
     }
 
     fn prover_folding_coeffs_level(pp: &Self::ProverParameters, level: usize) -> &[E::BaseField] {
@@ -736,9 +619,9 @@ mod tests {
     //     test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec, GoldilocksExt2>>();
     // }
 
-    type E = GoldilocksExt2;
-    type F = Goldilocks;
-    type Code = RSCode<RSCodeDefaultSpec>;
+    // type E = GoldilocksExt2;
+    // type F = Goldilocks;
+    // type Code = RSCode<RSCodeDefaultSpec>;
 
     // #[test]
     // pub fn test_colinearity() {

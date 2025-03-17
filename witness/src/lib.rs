@@ -1,7 +1,7 @@
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use p3::{
     field::{Field, PrimeCharacteristicRing},
-    matrix::{Matrix, bitrev::BitReversableMatrix},
+    matrix::Matrix,
 };
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 use rayon::{

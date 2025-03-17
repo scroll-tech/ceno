@@ -1,7 +1,5 @@
 #![deny(clippy::cargo)]
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::Transcript;
@@ -274,43 +272,6 @@ pub use basefold::{
 mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
-
-fn validate_input<E: ExtensionField>(
-    function: &str,
-    param_num_vars: usize,
-    polys: &[DenseMultilinearExtension<E>],
-    points: &[Vec<E>],
-) -> Result<(), Error> {
-    let polys = polys.iter().collect_vec();
-    let points = points.iter().collect_vec();
-    for poly in polys.iter() {
-        if param_num_vars < poly.num_vars {
-            return Err(err_too_many_variates(
-                function,
-                param_num_vars,
-                poly.num_vars,
-            ));
-        }
-    }
-    for point in points.iter() {
-        if param_num_vars < point.len() {
-            return Err(err_too_many_variates(function, param_num_vars, point.len()));
-        }
-    }
-    Ok(())
-}
-
-fn err_too_many_variates(function: &str, upto: usize, got: usize) -> Error {
-    Error::InvalidPcsParam(if function == "trim" {
-        format!(
-            "Too many variates to {function} (param supports variates up to {upto} but got {got})"
-        )
-    } else {
-        format!(
-            "Too many variates of poly to {function} (param supports variates up to {upto} but got {got})"
-        )
-    })
-}
 
 // TODO: Need to use some functions here in the integration benchmarks. But
 // unfortunately integration benchmarks do not compile the #[cfg(test)]

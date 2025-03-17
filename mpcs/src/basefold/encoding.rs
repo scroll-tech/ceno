@@ -89,6 +89,7 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     ) -> &[E::BaseField];
 }
 
+#[allow(dead_code)]
 fn concatenate_field_types<E: ExtensionField>(coeffs: &[FieldType<E>]) -> FieldType<E> {
     match coeffs[0] {
         FieldType::Ext(_) => {
@@ -117,13 +118,13 @@ fn concatenate_field_types<E: ExtensionField>(coeffs: &[FieldType<E>]) -> FieldT
 
 #[cfg(test)]
 pub(crate) mod test_util {
-    use ff_ext::ExtensionField;
-    use multilinear_extensions::mle::FieldType;
-    use rand::rngs::OsRng;
+    // use ff_ext::ExtensionField;
+    // use multilinear_extensions::mle::FieldType;
+    // use rand::rngs::OsRng;
 
-    use crate::util::plonky2_util::reverse_index_bits_in_place_field_type;
+    // use crate::util::plonky2_util::reverse_index_bits_in_place_field_type;
 
-    use super::EncodingScheme;
+    // use super::EncodingScheme;
 
     // pub fn test_codeword_folding<E: ExtensionField, Code: EncodingScheme<E>>() {
     //     let num_vars = 12;

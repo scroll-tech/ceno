@@ -18,7 +18,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::RMMCollections;
 use p3::field::PrimeCharacteristicRing;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[derive(Clone, Debug)]

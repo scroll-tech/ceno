@@ -1,12 +1,10 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use multilinear_extensions::util::max_usable_threads;
-use p3::maybe_rayon::prelude::*;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use std::sync::Arc;
 
 use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::LkMultiplicity};
 

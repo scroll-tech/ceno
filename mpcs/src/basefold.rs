@@ -1,9 +1,6 @@
 use crate::{
     Error, Evaluation, PolynomialCommitmentScheme,
-    sum_check::{
-        classic::{ClassicSumCheck, CoefficientsProver},
-        eq_xy_eval,
-    },
+    sum_check::eq_xy_eval,
     util::{
         arithmetic::inner_product, ext_to_usize, hash::write_digest_to_transcript, log2_strict,
         merkle_tree::poseidon2_merkle_tree,
@@ -14,15 +11,12 @@ use ceno_sumcheck::macros::{entered_span, exit_span};
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
-use p3::{
-    commit::Mmcs,
-    matrix::{Matrix, bitrev::BitReversableMatrix, dense::DenseMatrix},
-};
+use p3::{commit::Mmcs, matrix::dense::DenseMatrix};
 use query_phase::{simple_batch_prover_query_phase, simple_batch_verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
 use transcript::Transcript;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::RowMajorMatrix;
 
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
@@ -34,8 +28,6 @@ use rayon::{
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
 };
 pub use sumcheck::{one_level_eval_hc, one_level_interp_hc};
-
-type SumCheck<F> = ClassicSumCheck<CoefficientsProver<F>>;
 
 mod structure;
 pub use structure::{

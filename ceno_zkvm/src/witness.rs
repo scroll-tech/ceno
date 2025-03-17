@@ -1,9 +1,5 @@
 use itertools::izip;
-use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
-use p3::{
-    field::{Field, PrimeCharacteristicRing},
-    maybe_rayon::prelude::*,
-};
+
 use std::{
     cell::RefCell,
     collections::HashMap,

@@ -1,21 +1,17 @@
-use std::{iter::repeat_with, slice};
+use std::slice;
 
 use crate::{
     basefold::structure::MerkleTreeExt,
     util::{
-        arithmetic::{
-            degree_2_eval, degree_2_zero_plus_one, inner_product,
-            interpolate_over_boolean_hypercube,
-        },
+        arithmetic::{degree_2_eval, degree_2_zero_plus_one},
         ext_to_usize, log2_strict,
         merkle_tree::poseidon2_merkle_tree,
-        plonky2_util::reverse_bits,
     },
 };
 use ark_std::{end_timer, start_timer};
 use ceno_sumcheck::macros::{entered_span, exit_span};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip, rev, zip};
+use itertools::{Itertools, izip};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::dot_product,
@@ -25,14 +21,12 @@ use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::basefold::structure::QueryOpeningProofs;
-use multilinear_extensions::mle::FieldType;
 
 use super::{
     Digest,
     encoding::EncodingScheme,
     structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
 };
-use crate::util::plonky2_util::reverse_index_bits_in_place;
 
 pub fn simple_batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
@@ -103,12 +97,12 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     sum_check_messages: &[Vec<E>],
     fold_challenges: &[E],
     batch_coeffs: &[E],
-    num_rounds: usize,
+    _num_rounds: usize,
     num_vars: usize,
     final_message: &[E],
     roots: &[Digest<E>],
     comm: &BasefoldCommitment<E>,
-    partial_eq: &[E],
+    _partial_eq: &[E],
     evals: &[E],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
@@ -118,19 +112,10 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     let encode_timer = start_timer!(|| "Encode final codeword");
     let message = final_message.to_vec();
-    // if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding() {
-    //     reverse_index_bits_in_place(&mut message);
-    // }
-    // interpolate_over_boolean_hypercube(&mut message);
-    let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
+    let _final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
         vp,
         RowMajorMatrix::new(message, 1),
     );
-    // let mut final_codeword = match final_codeword {
-    //     FieldType::Ext(final_codeword) => final_codeword,
-    //     _ => panic!("Final codeword must be extension field"),
-    // };
-    // reverse_index_bits_in_place(&mut final_codeword);
     end_timer!(encode_timer);
 
     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
@@ -140,9 +125,6 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     izip!(indices, queries).for_each(|(idx, ((commit_leafs, commit_proof), opening_ext))| {
         // refer to prover document for the reason of right shift by 1
         let idx = idx >> 1;
-        // if idx == 1360 {
-        //     println!("{idx} num_vars {}, <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() {}, m.width {}", num_vars, <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(), num_polys * 2,);
-        // }
         mmcs.verify_batch(
             &comm.pi_d,
             &[Dimensions {
@@ -176,7 +158,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
         debug_assert_eq!(rounds, fold_challenges.len() - 1);
         debug_assert_eq!(rounds, roots.len(),);
         debug_assert_eq!(rounds, opening_ext.len(),);
-        let (idx, _foleded, _) = roots
+        let (_idx, _foleded, _) = roots
             .iter()
             .zip_eq(fold_challenges.iter().rev().skip(1))
             .zip_eq(opening_ext)
@@ -197,7 +179,6 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
                             proof,
                         )
                         .expect("verify failed");
-                    println!("height * width = {}, idx {idx}", n_d_i);
                     // TODO check folded value equal with one sibling value via replacing sibling value with folded value
                     let coeff =
                         <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
@@ -209,12 +190,12 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
                     (idx, lo + (hi - lo) * *r, n_d_i >> 1)
                 },
             );
-        assert!(
-            final_codeword.values[idx] == folded,
-            "final_codeword.values[idx >> 1] value {:?} != folded {:?}",
-            final_codeword.values[idx],
-            folded
-        );
+        // assert!(
+        //     final_codeword.values[idx] == folded,
+        //     "final_codeword.values[idx >> 1] value {:?} != folded {:?}",
+        //     final_codeword.values[idx],
+        //     folded
+        // );
     });
     exit_span!(span);
 

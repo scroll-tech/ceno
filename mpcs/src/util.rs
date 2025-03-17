@@ -6,7 +6,7 @@ pub mod plonky2_util;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools, izip};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 pub mod merkle_tree;
 use crate::{Error, util::parallel::parallelize};
 use p3::field::{PrimeCharacteristicRing, PrimeField};
