@@ -226,7 +226,7 @@ where
     let two = F::ONE + F::ONE;
     let two_inv = two.inverse();
 
-    let n_variables = p3_util::log2_strict_usize(coords.len());
+    let n_variables = coords.len();
     assert!(point < 3usize.pow(n_variables as u32));
 
     let mut acc = F::ONE;
