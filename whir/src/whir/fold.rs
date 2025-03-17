@@ -233,7 +233,7 @@ where
 
     // Note: This iterates over the ternary decomposition least-significant trit(?) first.
     // Since our convention is big endian, we reverse the order of coords to account for this.
-    for &val in coords.iter().rev() {
+    for &val in coords.iter() {
         let b = point % 3;
         acc *= match b {
             0 => (val - F::ONE) * (val - two) * two_inv,
