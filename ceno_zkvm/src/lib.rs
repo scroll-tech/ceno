@@ -21,7 +21,6 @@ pub mod stats;
 pub mod structs;
 mod uint;
 mod utils;
-mod virtual_polys;
 mod witness;
 
 pub use structs::ROMType;
