@@ -439,9 +439,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     _ => unimplemented!("do not support degree {} > 5", products.len()),
                 };
                 exit_span!(span);
-                if self.round == 1 {
-                    println!("SUM: {:?}", (sum[0] + sum[1]));
-                }
                 sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                 let span = entered_span!("extrapolation");
