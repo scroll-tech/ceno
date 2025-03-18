@@ -3,6 +3,8 @@ mod structure;
 
 use std::marker::PhantomData;
 
+use crate::util::log2_strict;
+
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
@@ -133,8 +135,10 @@ where
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(false);
-        let whir_config =
-            WhirConfig::new(MultivariateParameters::new(rmm[0].num_vars()), parameters);
+        let whir_config = WhirConfig::new(
+            MultivariateParameters::new(log2_strict(rmm.num_instances())),
+            parameters,
+        );
         let (witness, _commitment) = Committer::new(whir_config)
             .batch_commit(transcript, rmm)
             .map_err(crate::Error::WhirError)?;
