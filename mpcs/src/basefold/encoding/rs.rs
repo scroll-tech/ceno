@@ -6,6 +6,7 @@ use crate::{
     basefold::PolyEvalsCodeword,
     util::{log2_strict, plonky2_util::reverse_bits},
 };
+use aes::cipher::KeyInit;
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -136,6 +137,23 @@ where
             ));
         }
 
+        // initialize twiddles in dft to accelarate the process
+        let prover_dft: Radix2DitParallel<E::BaseField> = Default::default();
+        (0..max_message_size_log + Spec::get_rate_log()).for_each(|n| {
+            prover_dft.dft_batch(p3::matrix::dense::DenseMatrix::new_col(
+                vec![E::BaseField::ZERO; 1 << (n + 1)],
+            ));
+        });
+        let verifier_dft: Radix2Dit<E> = Default::default();
+        (Spec::get_basecode_msg_size_log()
+            ..Spec::get_basecode_msg_size_log() + Spec::get_rate_log())
+            .for_each(|n| {
+                verifier_dft.dft_batch(p3::matrix::dense::DenseMatrix::new_col(vec![
+                    E::ZERO;
+                    1 << (n + 1)
+                ]));
+            });
+
         // directly return bit reverse format, matching with codeword index
         let t_inv_halves_prover = (0..max_message_size_log + Spec::get_rate_log())
             .map(|i| {
@@ -161,12 +179,12 @@ where
 
         Ok((
             Self::ProverParameters {
-                dft: Default::default(),
+                dft: prover_dft,
                 t_inv_halves: t_inv_halves_prover.clone(),
                 full_message_size_log: max_message_size_log,
             },
             Self::VerifierParameters {
-                dft: Default::default(),
+                dft: verifier_dft,
                 // TODO make verifier calculate fft root by itself
                 t_inv_halves: t_inv_halves_prover,
                 full_message_size_log: max_message_size_log,
