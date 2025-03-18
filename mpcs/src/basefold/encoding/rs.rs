@@ -6,7 +6,6 @@ use crate::{
     basefold::PolyEvalsCodeword,
     util::{log2_strict, plonky2_util::reverse_bits},
 };
-use aes::cipher::KeyInit;
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;

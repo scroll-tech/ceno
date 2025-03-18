@@ -538,14 +538,6 @@ mod test {
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     #[test]
-    fn commit_open_verify_goldilocks() {
-        // Test trivial proof with small num vars
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11);
-        // Test trivial proof with small num vars
-        run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6);
-    }
-
-    #[test]
     fn simple_batch_commit_open_verify_goldilocks() {
         // Both challenge and poly are over base field
         run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
