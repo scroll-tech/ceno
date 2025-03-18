@@ -753,6 +753,11 @@ impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E>
     ) -> RangedMultilinearExtension<'_, E> {
         assert!(num_range > 0);
         let offset = self.evaluations.len() / num_range;
+        assert!(
+            offset > 0,
+            "invalid: {num_range} > evaluation length {}",
+            self.evaluations.len()
+        );
         let start = offset * range_index;
         RangedMultilinearExtension::new(self, start, offset)
     }
