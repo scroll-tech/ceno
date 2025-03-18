@@ -323,9 +323,9 @@ mod tests {
         );
 
         let full_folding = [
-            folding_randomness_3.clone(),
+            folding_randomness_1.clone(),
             folding_randomness_2.clone(),
-            folding_randomness_1,
+            folding_randomness_3.clone(),
         ]
         .concat();
 
@@ -339,13 +339,14 @@ mod tests {
                         + combination_randomness_1[1]
                             * eq_eval(
                                 &fold_point_11,
-                                &[folding_randomness_3.clone(), folding_randomness_2.clone()]
+                                &[folding_randomness_2.clone(), folding_randomness_3.clone()]
                                     .concat()
                             )
                         + combination_randomness_1[2]
                             * eq_eval(
                                 &fold_point_12,
-                                &[folding_randomness_3.clone(), folding_randomness_2].concat()
+                                &[folding_randomness_2.clone(), folding_randomness_3.clone()]
+                                    .concat()
                             ))
                     + combination_randomness_2[1] * eq_eval(&folding_randomness_3, &fold_point_2))
         )

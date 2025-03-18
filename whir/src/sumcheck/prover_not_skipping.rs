@@ -133,12 +133,14 @@ mod tests {
         let mut sumcheck_polys_iter = sumcheck_polys.into_iter();
         let sumcheck_poly_11: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_11.evaluations());
         let folding_randomness_11 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
         assert_eq!(folding_randomness_11, folding_randomness_1[0]);
         let sumcheck_poly_12: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_12.evaluations());
         let folding_randomness_12 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
