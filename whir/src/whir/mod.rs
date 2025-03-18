@@ -29,7 +29,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) merkle_answers: Vec<(MultiPath<E>, Vec<Vec<E>>)>,
-    pub(crate) sumcheck_poly_evals: Vec<[E; 3]>,
+    pub(crate) sumcheck_poly_evals: Vec<Vec<E>>,
     pub(crate) merkle_roots: Vec<Digest<E>>,
     pub(crate) ood_answers: Vec<Vec<E>>,
     pub(crate) final_poly: Vec<E>,

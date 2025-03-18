@@ -38,14 +38,14 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
     pub fn compute_sumcheck_polynomials<T: Transcript<E>>(
         &mut self,
         transcript: &mut T,
-        sumcheck_polys: &mut Vec<[E; 3]>,
+        sumcheck_polys: &mut Vec<Vec<E>>,
         folding_factor: usize,
     ) -> Result<Vec<E>, Error> {
         let mut res = Vec::with_capacity(folding_factor);
 
         for _ in 0..folding_factor {
             let sumcheck_poly = self.sumcheck_prover.compute_sumcheck_polynomial();
-            sumcheck_polys.push(sumcheck_poly.evaluations_3());
+            sumcheck_polys.push(sumcheck_poly.evaluations().to_vec());
             transcript.append_field_element_exts(sumcheck_poly.evaluations());
             let folding_randomness = transcript
                 .sample_and_append_challenge(b"folding_randomness")
@@ -143,12 +143,12 @@ mod tests {
         // Verifier part
         let mut sumcheck_polys_iter = sumcheck_polys.into_iter();
         let mut transcript = T::new(b"test");
-        let sumcheck_poly_11: [F; 3] = sumcheck_polys_iter.next().unwrap();
+        let sumcheck_poly_11: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
         let folding_randomness_11 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
-        let sumcheck_poly_12: [F; 3] = sumcheck_polys_iter.next().unwrap();
+        let sumcheck_poly_12: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
         let folding_randomness_12 = transcript
             .sample_and_append_challenge(b"folding_randomness")

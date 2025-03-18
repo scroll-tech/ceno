@@ -208,7 +208,7 @@ impl<E: ExtensionField> Prover<E> {
     fn simple_round_batch<T: Transcript<E>>(
         &self,
         transcript: &mut T,
-        sumcheck_poly_evals: &mut Vec<[E; 3]>,
+        sumcheck_poly_evals: &mut Vec<Vec<E>>,
         ood_answers: &mut Vec<Vec<E>>,
         merkle_roots: &mut Vec<Digest<E>>,
         round_state: RoundStateBatch<E>,

@@ -161,7 +161,7 @@ impl<E: ExtensionField> Prover<E> {
     pub(crate) fn round<T: Transcript<E>>(
         &self,
         transcript: &mut T,
-        sumcheck_poly_evals: &mut Vec<[E; 3]>,
+        sumcheck_poly_evals: &mut Vec<Vec<E>>,
         ood_answers: &mut Vec<Vec<E>>,
         merkle_roots: &mut Vec<Digest<E>>,
         mut round_state: RoundState<E>,

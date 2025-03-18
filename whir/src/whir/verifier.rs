@@ -109,7 +109,7 @@ impl<E: ExtensionField> Verifier<E> {
             // Initial sumcheck
             sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
             for _ in 0..self.params.folding_factor.at_round(0) {
-                let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+                let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                     .next()
                     .ok_or(Error::InvalidProof(
                         "Insufficient number of sumcheck polynomial evaluations".to_string(),
@@ -202,7 +202,7 @@ impl<E: ExtensionField> Verifier<E> {
             let mut sumcheck_rounds =
                 Vec::with_capacity(self.params.folding_factor.at_round(r + 1));
             for _ in 0..self.params.folding_factor.at_round(r + 1) {
-                let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+                let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                     .next()
                     .ok_or(Error::InvalidProof(
                         "Insufficient number of sumcheck polynomial evaluations".to_string(),
@@ -278,7 +278,7 @@ impl<E: ExtensionField> Verifier<E> {
 
         let mut final_sumcheck_rounds = Vec::with_capacity(self.params.final_sumcheck_rounds);
         for _ in 0..self.params.final_sumcheck_rounds {
-            let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+            let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                 .next()
                 .ok_or(Error::InvalidProof(
                     "Final sumcheck polynomial evaluations insufficient".to_string(),

@@ -37,10 +37,8 @@ impl<E: ExtensionField> Verifier<E> {
             assert_eq!(num_polys, evals.len());
         }
         let parsed_commitment = commitment;
-        let mut sumcheck_poly_evals_iter = whir_proof
-            .sumcheck_poly_evals
-            .iter()
-            .map(|[a, b, c]| [a.clone(), b.clone(), c.clone()]);
+        let mut sumcheck_poly_evals_iter =
+            whir_proof.sumcheck_poly_evals.iter().map(|x| x.to_vec());
 
         // It is possible that the committing and the opening of the polynomial
         // is separated in the protocol. So it doesn't make sense to write
@@ -71,10 +69,8 @@ impl<E: ExtensionField> Verifier<E> {
         assert_eq!(num_polys, point_per_poly.len());
         assert_eq!(num_polys, eval_per_poly.len());
 
-        let mut sumcheck_poly_evals_iter = whir_proof
-            .sumcheck_poly_evals
-            .iter()
-            .map(|[a, b, c]| [*a, *b, *c]);
+        let mut sumcheck_poly_evals_iter =
+            whir_proof.sumcheck_poly_evals.iter().map(|x| x.to_vec());
 
         // It is possible that the committing and the opening of the polynomial
         // is separated in the protocol. So it doesn't make sense to write
@@ -112,7 +108,7 @@ impl<E: ExtensionField> Verifier<E> {
         evals_per_point: &[Vec<E>],
         parsed_commitment: &WhirCommitmentInTranscript<E>,
         whir_proof: &WhirProof<E>,
-        sumcheck_poly_evals_iter: &mut impl Iterator<Item = [E; 3]>,
+        sumcheck_poly_evals_iter: &mut impl Iterator<Item = Vec<E>>,
     ) -> Result<(), Error> {
         // parse proof
         let compute_dot_product =
@@ -303,7 +299,7 @@ impl<E: ExtensionField> Verifier<E> {
         point_per_poly: &[Vec<E>],
         poly_comb_randomness: Vec<E>,
         whir_proof: &WhirProof<E>,
-        sumcheck_poly_evals_iter: &mut impl Iterator<Item = [E; 3]>,
+        sumcheck_poly_evals_iter: &mut impl Iterator<Item = Vec<E>>,
     ) -> Result<(Vec<E>, Vec<E>), Error> {
         let num_variables = self.params.mv_parameters.num_variables;
         let mut sumcheck_rounds = Vec::new();
@@ -315,7 +311,7 @@ impl<E: ExtensionField> Verifier<E> {
         // Unifying sumcheck
         sumcheck_rounds.reserve_exact(num_variables);
         for _ in 0..num_variables {
-            let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+            let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                 .next()
                 .ok_or(Error::InvalidProof(
                     "Insufficient number of sumcheck polynomial evaluations in unify sumcheck"
@@ -373,7 +369,7 @@ impl<E: ExtensionField> Verifier<E> {
         whir_proof: &WhirProof<E>,
         batched_randomness: Vec<E>,
         num_polys: usize,
-        sumcheck_poly_evals_iter: &mut impl Iterator<Item = [E; 3]>,
+        sumcheck_poly_evals_iter: &mut impl Iterator<Item = Vec<E>>,
     ) -> Result<ParsedProof<E>, Error> {
         let mut sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
@@ -392,7 +388,7 @@ impl<E: ExtensionField> Verifier<E> {
             // Initial sumcheck
             sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
             for _ in 0..self.params.folding_factor.at_round(0) {
-                let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+                let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                     .next()
                     .ok_or(Error::InvalidProof(
                         "Insufficient number of sumcheck polynomial evaluations".to_string(),
@@ -526,7 +522,7 @@ impl<E: ExtensionField> Verifier<E> {
             let mut sumcheck_rounds =
                 Vec::with_capacity(self.params.folding_factor.at_round(r + 1));
             for _ in 0..self.params.folding_factor.at_round(r + 1) {
-                let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+                let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                     .next()
                     .ok_or(Error::InvalidProof(
                         "Insufficient number of sumcheck polynomial evaluations".to_string(),
@@ -630,7 +626,7 @@ impl<E: ExtensionField> Verifier<E> {
 
         let mut final_sumcheck_rounds = Vec::with_capacity(self.params.final_sumcheck_rounds);
         for _ in 0..self.params.final_sumcheck_rounds {
-            let sumcheck_poly_evals: [E; 3] = sumcheck_poly_evals_iter
+            let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                 .next()
                 .ok_or(Error::InvalidProof(
                     "Insufficient number of sumcheck polynomial evaluation for final rounds"
