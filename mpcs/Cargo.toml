@@ -34,6 +34,7 @@ rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
+sumcheck = { path = "../sumcheck" }
 transcript = { path = "../transcript" }
 whir = { path = "../whir", features = ["ceno"] }
 zeroize = "1.8"

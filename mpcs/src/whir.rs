@@ -266,7 +266,7 @@ mod tests {
             gen_rand_poly,
             20,
             3,
-            5,
+            3,
         );
     }
 }

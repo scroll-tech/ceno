@@ -1,12 +1,14 @@
 #![deny(clippy::cargo)]
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use itertools::{Either, Itertools};
+use multilinear_extensions::{mle::{DenseMultilinearExtension, FieldType, MultilinearExtension}, virtual_poly::{build_eq_x_r, eq_eval, VPAuxInfo}};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::{BasicTranscript, Transcript};
 use util::hash::Digest;
 use p3_field::PrimeCharacteristicRing;
+use multilinear_extensions::virtual_poly::VirtualPolynomial;
+use sumcheck::structs::{IOPProof, IOPProverState, IOPVerifierState};
 
 pub mod sum_check;
 pub mod util;
@@ -334,21 +336,50 @@ pub fn pcs_batch_open_diff_size<E: ExtensionField, Pcs: PolynomialCommitmentSche
     packed_comm: &Pcs::CommitmentWithWitness,
     final_comm: &Option<Pcs::CommitmentWithWitness>,
     points: &[Vec<E>],
-    evals: &[E],
+    _evals: &[E],
     transcript: &mut impl Transcript<E>,
-) -> Result<(Pcs::Proof, Option<Pcs::Proof>), Error> {
+) -> Result<(IOPProof<E>, Vec<E>, Pcs::Proof, Option<Pcs::Proof>), Error> {
+    assert_eq!(polys.len(), points.len());
     // TODO: Sort the polys by decreasing size
+    let arc_polys: Vec<ArcMultilinearExtension<E>> = polys.into_iter().map(|p| ArcMultilinearExtension::from(p.clone())).collect();
+    // UNIFY SUMCHECK
+    // Sample random coefficients for each poly
+    let unify_coeffs = transcript.sample_vec(polys.len());
+    // First convert each point into EQ
+    let eq_points = points.iter().map(|p| build_eq_x_r(p)).collect::<Vec<_>>();
+
+    let mut sumcheck_poly = VirtualPolynomial::<E>::new(polys[0].num_vars());
+    for ((eq, poly), coeff) in eq_points.into_iter().zip(arc_polys).zip(unify_coeffs) {
+        let claim = match (&poly.evaluations(), &eq.evaluations) {
+            (FieldType::Base(p), FieldType::Ext(e)) => {
+                p.iter().zip(e).map(|(p, e)| E::from_bases(&[*p, E::BaseField::ZERO]) * *e).fold(E::ZERO, |s, i| s + i)
+            }
+            _ => unreachable!()
+        };
+        println!("C: {:?}", claim);
+        sumcheck_poly.add_mle_list(vec![eq, poly], coeff);
+    }
+    let (unify_proof, unify_prover_state) = IOPProverState::prove_batch_polys(1, vec![sumcheck_poly], transcript);
+    let packed_point = unify_proof.point.clone();
+    // sumcheck_poly is consisted of [eq, poly, eq, poly, ...], we only need the evaluations to `poly` here
+    let sumcheck_evals = unify_prover_state.get_mle_final_evaluations();
+    let (_, evals): (Vec<_>, Vec<_>) = sumcheck_evals.into_iter().enumerate().partition_map(|(i, e)| {
+        if i % 2 == 0 {
+            Either::Left(e)
+        } else {
+            Either::Right(e)
+        }
+    });
+
+    // GEN & EVAL PACK POLYS
     // TODO: The prover should be able to avoid packing the polys again
     let (packed_polys, final_poly, packed_comps, final_comp) = pack_poly_prover(polys);
-    // TODO: Add unifying sumcheck if the points do not match
-    // For now, assume that all polys are evaluated on the same points
-    let packed_point = points[0].clone();
+    let packed_polys: Vec<ArcMultilinearExtension<E>> = packed_polys.into_iter().map(|p| ArcMultilinearExtension::from(p)).collect();
     // Note: the points are stored in reverse
     let final_point = if let Some(final_poly) = &final_poly { packed_point[..final_poly.num_vars].to_vec() } else { Vec::new() };
     // Use comps to compute evals for packed polys from regular evals
-    let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, evals, &packed_comps, &final_comp);
+    let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, &evals, &packed_comps, &final_comp);
 
-    let packed_polys: Vec<ArcMultilinearExtension<E>> = packed_polys.into_iter().map(|p| ArcMultilinearExtension::from(p)).collect();
     let pack_proof = Pcs::simple_batch_open(pp, &packed_polys, packed_comm, &packed_point, &packed_evals, transcript)?;
     let final_proof = match (&final_poly, &final_comm, &final_eval) {
         (Some(final_poly), Some(final_comm), Some(final_eval)) => {
@@ -357,7 +388,7 @@ pub fn pcs_batch_open_diff_size<E: ExtensionField, Pcs: PolynomialCommitmentSche
         (None, None, None) => None,
         _ => unreachable!(),
     };
-    Ok((pack_proof, final_proof))
+    Ok((unify_proof, evals, pack_proof, final_proof))
 }
 
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -391,7 +422,9 @@ pub fn pcs_batch_verify_diff_size<'a, E: ExtensionField, Pcs: PolynomialCommitme
     packed_comm: &Pcs::Commitment,
     final_comm: &Option<Pcs::Commitment>,
     points: &[Vec<E>],
-    evals: &[E],
+    poly_evals: &[E], // Evaluation of polys on original points
+    unify_proof: &IOPProof<E>,
+    unify_evals: &[E], // Evaluation of polys on unified points 
     packed_proof: &Pcs::Proof,
     final_proof: &Option<Pcs::Proof>,
     transcript: &mut impl Transcript<E>,
@@ -399,6 +432,21 @@ pub fn pcs_batch_verify_diff_size<'a, E: ExtensionField, Pcs: PolynomialCommitme
 where
     Pcs::Commitment: 'a,
 {
+    assert_eq!(poly_num_vars.len(), points.len());
+    assert_eq!(poly_evals.len(), points.len());
+    // UNIFY SUMCHECK
+    // Sample random coefficients for each poly
+    let unify_coeffs = transcript.sample_vec(poly_num_vars.len());
+    let claim = poly_evals.iter().zip(&unify_coeffs).map(|(e, c)| *e * *c).sum();
+    let sumcheck_subclaim = IOPVerifierState::verify(claim, unify_proof, &VPAuxInfo { max_degree: 2, max_num_variables: poly_num_vars[0], phantom: Default::default() }, transcript);
+    let packed_point = sumcheck_subclaim.point.iter().map(|c| c.elements).collect::<Vec<_>>();
+    let claimed_eval = sumcheck_subclaim.expected_evaluation;
+    // Compute the evaluation of every EQ
+    let eq_evals = points.iter().map(|p| eq_eval(p, &packed_point[..p.len()]));
+    let expected_eval = eq_evals.zip(unify_evals).zip(unify_coeffs).map(|((eq, poly), coeff)| eq * *poly * coeff).sum();
+    assert_eq!(claimed_eval, expected_eval);
+
+    // VERIFY PACK POLYS
     // Replicate packing
     let (_, final_poly_num_vars, packed_comps, final_comp) = pack_poly_verifier(poly_num_vars);
     // TODO: Add unifying sumcheck if the points do not match
@@ -406,7 +454,7 @@ where
     let packed_point = points[0].clone();
     let final_point = if let Some(final_poly_num_vars) = &final_poly_num_vars { packed_point[..*final_poly_num_vars].to_vec() } else { Vec::new() };
     // Use comps to compute evals for packed polys from regular evals
-    let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, evals, &packed_comps, &final_comp);
+    let (packed_evals, final_eval) = compute_packed_eval(&packed_point, &final_point, unify_evals, &packed_comps, &final_comp);
 
     Pcs::simple_batch_verify(vp, packed_comm, &packed_point, &packed_evals, packed_proof, transcript)?;
     match (&final_comm, &final_eval, &final_proof) {
@@ -964,7 +1012,7 @@ pub mod test_util {
             assert!(max_num_vars > vars_gap * batch_size);
             let (pp, vp) = setup_pcs::<E, Pcs>(max_num_vars);
 
-            let (poly_num_vars, packed_comm, final_comm, evals, packed_proof, final_proof, challenge) = {
+            let (poly_num_vars, packed_comm, final_comm, poly_evals, unify_evals, unify_proof, packed_proof, final_proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
                 let polys: Vec<DenseMultilinearExtension<E>> = (0..batch_size).map(|i| 
                     gen_rand_polys(|_| max_num_vars - i * vars_gap, 1, gen_rand_poly)
@@ -975,12 +1023,14 @@ pub mod test_util {
                 let evals = polys.iter().zip(&points).map(|(poly, point)| poly.evaluate(point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
 
-                let (packed_proof, final_proof) = pcs_batch_open_diff_size::<E, Pcs>(&pp, &polys, &packed_comm, &final_comm, &points, &evals, &mut transcript).unwrap();
+                let (unify_proof, unify_evals, packed_proof, final_proof) = pcs_batch_open_diff_size::<E, Pcs>(&pp, &polys, &packed_comm, &final_comm, &points, &evals, &mut transcript).unwrap();
                 (
                     polys.iter().map(|p| p.num_vars()).collect::<Vec<_>>(),
                     Pcs::get_pure_commitment(&packed_comm),
                     if let Some(final_comm) = final_comm { Some(Pcs::get_pure_commitment(&final_comm)) } else { None },
                     evals,
+                    unify_evals,
+                    unify_proof,
                     packed_proof, 
                     final_proof,
                     transcript.read_challenge(),
@@ -996,9 +1046,9 @@ pub mod test_util {
 
                 let point = get_point_from_challenge(max_num_vars, &mut transcript);
                 let points: Vec<Vec<E>> = poly_num_vars.iter().map(|n| point[..*n].to_vec()).collect();
-                transcript.append_field_element_exts(&evals);
+                transcript.append_field_element_exts(&poly_evals);
 
-                pcs_batch_verify_diff_size::<E, Pcs>(&vp, &poly_num_vars, &packed_comm, &final_comm, &points, &evals, &packed_proof, &final_proof, &mut transcript).unwrap();
+                pcs_batch_verify_diff_size::<E, Pcs>(&vp, &poly_num_vars, &packed_comm, &final_comm, &points, &poly_evals, &unify_proof, &unify_evals,  &packed_proof, &final_proof, &mut transcript).unwrap();
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
