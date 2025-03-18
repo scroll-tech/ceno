@@ -37,7 +37,6 @@ pub use structure::{
 mod commit_phase;
 use commit_phase::simple_batch_commit_phase;
 mod encoding;
-pub use encoding::{coset_fft, fft, fft_root_table};
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 mod query_phase;

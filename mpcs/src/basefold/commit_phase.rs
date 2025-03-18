@@ -159,13 +159,10 @@ where
             if cfg!(feature = "sanity-check") {
                 // If the prover is honest, in the last round, the running oracle
                 // on the prover side should be exactly the encoding of the folded polynomial.
-
                 let evaluations = final_evals.clone();
                 let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode_slow_ext(
                     p3::matrix::dense::DenseMatrix::new(evaluations, 1),
                 );
-                // flip running oracle back to left right
-                assert_eq!(basecode.values.len(), new_running_oracle.values.len());
                 assert_eq!(basecode.values, new_running_oracle.values);
             }
         }

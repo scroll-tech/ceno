@@ -5,7 +5,7 @@ mod utils;
 
 mod rs;
 use p3::field::TwoAdicField;
-pub use rs::{RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table};
+pub use rs::{RSCode, RSCodeDefaultSpec};
 
 use serde::{Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;

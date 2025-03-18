@@ -62,10 +62,6 @@ name = "interpolate"
 
 [[bench]]
 harness = false
-name = "fft"
-
-[[bench]]
-harness = false
 name = "utils"
 
 [[bench]]
