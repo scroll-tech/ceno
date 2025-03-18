@@ -145,11 +145,13 @@ mod tests {
         let mut transcript = T::new(b"test");
         let sumcheck_poly_11: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_11.evaluations());
         let folding_randomness_11 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
         let sumcheck_poly_12: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_12.evaluations());
         let folding_randomness_12 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
@@ -171,9 +173,15 @@ mod tests {
             folded_polys_1[1].evaluations(),
         ) {
             (FieldType::Base(evals_0), FieldType::Base(evals_1)) => {
+                assert_eq!(evals_0.len(), 1);
+                assert_eq!(evals_1.len(), 1);
                 [F::from_bases(&[evals_0[0]]), F::from_bases(&[evals_1[0]])]
             }
-            (FieldType::Ext(evals_0), FieldType::Ext(evals_1)) => [evals_0[0], evals_1[0]],
+            (FieldType::Ext(evals_0), FieldType::Ext(evals_1)) => {
+                assert_eq!(evals_0.len(), 1);
+                assert_eq!(evals_1.len(), 1);
+                [evals_0[0], evals_1[0]]
+            }
             _ => panic!("Invalid folded polynomial"),
         };
         assert_eq!(
