@@ -10,9 +10,10 @@ use crate::{
     error::ZKVMError,
     expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
-    witness::RowMajorMatrix,
 };
+
 use p3_field::PrimeCharacteristicRing;
+use witness::RowMajorMatrix;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -180,15 +181,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
     ) -> ProvingKey<E, PCS> {
         // transpose from row-major to column-major
-        let fixed_traces = fixed_traces.map(RowMajorMatrix::into_mles);
+        let fixed_traces_polys = fixed_traces.as_ref().map(|rmm| rmm.to_mles());
 
-        let fixed_commit_wd = fixed_traces
-            .as_ref()
-            .map(|traces| PCS::batch_commit(pp, traces).unwrap());
+        let fixed_commit_wd = fixed_traces.map(|traces| PCS::batch_commit(pp, traces).unwrap());
         let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
 
         ProvingKey {
-            fixed_traces,
+            fixed_traces: fixed_traces_polys,
             fixed_commit_wd,
             vk: VerifyingKey {
                 cs: self,

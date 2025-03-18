@@ -357,9 +357,10 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        rmm: witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
+        let polys = rmm.to_mles();
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type

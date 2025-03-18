@@ -129,14 +129,14 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
+        rmm: witness::RowMajorMatrix<E::BaseField>,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(false);
         let whir_config =
-            WhirConfig::new(MultivariateParameters::new(polys[0].num_vars()), parameters);
+            WhirConfig::new(MultivariateParameters::new(rmm[0].num_vars()), parameters);
         let (witness, _commitment) = Committer::new(whir_config)
-            .batch_commit(transcript, polys)
+            .batch_commit(transcript, rmm)
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness.into())
