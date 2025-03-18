@@ -135,7 +135,7 @@ where
     pub(crate) fn eval_eq(eval: &[E], out: &mut [E], scalar: E) {
         const PARALLEL_THRESHOLD: usize = 10;
         debug_assert_eq!(out.len(), 1 << eval.len());
-        if let Some((&x, tail)) = eval.split_first() {
+        if let Some((&x, tail)) = eval.split_last() {
             let (low, high) = out.split_at_mut(out.len() / 2);
             // Update scalars using a single mul. Note that this causes a data dependency,
             // so for small fields it might be better to use two muls.
