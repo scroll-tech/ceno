@@ -164,7 +164,7 @@ mod tests {
             sumcheck_poly_11.evaluate_at_point(&[folding_randomness_11])
         );
 
-        let full_folding = vec![folding_randomness_12, folding_randomness_11];
+        let full_folding = vec![folding_randomness_11, folding_randomness_12];
 
         let eval_coeff = match (
             folded_polys_1[0].evaluations(),

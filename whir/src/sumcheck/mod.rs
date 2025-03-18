@@ -205,13 +205,19 @@ mod tests {
                 + combination_randomness[1] * fold_answer
         );
 
-        let full_folding = [folding_randomness_2.clone(), folding_randomness_1].concat();
+        let full_folding = [folding_randomness_1.clone(), folding_randomness_2.clone()].concat();
         let eval_coeff = match folded_poly_1
             .fix_variables(&folding_randomness_2)
             .evaluations()
         {
-            FieldType::Base(evals) => F::from_bases(&[evals[0]]),
-            FieldType::Ext(evals) => evals[0],
+            FieldType::Base(evals) => {
+                assert_eq!(evals.len(), 1);
+                F::from_bases(&[evals[0]])
+            }
+            FieldType::Ext(evals) => {
+                assert_eq!(evals.len(), 1);
+                evals[0]
+            }
             _ => panic!("Invalid folded polynomial"),
         };
         assert_eq!(

@@ -156,7 +156,7 @@ mod tests {
             sumcheck_poly_11.evaluate_at_point(&[folding_randomness_11])
         );
 
-        let full_folding = vec![folding_randomness_12, folding_randomness_11];
+        let full_folding = vec![folding_randomness_11, folding_randomness_12];
 
         let eval_coeff = match folded_poly_1.evaluations() {
             FieldType::Base(evals) => F::from_bases(&[evals[0]]),
@@ -233,21 +233,25 @@ mod tests {
         let mut transcript = T::new(b"test");
         let sumcheck_poly_11: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_11 = SumcheckPolynomial::new(sumcheck_poly_11.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_11.evaluations());
         let folding_randomness_11 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
         let sumcheck_poly_12: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_12 = SumcheckPolynomial::new(sumcheck_poly_12.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_12.evaluations());
         let folding_randomness_12 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
         let sumcheck_poly_21: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_21 = SumcheckPolynomial::new(sumcheck_poly_21.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_21.evaluations());
         let folding_randomness_21 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
         let sumcheck_poly_22: Vec<F> = sumcheck_polys_iter.next().unwrap();
         let sumcheck_poly_22 = SumcheckPolynomial::new(sumcheck_poly_22.to_vec(), 1);
+        transcript.append_field_element_exts(sumcheck_poly_22.evaluations());
         let folding_randomness_22 = transcript
             .sample_and_append_challenge(b"folding_randomness")
             .elements;
@@ -274,13 +278,13 @@ mod tests {
         );
 
         let full_folding = vec![
-            folding_randomness_22,
-            folding_randomness_21,
-            folding_randomness_12,
             folding_randomness_11,
+            folding_randomness_12,
+            folding_randomness_21,
+            folding_randomness_22,
         ];
 
-        let partial_folding = vec![folding_randomness_22, folding_randomness_21];
+        let partial_folding = vec![folding_randomness_21, folding_randomness_22];
 
         let eval_coeff = match folded_poly_2.evaluations() {
             FieldType::Base(evals) => F::from_bases(&[evals[0]]),
