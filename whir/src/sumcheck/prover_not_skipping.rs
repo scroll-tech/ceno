@@ -52,8 +52,6 @@ impl<E: ExtensionField> SumcheckProverNotSkipping<E> {
             self.sumcheck_prover
                 .compress(E::ONE, &[folding_randomness], &sumcheck_poly);
         }
-
-        res.reverse();
         Ok(res)
     }
 
