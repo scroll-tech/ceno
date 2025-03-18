@@ -306,7 +306,7 @@ where
         }
 
         // directly return bit reverse format, matching with codeword index
-        let t_inv_halves_prover = (0..max_message_size_log)
+        let t_inv_halves_prover = (0..max_message_size_log + Spec::get_rate_log())
             .map(|i| {
                 if i < Spec::get_basecode_msg_size_log() {
                     vec![]
@@ -361,11 +361,8 @@ where
         }
 
         // here 2 resize happend. first is padding to next pow2 height, second is pa
-        let m = rmm
-            .into_default_padded_p3_rmm()
-            // reverse bit of raw message first, because
-            // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
-            .bit_reversed_zero_pad(Spec::get_rate_log());
+        let mut m = rmm.into_default_padded_p3_rmm().to_row_major_matrix();
+        m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), E::BaseField::ZERO);
         let codeword = pp
             .dft
             .dft_batch(m)
@@ -390,12 +387,31 @@ where
         vp: &Self::VerifierParameters,
         rmm: p3::matrix::dense::RowMajorMatrix<E>,
     ) -> p3::matrix::dense::RowMajorMatrix<E> {
-        let m = rmm
-            // reverse bit of raw message first, because
-            // dft(reverse_row_bit(message)) == basefold::rs_encode(message)
-            .bit_reversed_zero_pad(Spec::get_rate_log()); //dft(reverse_row_bit(message)) == basefold::rs_encode(message)
+        debug_assert!(rmm.height().is_power_of_two());
+        let mut m = rmm.to_row_major_matrix();
+        m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), E::ZERO);
         vp.dft
             .dft_batch(m)
+            // The encoding scheme always folds the codeword in left-and-right
+            // manner. However, in query phase the two folded positions are
+            // always opened together, so it will be more efficient if the
+            // folded positions are simultaneously sibling nodes in the Merkle
+            // tree. Therefore, instead of left-and-right folding, we bit-reverse
+            // the codeword to make the folding even-and-odd, i.e., adjacent
+            // positions are folded.
+            .bit_reverse_rows()
+            .to_row_major_matrix()
+    }
+
+    // slow due to initialized dft object
+    fn encode_slow_ext<F: TwoAdicField>(
+        rmm: p3::matrix::dense::RowMajorMatrix<F>,
+    ) -> p3::matrix::dense::RowMajorMatrix<F> {
+        let dft = Radix2Dit::<F>::default();
+        debug_assert!(rmm.height().is_power_of_two());
+        let mut m = rmm.to_row_major_matrix();
+        m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), F::ZERO);
+        dft.dft_batch(m)
             // The encoding scheme always folds the codeword in left-and-right
             // manner. However, in query phase the two folded positions are
             // always opened together, so it will be more efficient if the
@@ -497,6 +513,7 @@ fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) ->
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
+    use itertools::izip;
     use p3::goldilocks::Goldilocks;
 
     // use crate::{
@@ -504,6 +521,9 @@ mod tests {
     //     util::{field_type_index_ext, plonky2_util::reverse_index_bits_in_place_field_type},
     // };
     use ff_ext::FromUniformBytes;
+    use rand::rngs::OsRng;
+
+    use crate::basefold::commit_phase::basefold_one_round_by_interpolation_weights;
 
     use super::*;
 
@@ -619,9 +639,60 @@ mod tests {
     //     test_codeword_folding::<GoldilocksExt2, RSCode<RSCodeDefaultSpec, GoldilocksExt2>>();
     // }
 
-    // type E = GoldilocksExt2;
-    // type F = Goldilocks;
-    // type Code = RSCode<RSCodeDefaultSpec>;
+    type E = GoldilocksExt2;
+    type F = Goldilocks;
+    type Code = RSCode<RSCodeDefaultSpec>;
+    use crate::BasefoldRSParams;
+
+    #[test]
+    pub fn test_message_codeword_colinearity() {
+        let num_vars = 10;
+        let rmm: RowMajorMatrix<F> = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
+        let pp = <Code as EncodingScheme<E>>::setup(num_vars);
+        let (pp, vp) = Code::trim(pp, num_vars).unwrap();
+        let codeword = Code::encode(&pp, rmm.clone());
+        let codeword = match codeword {
+            PolyEvalsCodeword::Normal(dense_matrix) => dense_matrix,
+            PolyEvalsCodeword::TooSmall(_) => todo!(),
+            PolyEvalsCodeword::TooBig(_) => todo!(),
+        };
+        assert_eq!(
+            codeword.values.len(),
+            1 << (num_vars + <Code as EncodingScheme<E>>::get_rate_log())
+        );
+
+        let rmm_ext = p3::matrix::dense::RowMajorMatrix::new(
+            rmm.values.iter().map(|v| E::from(*v)).collect(),
+            1,
+        );
+        // test encode small api
+        let codeword_ext = Code::encode_small(&vp, rmm_ext);
+        assert!(
+            izip!(&codeword.values, &codeword_ext.values).all(|(base, ext)| E::from(*base) == *ext)
+        );
+
+        // test basefold.encode(raw_message.fold(1-r, r)) ?= codeword.fold(1-r, r)
+        let r = E::from_u64(97);
+        let folded_codeword = basefold_one_round_by_interpolation_weights::<E, BasefoldRSParams>(
+            &pp,
+            log2_strict(codeword_ext.values.len()) - 1,
+            &codeword_ext.values,
+            r,
+        );
+
+        // encoded folded raw message
+        let codeword_from_folded_rmm = Code::encode_small(
+            &vp,
+            p3::matrix::dense::DenseMatrix::new(
+                rmm.values
+                    .chunks(2)
+                    .map(|ch| r * (ch[1] - ch[0]) + ch[0])
+                    .collect_vec(),
+                1,
+            ),
+        );
+        assert_eq!(&folded_codeword.values, &codeword_from_folded_rmm.values);
+    }
 
     // #[test]
     // pub fn test_colinearity() {

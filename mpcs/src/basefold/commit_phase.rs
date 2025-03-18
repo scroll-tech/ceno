@@ -60,7 +60,6 @@ where
         .par_chunks(comm.num_polys)
         .map(|row| dot_product(batch_coeffs.iter().copied(), row.iter().copied()))
         .collect::<Vec<_>>();
-    let initial_oracle = RowMajorMatrix::new_col(initial_oracle);
     end_timer!(batch_codewords_timer);
 
     let Some((running_evals, _)): Option<(ArcMultilinearExtension<E>, E)> = izip!(
@@ -119,8 +118,8 @@ where
         let new_running_oracle = if trees.is_empty() {
             basefold_one_round_by_interpolation_weights::<E, Spec>(
                 pp,
-                log2_strict(initial_oracle.values.len()) - 1,
-                &initial_oracle.values,
+                log2_strict(initial_oracle.len()) - 1,
+                &initial_oracle,
                 challenge,
             )
         } else {
@@ -158,26 +157,16 @@ where
             running_evals = Vec::new();
 
             if cfg!(feature = "sanity-check") {
-                // use witness::RowMajorMatrix as MyRowMajorMatrix;
                 // If the prover is honest, in the last round, the running oracle
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
-                // let evaluations = final_evals.clone();
-                // TODO to make it work, we need to support encode on extension field element
-                // let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
-                //     pp,
-                //     MyRowMajorMatrix::new_by_inner_matrix(
-                //         RowMajorMatrix::new(evaluations, 1),
-                //         InstancePaddingStrategy::Default,
-                //     ),
-                // );
-                // let basecode = match basecode {
-                //     FieldType::Ext(basecode) => basecode,
-                //     _ => panic!("Should be ext field"),
-                // };
-                // flip row index back to left right
-                // let mut new_running_oracle = new_running_oracle.bit_reverse_rows();
-                // assert_eq!(basecode, new_running_oracle);
+                let evaluations = final_evals.clone();
+                let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode_slow_ext(
+                    p3::matrix::dense::DenseMatrix::new(evaluations, 1),
+                );
+                // flip running oracle back to left right
+                assert_eq!(basecode.values.len(), new_running_oracle.values.len());
+                assert_eq!(basecode.values, new_running_oracle.values);
             }
         }
         end_timer!(sumcheck_timer);
@@ -190,7 +179,11 @@ where
     })
 }
 
-fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: BasefoldSpec<E>>(
+// TODO define it within codeword
+pub(crate) fn basefold_one_round_by_interpolation_weights<
+    E: ExtensionField,
+    Spec: BasefoldSpec<E>,
+>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     level: usize,
     values: &[E],
@@ -204,13 +197,12 @@ fn basefold_one_round_by_interpolation_weights<E: ExtensionField, Spec: Basefold
     RowMajorMatrix::new(
         values
             .par_chunks_exact(2)
-            .zip(
-                <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level),
-            )
+            .zip(folding_coeffs)
             .map(|(ys, coeff)| {
+                let (left, right) = (ys[0], ys[1]);
                 // original (left, right) = (a + bx, a - bx), a, b are codeword, but after times x it's not codeword
                 // recover left & right codeword via (c, d) = ((left + right) / 2, (left - right) / 2x)
-                let (lo, hi) = ((ys[0] + ys[1]).halve(), (ys[0] - ys[1]) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
+                let (lo, hi) = ((left + right).halve(), (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
                 // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
                 lo + (hi - lo) * challenge
             })

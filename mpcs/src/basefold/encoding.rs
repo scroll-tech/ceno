@@ -4,6 +4,7 @@ use multilinear_extensions::mle::FieldType;
 mod utils;
 
 mod rs;
+use p3::field::TwoAdicField;
 pub use rs::{RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table};
 
 use serde::{Serialize, de::DeserializeOwned};
@@ -33,6 +34,10 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error>;
 
     fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData;
+
+    fn encode_slow_ext<F: TwoAdicField>(
+        rmm: p3::matrix::dense::RowMajorMatrix<F>,
+    ) -> p3::matrix::dense::RowMajorMatrix<F>;
 
     /// Encodes a message in extension field, such that the verifier is also able
     /// to execute the encoding.
