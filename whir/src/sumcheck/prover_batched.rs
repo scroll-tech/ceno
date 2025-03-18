@@ -207,7 +207,6 @@ where
         folding_randomness: &[F],
         sumcheck_poly: &SumcheckPolynomial<F>,
     ) {
-        assert_eq!(folding_randomness.len(), 2);
         assert!(self.num_variables >= 1);
 
         let randomness = folding_randomness[0];
