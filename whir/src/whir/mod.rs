@@ -43,6 +43,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use rand::rngs::OsRng;
     use transcript::BasicTranscript;
+    use witness::RowMajorMatrix;
 
     use crate::{
         crypto::poseidon2_ext_merkle_tree,
@@ -159,15 +160,7 @@ mod tests {
 
         let params = WhirConfig::<E>::new(mv_params, whir_params);
 
-        let polynomials: Vec<DenseMultilinearExtension<E>> =
-            (0..num_polynomials)
-                .map(|i| {
-                    DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, vec![
-                    E::from_u64((i + 1) as u64);
-                    num_coeffs
-                ])
-                })
-                .collect();
+        let polynomials = RowMajorMatrix::rand(&mut rng, 1 << num_variables, num_polynomials);
 
         let points: Vec<Vec<E>> = (0..num_points)
             .map(|_| E::random_vec(num_variables, rng))
@@ -176,6 +169,7 @@ mod tests {
             .iter()
             .map(|point| {
                 polynomials
+                    .to_mles()
                     .iter()
                     .map(|poly| poly.evaluate(point))
                     .collect()
@@ -186,7 +180,7 @@ mod tests {
 
         let committer = Committer::new(params.clone());
         let (witnesses, commitment) = committer
-            .batch_commit(&mut transcript, &polynomials)
+            .batch_commit(&mut transcript, polynomials)
             .unwrap();
 
         let prover = Prover(params.clone());
@@ -244,20 +238,13 @@ mod tests {
 
         let params = WhirConfig::<E>::new(mv_params, whir_params);
 
-        let polynomials: Vec<DenseMultilinearExtension<E>> =
-            (0..num_polynomials)
-                .map(|i| {
-                    DenseMultilinearExtension::from_evaluations_ext_vec(
-                        num_variables,
-                        vec![E::from_u64((i + 1) as u64); num_coeffs],
-                    )
-                })
-                .collect();
+        let polynomials = RowMajorMatrix::rand(&mut rng, num_coeffs, num_polynomials);
 
         let point_per_poly: Vec<Vec<E>> = (0..num_polynomials)
             .map(|_| E::random_vec(num_variables, rng))
             .collect();
         let eval_per_poly: Vec<E> = polynomials
+            .to_mles()
             .iter()
             .zip(&point_per_poly)
             .map(|(poly, point)| poly.evaluate(point))
@@ -267,7 +254,7 @@ mod tests {
 
         let committer = Committer::new(params.clone());
         let (witnesses, commitment) = committer
-            .batch_commit(&mut transcript, &polynomials)
+            .batch_commit(&mut transcript, polynomials)
             .unwrap();
 
         let prover = Prover(params.clone());
