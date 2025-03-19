@@ -158,7 +158,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     }
 
     /// Evaluate the virtual polynomial at point `point`.
-    /// Returns an error is point.len() does not match `num_variables`.
+    /// Returns an error if point.len() does not match `num_variables`.
     pub fn evaluate(&self, point: &[E]) -> E {
         let start = start_timer!(|| "evaluation");
 

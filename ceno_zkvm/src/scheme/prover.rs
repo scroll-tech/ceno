@@ -10,6 +10,7 @@ use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
+    virtual_polys::VirtualPolynomials,
 };
 use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -33,8 +34,7 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{get_challenge_pows, optimal_sumcheck_threads},
-    virtual_polys::VirtualPolynomials,
+    utils::{add_mle_list_by_expr, get_challenge_pows, optimal_sumcheck_threads},
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
@@ -572,7 +572,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     }
                 }
 
-                distrinct_zerocheck_terms_set.extend(virtual_polys.add_mle_list_by_expr(
+                distrinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
+                    &mut virtual_polys,
                     sel_non_lc_zero_sumcheck.as_ref(),
                     witnesses.iter().collect_vec(),
                     expr,
