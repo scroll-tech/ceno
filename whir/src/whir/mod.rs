@@ -120,11 +120,9 @@ mod tests {
             .unwrap();
 
         let verifier = Verifier::new(params);
-        assert!(
-            verifier
-                .verify(&commitment, &mut transcript, &statement, &proof)
-                .is_ok()
-        );
+        verifier
+            .verify(&commitment, &mut transcript, &statement, &proof)
+            .unwrap();
     }
 
     fn make_whir_batch_things_same_point(
@@ -191,18 +189,16 @@ mod tests {
 
         let verifier = Verifier::new(params);
         let mut transcript = T::new(b"test");
-        assert!(
-            verifier
-                .simple_batch_verify(
-                    &commitment,
-                    &mut transcript,
-                    num_polynomials,
-                    &points,
-                    &evals_per_point,
-                    &proof
-                )
-                .is_ok()
-        );
+        verifier
+            .simple_batch_verify(
+                &commitment,
+                &mut transcript,
+                num_polynomials,
+                &points,
+                &evals_per_point,
+                &proof,
+            )
+            .unwrap();
         println!("PASSED!");
     }
 

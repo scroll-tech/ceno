@@ -178,7 +178,7 @@ impl<E: ExtensionField> Prover<E> {
                 round: 0,
                 sumcheck_prover,
                 folding_randomness,
-                coefficients: DenseMultilinearExtension::from_evaluations_ext_vec(
+                evaluations: DenseMultilinearExtension::from_evaluations_ext_vec(
                     p3_util::log2_strict_usize(polynomial.len()),
                     polynomial,
                 ),
@@ -220,7 +220,7 @@ impl<E: ExtensionField> Prover<E> {
         let mut round_state = round_state.round_state;
         // Fold the coefficients
         let folded_coefficients = round_state
-            .coefficients
+            .evaluations
             .fix_variables(&round_state.folding_randomness);
 
         let folded_coefficients_evals = match folded_coefficients.evaluations() {
@@ -449,7 +449,7 @@ impl<E: ExtensionField> Prover<E> {
             domain: new_domain,
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
-            coefficients: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
+            evaluations: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
             prev_merkle: Some(&merkle_tree),
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,

@@ -8,7 +8,7 @@ use crate::{
     parameters::FoldType,
     start_timer,
     sumcheck::prover_not_skipping::SumcheckProverNotSkipping,
-    utils::{self, expand_randomness},
+    utils::{self, expand_randomness, interpolate_over_boolean_hypercube},
     whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -140,7 +140,7 @@ impl<E: ExtensionField> Prover<E> {
             round: 0,
             sumcheck_prover,
             folding_randomness,
-            coefficients: witness.polys[0].clone(),
+            evaluations: witness.polys[0].clone(),
             prev_merkle: Some(&witness.merkle_tree),
             prev_merkle_answers: witness.merkle_leaves.clone(),
             merkle_proofs: vec![],
@@ -170,10 +170,10 @@ impl<E: ExtensionField> Prover<E> {
         mut round_state: RoundState<E>,
     ) -> Result<WhirProof<E>, Error> {
         // Fold the coefficients
-        let folded_coefficients = round_state
-            .coefficients
+        let folded_evaluations = round_state
+            .evaluations
             .fix_variables(&round_state.folding_randomness);
-        let folded_coefficients_evals = match folded_coefficients.evaluations() {
+        let folded_evaluations_values = match folded_evaluations.evaluations() {
             FieldType::Ext(evals) => evals,
             _ => {
                 panic!("Impossible after folding");
@@ -183,12 +183,12 @@ impl<E: ExtensionField> Prover<E> {
         let num_variables = self.0.mv_parameters.num_variables
             - self.0.folding_factor.total_number(round_state.round);
         // num_variables should match the folded_coefficients here.
-        assert_eq!(1 << num_variables, folded_coefficients_evals.len());
+        assert_eq!(1 << num_variables, folded_evaluations_values.len());
 
         // Base case
         if round_state.round == self.0.n_rounds() {
             // Directly send coefficients of the polynomial to the verifier.
-            transcript.append_field_element_exts(folded_coefficients_evals);
+            transcript.append_field_element_exts(folded_evaluations_values);
 
             // Final verifier queries and answers. The indices are over the
             // *folded* domain.
@@ -221,7 +221,7 @@ impl<E: ExtensionField> Prover<E> {
                 round_state
                     .sumcheck_prover
                     .unwrap_or_else(|| {
-                        SumcheckProverNotSkipping::new(folded_coefficients.clone(), &[], &[], &[])
+                        SumcheckProverNotSkipping::new(folded_evaluations.clone(), &[], &[], &[])
                     })
                     .compute_sumcheck_polynomials::<T>(
                         transcript,
@@ -235,7 +235,7 @@ impl<E: ExtensionField> Prover<E> {
                 sumcheck_poly_evals: sumcheck_poly_evals.clone(),
                 merkle_roots: merkle_roots.clone(),
                 ood_answers: ood_answers.clone(),
-                final_poly: folded_coefficients_evals.clone(),
+                final_poly: folded_evaluations_values.clone(),
                 folded_evals: Vec::new(),
             });
         }
@@ -244,8 +244,10 @@ impl<E: ExtensionField> Prover<E> {
 
         // Fold the coefficients, and compute fft of polynomial (and commit)
         let new_domain = round_state.domain.scale(2);
-        let expansion = new_domain.size() / folded_coefficients_evals.len();
-        let evals = expand_from_coeff(folded_coefficients_evals, expansion);
+        let expansion = new_domain.size() / folded_evaluations_values.len();
+        let mut folded_coeffs = folded_evaluations_values.clone();
+        interpolate_over_boolean_hypercube(&mut folded_coeffs);
+        let evals = expand_from_coeff(&folded_coeffs, expansion);
         // Group the evaluations into leaves by the *next* round folding factor
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
         // They also partially overlap and undo one another. We should merge them.
@@ -275,7 +277,7 @@ impl<E: ExtensionField> Prover<E> {
             let ood_answers = ood_points
                 .iter()
                 .map(|ood_point| {
-                    folded_coefficients.evaluate(&expand_from_univariate(*ood_point, num_variables))
+                    folded_evaluations.evaluate(&expand_from_univariate(*ood_point, num_variables))
                 })
                 .collect::<Vec<_>>();
             transcript.append_field_element_exts(&ood_answers);
@@ -399,7 +401,7 @@ impl<E: ExtensionField> Prover<E> {
             })
             .unwrap_or_else(|| {
                 SumcheckProverNotSkipping::new(
-                    folded_coefficients.clone(),
+                    folded_evaluations.clone(),
                     &stir_challenges,
                     &combination_randomness,
                     &stir_evaluations,
@@ -417,7 +419,7 @@ impl<E: ExtensionField> Prover<E> {
             domain: new_domain,
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
-            coefficients: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
+            evaluations: folded_evaluations, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
             prev_merkle: Some(&merkle_tree),
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
@@ -440,7 +442,7 @@ pub(crate) struct RoundState<'a, E: ExtensionField> {
     pub(crate) domain: Domain<E>,
     pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<E>>,
     pub(crate) folding_randomness: Vec<E>,
-    pub(crate) coefficients: DenseMultilinearExtension<E>,
+    pub(crate) evaluations: DenseMultilinearExtension<E>,
     pub(crate) prev_merkle: Option<&'a MerkleTreeExt<E>>,
     pub(crate) prev_merkle_answers: Vec<E>,
     pub(crate) merkle_proofs: Vec<(MultiPath<E>, Vec<Vec<E>>)>,
