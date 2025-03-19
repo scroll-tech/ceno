@@ -4,7 +4,7 @@ use crate::{
     crypto::verify_multi_proof,
     error::Error,
     sumcheck::proof::SumcheckPolynomial,
-    utils::expand_randomness,
+    utils::{evaluate_as_univariate, expand_randomness},
     whir::{
         Statement, WhirProof,
         fold::expand_from_univariate,
@@ -226,9 +226,8 @@ impl<E: ExtensionField> Verifier<E> {
 
         // Check the foldings computed from the proof match the evaluations of the polynomial
         let final_folds = &computed_folds[computed_folds.len() - 1];
-        let final_evaluations = parsed
-            .final_coefficients
-            .evaluate_as_univariate(&parsed.final_randomness_points);
+        let final_evaluations =
+            evaluate_as_univariate(&parsed.final_evaluations, &parsed.final_randomness_points);
         if !final_folds
             .iter()
             .zip(final_evaluations)
@@ -281,9 +280,11 @@ impl<E: ExtensionField> Verifier<E> {
 
         if prev_sumcheck_poly_eval
             != evaluation_of_v_poly
-                * parsed
-                    .final_coefficients
-                    .evaluate(&parsed.final_sumcheck_randomness)
+                * DenseMultilinearExtension::from_evaluations_ext_vec(
+                    p3_util::log2_strict_usize(parsed.final_evaluations.len()),
+                    parsed.final_evaluations,
+                )
+                .evaluate(&parsed.final_sumcheck_randomness)
         {
             return Err(Error::InvalidProof(
                 "Final sumcheck evaluation mismatched".to_string(),
@@ -557,11 +558,7 @@ impl<E: ExtensionField> Verifier<E> {
             domain_size >>= 1;
         }
 
-        let final_coefficients = whir_proof.final_poly.clone();
-        let final_coefficients = DenseMultilinearExtension::from_evaluations_ext_vec(
-            p3_util::log2_strict_usize(final_coefficients.len()),
-            final_coefficients,
-        );
+        let final_evaluations = whir_proof.final_poly.clone();
 
         // Final queries verify
         let final_randomness_indexes = get_challenge_stir_queries(
@@ -656,7 +653,7 @@ impl<E: ExtensionField> Verifier<E> {
             final_randomness_answers: final_randomness_answers.to_vec(),
             final_sumcheck_rounds,
             final_sumcheck_randomness,
-            final_coefficients,
+            final_evaluations,
         })
     }
 

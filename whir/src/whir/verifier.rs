@@ -1,6 +1,7 @@
-use std::iter;
-
-use crate::crypto::{Digest, verify_multi_proof};
+use crate::{
+    crypto::{Digest, verify_multi_proof},
+    utils::evaluate_as_univariate,
+};
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
@@ -8,6 +9,7 @@ use multilinear_extensions::{
 };
 use p3_field::{Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::iter;
 use transcript::Transcript;
 
 use super::{Statement, WhirProof, fold::expand_from_univariate, parameters::WhirConfig};
@@ -47,7 +49,7 @@ pub(crate) struct ParsedProof<E: ExtensionField> {
     pub(crate) final_folding_randomness: Vec<E>,
     pub(crate) final_sumcheck_rounds: Vec<(SumcheckPolynomial<E>, E)>,
     pub(crate) final_sumcheck_randomness: Vec<E>,
-    pub(crate) final_coefficients: DenseMultilinearExtension<E>,
+    pub(crate) final_evaluations: Vec<E>,
 }
 
 #[derive(Debug, Clone)]
@@ -238,11 +240,7 @@ impl<E: ExtensionField> Verifier<E> {
             domain_size /= 2;
         }
 
-        let final_coefficients = whir_proof.final_poly.clone();
-        let final_coefficients = DenseMultilinearExtension::from_evaluations_ext_vec(
-            self.params.final_sumcheck_rounds,
-            final_coefficients,
-        );
+        let final_evaluations = whir_proof.final_poly.clone();
 
         // Final queries verify
         let final_randomness_indexes = get_challenge_stir_queries(
@@ -307,7 +305,7 @@ impl<E: ExtensionField> Verifier<E> {
             final_randomness_answers: final_randomness_answers.to_vec(),
             final_sumcheck_rounds,
             final_sumcheck_randomness,
-            final_coefficients,
+            final_evaluations,
         })
     }
 
@@ -572,9 +570,8 @@ impl<E: ExtensionField> Verifier<E> {
 
         // Check the foldings computed from the proof match the evaluations of the polynomial
         let final_folds = &computed_folds[computed_folds.len() - 1];
-        let final_evaluations = parsed
-            .final_coefficients
-            .evaluate_as_univariate(&parsed.final_randomness_points);
+        let final_evaluations =
+            evaluate_as_univariate(&parsed.final_evaluations, &parsed.final_randomness_points);
         if !final_folds
             .iter()
             .zip(final_evaluations)
@@ -627,9 +624,11 @@ impl<E: ExtensionField> Verifier<E> {
 
         if prev_sumcheck_poly_eval
             != evaluation_of_v_poly
-                * parsed
-                    .final_coefficients
-                    .evaluate(&parsed.final_sumcheck_randomness)
+                * DenseMultilinearExtension::from_evaluations_ext_vec(
+                    p3_util::log2_strict_usize(parsed.final_evaluations.len()),
+                    parsed.final_evaluations,
+                )
+                .evaluate(&parsed.final_sumcheck_randomness)
         {
             return Err(Error::InvalidProof(
                 "Final sumcheck evaluation mismatch".to_string(),

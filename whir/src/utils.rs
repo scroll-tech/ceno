@@ -144,6 +144,22 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
     // end_timer!(timer);
 }
 
+pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> Vec<E> {
+    let mut coeffs = evals.to_vec();
+    interpolate_over_boolean_hypercube(&mut coeffs);
+    points
+        .iter()
+        .map(|x| {
+            let coeff_vec = coeffs.iter();
+            let mut acc = E::ZERO;
+            for c in coeff_vec {
+                acc = acc * *x + *c;
+            }
+            acc
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use p3_field::PrimeCharacteristicRing;

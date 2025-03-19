@@ -337,31 +337,6 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         end_timer!(start);
         list
     }
-
-    pub fn evaluate_as_univariate(&self, points: &[E]) -> Vec<E> {
-        points
-            .iter()
-            .map(|x| match self.evaluations {
-                FieldType::Base(ref evals) => {
-                    let coeff_vec = evals.iter().rev();
-                    let mut acc = E::ZERO;
-                    for c in coeff_vec {
-                        acc = acc * *x + *c;
-                    }
-                    acc
-                }
-                FieldType::Ext(ref evals) => {
-                    let coeff_vec = evals.iter().rev();
-                    let mut acc = E::ZERO;
-                    for c in coeff_vec {
-                        acc = acc * *x + *c;
-                    }
-                    acc
-                }
-                _ => panic!("unsupported field type"),
-            })
-            .collect()
-    }
 }
 
 #[allow(clippy::wrong_self_convention)]
