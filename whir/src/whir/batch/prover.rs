@@ -10,7 +10,7 @@ use crate::{
         prover_not_skipping::SumcheckProverNotSkipping,
         prover_not_skipping_batched::SumcheckProverNotSkippingBatched,
     },
-    utils::{self, expand_randomness},
+    utils::{self, evaluate_over_hypercube, expand_randomness},
     whir::{
         WhirProof,
         batch::utils::field_type_index_ext,
@@ -399,9 +399,11 @@ impl<E: ExtensionField> Prover<E> {
             }
             FoldType::ProverHelps => {
                 stir_evaluations.extend(batched_answers.iter().map(|batched_answers| {
+                    let mut batched_answers_coeffs = batched_answers.to_vec();
+                    evaluate_over_hypercube(&mut batched_answers_coeffs);
                     DenseMultilinearExtension::from_evaluations_ext_vec(
-                        p3_util::log2_strict_usize(batched_answers.len()),
-                        batched_answers.to_vec(),
+                        p3_util::log2_strict_usize(batched_answers_coeffs.len()),
+                        batched_answers_coeffs.to_vec(),
                     )
                     .evaluate(&round_state.folding_randomness)
                 }))

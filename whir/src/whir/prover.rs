@@ -8,7 +8,7 @@ use crate::{
     parameters::FoldType,
     start_timer,
     sumcheck::prover_not_skipping::SumcheckProverNotSkipping,
-    utils::{self, expand_randomness, interpolate_over_boolean_hypercube},
+    utils::{self, evaluate_over_hypercube, expand_randomness, interpolate_over_boolean_hypercube},
     whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -370,9 +370,11 @@ impl<E: ExtensionField> Prover<E> {
                 // transformed such that they are exactly the coefficients of the
                 // multilinear polynomial whose evaluation at the folding randomness
                 // is just the folding of E evaluated at the folded point.
+                let mut answers_coeffs = answers.to_vec();
+                evaluate_over_hypercube(&mut answers_coeffs);
                 DenseMultilinearExtension::from_evaluations_ext_vec(
-                    p3_util::log2_strict_usize(answers.len()),
-                    answers.to_vec(),
+                    p3_util::log2_strict_usize(answers_coeffs.len()),
+                    answers_coeffs.to_vec(),
                 )
                 .evaluate(&round_state.folding_randomness)
             })),
