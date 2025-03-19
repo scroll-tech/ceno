@@ -38,6 +38,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use core::num;
+
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
     use p3_field::PrimeCharacteristicRing;
@@ -122,7 +124,10 @@ mod tests {
         let verifier = Verifier::new(params);
         verifier
             .verify(&commitment, &mut transcript, &statement, &proof)
-            .unwrap();
+            .expect(&format!(
+                "Failed at number of variables = {}, folding factor = {:?}",
+                num_variables, folding_factor
+            ));
     }
 
     fn make_whir_batch_things_same_point(
