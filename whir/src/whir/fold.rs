@@ -31,8 +31,7 @@ pub fn compute_fold<F: Field>(
             let left = f_value_0 + f_value_1;
             let right = point_inv * (f_value_0 - f_value_1);
 
-            new_answers[i] =
-                two_inv * (left + folding_randomness[folding_randomness.len() - 1 - rec] * right);
+            new_answers[i] = two_inv * (left + folding_randomness[rec] * right);
             coset_index_inv *= coset_gen_inv;
         }
         answers = new_answers;
