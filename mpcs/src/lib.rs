@@ -49,6 +49,14 @@ pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::batch_commit(pp, rmm, transcript)
 }
 
+pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+    pp: &Pcs::ProverParam,
+    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    transcript: &mut impl Transcript<E>,
+) -> Result<Pcs::CommitmentWithWitness, Error> {
+    Pcs::batch_commit_and_write(pp, rmm, transcript)
+}
+
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     poly: &DenseMultilinearExtension<E>,
