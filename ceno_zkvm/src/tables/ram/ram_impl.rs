@@ -465,7 +465,7 @@ mod tests {
                 value: 0,
             })
             .collect_vec();
-        let [_, mut structural_witness] = HintsCircuit::<E>::assign_instances(
+        let [_, structural_witness] = HintsCircuit::<E>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -481,7 +481,6 @@ mod tests {
             .position(|name| name == "riscv/RAM_Memory_HintsTable/addr")
             .unwrap();
 
-        structural_witness.padding_by_strategy();
         let addr_padded_view: DenseMultilinearExtension<E> =
             structural_witness.to_mles()[addr_column].clone();
         // Expect addresses to proceed consecutively inside the padding as well

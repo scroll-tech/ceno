@@ -48,9 +48,13 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         Standard: Distribution<T>,
     {
         debug_assert!(rows > 0);
+        let mut inner = p3_matrix::dense::RowMajorMatrix::rand(rng, rows, cols);
         let num_row_padded = next_pow2_instance_padding(rows);
+        if num_row_padded > rows {
+            inner.pad_to_height(num_row_padded, T::default());
+        }
         Self {
-            inner: p3_matrix::dense::RowMajorMatrix::rand(rng, num_row_padded, cols),
+            inner,
             num_rows: rows,
             is_padded: true,
             padding_strategy: InstancePaddingStrategy::Default,
@@ -79,10 +83,6 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
 
     pub fn n_col(&self) -> usize {
         self.inner.width
-    }
-
-    pub fn num_vars(&self) -> usize {
-        self.inner.height().ilog2() as usize
     }
 
     pub fn new(
@@ -129,7 +129,8 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 
     pub fn iter_rows(&self) -> Chunks<T> {
-        self.inner.values[..self.num_instances() * self.n_col()].chunks(self.inner.width)
+        let max_range = self.num_instances() * self.n_col();
+        self.inner.values[..max_range].chunks(self.inner.width)
     }
 
     pub fn iter_mut(&mut self) -> ChunksMut<T> {
@@ -143,6 +144,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 
     pub fn padding_by_strategy(&mut self) {
+        debug_assert!(!self.is_padded);
         let num_instances = self.num_instances();
         let start_index = self.num_instances() * self.n_col();
 
@@ -150,18 +152,17 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
             return;
         }
 
-        // parallel padding task when size is large
-        let nthreads = max_usable_threads();
-        let num_instance_per_batch = if self.num_padding_instances() > 256 {
-            self.num_padding_instances().div_ceil(nthreads)
-        } else {
-            self.num_padding_instances()
-        }
-        .max(1);
-
         match &self.padding_strategy {
             InstancePaddingStrategy::Default => (),
             InstancePaddingStrategy::RepeatLast => {
+                let nthreads = max_usable_threads();
+                let num_instance_per_batch = if self.num_padding_instances() > 256 {
+                    self.num_padding_instances().div_ceil(nthreads)
+                } else {
+                    self.num_padding_instances()
+                }
+                .max(1);
+
                 let last_instance = self[num_instances - 1].to_vec();
                 self.inner.values[start_index..]
                     .par_chunks_mut(self.inner.width * num_instance_per_batch)
