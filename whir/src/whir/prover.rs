@@ -46,12 +46,15 @@ impl<E: ExtensionField> Prover<E> {
         true
     }
 
-    fn validate_witness(&self, witness: &Witnesses<E>) -> bool {
+    fn validate_witness(&self, witness: &Witnesses<E>) {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         if !self.0.initial_statement {
             assert!(witness.ood_points.is_empty());
         }
-        witness.polys[0].num_vars() == self.0.mv_parameters.num_variables
+        assert_eq!(
+            witness.polys[0].num_vars(),
+            self.0.mv_parameters.num_variables
+        );
     }
 
     pub fn prove<T: Transcript<E>>(
@@ -72,7 +75,7 @@ impl<E: ExtensionField> Prover<E> {
 
         assert!(self.validate_parameters());
         assert!(self.validate_statement(&statement));
-        assert!(self.validate_witness(&witness));
+        self.validate_witness(&witness);
 
         let timer = start_timer!(|| "Single Prover");
         let initial_claims: Vec<_> = witness

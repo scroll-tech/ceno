@@ -174,7 +174,9 @@ impl<F: Field> NttEngine<F> {
     pub fn root(&self, order: usize) -> F {
         assert!(
             self.order % order == 0,
-            "Subgroup of requested order does not exist."
+            "Subgroup of requested order {} does not exist. Total order is {}.",
+            order,
+            self.order
         );
         self.omega_order.exp_u64((self.order / order) as u64)
     }

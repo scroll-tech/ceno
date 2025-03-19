@@ -4,7 +4,8 @@ use crate::{
     end_timer,
     error::Error,
     ntt::expand_from_coeff,
-    start_timer, utils,
+    start_timer,
+    utils::{self, interpolate_over_boolean_hypercube},
     whir::{
         fold::{expand_from_univariate, restructure_evaluations},
         fs_utils::MmcsCommitmentWriter,
@@ -35,21 +36,29 @@ impl<E: ExtensionField> Committer<E> {
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let timer = start_timer!(|| "Single Commit");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
-        let mut coeffs = match polynomial.evaluations() {
+        let mut evaluations = match polynomial.evaluations() {
             FieldType::Base(evals) => evals.iter().map(|x| E::from_bases(&[*x])).collect(),
             FieldType::Ext(evals) => evals.clone(),
             _ => panic!("Unsupported field type"),
         };
 
-        // TODO: interpolate over hyper cube
-
-        if coeffs.len() < 1 << self.0.folding_factor.at_round(0) {
+        let mut coeffs = evaluations.clone();
+        interpolate_over_boolean_hypercube(&mut coeffs);
+        // Resize the polynomial to at least the first folding factor number of
+        // variables. This is equivalent to repeating the evaluations over the
+        // hypercube, and extending zero to the coefficients.
+        if evaluations.len() < (1 << self.0.folding_factor.at_round(0)) {
+            let original_size = evaluations.len();
+            evaluations.resize(1 << self.0.folding_factor.at_round(0), E::ZERO);
+            for i in original_size..evaluations.len() {
+                evaluations[i] = evaluations[i - original_size];
+            }
             coeffs.extend(itertools::repeat_n(
                 E::ZERO,
-                1 << self.0.folding_factor.at_round(0) - coeffs.len(),
+                (1 << self.0.folding_factor.at_round(0)) - original_size,
             ));
         }
-        let base_domain = self.0.starting_domain.base_domain.unwrap();
+
         let expansion = self.0.starting_domain.size() / polynomial.evaluations().len();
         let evals = expand_from_coeff(&coeffs, expansion);
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
@@ -82,10 +91,7 @@ impl<E: ExtensionField> Committer<E> {
             let ood_answers = ood_points
                 .iter()
                 .map(|ood_point| {
-                    polynomial.evaluate(&expand_from_univariate(
-                        *ood_point,
-                        self.0.mv_parameters.num_variables,
-                    ))
+                    polynomial.evaluate(&expand_from_univariate(*ood_point, polynomial.num_vars()))
                 })
                 .collect::<Vec<_>>();
             transcript.append_field_element_exts(&ood_answers);
@@ -105,6 +111,10 @@ impl<E: ExtensionField> Committer<E> {
             ood_answers: ood_answers.clone(),
         };
 
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            p3_util::log2_strict_usize(evaluations.len()),
+            evaluations,
+        );
         Ok((
             Witnesses {
                 polys: vec![polynomial],
