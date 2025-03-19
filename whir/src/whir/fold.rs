@@ -253,7 +253,10 @@ mod tests {
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
     use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 
-    use crate::{utils::stack_evaluations, whir::fold::expand_from_univariate};
+    use crate::{
+        utils::{evaluate_over_hypercube, stack_evaluations},
+        whir::fold::expand_from_univariate,
+    };
 
     use super::{compute_fold, restructure_evaluations};
 
@@ -364,9 +367,11 @@ mod tests {
                 folding_factor,
             );
 
+            let mut processed_evals = processed[span.clone()].to_vec();
+            evaluate_over_hypercube(&mut processed_evals);
             let answer_processed = DenseMultilinearExtension::from_evaluations_ext_vec(
-                p3_util::log2_strict_usize(processed[span.clone()].len()),
-                processed[span].to_vec(),
+                p3_util::log2_strict_usize(processed_evals.len()),
+                processed_evals.to_vec(),
             )
             .evaluate(&folding_randomness.clone());
 

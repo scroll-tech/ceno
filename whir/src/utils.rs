@@ -144,6 +144,26 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
     // end_timer!(timer);
 }
 
+pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
+    let n = p3_util::log2_strict_usize(coeffs.len());
+
+    // This code implicitly assumes that coeffs has size at least 1 << n,
+    // that means the size of evals should be a power of two
+    for i in (2..n + 1).rev() {
+        let chunk_size = 1 << i;
+        coeffs.par_chunks_mut(chunk_size).for_each(|chunk| {
+            let half_chunk = chunk_size >> 1;
+            for j in half_chunk..chunk_size {
+                chunk[j] += chunk[j - half_chunk];
+            }
+        });
+    }
+
+    coeffs.par_chunks_mut(2).for_each(|chunk| {
+        chunk[1] += chunk[0];
+    });
+}
+
 pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> Vec<E> {
     let mut coeffs = evals.to_vec();
     interpolate_over_boolean_hypercube(&mut coeffs);
