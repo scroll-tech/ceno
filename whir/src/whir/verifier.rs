@@ -293,6 +293,7 @@ impl<E: ExtensionField> Verifier<E> {
                 ))?
                 .clone();
             let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
+            transcript.append_field_element_exts(sumcheck_poly.evaluations());
             let folding_randomness_single = transcript
                 .sample_and_append_challenge(b"folding_randomness")
                 .elements;
