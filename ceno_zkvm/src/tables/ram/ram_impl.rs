@@ -3,6 +3,7 @@ use std::{marker::PhantomData, sync::Arc};
 use ceno_emul::{Addr, Cycle, WORD_SIZE};
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
+use rayon::iter::IndexedParallelIterator;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
@@ -14,6 +15,7 @@ use crate::{
     structs::ProgramParams,
 };
 use ff_ext::FieldInto;
+use rayon::iter::ParallelIterator;
 
 use super::{
     MemInitRecord,
@@ -443,8 +445,7 @@ mod tests {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3_field::PrimeCharacteristicRing;
-    use p3_goldilocks::Goldilocks as F;
+    use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
     use witness::next_pow2_instance_padding;
 
     #[test]

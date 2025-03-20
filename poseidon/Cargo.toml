@@ -12,12 +12,7 @@ version.workspace = true
 [dependencies]
 criterion.workspace = true
 ff_ext = { path = "../ff_ext" }
-p3-challenger.workspace = true
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-mds.workspace = true
-p3-poseidon2.workspace = true
-p3-symmetric.workspace = true
+p3 = { path = "../p3" }
 serde.workspace = true
 unroll = "0.1"
 

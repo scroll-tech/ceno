@@ -19,7 +19,7 @@ use crate::{
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {

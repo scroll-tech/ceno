@@ -23,7 +23,7 @@ use crate::{
         merge_sumcheck_polys, serial_extrapolate,
     },
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.

@@ -4,7 +4,7 @@ use crate::{op_mle, util::ceil_log2};
 use ark_std::{end_timer, rand::RngCore, start_timer};
 use core::hash::Hash;
 use ff_ext::{ExtensionField, FromUniformBytes};
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3::field::{Field, PrimeCharacteristicRing};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };

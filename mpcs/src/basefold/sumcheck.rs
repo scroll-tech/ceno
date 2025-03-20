@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use p3_field::Field;
+use p3::field::Field;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
     ParallelSliceMut,
@@ -169,7 +169,7 @@ pub fn sum_check_last_round<F: Field>(eq: &mut Vec<F>, bh_values: &mut Vec<F>, c
 
 #[cfg(test)]
 mod tests {
-    use p3_goldilocks::Goldilocks;
+    use p3::goldilocks::Goldilocks;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
 

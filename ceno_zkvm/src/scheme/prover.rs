@@ -12,7 +12,7 @@ use multilinear_extensions::{
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},

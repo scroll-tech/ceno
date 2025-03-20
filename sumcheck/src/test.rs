@@ -8,7 +8,7 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use transcript::{BasicTranscript, Transcript};
 
 #[test]

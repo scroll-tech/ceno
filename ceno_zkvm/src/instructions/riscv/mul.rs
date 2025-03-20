@@ -82,8 +82,7 @@ use std::marker::PhantomData;
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, SmallField};
-use p3_field::PrimeCharacteristicRing;
-use p3_goldilocks::Goldilocks;
+use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
 
 use crate::{
     circuit_builder::CircuitBuilder,
