@@ -17,8 +17,8 @@ itertools.workspace = true
 p3 = { path = "../p3" }
 proc-macro2 = "1.0.92"
 quote = "1.0"
-syn = { version = "2.0", features = ["full"] }
 rand.workspace = true
+syn = { version = "2.0", features = ["full"] }
 
 [dev-dependencies]
 ff_ext = { path = "../ff_ext" }
