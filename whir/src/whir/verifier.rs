@@ -199,7 +199,9 @@ impl<E: ExtensionField> Verifier<E> {
                 return Err(Error::InvalidProof("Merkle proof failed".to_string()));
             }
 
-            let combination_randomness_gen = transcript.read_challenge().elements;
+            let combination_randomness_gen = transcript
+                .sample_and_append_challenge(b"combination_randomness")
+                .elements;
             let combination_randomness = expand_randomness(
                 combination_randomness_gen,
                 stir_challenges_indexes.len() + round_params.ood_samples,

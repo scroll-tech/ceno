@@ -21,8 +21,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use itertools::zip_eq;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::commit::Mmcs;
-use p3::matrix::dense::RowMajorMatrix;
+use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
 use transcript::Transcript;
 
 use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
@@ -142,7 +141,7 @@ impl<E: ExtensionField> Prover<E> {
 
         let comb_timer = start_timer!(|| "combination randomness");
         let combination_randomness_gen = transcript
-            .sample_and_append_challenge(b"combination_randomness_gen")
+            .sample_and_append_challenge(b"combination_randomness")
             .elements;
         let combination_randomness =
             expand_randomness(combination_randomness_gen, initial_claims.len());
@@ -415,7 +414,7 @@ impl<E: ExtensionField> Prover<E> {
 
         // Randomness for combination
         let combination_randomness_gen = transcript
-            .sample_and_append_challenge(b"combination_randomness_gen")
+            .sample_and_append_challenge(b"combination_randomness")
             .elements;
         let combination_randomness =
             expand_randomness(combination_randomness_gen, stir_challenges.len());

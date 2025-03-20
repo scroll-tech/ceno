@@ -380,7 +380,7 @@ impl<E: ExtensionField> Prover<E> {
 
         // Randomness for combination
         let combination_randomness_gen = transcript
-            .sample_and_append_challenge(b"combination_randomness_gen")
+            .sample_and_append_challenge(b"combination_randomness")
             .elements;
         let combination_randomness =
             expand_randomness(combination_randomness_gen, stir_challenges.len());

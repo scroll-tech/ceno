@@ -378,7 +378,7 @@ impl<E: ExtensionField> Verifier<E> {
         if self.params.initial_statement {
             // Derive combination randomness and first sumcheck polynomial
             let combination_randomness_gen = transcript
-                .sample_and_append_challenge(b"combination_randomness_gen")
+                .sample_and_append_challenge(b"combination_randomness")
                 .elements;
             initial_combination_randomness = expand_randomness(
                 combination_randomness_gen,
@@ -512,7 +512,7 @@ impl<E: ExtensionField> Verifier<E> {
             };
 
             let combination_randomness_gen = transcript
-                .sample_and_append_challenge(b"combination_randomness_gen")
+                .sample_and_append_challenge(b"combination_randomness")
                 .elements;
             let combination_randomness = expand_randomness(
                 combination_randomness_gen,
