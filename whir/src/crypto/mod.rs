@@ -73,23 +73,24 @@ pub fn verify_multi_proof<E: ExtensionField>(
     leaf_size: usize,
     matrix_height: usize,
 ) -> Result<(), Error> {
-    indices
-        .iter()
-        .zip(proof.iter())
-        .all(|(index, path)| {
-            hash_params
-                .verify_batch(
-                    root,
-                    &[Dimensions {
-                        width: leaf_size,
-                        height: 1 << matrix_height,
-                    }],
-                    *index,
-                    &[values[*index].clone()],
-                    &path.1,
-                )
-                .is_ok()
-        })
-        .then_some(())
-        .ok_or(Error::MmcsError("Failed to verify proof".to_string()))
+    for (index, path) in indices.iter().zip(proof.iter()) {
+        hash_params
+            .verify_batch(
+                root,
+                &[Dimensions {
+                    width: leaf_size,
+                    height: 1 << matrix_height,
+                }],
+                *index,
+                &[values[*index].clone()],
+                &path.1,
+            )
+            .map_err(|e| {
+                Error::MmcsError(format!(
+                    "Failed to verify proof for index {}: {:?}",
+                    index, e
+                ))
+            })?
+    }
+    Ok(())
 }

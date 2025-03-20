@@ -256,7 +256,7 @@ impl<E: ExtensionField> Verifier<E> {
 
         let (final_merkle_proof, final_randomness_answers) =
             &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
-        if !verify_multi_proof(
+        verify_multi_proof(
             &self.params.hash_params,
             &prev_root,
             &final_randomness_indexes,
@@ -269,10 +269,7 @@ impl<E: ExtensionField> Verifier<E> {
             1,
             p3_util::log2_strict_usize(domain_size),
         )
-        .is_ok()
-        {
-            return Err(Error::InvalidProof("Final Merkle proof failed".to_string()));
-        }
+        .map_err(|e| Error::InvalidProof(format!("Final Merkle proof failed: {:?}", e)))?;
 
         let mut final_sumcheck_rounds = Vec::with_capacity(self.params.final_sumcheck_rounds);
         for _ in 0..self.params.final_sumcheck_rounds {
