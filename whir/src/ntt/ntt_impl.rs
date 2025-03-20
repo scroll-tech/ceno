@@ -8,7 +8,7 @@ use super::{
     utils::{lcm, sqrt_factor, workload_size},
 };
 use ff_ext::ExtensionField;
-use p3_field::{Field, TwoAdicField};
+use p3::field::{Field, TwoAdicField};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,

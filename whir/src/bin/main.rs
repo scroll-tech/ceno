@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use transcript::BasicTranscript;
 use whir::{

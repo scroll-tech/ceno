@@ -21,8 +21,8 @@ use crate::{
 use ff_ext::ExtensionField;
 use itertools::zip_eq;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3_commit::Mmcs;
-use p3_matrix::dense::RowMajorMatrix;
+use p3::commit::Mmcs;
+use p3::matrix::dense::RowMajorMatrix;
 use transcript::Transcript;
 
 use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
@@ -151,7 +151,7 @@ impl<E: ExtensionField> Prover<E> {
         let sumcheck_timer = start_timer!(|| "sumcheck");
         let mut sumcheck_prover = Some(SumcheckProverNotSkipping::new(
             DenseMultilinearExtension::from_evaluations_ext_vec(
-                p3_util::log2_strict_usize(polynomial.len()),
+                p3::util::log2_strict_usize(polynomial.len()),
                 polynomial.clone(),
             ),
             &initial_claims,
@@ -179,7 +179,7 @@ impl<E: ExtensionField> Prover<E> {
                 sumcheck_prover,
                 folding_randomness,
                 evaluations: DenseMultilinearExtension::from_evaluations_ext_vec(
-                    p3_util::log2_strict_usize(polynomial.len()),
+                    p3::util::log2_strict_usize(polynomial.len()),
                     polynomial,
                 ),
                 prev_merkle: None,
@@ -402,7 +402,7 @@ impl<E: ExtensionField> Prover<E> {
                     let mut batched_answers_coeffs = batched_answers.to_vec();
                     evaluate_over_hypercube(&mut batched_answers_coeffs);
                     DenseMultilinearExtension::from_evaluations_ext_vec(
-                        p3_util::log2_strict_usize(batched_answers_coeffs.len()),
+                        p3::util::log2_strict_usize(batched_answers_coeffs.len()),
                         batched_answers_coeffs.to_vec(),
                     )
                     .evaluate(&round_state.folding_randomness)

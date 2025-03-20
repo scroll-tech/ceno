@@ -18,8 +18,8 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3_commit::Mmcs;
-use p3_util::log2_strict_usize;
+use p3::util::log2_strict_usize;
+use p3::commit::Mmcs;
 use transcript::Transcript;
 
 impl<E: ExtensionField> Verifier<E> {
@@ -281,7 +281,7 @@ impl<E: ExtensionField> Verifier<E> {
         if prev_sumcheck_poly_eval
             != evaluation_of_v_poly
                 * DenseMultilinearExtension::from_evaluations_ext_vec(
-                    p3_util::log2_strict_usize(parsed.final_evaluations.len()),
+                    p3::util::log2_strict_usize(parsed.final_evaluations.len()),
                     parsed.final_evaluations,
                 )
                 .evaluate(&parsed.final_sumcheck_randomness)
@@ -482,7 +482,7 @@ impl<E: ExtensionField> Verifier<E> {
                     .as_slice(),
                 merkle_proof_with_answers,
                 answers[0].len(),
-                p3_util::log2_strict_usize(domain_size / answers[0].len()),
+                p3::util::log2_strict_usize(domain_size / answers[0].len()),
             )
             .is_ok()
             {
@@ -591,7 +591,7 @@ impl<E: ExtensionField> Verifier<E> {
                 .as_slice(),
             final_merkle_proof,
             final_randomness_answers[0].len(),
-            p3_util::log2_strict_usize(domain_size / final_randomness_answers[0].len()),
+            p3::util::log2_strict_usize(domain_size / final_randomness_answers[0].len()),
         )
         .is_ok()
         {

@@ -16,7 +16,7 @@ use crate::{
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 
 pub struct HaltConfig {

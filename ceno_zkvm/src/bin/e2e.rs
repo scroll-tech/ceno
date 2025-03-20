@@ -7,8 +7,7 @@ use clap::Parser;
 use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
-use p3_field::PrimeCharacteristicRing;
-use p3_goldilocks::Goldilocks;
+use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
 use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -148,7 +147,11 @@ fn main() {
     // do statistics
     let stat_recorder = StatisticRecorder::default();
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
-    verifier.verify_proof(zkvm_proof.clone(), transcript).ok();
+    assert!(
+        verifier
+            .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
+            .is_ok()
+    );
     println!("e2e proof stat: {}", zkvm_proof);
     println!(
         "hashes count = {}",

@@ -1,0 +1,24 @@
+[package]
+categories.workspace = true
+description = "Plonky3"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "p3"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+p3-challenger.workspace = true
+p3-field.workspace = true
+p3-goldilocks.workspace = true
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
+p3-mds.workspace = true
+p3-poseidon.workspace = true
+p3-poseidon2.workspace = true
+p3-symmetric.workspace = true
+p3-matrix.workspace = true
+p3-util.workspace = true
+p3-commit.workspace = true
+p3-merkle-tree.workspace = true

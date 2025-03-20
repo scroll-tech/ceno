@@ -7,7 +7,7 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
-use p3_field::Field;
+use p3::field::Field;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Rotation(pub i32);

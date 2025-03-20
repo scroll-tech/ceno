@@ -11,7 +11,7 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 

@@ -1,8 +1,8 @@
 use crate::{ntt::intt_batch, parameters::FoldType};
 
 use ff_ext::ExtensionField;
-use p3_field::Field;
-use p3_matrix::dense::RowMajorMatrix;
+use p3::matrix::dense::RowMajorMatrix;
+use p3::field::Field;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -251,7 +251,7 @@ mod tests {
     use ff_ext::{ExtensionField, GoldilocksExt2};
     use goldilocks::Goldilocks;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+    use p3::field::{Field, PrimeCharacteristicRing, TwoAdicField};
 
     use crate::{
         utils::{evaluate_over_hypercube, stack_evaluations},
@@ -276,7 +276,7 @@ mod tests {
             (0..num_coeffs).map(F::from_u64).collect::<Vec<_>>(),
         );
 
-        let root_of_unity = F::two_adic_generator(p3_util::log2_strict_usize(domain_size));
+        let root_of_unity = F::two_adic_generator(p3::util::log2_strict_usize(domain_size));
 
         let index = 15;
         let folding_randomness: Vec<_> =
@@ -328,7 +328,7 @@ mod tests {
             (0..num_coeffs).map(F::from_u64).collect::<Vec<_>>(),
         );
 
-        let root_of_unity = F::two_adic_generator(p3_util::log2_strict_usize(domain_size));
+        let root_of_unity = F::two_adic_generator(p3::util::log2_strict_usize(domain_size));
         let root_of_unity_inv = root_of_unity.inverse();
 
         let folding_randomness: Vec<_> =
@@ -370,7 +370,7 @@ mod tests {
             let mut processed_evals = processed[span.clone()].to_vec();
             evaluate_over_hypercube(&mut processed_evals);
             let answer_processed = DenseMultilinearExtension::from_evaluations_ext_vec(
-                p3_util::log2_strict_usize(processed_evals.len()),
+                p3::util::log2_strict_usize(processed_evals.len()),
                 processed_evals.to_vec(),
             )
             .evaluate(&folding_randomness.clone());

@@ -19,7 +19,7 @@ use crate::{
     },
     witness::LkMultiplicity,
 };
-pub use p3_field::PrimeCharacteristicRing;
+pub use p3::field::PrimeCharacteristicRing;
 
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
 

@@ -1,4 +1,4 @@
-use p3_field::Field;
+use p3::field::Field;
 
 use crate::{utils::base_decomposition, whir::fold::eq_poly3};
 
@@ -76,7 +76,7 @@ where
 mod tests {
 
     use ff_ext::GoldilocksExt2;
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     use crate::utils::base_decomposition;
 

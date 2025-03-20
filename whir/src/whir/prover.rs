@@ -13,8 +13,8 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_matrix::dense::RowMajorMatrix;
+use p3::commit::{ExtensionMmcs, Mmcs};
+use p3::matrix::dense::RowMajorMatrix;
 use transcript::Transcript;
 
 use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
@@ -366,7 +366,7 @@ impl<E: ExtensionField> Prover<E> {
                 let mut answers_coeffs = answers.to_vec();
                 evaluate_over_hypercube(&mut answers_coeffs);
                 DenseMultilinearExtension::from_evaluations_ext_vec(
-                    p3_util::log2_strict_usize(answers_coeffs.len()),
+                    p3::util::log2_strict_usize(answers_coeffs.len()),
                     answers_coeffs.to_vec(),
                 )
                 .evaluate(&round_state.folding_randomness)

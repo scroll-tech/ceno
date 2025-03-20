@@ -246,7 +246,7 @@ mod tests {
     use ff_ext::GoldilocksExt2;
     use goldilocks::Goldilocks;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     use super::SumcheckSingle;
 
