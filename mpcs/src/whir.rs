@@ -105,9 +105,10 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
+        polys: witness::RowMajorMatrix<E::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(polys))
+        let polys = polys.to_mles();
+        let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness)

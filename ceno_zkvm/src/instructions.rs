@@ -5,28 +5,12 @@ use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use std::sync::Arc;
 
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    witness::{LkMultiplicity, RowMajorMatrix},
-};
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::LkMultiplicity};
+
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub mod riscv;
-
-#[derive(Clone)]
-pub enum InstancePaddingStrategy {
-    // Pads with default values of underlying type
-    // Usually zero, but check carefully
-    Default,
-    // Pads by repeating last row
-    RepeatLast,
-    // Custom strategy consists of a closure
-    // `pad(i, j) = padding value for cell at row i, column j`
-    // pad should be able to cross thread boundaries
-    Custom(Arc<dyn Fn(u64, u64) -> u64 + Send + Sync>),
-}
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
@@ -79,6 +63,7 @@ pub trait Instruction<E: ExtensionField> {
             })
             .collect::<Result<(), ZKVMError>>()?;
 
+        raw_witin.padding_by_strategy();
         Ok((raw_witin, lk_multiplicity))
     }
 }

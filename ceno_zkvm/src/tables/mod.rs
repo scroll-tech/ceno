@@ -1,6 +1,7 @@
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::RowMajorMatrix};
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError};
 use ff_ext::ExtensionField;
 use std::collections::HashMap;
+use witness::RowMajorMatrix;
 mod range;
 pub use range::*;
 
@@ -12,6 +13,9 @@ pub use program::{InsnRecord, ProgramTableCircuit, ProgramTableConfig};
 
 mod ram;
 pub use ram::*;
+
+/// format: [witness, structural_witness]
+pub type RMMCollections<F> = [RowMajorMatrix<F>; 2];
 
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
@@ -36,5 +40,5 @@ pub trait TableCircuit<E: ExtensionField> {
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
         input: &Self::WitnessInput,
-    ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>;
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError>;
 }
