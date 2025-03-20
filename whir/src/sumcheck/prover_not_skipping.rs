@@ -159,7 +159,7 @@ mod tests {
         let full_folding = vec![folding_randomness_11, folding_randomness_12];
 
         let eval_coeff = match folded_poly_1.evaluations() {
-            FieldType::Base(evals) => F::from_bases(&[evals[0]]),
+            FieldType::Base(evals) => F::from_base(&evals[0]),
             FieldType::Ext(evals) => evals[0],
             _ => panic!("Invalid folded polynomial"),
         };
@@ -291,7 +291,7 @@ mod tests {
         let partial_folding = vec![folding_randomness_21, folding_randomness_22];
 
         let eval_coeff = match folded_poly_2.evaluations() {
-            FieldType::Base(evals) => F::from_bases(&[evals[0]]),
+            FieldType::Base(evals) => F::from_base(&evals[0]),
             FieldType::Ext(evals) => evals[0],
             _ => panic!("Invalid folded polynomial"),
         };

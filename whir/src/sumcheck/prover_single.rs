@@ -32,10 +32,7 @@ where
 
         let mut prover = SumcheckSingle {
             evaluation_of_p: match coeffs.evaluations() {
-                FieldType::Base(evals) => evals
-                    .iter()
-                    .map(|e| E::from_bases(&[*e]))
-                    .collect::<Vec<_>>(),
+                FieldType::Base(evals) => evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>(),
                 FieldType::Ext(evals) => evals.clone(),
                 _ => panic!("Invalid field type"),
             },

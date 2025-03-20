@@ -19,7 +19,7 @@ where
     pub fn new(degree: usize, log_rho_inv: usize) -> Option<Self> {
         let size = degree * (1 << log_rho_inv);
         let base_domain = TwoAdicMultiplicativeCoset {
-            log_n: p3_util::log2_strict_usize(size) + log_rho_inv,
+            log_n: p3_util::log2_strict_usize(size),
             shift: E::BaseField::from_u64(1),
         };
         let backing_domain = Self::to_extension_domain(&base_domain);

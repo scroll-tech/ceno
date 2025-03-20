@@ -112,6 +112,8 @@ pub trait ExtensionField:
 
     type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField + PoseidonField;
 
+    fn from_base(base: &Self::BaseField) -> Self;
+
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 
     fn as_bases(&self) -> &[Self::BaseField];
@@ -233,6 +235,10 @@ mod impl_goldilocks {
         const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
 
         type BaseField = Goldilocks;
+
+        fn from_base(base: &Goldilocks) -> Self {
+            Self::from_bases(&[*base, Goldilocks::ZERO])
+        }
 
         fn from_bases(bases: &[Goldilocks]) -> Self {
             debug_assert_eq!(bases.len(), 2);

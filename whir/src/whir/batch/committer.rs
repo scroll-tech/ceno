@@ -69,10 +69,9 @@ impl<E: ExtensionField> Committer<E> {
             .map(|poly| {
                 expand_from_coeff(
                     &match poly.evaluations() {
-                        FieldType::Base(evals) => evals
-                            .iter()
-                            .map(|e| E::from_bases(&[*e]))
-                            .collect::<Vec<_>>(),
+                        FieldType::Base(evals) => {
+                            evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>()
+                        }
                         FieldType::Ext(evals) => evals.clone(),
                         _ => panic!("Invalid field type"),
                     },
@@ -170,10 +169,9 @@ impl<E: ExtensionField> Committer<E> {
                 DenseMultilinearExtension::from_evaluations_ext_vec(
                     poly.num_vars(),
                     match poly.evaluations() {
-                        FieldType::Base(evals) => evals
-                            .iter()
-                            .map(|e| E::from_bases(&[*e]))
-                            .collect::<Vec<_>>(),
+                        FieldType::Base(evals) => {
+                            evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>()
+                        }
                         FieldType::Ext(evals) => evals.clone(),
                         _ => panic!("Invalid field type"),
                     },

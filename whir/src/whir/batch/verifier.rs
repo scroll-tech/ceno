@@ -481,8 +481,8 @@ impl<E: ExtensionField> Verifier<E> {
                     .collect::<Vec<Vec<E>>>()
                     .as_slice(),
                 merkle_proof_with_answers,
-                1,
-                p3_util::log2_strict_usize(domain_size),
+                answers[0].len(),
+                p3_util::log2_strict_usize(domain_size / answers[0].len()),
             )
             .is_ok()
             {
@@ -590,8 +590,8 @@ impl<E: ExtensionField> Verifier<E> {
                 .collect::<Vec<_>>()
                 .as_slice(),
             final_merkle_proof,
-            1,
-            p3_util::log2_strict_usize(domain_size),
+            final_randomness_answers[0].len(),
+            p3_util::log2_strict_usize(domain_size / final_randomness_answers[0].len()),
         )
         .is_ok()
         {

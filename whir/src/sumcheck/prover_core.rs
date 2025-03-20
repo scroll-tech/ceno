@@ -27,10 +27,7 @@ impl<F: ExtensionField> SumcheckCore<F> {
 
         let mut prover = SumcheckCore {
             evaluation_of_p: match coeffs.evaluations() {
-                FieldType::Base(evals) => evals
-                    .iter()
-                    .map(|e| F::from_bases(&[*e]))
-                    .collect::<Vec<_>>(),
+                FieldType::Base(evals) => evals.iter().map(|e| F::from_base(e)).collect::<Vec<_>>(),
                 FieldType::Ext(evals) => evals.clone(),
                 _ => panic!("Invalid field type"),
             }, // transform coefficient form -> evaluation form

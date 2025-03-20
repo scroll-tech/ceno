@@ -41,10 +41,9 @@ where
             evaluations_of_p: coeffs
                 .into_iter()
                 .map(|c| match c.evaluations() {
-                    FieldType::Base(evals) => evals
-                        .iter()
-                        .map(|e| F::from_bases(&[*e]))
-                        .collect::<Vec<_>>(),
+                    FieldType::Base(evals) => {
+                        evals.iter().map(|e| F::from_base(e)).collect::<Vec<_>>()
+                    }
                     FieldType::Ext(evals) => evals.clone(),
                     _ => panic!("Invalid field type"),
                 })

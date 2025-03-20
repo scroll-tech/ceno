@@ -187,8 +187,8 @@ impl<E: ExtensionField> Verifier<E> {
                     .collect::<Vec<Vec<E>>>()
                     .as_slice(),
                 merkle_proof_with_answers,
-                1,
-                p3_util::log2_strict_usize(domain_size),
+                answers[0].len(),
+                p3_util::log2_strict_usize(domain_size / answers[0].len()),
             )
             .is_ok()
             {
@@ -266,8 +266,8 @@ impl<E: ExtensionField> Verifier<E> {
                 .collect::<Vec<_>>()
                 .as_slice(),
             final_merkle_proof,
-            1,
-            p3_util::log2_strict_usize(domain_size),
+            final_randomness_answers[0].len(),
+            p3_util::log2_strict_usize(domain_size / final_randomness_answers[0].len()),
         )
         .map_err(|e| Error::InvalidProof(format!("Final Merkle proof failed: {:?}", e)))?;
 
@@ -405,7 +405,7 @@ impl<E: ExtensionField> Verifier<E> {
                         &round.folding_randomness,
                         coset_offset_inv,
                         coset_generator_inv,
-                        E::from_bases(&[self.two_inv]),
+                        E::from_base(&self.two_inv),
                         self.params.folding_factor.at_round(round_index),
                     )
                 })
@@ -433,7 +433,7 @@ impl<E: ExtensionField> Verifier<E> {
                     &parsed.final_folding_randomness,
                     coset_offset_inv,
                     coset_generator_inv,
-                    E::from_bases(&[self.two_inv]),
+                    E::from_base(&self.two_inv),
                     self.params.folding_factor.at_round(parsed.rounds.len()),
                 )
             })

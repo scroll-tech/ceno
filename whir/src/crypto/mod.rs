@@ -87,8 +87,8 @@ pub fn verify_multi_proof<E: ExtensionField>(
             )
             .map_err(|e| {
                 Error::MmcsError(format!(
-                    "Failed to verify proof for index {}: {:?}",
-                    index, e
+                    "Failed to verify proof for index {}, leaf size {}, matrix height log {}, error: {:?}",
+                    index, leaf_size, matrix_height, e
                 ))
             })?
     }

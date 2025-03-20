@@ -37,7 +37,7 @@ impl<E: ExtensionField> Committer<E> {
         let timer = start_timer!(|| "Single Commit");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
         let mut evaluations = match polynomial.evaluations() {
-            FieldType::Base(evals) => evals.iter().map(|x| E::from_bases(&[*x])).collect(),
+            FieldType::Base(evals) => evals.iter().map(|x| E::from_base(x)).collect(),
             FieldType::Ext(evals) => evals.clone(),
             _ => panic!("Unsupported field type"),
         };
@@ -59,7 +59,7 @@ impl<E: ExtensionField> Committer<E> {
             ));
         }
 
-        let expansion = self.0.starting_domain.size() / polynomial.evaluations().len();
+        let expansion = self.0.starting_domain.size() / evaluations.len();
         let evals = expand_from_coeff(&coeffs, expansion);
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
         // They also partially overlap and undo one another. We should merge them.
@@ -74,9 +74,6 @@ impl<E: ExtensionField> Committer<E> {
 
         // Group folds together as a leaf.
         let fold_size = 1 << self.0.folding_factor.at_round(0);
-        #[cfg(not(feature = "parallel"))]
-        let leafs_iter = folded_evals.chunks_exact(fold_size);
-        #[cfg(feature = "parallel")]
         let merkle_build_timer = start_timer!(|| "Single Merkle Tree Build");
         let (root, merkle_tree) = self
             .0

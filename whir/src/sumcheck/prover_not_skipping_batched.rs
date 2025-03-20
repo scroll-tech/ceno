@@ -176,7 +176,7 @@ mod tests {
             (FieldType::Base(evals_0), FieldType::Base(evals_1)) => {
                 assert_eq!(evals_0.len(), 1);
                 assert_eq!(evals_1.len(), 1);
-                [F::from_bases(&[evals_0[0]]), F::from_bases(&[evals_1[0]])]
+                [F::from_base(&evals_0[0]), F::from_base(&evals_1[0])]
             }
             (FieldType::Ext(evals_0), FieldType::Ext(evals_1)) => {
                 assert_eq!(evals_0.len(), 1);
