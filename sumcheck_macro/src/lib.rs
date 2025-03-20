@@ -253,40 +253,35 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             // NOTE: current method work in suffix alignment order
             let num_var = ceil_log2(v1.len());
             let expected_numvars_at_round = self.expected_numvars_at_round();
-            let res = if num_var < expected_numvars_at_round {
+            if num_var < expected_numvars_at_round {
                 // TODO optimize by caching computed result for later round reuse
                 // need to figure out how to cache in one place to support base/extension field
-                let sum = (0..largest_even_below(v1.len())).map(
+                let mut sum = (0..largest_even_below(v1.len())).map(
                     |b| {
                         #product
                     },
                 ).sum();
+                // calculate multiplicity term
+                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                let num_vars_multiplicity = self.expected_numvars_at_round().saturating_sub(1).saturating_sub(num_var);
+                if num_vars_multiplicity > 0 {
+                    sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                }
                 AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
             } else {
-                (0..largest_even_below(v1.len()))
-                #iter
-                .map(|b| {
-                    #additive_array_items
-                })
-                .sum::<AdditiveArray<_, #degree_plus_one>>()
-            };
-            let res = if v1.len() == 1 {
-                let b = 0;
-                AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
-            } else {
-                res
-            };
-
-            // calculate multiplicity term
-            // minus one because when expected num of var is i, the boolean hypercube dimension only i-1
-            let num_vars_multiplicity = self.expected_numvars_at_round().saturating_sub(1).saturating_sub(num_var);
-
-            if num_vars_multiplicity > 0 {
-                AdditiveArray(res.0.map(|e| e * E::BaseField::from_u64(1 << num_vars_multiplicity)))
-            } else {
-                res
+                let res = (0..largest_even_below(v1.len()))
+                    #iter
+                    .map(|b| {
+                        #additive_array_items
+                    })
+                    .sum::<AdditiveArray<_, #degree_plus_one>>();
+                if v1.len() == 1 {
+                    let b = 0;
+                    AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
+                } else {
+                    res
+                }
             }
-
         }
     };
 
