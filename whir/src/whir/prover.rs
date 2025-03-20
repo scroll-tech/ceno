@@ -184,7 +184,6 @@ impl<E: ExtensionField> Prover<E> {
         if round_state.round == self.0.n_rounds() {
             // Directly send coefficients of the polynomial to the verifier.
             transcript.append_field_element_exts(folded_evaluations_values);
-            println!("Final folded evaluations: {:?}", folded_evaluations_values);
 
             // Final verifier queries and answers. The indices are over the
             // *folded* domain.
