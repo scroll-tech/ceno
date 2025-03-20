@@ -1,6 +1,6 @@
 use crate::{
     crypto::{Digest, verify_multi_proof, write_digest_to_transcript},
-    utils::evaluate_as_univariate,
+    utils::{evaluate_as_univariate, evaluate_over_hypercube},
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{
@@ -455,9 +455,11 @@ impl<E: ExtensionField> Verifier<E> {
                 .stir_challenges_answers
                 .iter()
                 .map(|answers| {
+                    let mut evals = answers.clone();
+                    evaluate_over_hypercube(&mut evals);
                     DenseMultilinearExtension::from_evaluations_ext_vec(
-                        p3::util::log2_strict_usize(answers.len()),
-                        answers.to_vec(),
+                        p3::util::log2_strict_usize(evals.len()),
+                        evals.to_vec(),
                     )
                     .evaluate(&round.folding_randomness)
                 })
@@ -470,9 +472,11 @@ impl<E: ExtensionField> Verifier<E> {
             .final_randomness_answers
             .iter()
             .map(|answers| {
+                let mut evals = answers.clone();
+                evaluate_over_hypercube(&mut evals);
                 DenseMultilinearExtension::from_evaluations_ext_vec(
-                    p3::util::log2_strict_usize(answers.len()),
-                    answers.to_vec(),
+                    p3::util::log2_strict_usize(evals.len()),
+                    evals.to_vec(),
                 )
                 .evaluate(&parsed.final_folding_randomness)
             })

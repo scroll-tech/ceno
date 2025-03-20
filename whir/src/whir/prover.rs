@@ -13,8 +13,10 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::commit::{ExtensionMmcs, Mmcs};
-use p3::matrix::dense::RowMajorMatrix;
+use p3::{
+    commit::{ExtensionMmcs, Mmcs},
+    matrix::dense::RowMajorMatrix,
+};
 use transcript::Transcript;
 
 use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};

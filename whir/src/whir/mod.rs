@@ -69,7 +69,6 @@ mod tests {
         folding_factor: FoldingFactor,
         num_points: usize,
         soundness_type: SoundnessType,
-        pow_bits: usize,
         fold_type: FoldType,
     ) {
         let num_coeffs = 1 << num_variables;
@@ -82,7 +81,7 @@ mod tests {
         let whir_params = WhirParameters::<E> {
             initial_statement: true,
             security_level: 32,
-            pow_bits,
+            pow_bits: 0,
             folding_factor,
             hash_params,
             soundness_type,
@@ -127,8 +126,8 @@ mod tests {
         verifier
             .verify(&commitment, &mut transcript, &statement, &proof)
             .expect(&format!(
-                "Failed at number of variables = {}, folding factor = {:?}",
-                num_variables, folding_factor
+                "Failed at number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
+                num_variables, folding_factor, num_points, soundness_type, fold_type
             ));
     }
 
@@ -138,7 +137,6 @@ mod tests {
         num_points: usize,
         folding_factor: usize,
         soundness_type: SoundnessType,
-        pow_bits: usize,
         fold_type: FoldType,
     ) {
         println!(
@@ -155,7 +153,7 @@ mod tests {
         let whir_params = WhirParameters::<E> {
             initial_statement: true,
             security_level: 32,
-            pow_bits,
+            pow_bits: 0,
             folding_factor: FoldingFactor::Constant(folding_factor),
             hash_params,
             soundness_type,
@@ -215,7 +213,6 @@ mod tests {
         num_variables: usize,
         folding_factor: usize,
         soundness_type: SoundnessType,
-        pow_bits: usize,
         fold_type: FoldType,
     ) {
         println!(
@@ -232,7 +229,7 @@ mod tests {
         let whir_params = WhirParameters::<E> {
             initial_statement: true,
             security_level: 32,
-            pow_bits,
+            pow_bits: 0,
             folding_factor: FoldingFactor::Constant(folding_factor),
             hash_params,
             soundness_type,
@@ -297,7 +294,6 @@ mod tests {
         let fold_types = [FoldType::Naive, FoldType::ProverHelps];
         let num_points = [0, 1, 2];
         let num_polys = [1, 2, 3];
-        let pow_bits = [0, 5, 10];
 
         for folding_factor in folding_factors {
             let num_variables = folding_factor - 1..=2 * folding_factor;
@@ -305,16 +301,13 @@ mod tests {
                 for fold_type in fold_types {
                     for num_points in num_points {
                         for soundness_type in soundness_type {
-                            for pow_bits in pow_bits {
-                                make_whir_things(
-                                    num_variables,
-                                    FoldingFactor::Constant(folding_factor),
-                                    num_points,
-                                    soundness_type,
-                                    pow_bits,
-                                    fold_type,
-                                );
-                            }
+                            make_whir_things(
+                                num_variables,
+                                FoldingFactor::Constant(folding_factor),
+                                num_points,
+                                soundness_type,
+                                fold_type,
+                            );
                         }
                     }
                 }
@@ -328,17 +321,14 @@ mod tests {
                     for num_points in num_points {
                         for num_polys in num_polys {
                             for soundness_type in soundness_type {
-                                for pow_bits in pow_bits {
-                                    make_whir_batch_things_same_point(
-                                        num_polys,
-                                        num_variables,
-                                        num_points,
-                                        folding_factor,
-                                        soundness_type,
-                                        pow_bits,
-                                        fold_type,
-                                    );
-                                }
+                                make_whir_batch_things_same_point(
+                                    num_polys,
+                                    num_variables,
+                                    num_points,
+                                    folding_factor,
+                                    soundness_type,
+                                    fold_type,
+                                );
                             }
                         }
                     }
@@ -352,16 +342,13 @@ mod tests {
                 for fold_type in fold_types {
                     for num_polys in num_polys {
                         for soundness_type in soundness_type {
-                            for pow_bits in pow_bits {
-                                make_whir_batch_things_diff_point(
-                                    num_polys,
-                                    num_variables,
-                                    folding_factor,
-                                    soundness_type,
-                                    pow_bits,
-                                    fold_type,
-                                );
-                            }
+                            make_whir_batch_things_diff_point(
+                                num_polys,
+                                num_variables,
+                                folding_factor,
+                                soundness_type,
+                                fold_type,
+                            );
                         }
                     }
                 }
