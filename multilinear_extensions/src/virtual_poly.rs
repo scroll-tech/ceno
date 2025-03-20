@@ -7,7 +7,7 @@ use crate::{
 use ark_std::{end_timer, rand::Rng, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use p3_field::Field;
+use p3::field::Field;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,

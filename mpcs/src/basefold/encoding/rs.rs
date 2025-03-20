@@ -9,7 +9,7 @@ use crate::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use p3_field::{Field, PrimeCharacteristicRing, PrimeField, TwoAdicField};
+use p3::field::{Field, PrimeCharacteristicRing, PrimeField, TwoAdicField};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -545,7 +545,7 @@ fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) ->
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
-    use p3_goldilocks::Goldilocks;
+    use p3::goldilocks::Goldilocks;
 
     use crate::{
         basefold::encoding::test_util::test_codeword_folding,

@@ -82,8 +82,7 @@ mod tests {
 
     use super::*;
     use ff_ext::{FieldInto, FromUniformBytes, GoldilocksExt2 as E};
-    use p3_field::PrimeCharacteristicRing;
-    use p3_goldilocks::Goldilocks as F;
+    use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
     use rand_chacha::{ChaChaRng, rand_core::SeedableRng};
 
     #[test]
