@@ -174,7 +174,7 @@ pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> V
     points
         .iter()
         .map(|x| {
-            let coeff_vec = coeffs.iter();
+            let coeff_vec = coeffs.iter().rev();
             let mut acc = E::ZERO;
             for c in coeff_vec {
                 acc = acc * *x + *c;
