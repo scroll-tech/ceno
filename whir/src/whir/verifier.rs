@@ -559,7 +559,6 @@ impl<E: ExtensionField> Verifier<E> {
             } else {
                 E::ZERO
             };
-            println!("Prev eval: {}", prev_eval);
             let claimed_sum = prev_eval
                 + values
                     .zip(&round.combination_randomness)
@@ -582,10 +581,12 @@ impl<E: ExtensionField> Verifier<E> {
                 let (prev_poly, randomness) = prev.unwrap();
                 if sumcheck_poly.sum_over_hypercube() != prev_poly.evaluate_at_point(&[randomness])
                 {
-                    return Err(Error::InvalidProof(
-                        "Sumcheck poly sum over hypercube mismatch with prev poly eval at point"
-                            .to_string(),
-                    ));
+                    return Err(Error::InvalidProof(format!(
+                        "Sumcheck poly sum over hypercube mismatch with prev poly eval at point at round {}: {} != {}",
+                        round_index,
+                        sumcheck_poly.sum_over_hypercube(),
+                        prev_poly.evaluate_at_point(&[randomness])
+                    )));
                 }
                 prev = Some((sumcheck_poly.clone(), *new_randomness));
             }
