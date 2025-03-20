@@ -1,8 +1,10 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_matrix::{Dimensions, dense::RowMajorMatrix, extension::FlatMatrixView};
-use p3_merkle_tree::{MerkleTree as P3MerkleTree, MerkleTreeMmcs};
-use p3_symmetric::{Hash as P3Hash, PaddingFreeSponge, TruncatedPermutation};
+use p3::{
+    commit::{ExtensionMmcs, Mmcs},
+    matrix::{Dimensions, dense::RowMajorMatrix, extension::FlatMatrixView},
+    merkle_tree::{MerkleTree as P3MerkleTree, MerkleTreeMmcs},
+    symmetric::{Hash as P3Hash, PaddingFreeSponge, TruncatedPermutation},
+};
 use poseidon::digest::DIGEST_WIDTH;
 use transcript::Transcript;
 

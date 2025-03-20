@@ -13,8 +13,8 @@ use crate::{
 use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3_commit::Mmcs;
-use p3_matrix::dense::RowMajorMatrix;
+use p3::commit::Mmcs;
+use p3::matrix::dense::RowMajorMatrix;
 use transcript::Transcript;
 
 use crate::whir::fs_utils::MmcsCommitmentWriter;

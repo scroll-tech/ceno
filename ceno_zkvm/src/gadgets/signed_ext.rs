@@ -7,7 +7,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::{ExtensionField, FieldInto};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 
 /// Extract the most significant bit from an expression previously constrained

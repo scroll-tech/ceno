@@ -13,7 +13,7 @@ mod tests {
         mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
         virtual_poly::eq_eval,
     };
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     use crate::whir::fold::expand_from_univariate;
 

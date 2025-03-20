@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use nimue_pow::PoWChallenge;
-use p3_field::Field;
+use p3::field::Field;
 use transcript::Transcript;
 
 use crate::error::Error;
@@ -69,7 +69,7 @@ mod tests {
         virtual_poly::eq_eval,
     };
     use nimue_pow::blake3::Blake3PoW;
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
     use transcript::{BasicTranscript, Transcript};
 
     use crate::{

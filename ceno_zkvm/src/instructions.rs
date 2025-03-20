@@ -63,6 +63,7 @@ pub trait Instruction<E: ExtensionField> {
             })
             .collect::<Result<(), ZKVMError>>()?;
 
+        raw_witin.padding_by_strategy();
         Ok((raw_witin, lk_multiplicity))
     }
 }

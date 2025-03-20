@@ -1,6 +1,7 @@
 //! The implementation of range tables. No generics.
 
 use ff_ext::{ExtensionField, SmallField};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::collections::HashMap;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 

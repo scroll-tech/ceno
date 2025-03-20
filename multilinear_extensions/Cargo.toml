@@ -13,8 +13,7 @@ version.workspace = true
 ark-std.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
-p3-field.workspace = true
-p3-goldilocks.workspace = true
+p3 = { path = "../p3" }
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true

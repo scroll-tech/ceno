@@ -1,6 +1,6 @@
 use crate::crypto::{Digest, MultiPath};
 use ff_ext::{ExtensionField, PoseidonField};
-use p3_commit::Mmcs;
+use p3::commit::Mmcs;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod batch;
@@ -42,7 +42,7 @@ mod tests {
 
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
     use rand::rngs::OsRng;
     use transcript::BasicTranscript;
     use witness::RowMajorMatrix;
@@ -93,7 +93,7 @@ mod tests {
         let params = WhirConfig::<E>::new(mv_params, whir_params);
 
         let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, vec![
-                <E as p3_field::PrimeCharacteristicRing>::from_u64(1);
+                <E as p3::field::PrimeCharacteristicRing>::from_u64(1);
                 num_coeffs
             ]);
 

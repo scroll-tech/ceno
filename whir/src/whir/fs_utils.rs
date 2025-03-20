@@ -1,6 +1,6 @@
 use crate::{crypto::Digest, error::Error, utils::dedup};
 use ff_ext::{ExtensionField, SmallField};
-use p3_commit::Mmcs;
+use p3::commit::Mmcs;
 use transcript::Transcript;
 
 pub fn get_challenge_stir_queries<E: ExtensionField, T: Transcript<E>>(

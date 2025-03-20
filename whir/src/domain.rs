@@ -1,6 +1,8 @@
 use ff_ext::ExtensionField;
-use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{PrimeCharacteristicRing, TwoAdicField};
+use p3::{
+    commit::TwoAdicMultiplicativeCoset,
+    field::{PrimeCharacteristicRing, TwoAdicField},
+};
 
 #[derive(Debug, Clone)]
 pub struct Domain<E>
@@ -19,7 +21,7 @@ where
     pub fn new(degree: usize, log_rho_inv: usize) -> Option<Self> {
         let size = degree * (1 << log_rho_inv);
         let base_domain = TwoAdicMultiplicativeCoset {
-            log_n: p3_util::log2_strict_usize(size),
+            log_n: p3::util::log2_strict_usize(size),
             shift: E::BaseField::from_u64(1),
         };
         let backing_domain = Self::to_extension_domain(&base_domain);
@@ -62,7 +64,7 @@ where
     // <w^power> (note this will have size |L| / power)
     fn scale_generator_by(&self, power: usize) -> TwoAdicMultiplicativeCoset<E> {
         TwoAdicMultiplicativeCoset {
-            log_n: self.backing_domain.log_n - p3_util::log2_strict_usize(power),
+            log_n: self.backing_domain.log_n - p3::util::log2_strict_usize(power),
             shift: self.backing_domain.shift.exp_u64(power as u64),
         }
     }

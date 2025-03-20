@@ -15,10 +15,10 @@ use crate::{
 use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3_matrix::dense::RowMajorMatrix;
+use p3::matrix::dense::RowMajorMatrix;
 use transcript::Transcript;
 
-use p3_commit::Mmcs;
+use p3::commit::Mmcs;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -109,7 +109,7 @@ impl<E: ExtensionField> Committer<E> {
         };
 
         let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
-            p3_util::log2_strict_usize(evaluations.len()),
+            p3::util::log2_strict_usize(evaluations.len()),
             evaluations,
         );
         Ok((

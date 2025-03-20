@@ -16,7 +16,7 @@ use crate::{
 use ark_std::iterable::Iterable;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, enumerate};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use std::{
     borrow::Cow,
     mem::{self},

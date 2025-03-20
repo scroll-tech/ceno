@@ -76,7 +76,7 @@ mod tests {
         virtual_poly::eq_eval,
     };
     use nimue_pow::blake3::Blake3PoW;
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
     use transcript::{BasicTranscript, Transcript};
 
     use crate::{

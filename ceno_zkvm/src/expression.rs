@@ -9,7 +9,7 @@ use std::{
 
 use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, SmallField};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
@@ -1088,7 +1088,7 @@ mod tests {
     use super::{Expression, ToExpr, fmt};
     use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
     use ff_ext::{FieldInto, GoldilocksExt2};
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     #[test]
     fn test_expression_arithmetics() {

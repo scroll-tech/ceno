@@ -2,7 +2,7 @@ use super::proof::SumcheckPolynomial;
 use crate::sumcheck::prover_single::SumcheckSingle;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3_field::Field;
+use p3::field::Field;
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
 
@@ -245,7 +245,7 @@ where
 mod tests {
     use ff_ext::GoldilocksExt2;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     use super::SumcheckBatched;
 

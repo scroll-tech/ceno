@@ -1,7 +1,7 @@
 use crate::ntt::{transpose, transpose_bench_allocate};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use p3_field::Field;
+use p3::field::Field;
 use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
 use std::collections::BTreeSet;
 
@@ -124,7 +124,7 @@ pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &
 pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
     // let timer = start_timer!(|| "interpolate_over_hypercube");
     // iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
-    let n = p3_util::log2_strict_usize(evals.len());
+    let n = p3::util::log2_strict_usize(evals.len());
 
     evals.par_chunks_mut(2).for_each(|chunk| {
         chunk[1] -= chunk[0];
@@ -145,7 +145,7 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
 }
 
 pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
-    let n = p3_util::log2_strict_usize(coeffs.len());
+    let n = p3::util::log2_strict_usize(coeffs.len());
 
     // This code implicitly assumes that coeffs has size at least 1 << n,
     // that means the size of evals should be a power of two
@@ -186,7 +186,7 @@ pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> V
 
 #[cfg(test)]
 mod tests {
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     use crate::utils::base_decomposition;
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_evaluations_stack() {
-        use p3_goldilocks::Goldilocks as F;
+        use p3::goldilocks::Goldilocks as F;
 
         let num = 256;
         let folding_factor = 3;

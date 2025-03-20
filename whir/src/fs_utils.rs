@@ -1,6 +1,6 @@
 use nimue::plugins::ark::FieldIOPattern;
 use nimue_pow::PoWIOPattern;
-use p3_field::Field;
+use p3::field::Field;
 pub trait OODIOPattern<F: Field> {
     fn add_ood(self, num_samples: usize) -> Self;
 }

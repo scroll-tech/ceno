@@ -22,7 +22,7 @@ use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -1259,7 +1259,7 @@ mod tests {
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::mle::IntoMLE;
-    use p3_goldilocks::Goldilocks;
+    use p3::goldilocks::Goldilocks;
     use witness::InstancePaddingStrategy;
 
     #[derive(Debug)]
