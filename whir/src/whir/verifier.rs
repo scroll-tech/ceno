@@ -160,6 +160,8 @@ impl<E: ExtensionField> Verifier<E> {
 
             let new_root = whir_proof.merkle_roots[r].clone();
 
+            write_digest_to_transcript(&new_root, transcript);
+
             let (ood_points, ood_answers) = if round_params.ood_samples > 0 {
                 let ood_points =
                     transcript.sample_and_append_vec(b"ood_points", round_params.ood_samples);
@@ -557,6 +559,7 @@ impl<E: ExtensionField> Verifier<E> {
             } else {
                 E::ZERO
             };
+            println!("Prev eval: {}", prev_eval);
             let claimed_sum = prev_eval
                 + values
                     .zip(&round.combination_randomness)

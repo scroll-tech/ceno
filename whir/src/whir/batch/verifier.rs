@@ -1,7 +1,7 @@
 use std::iter;
 
 use crate::{
-    crypto::verify_multi_proof,
+    crypto::{verify_multi_proof, write_digest_to_transcript},
     error::Error,
     sumcheck::proof::SumcheckPolynomial,
     utils::{evaluate_as_univariate, expand_randomness},
@@ -442,6 +442,8 @@ impl<E: ExtensionField> Verifier<E> {
             let round_params = &self.params.round_parameters[r];
 
             let new_root = whir_proof.merkle_roots[r].clone();
+
+            write_digest_to_transcript(&new_root, transcript);
 
             let (ood_points, ood_answers) = if round_params.ood_samples > 0 {
                 let ood_points =

@@ -1,6 +1,9 @@
 use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::{Digest, MerkleTree, MerkleTreeExt, MultiPath, generate_multi_proof},
+    crypto::{
+        Digest, MerkleTree, MerkleTreeExt, MultiPath, generate_multi_proof,
+        write_digest_to_transcript,
+    },
     domain::Domain,
     end_timer,
     error::Error,
@@ -267,7 +270,7 @@ impl<E: ExtensionField> Prover<E> {
             1 << self.0.folding_factor.at_round(round_state.round + 1),
         ));
 
-        transcript.append_message(&bincode::serialize(&root).unwrap());
+        write_digest_to_transcript(&root, transcript);
         merkle_roots.push(root);
 
         let (ood_points, ood_answers_round) = if round_params.ood_samples > 0 {
