@@ -221,7 +221,7 @@ impl<E: ExtensionField> Verifier<E> {
                 sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
             }
 
-            let new_folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
+            let new_folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).collect();
 
             rounds.push(ParsedRound {
                 folding_randomness,
@@ -289,11 +289,7 @@ impl<E: ExtensionField> Verifier<E> {
                 .elements;
             final_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
         }
-        let final_sumcheck_randomness = final_sumcheck_rounds
-            .iter()
-            .map(|&(_, r)| r)
-            .rev()
-            .collect();
+        let final_sumcheck_randomness = final_sumcheck_rounds.iter().map(|&(_, r)| r).collect();
 
         Ok(ParsedProof {
             initial_combination_randomness,
@@ -545,7 +541,7 @@ impl<E: ExtensionField> Verifier<E> {
             prev = Some((prev_poly, randomness));
         }
 
-        for (round, folds) in parsed.rounds.iter().zip(&computed_folds) {
+        for (round_index, (round, folds)) in parsed.rounds.iter().zip(&computed_folds).enumerate() {
             let (sumcheck_poly, new_randomness) = &round.sumcheck_rounds[0].clone();
 
             let values = round.ood_answers.iter().copied().chain(folds.clone());
@@ -562,9 +558,12 @@ impl<E: ExtensionField> Verifier<E> {
                     .sum::<E>();
 
             if sumcheck_poly.sum_over_hypercube() != claimed_sum {
-                return Err(Error::InvalidProof(
-                    "Sumcheck poly sum over hypercube mismatch with claimed sum".to_string(),
-                ));
+                return Err(Error::InvalidProof(format!(
+                    "Sumcheck poly sum over hypercube mismatch with claimed sum in round {}: {} != {}",
+                    round_index,
+                    sumcheck_poly.sum_over_hypercube(),
+                    claimed_sum
+                )));
             }
 
             prev = Some((sumcheck_poly.clone(), *new_randomness));

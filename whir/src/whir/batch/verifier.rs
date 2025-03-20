@@ -18,8 +18,7 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3::util::log2_strict_usize;
-use p3::commit::Mmcs;
+use p3::{commit::Mmcs, util::log2_strict_usize};
 use transcript::Transcript;
 
 impl<E: ExtensionField> Verifier<E> {
@@ -325,7 +324,7 @@ impl<E: ExtensionField> Verifier<E> {
                 .elements;
             sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
         }
-        let folded_point: Vec<E> = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
+        let folded_point: Vec<E> = sumcheck_rounds.iter().map(|&(_, r)| r).collect();
         let folded_eqs: Vec<E> = point_per_poly
             .iter()
             .zip(&poly_comb_randomness)
@@ -403,7 +402,7 @@ impl<E: ExtensionField> Verifier<E> {
                 sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
             }
 
-            folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
+            folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).collect();
         } else {
             assert_eq!(parsed_commitment.ood_points.len(), 0);
             assert_eq!(statement.points.len(), 0);
@@ -536,7 +535,7 @@ impl<E: ExtensionField> Verifier<E> {
                 sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
             }
 
-            let new_folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
+            let new_folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).collect();
 
             rounds.push(ParsedRound {
                 folding_randomness,
@@ -636,11 +635,7 @@ impl<E: ExtensionField> Verifier<E> {
                 .elements;
             final_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
         }
-        let final_sumcheck_randomness = final_sumcheck_rounds
-            .iter()
-            .map(|&(_, r)| r)
-            .rev()
-            .collect();
+        let final_sumcheck_randomness = final_sumcheck_rounds.iter().map(|&(_, r)| r).collect();
 
         Ok(ParsedProof {
             initial_combination_randomness,
@@ -662,9 +657,12 @@ impl<E: ExtensionField> Verifier<E> {
     fn compute_v_poly_for_batched(&self, statement: &Statement<E>, proof: &ParsedProof<E>) -> E {
         let mut num_variables = self.params.mv_parameters.num_variables;
 
-        let mut folding_randomness = iter::once(&proof.final_sumcheck_randomness)
+        let mut folding_randomness = proof
+            .rounds
+            .iter()
+            .map(|r| &r.folding_randomness)
             .chain(iter::once(&proof.final_folding_randomness))
-            .chain(proof.rounds.iter().rev().map(|r| &r.folding_randomness))
+            .chain(iter::once(&proof.final_sumcheck_randomness))
             .flatten()
             .copied()
             .collect::<Vec<_>>();
