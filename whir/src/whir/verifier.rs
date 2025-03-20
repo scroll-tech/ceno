@@ -357,7 +357,7 @@ impl<E: ExtensionField> Verifier<E> {
 
         for (round, round_proof) in proof.rounds.iter().enumerate() {
             num_variables -= self.params.folding_factor.at_round(round);
-            folding_randomness = folding_randomness[..num_variables].to_vec();
+            folding_randomness = folding_randomness[num_variables..].to_vec();
 
             let ood_points = &round_proof.ood_points;
             let stir_challenges_points = &round_proof.stir_challenges_points;
