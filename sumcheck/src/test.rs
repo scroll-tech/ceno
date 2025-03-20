@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
     util::interpolate_uni_poly,
@@ -7,12 +5,10 @@ use crate::{
 use ark_std::{rand::RngCore, test_rng};
 use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
 use p3::field::PrimeCharacteristicRing;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
 #[test]
@@ -144,28 +140,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     if let Some(p) = challenge {
         prover_state.challenges.push(p);
         // fix last challenge to collect final evaluation
-        prover_state
-            .poly
-            .flattened_ml_extensions
-            .par_iter_mut()
-            .for_each(|mle| {
-                if num_variables == 1 {
-                    // first time fix variable should be create new instance
-                    if mle.num_vars() > 0 {
-                        *mle = mle.fix_variables(&[p.elements]).into();
-                    } else {
-                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            0,
-                            mle.get_base_field_vec().to_vec(),
-                        ))
-                    }
-                } else {
-                    let mle = Arc::get_mut(mle).unwrap();
-                    if mle.num_vars() > 0 {
-                        mle.fix_variables_in_place(&[p.elements]);
-                    }
-                }
-            });
+        prover_state.fix_var(p.elements);
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);
     assert!(
