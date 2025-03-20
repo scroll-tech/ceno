@@ -11,7 +11,6 @@ use crate::{
     expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
 };
-
 use p3::field::PrimeCharacteristicRing;
 use witness::RowMajorMatrix;
 
