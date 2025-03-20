@@ -634,17 +634,17 @@ impl<E: ExtensionField> Verifier<E> {
         // Check the final sumcheck evaluation
         let evaluation_of_v_poly = self.compute_v_poly(&parsed_commitment, statement, &parsed);
 
-        if prev_sumcheck_poly_eval
-            != evaluation_of_v_poly
-                * DenseMultilinearExtension::from_evaluations_ext_vec(
-                    p3::util::log2_strict_usize(parsed.final_evaluations.len()),
-                    parsed.final_evaluations,
-                )
-                .evaluate(&parsed.final_sumcheck_randomness)
-        {
-            return Err(Error::InvalidProof(
-                "Final sumcheck evaluation mismatch".to_string(),
-            ));
+        let expected_sumcheck_poly_eval = evaluation_of_v_poly
+            * DenseMultilinearExtension::from_evaluations_ext_vec(
+                p3::util::log2_strict_usize(parsed.final_evaluations.len()),
+                parsed.final_evaluations,
+            )
+            .evaluate(&parsed.final_sumcheck_randomness);
+        if prev_sumcheck_poly_eval != expected_sumcheck_poly_eval {
+            return Err(Error::InvalidProof(format!(
+                "Final sumcheck evaluation mismatch: {} != {}",
+                prev_sumcheck_poly_eval, expected_sumcheck_poly_eval
+            )));
         }
 
         Ok(())
