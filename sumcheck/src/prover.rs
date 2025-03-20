@@ -329,12 +329,15 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         end_timer!(start);
 
         let max_degree = polynomial.aux_info.max_degree;
+        let num_polys = polynomial.flattened_ml_extensions.len();
         assert!(extrapolation_aux.len() == max_degree - 1);
         Self {
+            max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
             extrapolation_aux,
+            poly_index_is_bind: vec![false; num_polys],
         }
     }
 
@@ -381,30 +384,44 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
 
-            if self.challenges.len() == 1 {
-                self.poly.flattened_ml_extensions.iter_mut().for_each(|f| {
-                    if f.num_vars() > 0 {
-                        *f = Arc::new(f.fix_variables(&[r.elements]));
+            let expected_numvars_at_round = self.expected_numvars_at_round();
+            println!("num poly {}", self.poly.flattened_ml_extensions.len());
+            self.poly_index_is_bind
+                .par_iter_mut()
+                .zip(self.poly.flattened_ml_extensions.par_iter_mut())
+                .for_each(|(has_bind, poly)| {
+                    if *has_bind {
+                        // in place
+                        let f = Arc::get_mut(poly);
+
+                        if let Some(f) = f {
+                            debug_assert!(f.num_vars() <= expected_numvars_at_round);
+                            debug_assert!(f.num_vars() > 0);
+                            println!("binded f.num_vars() {}", f.num_vars());
+                            if f.num_vars() == expected_numvars_at_round {
+                                println!(
+                                    "has bind at round {}, num_var {}",
+                                    self.round,
+                                    f.num_vars()
+                                );
+                                f.fix_variables_in_place_parallel(&[r.elements])
+                            }
+                        };
                     } else {
-                        panic!("calling sumcheck on constant")
+                        debug_assert!(poly.num_vars() <= expected_numvars_at_round);
+                        debug_assert!(poly.num_vars() > 0);
+                        println!("f.num_vars() {}", poly.num_vars());
+                        if expected_numvars_at_round == poly.num_vars() {
+                            println!(
+                                "what bind at round {}, num_var {}",
+                                self.round,
+                                poly.num_vars()
+                            );
+                            *poly = Arc::new(poly.fix_variables_parallel(&[r.elements]));
+                            *has_bind = true;
+                        }
                     }
                 });
-            } else {
-                self.poly
-                    .flattened_ml_extensions
-                    .iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut,
-                    // which can be +5% overhead rust docs doen't explain the
-                    // reason
-                    .map(Arc::get_mut)
-                    .for_each(|f| {
-                        if let Some(f) = f {
-                            if f.num_vars() > 0 {
-                                f.fix_variables_in_place(&[r.elements]);
-                            }
-                        }
-                    });
-            }
         }
         exit_span!(span);
         // end_timer!(fix_argument);
@@ -484,6 +501,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 }
             })
             .collect()
+    }
+    pub fn expected_numvars_at_round(&self) -> usize {
+        // first round start from 1
+        let num_vars = self.max_num_variables + 1 - self.round;
+        debug_assert!(num_vars > 0, "make sumcheck work on constant");
+        num_vars
     }
 }
 
@@ -588,10 +611,13 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         );
 
         let max_degree = polynomial.aux_info.max_degree;
+        let num_polys = polynomial.flattened_ml_extensions.len();
         let prover_state = Self {
+            max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
+            poly_index_is_bind: vec![false; num_polys],
             extrapolation_aux: (1..max_degree)
                 .map(|degree| {
                     let points = (0..1 + degree as u64).map(E::from_u64).collect::<Vec<_>>();
@@ -644,33 +670,31 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
 
-            if self.challenges.len() == 1 {
-                self.poly
-                    .flattened_ml_extensions
-                    .par_iter_mut()
-                    .for_each(|f| {
-                        if f.num_vars() > 0 {
-                            *f = Arc::new(f.fix_variables_parallel(&[r.elements]));
-                        } else {
-                            panic!("calling sumcheck on constant")
-                        }
-                    });
-            } else {
-                self.poly
-                    .flattened_ml_extensions
-                    .par_iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut,
-                    // which can be +5% overhead rust docs doen't explain the
-                    // reason
-                    .map(Arc::get_mut)
-                    .for_each(|f| {
+            let expected_numvars_at_round = self.expected_numvars_at_round();
+
+            self.poly_index_is_bind
+                .par_iter_mut()
+                .zip(self.poly.flattened_ml_extensions.par_iter_mut())
+                .for_each(|(has_bind, poly)| {
+                    if *has_bind {
+                        // in place
+                        let f = Arc::get_mut(poly);
                         if let Some(f) = f {
-                            if f.num_vars() > 0 {
+                            debug_assert!(f.num_vars() <= expected_numvars_at_round);
+                            debug_assert!(f.num_vars() > 0);
+                            if f.num_vars() == expected_numvars_at_round {
                                 f.fix_variables_in_place_parallel(&[r.elements])
                             }
+                        };
+                    } else {
+                        debug_assert!(poly.num_vars() <= expected_numvars_at_round);
+                        debug_assert!(poly.num_vars() > 0);
+                        if expected_numvars_at_round == poly.num_vars() {
+                            *poly = Arc::new(poly.fix_variables_parallel(&[r.elements]));
+                            *has_bind = true;
                         }
-                    });
-            }
+                    }
+                });
         }
         exit_span!(span);
         // end_timer!(fix_argument);

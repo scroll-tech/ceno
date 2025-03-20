@@ -44,6 +44,8 @@ pub struct IOPProverState<'a, E: ExtensionField> {
     /// points with precomputed barycentric weights for extrapolating smaller
     /// degree uni-polys to `max_degree + 1` evaluations.
     pub(crate) extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
+    pub(crate) max_num_variables: usize,
+    pub(crate) poly_index_is_bind: Vec<bool>,
 }
 
 /// Prover State of a PolyIOP
