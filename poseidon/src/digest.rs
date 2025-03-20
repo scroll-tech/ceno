@@ -1,4 +1,4 @@
-use crate::constants::DIGEST_WIDTH;
+pub use crate::constants::DIGEST_WIDTH;
 use p3_field::PrimeField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 

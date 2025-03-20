@@ -100,7 +100,9 @@ pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
     fn to_noncanonical_u64(&self) -> u64;
 }
 
-pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord {
+pub trait ExtensionField:
+    P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord + TwoAdicField
+{
     const DEGREE: usize;
     const MULTIPLICATIVE_GENERATOR: Self;
     const TWO_ADICITY: usize;
@@ -109,6 +111,8 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
     const NONRESIDUE: Self::BaseField;
 
     type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField + PoseidonField;
+
+    fn from_base(base: &Self::BaseField) -> Self;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 
@@ -218,19 +222,23 @@ mod impl_goldilocks {
     impl ExtensionField for GoldilocksExt2 {
         const DEGREE: usize = 2;
         const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
-        const TWO_ADICITY: usize = Goldilocks::TWO_ADICITY;
+        const TWO_ADICITY: usize = <GoldilocksExt2 as TwoAdicField>::TWO_ADICITY;
         // Passing two-adacity itself to this function will get the root of unity
         // with the largest order, i.e., order = 2^two-adacity.
         const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
             Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
         const TWO_ADIC_ROOT_OF_UNITY: Self = BinomialExtensionField::new_unchecked(
-            Goldilocks::ext_two_adic_generator_const(Goldilocks::TWO_ADICITY),
+            Goldilocks::ext_two_adic_generator_const(<GoldilocksExt2 as TwoAdicField>::TWO_ADICITY),
         );
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
 
         type BaseField = Goldilocks;
+
+        fn from_base(base: &Goldilocks) -> Self {
+            Self::from_bases(&[*base, Goldilocks::ZERO])
+        }
 
         fn from_bases(bases: &[Goldilocks]) -> Self {
             debug_assert_eq!(bases.len(), 2);
@@ -251,6 +259,35 @@ mod impl_goldilocks {
                 .iter()
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_two_adic_generator() {
+            for i in 0..32 {
+                assert_eq!(
+                    Goldilocks::two_adic_generator_const(i).exp_u64(1 << i),
+                    Goldilocks::ONE
+                );
+                assert_eq!(
+                    GoldilocksExt2::two_adic_generator(i).exp_u64(1 << i),
+                    GoldilocksExt2::ONE
+                );
+                if i > 0 {
+                    assert_eq!(
+                        Goldilocks::two_adic_generator_const(i).exp_u64(1 << (i - 1)),
+                        -Goldilocks::ONE
+                    );
+                    assert_eq!(
+                        GoldilocksExt2::two_adic_generator(i).exp_u64(1 << (i - 1)),
+                        -GoldilocksExt2::ONE
+                    );
+                }
+            }
         }
     }
 }
