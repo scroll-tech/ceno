@@ -165,6 +165,10 @@ pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
 }
 
 pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> Vec<E> {
+    if evals.len() == 1 {
+        // It's a constant function, so just return the constant value.
+        return vec![evals[0]; points.len()];
+    }
     let mut coeffs = evals.to_vec();
     interpolate_over_boolean_hypercube(&mut coeffs);
     points

@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Digest, verify_multi_proof},
+    crypto::{Digest, verify_multi_proof, write_digest_to_transcript},
     utils::evaluate_as_univariate,
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -78,12 +78,12 @@ impl<E: ExtensionField> Verifier<E> {
         commitment: &WhirCommitmentInTranscript<E>,
         transcript: &mut T,
     ) {
+        write_digest_to_transcript(&commitment.root, transcript);
         if self.params.committment_ood_samples > 0 {
             assert_eq!(
                 commitment.ood_points,
-                (0..self.params.committment_ood_samples)
-                    .map(|_| transcript.read_challenge().elements)
-                    .collect::<Vec<_>>()
+                transcript
+                    .sample_and_append_vec(b"ood_points", self.params.committment_ood_samples)
             );
             transcript.append_field_element_exts(&commitment.ood_answers);
         }
@@ -96,20 +96,22 @@ impl<E: ExtensionField> Verifier<E> {
         statement: &Statement<E>, // Will be needed later
         whir_proof: &WhirProof<E>,
     ) -> Result<ParsedProof<E>, Error> {
-        let mut sumcheck_rounds = Vec::new();
+        let mut initial_sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
         let initial_combination_randomness;
         let mut sumcheck_poly_evals_iter = whir_proof.sumcheck_poly_evals.iter();
         if self.params.initial_statement {
             // Derive combination randomness and first sumcheck polynomial
-            let combination_randomness_gen = transcript.read_challenge().elements;
+            let combination_randomness_gen = transcript
+                .sample_and_append_challenge(b"combination_randomness")
+                .elements;
             initial_combination_randomness = expand_randomness(
                 combination_randomness_gen,
                 parsed_commitment.ood_points.len() + statement.points.len(),
             );
 
             // Initial sumcheck
-            sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
+            initial_sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
             for _ in 0..self.params.folding_factor.at_round(0) {
                 let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                     .next()
@@ -119,11 +121,13 @@ impl<E: ExtensionField> Verifier<E> {
                     .clone();
                 transcript.append_field_element_exts(&sumcheck_poly_evals);
                 let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-                let folding_randomness_single = transcript.read_challenge().elements;
-                sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
+                let folding_randomness_single = transcript
+                    .sample_and_append_challenge(b"folding_randomness")
+                    .elements;
+                initial_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
             }
 
-            folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).rev().collect();
+            folding_randomness = initial_sumcheck_rounds.iter().map(|&(_, r)| r).collect();
         } else {
             assert_eq!(parsed_commitment.ood_points.len(), 0);
             assert_eq!(statement.points.len(), 0);
@@ -293,7 +297,7 @@ impl<E: ExtensionField> Verifier<E> {
 
         Ok(ParsedProof {
             initial_combination_randomness,
-            initial_sumcheck_rounds: sumcheck_rounds,
+            initial_sumcheck_rounds,
             rounds,
             final_domain_gen_inv: domain_gen_inv,
             final_folding_randomness: folding_randomness,
@@ -326,7 +330,7 @@ impl<E: ExtensionField> Verifier<E> {
             .clone()
             .into_iter()
             .map(|mut p| {
-                while p.len() < (1 << self.params.folding_factor.at_round(0)) {
+                while p.len() < self.params.folding_factor.at_round(0) {
                     p.insert(0, E::ONE);
                 }
                 p
@@ -515,10 +519,17 @@ impl<E: ExtensionField> Verifier<E> {
             }
 
             // Check the rest of the rounds
-            for (sumcheck_poly, new_randomness) in &parsed.initial_sumcheck_rounds[1..] {
+            for (index, (sumcheck_poly, new_randomness)) in
+                parsed.initial_sumcheck_rounds[1..].iter().enumerate()
+            {
                 if sumcheck_poly.sum_over_hypercube() != prev_poly.evaluate_at_point(&[randomness])
                 {
-                    return Err(Error::InvalidProof("Invalid initial sumcheck".to_string()));
+                    return Err(Error::InvalidProof(format!(
+                        "Invalid initial sumcheck at round {}: {} != {}",
+                        index + 1,
+                        sumcheck_poly.sum_over_hypercube(),
+                        prev_poly.evaluate_at_point(&[randomness])
+                    )));
                 }
                 prev_poly = sumcheck_poly.clone();
                 randomness = *new_randomness;
@@ -569,14 +580,14 @@ impl<E: ExtensionField> Verifier<E> {
         let final_folds = &computed_folds[computed_folds.len() - 1];
         let final_evaluations =
             evaluate_as_univariate(&parsed.final_evaluations, &parsed.final_randomness_points);
-        if !final_folds
-            .iter()
-            .zip(final_evaluations)
-            .all(|(&fold, eval)| fold == eval)
-        {
-            return Err(Error::InvalidProof(
-                "Final foldings mismatch with final evaluations".to_string(),
-            ));
+
+        for (index, (&fold, eval)) in final_folds.iter().zip(final_evaluations).enumerate() {
+            if fold != eval {
+                return Err(Error::InvalidProof(format!(
+                    "Final foldings mismatch with final evaluations: at {}, {} != {}",
+                    index, fold, eval
+                )));
+            }
         }
 
         // Check the final sumchecks

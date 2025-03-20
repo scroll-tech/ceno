@@ -121,7 +121,9 @@ mod tests {
             .prove(&mut transcript, statement.clone(), &witness)
             .unwrap();
 
+        let mut transcript = T::new(b"test");
         let verifier = Verifier::new(params);
+        verifier.write_commitment_to_transcript(&commitment, &mut transcript);
         verifier
             .verify(&commitment, &mut transcript, &statement, &proof)
             .expect(&format!(
@@ -194,6 +196,7 @@ mod tests {
 
         let verifier = Verifier::new(params);
         let mut transcript = T::new(b"test");
+        verifier.write_commitment_to_transcript(&commitment, &mut transcript);
         verifier
             .simple_batch_verify(
                 &commitment,
@@ -266,6 +269,7 @@ mod tests {
 
         let verifier = Verifier::new(params);
         let mut transcript = T::new(b"test");
+        verifier.write_commitment_to_transcript(&commitment, &mut transcript);
         verifier
             .same_size_batch_verify(
                 &commitment,

@@ -30,19 +30,12 @@ impl<E: ExtensionField> Prover<E> {
     }
 
     fn validate_statement(&self, statement: &Statement<E>) -> bool {
-        if statement.points.len() != statement.evaluations.len() {
-            return false;
-        }
-        if !statement
+        assert_eq!(statement.points.len(), statement.evaluations.len());
+        statement
             .points
             .iter()
-            .all(|point| point.len() == self.0.mv_parameters.num_variables)
-        {
-            return false;
-        }
-        if !self.0.initial_statement && !statement.points.is_empty() {
-            return false;
-        }
+            .for_each(|point| assert_eq!(point.len(), self.0.mv_parameters.num_variables));
+        assert!(self.0.initial_statement || statement.points.is_empty());
         true
     }
 
@@ -68,13 +61,13 @@ impl<E: ExtensionField> Prover<E> {
         let mut ood_answers = Vec::new();
         let mut merkle_roots = Vec::new();
         for p in statement.points.iter_mut() {
-            while p.len() < (1 << self.0.folding_factor.at_round(0)) {
+            while p.len() < self.0.folding_factor.at_round(0) {
                 p.insert(0, E::ONE);
             }
         }
 
         assert!(self.validate_parameters());
-        assert!(self.validate_statement(&statement));
+        self.validate_statement(&statement);
         self.validate_witness(&witness);
 
         let timer = start_timer!(|| "Single Prover");
