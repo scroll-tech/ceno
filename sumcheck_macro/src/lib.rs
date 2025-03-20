@@ -240,7 +240,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                 res
             };
             println!("self.expected_numvars_in_current_round() {}, ceil_log2(v1.len()) {}", self.expected_numvars_at_round(), ceil_log2(v1.len()));
-            let num_vars_multiplicity = self.expected_numvars_at_round() - ceil_log2(v1.len()); // +1 due to we already bind, thus
+            let num_vars_multiplicity = self.expected_numvars_at_round() - ceil_log2(v1.len());
             if num_vars_multiplicity > 0 {
                 AdditiveArray(res.0.map(|e| e * E::BaseField::from_u64(1 << num_vars_multiplicity)))
             } else {
