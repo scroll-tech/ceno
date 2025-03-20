@@ -10,7 +10,10 @@ use std::{
 };
 use sumcheck::structs::IOPProverMessage;
 
-use crate::structs::TowerProofs;
+use crate::{
+    instructions::{Instruction, riscv::ecall::HaltInstruction},
+    structs::TowerProofs,
+};
 
 pub mod constants;
 pub mod prover;
@@ -167,6 +170,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
 
     pub fn num_circuits(&self) -> usize {
         self.opcode_proofs.len() + self.table_proofs.len()
+    }
+
+    pub fn has_halt(&self) -> bool {
+        let halt_instance_count = self
+            .opcode_proofs
+            .get(&HaltInstruction::<E>::name())
+            .map(|(_, p)| p.num_instances)
+            .unwrap_or(0);
+        if halt_instance_count > 0 {
+            assert_eq!(
+                halt_instance_count, 1,
+                "abnormal halt instance count {halt_instance_count} != 1"
+            );
+        }
+        halt_instance_count == 1
     }
 }
 

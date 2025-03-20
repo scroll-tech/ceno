@@ -425,6 +425,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                 set_val!(structural_row, self.addr, rec.addr as u64);
             });
 
+        structural_witness.padding_by_strategy();
         Ok([witness, structural_witness])
     }
 }
@@ -443,6 +444,7 @@ mod tests {
     use ceno_emul::WORD_SIZE;
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
+    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
     use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
     use witness::next_pow2_instance_padding;
 
@@ -480,9 +482,10 @@ mod tests {
             .position(|name| name == "riscv/RAM_Memory_HintsTable/addr")
             .unwrap();
 
-        let addr_padded_view = structural_witness.column_padded(addr_column);
+        let addr_padded_view: DenseMultilinearExtension<E> =
+            structural_witness.to_mles()[addr_column].clone();
         // Expect addresses to proceed consecutively inside the padding as well
-        let expected = successors(Some(addr_padded_view[0]), |idx| {
+        let expected = successors(Some(addr_padded_view.get_base_field_vec()[0]), |idx| {
             Some(*idx + F::from_u64(WORD_SIZE as u64))
         })
         .take(next_pow2_instance_padding(
@@ -490,6 +493,6 @@ mod tests {
         ))
         .collect::<Vec<_>>();
 
-        assert_eq!(addr_padded_view, expected)
+        assert_eq!(addr_padded_view.get_base_field_vec(), expected)
     }
 }
