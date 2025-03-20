@@ -409,7 +409,11 @@ impl<E: ExtensionField> Verifier<E> {
 
             initial_combination_randomness = vec![E::ONE];
             folding_randomness = (0..self.params.folding_factor.at_round(0))
-                .map(|_| transcript.read_challenge().elements)
+                .map(|_| {
+                    transcript
+                        .sample_and_append_challenge(b"folding_randomness")
+                        .elements
+                })
                 .collect();
         };
 

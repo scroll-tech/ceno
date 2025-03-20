@@ -126,7 +126,11 @@ impl<E: ExtensionField> Prover<E> {
             // initial rounds of the sum-check, and the verifier directly sends
             // the initial folding randomnesses.
             (0..self.0.folding_factor.at_round(0))
-                .map(|_| transcript.read_challenge().elements)
+                .map(|_| {
+                    transcript
+                        .sample_and_append_challenge(b"folding_randomness")
+                        .elements
+                })
                 .collect()
         };
 
