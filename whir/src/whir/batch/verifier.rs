@@ -565,6 +565,7 @@ impl<E: ExtensionField> Verifier<E> {
         }
 
         let final_evaluations = whir_proof.final_poly.clone();
+        transcript.append_field_element_exts(&final_evaluations);
 
         // Final queries verify
         let final_randomness_indexes = get_challenge_stir_queries(
