@@ -318,9 +318,12 @@ impl<E: ExtensionField> Verifier<E> {
     ) -> E {
         let mut num_variables = self.params.mv_parameters.num_variables;
 
-        let mut folding_randomness = iter::once(&proof.final_sumcheck_randomness)
+        let mut folding_randomness = proof
+            .rounds
+            .iter()
+            .map(|r| &r.folding_randomness)
             .chain(iter::once(&proof.final_folding_randomness))
-            .chain(proof.rounds.iter().rev().map(|r| &r.folding_randomness))
+            .chain(iter::once(&proof.final_sumcheck_randomness))
             .flatten()
             .copied()
             .collect::<Vec<_>>();
