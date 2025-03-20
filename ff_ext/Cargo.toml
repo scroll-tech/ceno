@@ -10,9 +10,6 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-poseidon2.workspace = true
-p3-symmetric.workspace = true
+p3 = { path = "../p3" }
 rand_core.workspace = true
 serde.workspace = true

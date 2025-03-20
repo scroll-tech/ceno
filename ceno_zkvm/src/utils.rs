@@ -12,7 +12,7 @@ use multilinear_extensions::{
     util::max_usable_threads, virtual_poly::ArcMultilinearExtension,
     virtual_polys::VirtualPolynomials,
 };
-use p3_field::Field;
+use p3::field::Field;
 use transcript::Transcript;
 
 use crate::expression::Expression;
@@ -297,18 +297,19 @@ mod tests {
     use multilinear_extensions::{
         mle::IntoMLE, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
     };
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         expression::{Expression, ToExpr},
         utils::add_mle_list_by_expr,
     };
+    use p3::goldilocks::Goldilocks;
 
     #[test]
     fn test_add_mle_list_by_expr() {
-        type E = ff_ext::GoldilocksExt2;
-        type F = p3_goldilocks::Goldilocks;
+        type E = GoldilocksExt2;
+        type F = Goldilocks;
         let mut cs = ConstraintSystem::new(|| "test_root");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
         let x = cb.create_witin(|| "x");

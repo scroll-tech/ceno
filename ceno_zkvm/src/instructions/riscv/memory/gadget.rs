@@ -10,7 +10,7 @@ use crate::{
 use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3::field::{Field, PrimeCharacteristicRing};
 
 pub struct MemWordChange<const N_ZEROS: usize> {
     prev_limb_bytes: Vec<WitIn>,

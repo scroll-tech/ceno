@@ -11,7 +11,7 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, op_mle, virtual_poly::VirtualPolynomial,
 };
-use p3_field::Field;
+use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
 
 use crate::structs::IOPProverState;

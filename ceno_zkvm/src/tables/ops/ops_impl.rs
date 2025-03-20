@@ -2,6 +2,7 @@
 
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::collections::HashMap;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 

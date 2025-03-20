@@ -23,7 +23,7 @@ use crate::{
         merge_sumcheck_polys, serial_extrapolate,
     },
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
@@ -431,10 +431,10 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         self.poly_index_fixvar_in_place
             .iter_mut()
             .zip_eq(self.poly.flattened_ml_extensions.iter_mut())
-            .for_each(|(has_fixvar_in_place, poly)| {
+            .for_each(|(can_fixvar_in_place, poly)| {
                 debug_assert!(poly.num_vars() <= expected_numvars_at_round);
                 debug_assert!(poly.num_vars() > 0);
-                if *has_fixvar_in_place {
+                if *can_fixvar_in_place {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
@@ -450,7 +450,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                             poly.num_vars()
                         );
                         *poly = Arc::new(poly.fix_variables(&[r]));
-                        *has_fixvar_in_place = true;
+                        *can_fixvar_in_place = true;
                     }
                 } else {
                     panic!("calling sumcheck on constant")
@@ -662,8 +662,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         self.poly_index_fixvar_in_place
             .par_iter_mut()
             .zip_eq(self.poly.flattened_ml_extensions.par_iter_mut())
-            .for_each(|(has_fixvar_in_place, poly)| {
-                if *has_fixvar_in_place {
+            .for_each(|(can_fixvar_in_place, poly)| {
+                if *can_fixvar_in_place {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
@@ -679,7 +679,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                             poly.num_vars()
                         );
                         *poly = Arc::new(poly.fix_variables_parallel(&[r]));
-                        *has_fixvar_in_place = true;
+                        *can_fixvar_in_place = true;
                     }
                 } else {
                     panic!("calling sumcheck on constant")

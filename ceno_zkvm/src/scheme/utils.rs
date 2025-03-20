@@ -415,7 +415,7 @@ mod tests {
         util::ceil_log2,
         virtual_poly::ArcMultilinearExtension,
     };
-    use p3_field::PrimeCharacteristicRing;
+    use p3::field::PrimeCharacteristicRing;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -674,7 +674,7 @@ mod tests {
     #[test]
     fn test_wit_infer_by_expr_base_field() {
         type E = ff_ext::GoldilocksExt2;
-        type B = p3_goldilocks::Goldilocks;
+        type B = p3::goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let a = cb.create_witin(|| "a");
@@ -701,7 +701,7 @@ mod tests {
     #[test]
     fn test_wit_infer_by_expr_ext_field() {
         type E = ff_ext::GoldilocksExt2;
-        type B = p3_goldilocks::Goldilocks;
+        type B = p3::goldilocks::Goldilocks;
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let a = cb.create_witin(|| "a");

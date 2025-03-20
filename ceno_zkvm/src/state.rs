@@ -6,7 +6,7 @@ use crate::{
     expression::{Expression, ToExpr},
     structs::RAMType,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 pub trait StateCircuit<E: ExtensionField> {
     fn initial_global_state(
