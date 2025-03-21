@@ -75,7 +75,7 @@ pub fn verify_multi_proof<E: ExtensionField>(
     leaf_size: usize,
     matrix_height: usize,
 ) -> Result<(), Error> {
-    for (index, path) in indices.iter().zip(proof.iter()) {
+    for ((index, path), value) in indices.iter().zip(proof.iter()).zip(values.iter()) {
         hash_params
             .verify_batch(
                 root,
@@ -84,7 +84,7 @@ pub fn verify_multi_proof<E: ExtensionField>(
                     height: 1 << matrix_height,
                 }],
                 *index,
-                &[values[*index].clone()],
+                &[value.clone()],
                 &path.1,
             )
             .map_err(|e| {
