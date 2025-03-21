@@ -8,7 +8,10 @@ use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
 use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
-use std::{fs, panic};
+use std::{
+    fs,
+    panic::{self, AssertUnwindSafe},
+};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
@@ -166,7 +169,9 @@ fn main() {
 
     // capture panic message, if have
     let result = with_panic_hook(Box::new(|_info| ()), || {
-        panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            verifier.verify_proof(zkvm_proof, transcript)
+        }))
     });
     match result {
         Ok(res) => {

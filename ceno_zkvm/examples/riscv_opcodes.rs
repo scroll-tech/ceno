@@ -1,4 +1,8 @@
-use std::{panic, sync::Arc, time::Instant};
+use std::{
+    panic::{self, AssertUnwindSafe},
+    sync::Arc,
+    time::Instant,
+};
 
 use ceno_zkvm::{
     instructions::riscv::{MemPadder, MmuConfig, Rv32imConfig, constants::EXIT_PC},
@@ -313,7 +317,9 @@ fn main() {
 
         // capture panic message, if have
         let result = with_panic_hook(Box::new(|_info| ()), || {
-            panic::catch_unwind(|| verifier.verify_proof(zkvm_proof, transcript))
+            panic::catch_unwind(AssertUnwindSafe(|| {
+                verifier.verify_proof(zkvm_proof, transcript)
+            }))
         });
         match result {
             Ok(res) => {
