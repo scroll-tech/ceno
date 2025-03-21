@@ -218,11 +218,11 @@ impl<E: ExtensionField> Prover<E> {
         let prev_merkle_answers = round_state.prev_merkle_answers;
         let mut round_state = round_state.round_state;
         // Fold the coefficients
-        let folded_coefficients = round_state
+        let folded_evaluations = round_state
             .evaluations
             .fix_variables(&round_state.folding_randomness);
 
-        let folded_coefficients_evals = match folded_coefficients.evaluations() {
+        let folded_coefficients_evals = match folded_evaluations.evaluations() {
             FieldType::Ext(evals) => evals,
             _ => {
                 panic!("Impossible after folding");
@@ -263,7 +263,7 @@ impl<E: ExtensionField> Prover<E> {
                 round_state
                     .sumcheck_prover
                     .unwrap_or_else(|| {
-                        SumcheckProverNotSkipping::new(folded_coefficients.clone(), &[], &[], &[])
+                        SumcheckProverNotSkipping::new(folded_evaluations.clone(), &[], &[], &[])
                     })
                     .compute_sumcheck_polynomials::<T>(
                         transcript,
@@ -313,7 +313,7 @@ impl<E: ExtensionField> Prover<E> {
             let ood_answers = ood_points
                 .iter()
                 .map(|ood_point| {
-                    folded_coefficients.evaluate(&expand_from_univariate(*ood_point, num_variables))
+                    folded_evaluations.evaluate(&expand_from_univariate(*ood_point, num_variables))
                 })
                 .collect::<Vec<_>>();
             transcript.append_field_element_exts(&ood_answers);
@@ -432,7 +432,7 @@ impl<E: ExtensionField> Prover<E> {
             })
             .unwrap_or_else(|| {
                 SumcheckProverNotSkipping::new(
-                    folded_coefficients.clone(),
+                    folded_evaluations.clone(),
                     &stir_challenges,
                     &combination_randomness,
                     &stir_evaluations,
@@ -450,7 +450,7 @@ impl<E: ExtensionField> Prover<E> {
             domain: new_domain,
             sumcheck_prover: Some(sumcheck_prover),
             folding_randomness,
-            evaluations: folded_coefficients, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
+            evaluations: folded_evaluations, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
             prev_merkle: Some(&merkle_tree),
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
