@@ -205,7 +205,8 @@ mod tests {
                 &proof,
             )
             .expect(&format!(
-                "Failed at number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
+                "Failed at number of polys = {}, number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
+                num_polynomials,
                 num_variables, folding_factor, num_points, soundness_type, fold_type
             ));
     }
