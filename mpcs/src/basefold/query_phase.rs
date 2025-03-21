@@ -66,9 +66,12 @@ where
                 let leafs = values.pop().unwrap();
                 (leafs, proof)
             };
+
             // this is equivalent with "idx = idx % n_{d-1}" operation in non row bit reverse format
             let idx = idx >> 1;
             let (_, opening_ext) = trees.iter().fold((idx, vec![]), |(idx, mut proofs), tree| {
+                // differentiate interpolate to left or right position at next layer
+                let is_interpolate_to_right_index = (idx & 1) == 1;
                 // mask the least significant bit (LSB) for the same reason as above:
                 // 1. we only need the even part of the index.
                 // 2. since even and odd parts are concatenated in the same leaf,
@@ -77,8 +80,8 @@ where
                 let (mut values, proof) = mmcs_ext.open_batch(idx >> 1, tree);
                 let leafs = values.pop().unwrap();
                 debug_assert_eq!(leafs.len(), 2);
-                // TODO we can keep only one of the leafs, as the other can be interpolate from previous layer
-                proofs.push((leafs, proof));
+                let sibling = leafs[(!is_interpolate_to_right_index) as usize];
+                proofs.push((sibling, proof));
                 (idx >> 1, proofs)
             });
             (opening, opening_ext)
@@ -119,7 +122,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     let span = entered_span!("check queries");
     izip!(indices, queries).for_each(|(idx, ((commit_leafs, commit_proof), opening_ext))| {
-        // refer to prover document for the reason of right shift by 1
+        // refer to prover documentation for the reason of right shift by 1
         let idx = idx >> 1;
         mmcs.verify_batch(
             &comm.pi_d_digest,
@@ -160,7 +163,11 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
             .zip_eq(opening_ext)
             .fold(
                 (idx, folded, n_d_next),
-                |(idx, folded, n_d_i), ((pi_comm, r), (leafs, proof))| {
+                |(idx, folded, n_d_i), ((pi_comm, r), (leaf, proof))| {
+                    let is_interpolate_to_right_index = (idx & 1) == 1;
+                    let mut leafs = vec![*leaf; 2];
+                    leafs[is_interpolate_to_right_index as usize] = folded;
+
                     let idx = idx >> 1;
                     mmcs_ext
                         .verify_batch(
@@ -171,12 +178,10 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
                                 height: n_d_i >> 1,
                             }],
                             idx,
-                            slice::from_ref(leafs),
+                            slice::from_ref(&leafs),
                             proof,
                         )
                         .expect("verify failed");
-                    // TODO check folded value equal with one sibling value via replacing sibling value with folded value
-                    debug_assert!(leafs.iter().any(|v| *v == folded),);
                     let coeff =
                         <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
                             vp,

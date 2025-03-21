@@ -201,7 +201,7 @@ where
             return PolyEvalsCodeword::TooSmall(Box::new(rmm.into_default_padded_p3_rmm()));
         }
 
-        // here 2 resize happend. first is padding to next pow2 height, second is pa
+        // here 2 resize happend. first is padding to next pow2 height, second is extend to 2^get_rate_log times size
         let mut m = rmm.into_default_padded_p3_rmm().to_row_major_matrix();
         m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), E::BaseField::ZERO);
         let codeword = pp
@@ -217,7 +217,7 @@ where
             .bit_reverse_rows()
             .to_row_major_matrix()
             .values;
-        // to make 2 consecutive position to be open together, we need "concat" 2 consecutive leafs
+        // to make 2 consecutive position to be open together, we trickily "concat" 2 consecutive leafs
         // so both can be open under same row index
         let codeword = DenseMatrix::new(codeword, num_polys * 2);
 

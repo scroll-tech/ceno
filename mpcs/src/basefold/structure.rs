@@ -227,10 +227,12 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     }
 }
 
-pub type MerkleProofWithLeafs<F1, F2> = (Vec<F1>, Vec<[F2; DIGEST_WIDTH]>);
+pub type MKProofNTo1<F1, F2> = (Vec<F1>, Vec<[F2; DIGEST_WIDTH]>);
+// for 2 to 1, leaf layer just need one value, as the other can be interpolated from previous layer
+pub type MKProof2To1<F1, F2> = (F1, Vec<[F2; DIGEST_WIDTH]>);
 pub type QueryOpeningProofs<E> = Vec<(
-    MerkleProofWithLeafs<<E as ExtensionField>::BaseField, <E as ExtensionField>::BaseField>,
-    Vec<MerkleProofWithLeafs<E, <E as ExtensionField>::BaseField>>,
+    MKProofNTo1<<E as ExtensionField>::BaseField, <E as ExtensionField>::BaseField>,
+    Vec<MKProof2To1<E, <E as ExtensionField>::BaseField>>,
 )>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
