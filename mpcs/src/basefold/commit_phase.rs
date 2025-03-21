@@ -5,9 +5,7 @@ use super::{
     structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTreeExt},
     sumcheck::{sum_check_challenge_round, sum_check_first_round, sum_check_last_round},
 };
-use crate::util::{
-    hash::write_digest_to_transcript, log2_strict, merkle_tree::poseidon2_merkle_tree,
-};
+use crate::util::{hash::write_digest_to_transcript, merkle_tree::poseidon2_merkle_tree};
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::izip;
@@ -15,6 +13,7 @@ use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::dot_product,
     matrix::dense::RowMajorMatrix,
+    util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
@@ -118,7 +117,7 @@ where
         let new_running_oracle = if trees.is_empty() {
             basefold_one_round_by_interpolation_weights::<E, Spec>(
                 pp,
-                log2_strict(initial_oracle.len()) - 1,
+                log2_strict_usize(initial_oracle.len()) - 1,
                 &initial_oracle,
                 challenge,
             )
@@ -126,7 +125,7 @@ where
             let values = &mmcs_ext.get_matrices(trees.last().unwrap())[0].values;
             basefold_one_round_by_interpolation_weights::<E, Spec>(
                 pp,
-                log2_strict(values.len()) - 1,
+                log2_strict_usize(values.len()) - 1,
                 values,
                 challenge,
             )

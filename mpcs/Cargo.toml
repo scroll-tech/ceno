@@ -26,7 +26,6 @@ multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
 p3.workspace = true
-plonky2.workspace = true
 poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true

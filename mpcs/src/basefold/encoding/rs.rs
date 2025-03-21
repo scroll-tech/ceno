@@ -1,23 +1,16 @@
 use std::marker::PhantomData;
 
 use super::{EncodingProverParameters, EncodingScheme};
-use crate::{
-    Error,
-    basefold::PolyEvalsCodeword,
-    util::{log2_strict, plonky2_util::reverse_bits},
-};
-use ark_std::{end_timer, start_timer};
+use crate::{Error, basefold::PolyEvalsCodeword};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use p3::{
     dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft},
-    field::{Field, PrimeCharacteristicRing, TwoAdicField, batch_multiplicative_inverse},
+    field::{PrimeCharacteristicRing, TwoAdicField, batch_multiplicative_inverse},
     matrix::{Matrix, bitrev::BitReversableMatrix, dense::DenseMatrix},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
-
-use crate::util::arithmetic::horner;
 
 pub trait RSCodeSpec: std::fmt::Debug + Clone {
     fn get_number_queries() -> usize;
@@ -315,59 +308,12 @@ where
     }
 }
 
-impl<Spec: RSCodeSpec> RSCode<Spec> {
-    #[allow(unused)]
-    fn folding_coeffs_naive<E: ExtensionField>(
-        level: usize,
-        index: usize,
-        full_message_size_log: usize,
-    ) -> (E, E, E) {
-        // The coefficients are for the bit-reversed codeword, so reverse the
-        // bits before providing the coefficients.
-        let index = reverse_bits(index, level);
-        // x0 is the index-th 2^(level+1)-th root of unity, multiplied by
-        // the shift factor at level+1, which is gamma^2^(full_codeword_log_n - level - 1).
-        let x0 = E::BaseField::two_adic_generator(level + 1).exp_u64(index as u64)
-            * E::BaseField::GENERATOR
-                .exp_power_of_2(full_message_size_log + Spec::get_rate_log() - level - 1);
-        let x1 = -x0;
-        let w = (x1 - x0).inverse();
-        (E::from(x0), E::from(x1), E::from(w))
-    }
-}
-
-#[allow(unused)]
-fn naive_fft<E: ExtensionField>(poly: &[E], rate: usize, shift: E::BaseField) -> Vec<E> {
-    let timer = start_timer!(|| "Encode RSCode");
-    let message_size = poly.len();
-    let domain_size_bit = log2_strict(message_size * rate);
-    let root = E::BaseField::two_adic_generator(domain_size_bit);
-    // The domain is shift * H where H is the multiplicative subgroup of size
-    // message_size * rate.
-    let mut domain = Vec::<E::BaseField>::with_capacity(message_size * rate);
-    domain.push(shift);
-    for i in 1..message_size * rate {
-        domain.push(domain[i - 1] * root);
-    }
-    let mut res = vec![E::ZERO; message_size * rate];
-    res.iter_mut()
-        .enumerate()
-        .for_each(|(i, target)| *target = horner(poly, &E::from(domain[i])));
-    end_timer!(timer);
-
-    res
-}
-
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
     use itertools::izip;
-    use p3::goldilocks::Goldilocks;
+    use p3::{goldilocks::Goldilocks, util::log2_strict_usize};
 
-    // use crate::{
-    //     basefold::encoding::test_util::test_codeword_folding,
-    //     util::{field_type_index_ext, plonky2_util::reverse_index_bits_in_place_field_type},
-    // };
     use rand::rngs::OsRng;
 
     use crate::basefold::commit_phase::basefold_one_round_by_interpolation_weights;
@@ -410,7 +356,7 @@ mod tests {
         let r = E::from_u64(97);
         let folded_codeword = basefold_one_round_by_interpolation_weights::<E, BasefoldRSParams>(
             &pp,
-            log2_strict(codeword_ext.values.len()) - 1,
+            log2_strict_usize(codeword_ext.values.len()) - 1,
             &codeword_ext.values,
             r,
         );

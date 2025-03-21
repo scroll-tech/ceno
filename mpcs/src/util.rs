@@ -2,7 +2,6 @@ pub mod arithmetic;
 pub mod expression;
 pub mod hash;
 pub mod parallel;
-pub mod plonky2_util;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools, izip};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
@@ -10,7 +9,6 @@ use serde::{Deserialize, Serialize};
 pub mod merkle_tree;
 use crate::{Error, util::parallel::parallelize};
 use p3::field::{PrimeCharacteristicRing, PrimeField};
-pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
     let bases = x.as_bases();

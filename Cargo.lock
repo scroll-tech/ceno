@@ -35,7 +35,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
- "const-random",
  "getrandom 0.2.15",
  "once_cell",
  "version_check",
@@ -707,26 +706,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "const-random"
-version = "0.1.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87e00182fe74b066627d63b85fd550ac2998d4b0bd86bfed477a0ae4c7c71359"
-dependencies = [
- "const-random-macro",
-]
-
-[[package]]
-name = "const-random-macro"
-version = "0.1.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d839f2a20b0aee515dc581a6172f2321f96cab76c1a38a4c584a194955390e"
-dependencies = [
- "getrandom 0.2.15",
- "once_cell",
- "tiny-keccak",
-]
-
-[[package]]
 name = "constant_time_eq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1083,15 +1062,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fixed-hash"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfcf0ed7fe52a17a03854ec54a9f76d6d84508d1c0e66bc1793301c73fc8493c"
-dependencies = [
- "static_assertions",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1142,10 +1112,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4567c8db10ae91089c99af84c68c38da3ec2f087c3f82960bcdbf3656b6f4d7"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1232,10 +1200,7 @@ version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
- "ahash",
  "allocator-api2",
- "rayon",
- "serde",
 ]
 
 [[package]]
@@ -1338,15 +1303,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
@@ -1419,16 +1375,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ecc2af9a1119c51f12a14607e783cb977bde58bc069ff0c3da1095e635d70654"
 dependencies = [
  "cpufeatures",
-]
-
-[[package]]
-name = "keccak-hash"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce2bd4c29270e724d3eaadf7bdc8700af4221fc0ed771b855eadcd1b98d52851"
-dependencies = [
- "primitive-types",
- "tiny-keccak",
 ]
 
 [[package]]
@@ -1542,7 +1488,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "p3",
- "plonky2",
  "poseidon",
  "rand",
  "rand_chacha",
@@ -1642,36 +1587,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "num"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
-dependencies = [
- "num-bigint",
- "num-complex",
- "num-integer",
- "num-iter",
- "num-rational",
- "num-traits",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
- "num-traits",
- "rand",
-]
-
-[[package]]
-name = "num-complex"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
-dependencies = [
  "num-traits",
  "rand",
 ]
@@ -1703,28 +1624,6 @@ version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
 dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "num-iter"
-version = "0.1.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
-dependencies = [
- "autocfg",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-rational"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
-dependencies = [
- "num-bigint",
- "num-integer",
  "num-traits",
 ]
 
@@ -1813,6 +1712,7 @@ dependencies = [
  "p3-poseidon",
  "p3-poseidon2",
  "p3-symmetric",
+ "p3-util",
 ]
 
 [[package]]
@@ -2043,62 +1943,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 
 [[package]]
-name = "plonky2"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85f26b090b989aebdeaf6a4eed748c1fbcabf67e7273a22e4e0c877b63846d0f"
-dependencies = [
- "ahash",
- "anyhow",
- "getrandom 0.2.15",
- "hashbrown 0.14.5",
- "itertools 0.11.0",
- "keccak-hash",
- "log",
- "num",
- "plonky2_field",
- "plonky2_maybe_rayon",
- "plonky2_util",
- "rand",
- "rand_chacha",
- "serde",
- "static_assertions",
- "unroll",
- "web-time",
-]
-
-[[package]]
-name = "plonky2_field"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a1dca60ad900d81b1fe2df3d0b88d43345988e2935e6709176e96573f4bcf5d"
-dependencies = [
- "anyhow",
- "itertools 0.11.0",
- "num",
- "plonky2_util",
- "rand",
- "serde",
- "static_assertions",
- "unroll",
-]
-
-[[package]]
-name = "plonky2_maybe_rayon"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ff44a90aaca13e10e7ddf8fab815ba1b404c3f7c3ca82aaf11c46beabaa923"
-dependencies = [
- "rayon",
-]
-
-[[package]]
-name = "plonky2_util"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b16136f5f3019c1e83035af76cccddd56d789a5e2933306270185c3f99f12259"
-
-[[package]]
 name = "plotters"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2149,7 +1993,6 @@ dependencies = [
  "criterion",
  "ff_ext",
  "p3",
- "plonky2",
  "rand",
  "serde",
  "unroll",
@@ -2198,16 +2041,6 @@ dependencies = [
  "lazy_static",
  "term",
  "unicode-width",
-]
-
-[[package]]
-name = "primitive-types"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05e4722c697a58a99d5d06a08c30821d7c082a4632198de1eaa5a6c22ef42373"
-dependencies = [
- "fixed-hash",
- "uint",
 ]
 
 [[package]]
@@ -3061,18 +2894,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 
 [[package]]
-name = "uint"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76f64bba2c53b04fcab63c01a7d7427eadc821e3bc48c34dc9ba29c501164b52"
-dependencies = [
- "byteorder",
- "crunchy",
- "hex",
- "static_assertions",
-]
-
-[[package]]
 name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3227,16 +3048,6 @@ name = "web-sys"
 version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33b6dd2ef9186f1f2072e409e99cd22a975331a6b3591b12c764e0e55c60d5d2"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "web-time"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

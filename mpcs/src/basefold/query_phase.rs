@@ -4,7 +4,7 @@ use crate::{
     basefold::structure::MerkleTreeExt,
     util::{
         arithmetic::{degree_2_eval, degree_2_zero_plus_one, inner_product},
-        ext_to_usize, log2_strict,
+        ext_to_usize,
         merkle_tree::poseidon2_merkle_tree,
     },
 };
@@ -16,6 +16,7 @@ use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::dot_product,
     matrix::{Dimensions, dense::RowMajorMatrix},
+    util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
@@ -179,12 +180,12 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
                     let coeff =
                         <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
                             vp,
-                            log2_strict(n_d_i) - 1,
+                            log2_strict_usize(n_d_i) - 1,
                         )[idx];
                     debug_assert_eq!(
                         <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
                             vp,
-                            log2_strict(n_d_i) - 1,
+                            log2_strict_usize(n_d_i) - 1,
                         )
                         .len(),
                         n_d_i >> 1

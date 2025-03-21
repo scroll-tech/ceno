@@ -2,7 +2,7 @@ use crate::{
     Error, Evaluation, PolynomialCommitmentScheme,
     sum_check::eq_xy_eval,
     util::{
-        arithmetic::inner_product, ext_to_usize, hash::write_digest_to_transcript, log2_strict,
+        arithmetic::inner_product, ext_to_usize, hash::write_digest_to_transcript,
         merkle_tree::poseidon2_merkle_tree,
     },
 };
@@ -11,7 +11,7 @@ use ceno_sumcheck::macros::{entered_span, exit_span};
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
-use p3::{commit::Mmcs, matrix::dense::DenseMatrix};
+use p3::{commit::Mmcs, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{simple_batch_prover_query_phase, simple_batch_verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
@@ -179,7 +179,7 @@ where
     type Proof = BasefoldProof<E>;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error> {
-        let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict(poly_size));
+        let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict_usize(poly_size));
 
         Ok(BasefoldParams { params: pp })
     }
@@ -190,8 +190,8 @@ where
         pp: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        <Spec::EncodingScheme as EncodingScheme<E>>::trim(pp.params, log2_strict(poly_size)).map(
-            |(pp, vp)| {
+        <Spec::EncodingScheme as EncodingScheme<E>>::trim(pp.params, log2_strict_usize(poly_size))
+            .map(|(pp, vp)| {
                 (
                     BasefoldProverParams {
                         encoding_params: pp,
@@ -200,8 +200,7 @@ where
                         encoding_params: vp,
                     },
                 )
-            },
-        )
+            })
     }
 
     fn commit(

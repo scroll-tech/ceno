@@ -10,3 +10,4 @@ pub use p3_merkle_tree as merkle_tree;
 pub use p3_poseidon as poseidon;
 pub use p3_poseidon2 as poseidon2;
 pub use p3_symmetric as symmetric;
+pub use p3_util as util;
