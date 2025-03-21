@@ -597,8 +597,7 @@ impl<E: ExtensionField> Verifier<E> {
                 .iter()
                 .map(|raw_answer| {
                     if !batched_randomness.is_empty() {
-                        let chunk_size =
-                            1 << self.params.folding_factor.at_round(self.params.n_rounds());
+                        let chunk_size = 1 << self.params.folding_factor.at_round(0);
                         let mut res = vec![E::ZERO; chunk_size];
                         for i in 0..chunk_size {
                             for j in 0..num_polys {
@@ -641,7 +640,7 @@ impl<E: ExtensionField> Verifier<E> {
             final_folding_randomness: folding_randomness,
             final_randomness_indexes,
             final_randomness_points,
-            final_randomness_answers: final_randomness_answers.to_vec(),
+            final_randomness_answers,
             final_sumcheck_rounds,
             final_sumcheck_randomness,
             final_evaluations,

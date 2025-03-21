@@ -385,14 +385,16 @@ impl<E: ExtensionField> Prover<E> {
                         // let _coset_offset = domain_gen.pow(&[*index as u64]);
                         let coset_offset_inv = domain_gen_inv.exp_u64(*index as u64);
 
-                        compute_fold(
+                        let res = compute_fold(
                             batched_answers,
                             &round_state.folding_randomness,
                             coset_offset_inv,
                             coset_generator_inv,
                             E::from_u64(2).inverse(),
                             self.0.folding_factor.at_round(round_state.round),
-                        )
+                        );
+
+                        res
                     },
                 ))
             }

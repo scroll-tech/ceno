@@ -3,7 +3,8 @@ use crate::{
     end_timer,
     error::Error,
     ntt::expand_from_coeff,
-    start_timer, utils,
+    start_timer,
+    utils::{self, interpolate_over_boolean_hypercube},
     whir::{
         committer::Committer,
         fold::{expand_from_univariate, restructure_evaluations},
@@ -13,8 +14,7 @@ use crate::{
 use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::commit::Mmcs;
-use p3::matrix::dense::RowMajorMatrix;
+use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
 use transcript::Transcript;
 
 use crate::whir::fs_utils::MmcsCommitmentWriter;
@@ -70,9 +70,16 @@ impl<E: ExtensionField> Committer<E> {
                 expand_from_coeff(
                     &match poly.evaluations() {
                         FieldType::Base(evals) => {
-                            evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>()
+                            let mut evals =
+                                evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>();
+                            interpolate_over_boolean_hypercube(&mut evals);
+                            evals
                         }
-                        FieldType::Ext(evals) => evals.clone(),
+                        FieldType::Ext(evals) => {
+                            let mut evals = evals.clone();
+                            interpolate_over_boolean_hypercube(&mut evals);
+                            evals
+                        }
                         _ => panic!("Invalid field type"),
                     },
                     expansion,
