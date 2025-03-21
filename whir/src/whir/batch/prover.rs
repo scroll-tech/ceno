@@ -10,7 +10,7 @@ use crate::{
         prover_not_skipping::SumcheckProverNotSkipping,
         prover_not_skipping_batched::SumcheckProverNotSkippingBatched,
     },
-    utils::{self, evaluate_over_hypercube, expand_randomness},
+    utils::{self, evaluate_over_hypercube, expand_randomness, interpolate_over_boolean_hypercube},
     whir::{
         WhirProof,
         batch::utils::field_type_index_ext,
@@ -287,7 +287,9 @@ impl<E: ExtensionField> Prover<E> {
         // Fold the coefficients, and compute fft of polynomial (and commit)
         let new_domain = round_state.domain.scale(2);
         let expansion = new_domain.size() / folded_coefficients_evals.len();
-        let evals = expand_from_coeff(folded_coefficients_evals, expansion);
+        let mut folded_coefficients_coeffs = folded_coefficients_evals.clone();
+        interpolate_over_boolean_hypercube(&mut folded_coefficients_coeffs);
+        let evals = expand_from_coeff(&folded_coefficients_coeffs, expansion);
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
         // They also partially overlap and undo one another. We should merge them.
         let folded_evals =

@@ -463,7 +463,7 @@ impl<E: ExtensionField> Verifier<E> {
                 })
                 .collect();
 
-            if !verify_multi_proof(
+            verify_multi_proof(
                 &self.params.hash_params,
                 &prev_root,
                 &stir_challenges_indexes,
@@ -474,12 +474,11 @@ impl<E: ExtensionField> Verifier<E> {
                     .as_slice(),
                 merkle_proof_with_answers,
                 answers[0].len(),
-                p3::util::log2_strict_usize(domain_size / answers[0].len()),
+                p3::util::log2_strict_usize(
+                    domain_size * if r == 0 { num_polys } else { 1 } / answers[0].len(),
+                ),
             )
-            .is_ok()
-            {
-                return Err(Error::InvalidProof("Merkle proof failed".to_string()));
-            }
+            .map_err(|e| Error::InvalidProof(format!("Merkle proof failed: {:?}", e)))?;
 
             let answers: Vec<_> = if r == 0 {
                 answers
