@@ -371,7 +371,7 @@ impl<E: ExtensionField> Verifier<E> {
         num_polys: usize,
         sumcheck_poly_evals_iter: &mut impl Iterator<Item = Vec<E>>,
     ) -> Result<ParsedProof<E>, Error> {
-        let mut sumcheck_rounds = Vec::new();
+        let mut initial_sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
         let initial_combination_randomness;
 
@@ -386,7 +386,7 @@ impl<E: ExtensionField> Verifier<E> {
         );
 
         // Initial sumcheck
-        sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
+        initial_sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
         for _ in 0..self.params.folding_factor.at_round(0) {
             let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
                 .next()
@@ -399,10 +399,10 @@ impl<E: ExtensionField> Verifier<E> {
             let folding_randomness_single = transcript
                 .sample_and_append_challenge(b"folding_randomness")
                 .elements;
-            sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
+            initial_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
         }
 
-        folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).collect();
+        folding_randomness = initial_sumcheck_rounds.iter().map(|&(_, r)| r).collect();
 
         let mut prev_root = parsed_commitment.root.clone();
         let domain_gen = self.params.starting_domain.backing_domain_group_gen();
@@ -635,7 +635,7 @@ impl<E: ExtensionField> Verifier<E> {
 
         Ok(ParsedProof {
             initial_combination_randomness,
-            initial_sumcheck_rounds: sumcheck_rounds,
+            initial_sumcheck_rounds,
             rounds,
             final_domain_gen_inv: domain_gen_inv,
             final_folding_randomness: folding_randomness,
