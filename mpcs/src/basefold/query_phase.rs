@@ -121,7 +121,7 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
         // refer to prover document for the reason of right shift by 1
         let idx = idx >> 1;
         mmcs.verify_batch(
-            &comm.pi_d,
+            &comm.pi_d_digest,
             &[Dimensions {
                 // width size is double num_polys due to leaf + right leafs are concat
                 width: num_polys * 2,

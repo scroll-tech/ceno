@@ -6,7 +6,6 @@ use p3::{
 use poseidon::DIGEST_WIDTH;
 
 pub(crate) type Poseidon2Sponge<P> = PaddingFreeSponge<P, 8, 4, 4>;
-// TODO investigate compression setting legibility
 pub(crate) type Poseidon2Compression<P> = TruncatedPermutation<P, 2, 4, 8>;
 pub(crate) type Poseidon2MerkleMmcs<F, P> =
     MerkleTreeMmcs<F, F, Poseidon2Sponge<P>, Poseidon2Compression<P>, DIGEST_WIDTH>;

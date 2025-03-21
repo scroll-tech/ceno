@@ -77,7 +77,7 @@ pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) pi_d: Digest<E>,
+    pub(crate) pi_d_digest: Digest<E>,
     pub(crate) codeword: MerkleTree<E::BaseField>,
     pub(crate) polynomials_bh_evals: Vec<ArcMultilinearExtension<'static, E>>,
     pub(crate) num_vars: usize,
@@ -90,7 +90,12 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
-        BasefoldCommitment::new(self.pi_d, self.num_vars, self.is_base, self.num_polys)
+        BasefoldCommitment::new(
+            self.pi_d_digest,
+            self.num_vars,
+            self.is_base,
+            self.num_polys,
+        )
     }
 
     pub fn poly_size(&self) -> usize {
@@ -121,22 +126,13 @@ where
     }
 }
 
-// impl<E: ExtensionField> From<&BasefoldCommitmentWithWitness<E>> for BasefoldCommitment<E>
-// where
-//     E::BaseField: Serialize + DeserializeOwned,
-// {
-//     fn from(val: &BasefoldCommitmentWithWitness<E>) -> Self {
-//         val.to_commitment()
-//     }
-// }
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
 pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) pi_d: Digest<E>,
+    pub(super) pi_d_digest: Digest<E>,
     pub(super) num_vars: Option<usize>,
     pub(super) is_base: bool,
     pub(super) num_polys: Option<usize>,
@@ -146,17 +142,17 @@ impl<E: ExtensionField> BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn new(root: Digest<E>, num_vars: usize, is_base: bool, num_polys: usize) -> Self {
+    pub fn new(pi_d_digest: Digest<E>, num_vars: usize, is_base: bool, num_polys: usize) -> Self {
         Self {
-            pi_d: root,
+            pi_d_digest,
             num_vars: Some(num_vars),
             is_base,
             num_polys: Some(num_polys),
         }
     }
 
-    pub fn root(&self) -> Digest<E> {
-        self.pi_d
+    pub fn pi_d_digest(&self) -> Digest<E> {
+        self.pi_d_digest
     }
 
     pub fn num_vars(&self) -> Option<usize> {

@@ -263,7 +263,7 @@ where
                 let polys: Vec<ArcMultilinearExtension<E>> =
                     polys.into_iter().map(|poly| poly.into()).collect_vec();
                 Self::CommitmentWithWitness {
-                    pi_d: comm,
+                    pi_d_digest: comm,
                     codeword,
                     polynomials_bh_evals: polys,
                     num_vars,
@@ -277,7 +277,7 @@ where
                 let polys: Vec<ArcMultilinearExtension<E>> =
                     polys.into_iter().map(|poly| poly.into()).collect_vec();
                 Self::CommitmentWithWitness {
-                    pi_d: comm,
+                    pi_d_digest: comm,
                     codeword,
                     polynomials_bh_evals: polys,
                     num_vars,
@@ -297,7 +297,7 @@ where
         comm: &Self::Commitment,
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
-        write_digest_to_transcript(&comm.root(), transcript);
+        write_digest_to_transcript(&comm.pi_d_digest(), transcript);
         Ok(())
     }
 
@@ -450,7 +450,7 @@ where
             let mmcs = poseidon2_merkle_tree::<E>();
             // TODO remove clone here
             let (root, _) = mmcs.commit_matrix(trivial_proof.clone());
-            if comm.root() == root {
+            if comm.pi_d_digest() == root {
                 return Ok(());
             } else {
                 return Err(Error::MerkleRootMismatch);
