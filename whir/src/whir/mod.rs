@@ -139,10 +139,6 @@ mod tests {
         soundness_type: SoundnessType,
         fold_type: FoldType,
     ) {
-        println!(
-            "NP = {num_polynomials}, NE = {num_points}, NV = {num_variables}, FOLD_TYPE = {:?}",
-            fold_type
-        );
         let num_coeffs = 1 << num_variables;
 
         let mut rng = OsRng;
@@ -279,11 +275,11 @@ mod tests {
                 &eval_per_poly,
                 &proof,
             )
-            .unwrap();
-        // assert!(verifier
-        //     .same_size_batch_verify(&mut arthur, num_polynomials, &point_per_poly, &eval_per_poly, &proof)
-        //     .is_ok());
-        println!("PASSED!");
+            .expect(&format!(
+                "Failed at number of polys = {}, number of variables = {}, folding factor = {:?}, soundness type = {:?}, fold type = {:?}",
+                num_polynomials,
+                num_variables, folding_factor, soundness_type, fold_type
+            ));
     }
 
     #[test]

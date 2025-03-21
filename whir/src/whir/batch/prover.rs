@@ -529,10 +529,15 @@ impl<E: ExtensionField> Prover<E> {
 
         let timer = start_timer!(|| "simple_batch");
         // perform simple_batch on folded_point and folded_evals
-        let mut result =
-            self.simple_batch_prove(transcript, &[folded_point], &[folded_evals], witness)?;
+        let mut result = self.simple_batch_prove(
+            transcript,
+            &[folded_point],
+            &[folded_evals.clone()],
+            witness,
+        )?;
         sumcheck_polys.extend(result.sumcheck_poly_evals);
         result.sumcheck_poly_evals = sumcheck_polys;
+        result.folded_evals = folded_evals;
         end_timer!(timer);
         end_timer!(prove_timer);
 

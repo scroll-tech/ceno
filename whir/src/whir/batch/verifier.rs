@@ -319,6 +319,7 @@ impl<E: ExtensionField> Verifier<E> {
                 ))?
                 .clone();
             let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
+            transcript.append_field_element_exts(sumcheck_poly.evaluations());
             let folding_randomness_single = transcript
                 .sample_and_append_challenge(b"folding_randomness")
                 .elements;
@@ -340,9 +341,10 @@ impl<E: ExtensionField> Verifier<E> {
             .map(|(eval, eq)| *eval * *eq)
             .sum();
         if sumcheck_claim != sumcheck_expected {
-            return Err(Error::InvalidProof(
-                "Sumcheck mismatch with claimed in parse unify sumcheck".to_string(),
-            ));
+            return Err(Error::InvalidProof(format!(
+                "Sumcheck mismatch with claimed in parse unify sumcheck: {} != {}",
+                sumcheck_claim, sumcheck_expected
+            )));
         }
 
         Ok((folded_point, folded_evals))
