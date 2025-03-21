@@ -305,6 +305,7 @@ impl<E: ExtensionField> Prover<E> {
         ));
 
         write_digest_to_transcript(&root, transcript);
+        merkle_roots.push(root);
 
         // OOD Samples
         let (ood_points, ood_answers_round) = if round_params.ood_samples > 0 {
@@ -345,11 +346,8 @@ impl<E: ExtensionField> Prover<E> {
             .map(|univariate| expand_from_univariate(univariate, num_variables))
             .collect();
 
-        let merkle_proof_with_leaves = generate_multi_proof(
-            &self.0.hash_params,
-            &round_state.prev_merkle.unwrap(),
-            &stir_challenges_indexes,
-        );
+        let merkle_proof_with_leaves =
+            generate_multi_proof(&self.0.hash_params, &prev_merkle, &stir_challenges_indexes);
         let fold_size = (1 << self.0.folding_factor.at_round(round_state.round)) * num_polys;
         let answers = stir_challenges_indexes
             .par_iter()
@@ -457,6 +455,7 @@ impl<E: ExtensionField> Prover<E> {
             prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
         };
+        ood_answers.push(ood_answers_round);
 
         self.round(
             transcript,
