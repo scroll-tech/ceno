@@ -219,33 +219,68 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
         };
 
         let iter = if parallalize {
-            quote! {.into_par_iter().step_by(2).with_min_len(64)}
+            quote! {.into_par_iter().step_by(2).rev().with_min_len(64)}
         } else {
             quote! {.step_by(2).rev()}
         };
 
         // Generate the final AdditiveArray expression.
+
+        // special case: generate product for polynomial num_var less than current expected num_var
+        // which happened when we batching sumcheck with different num_vars
+        let product = mul_exprs(
+            (1..=degree)
+                .map(|j: u32| {
+                    let v = ident(format!("v{j}"));
+                    quote! {#v[b]}
+                })
+                .collect(),
+        );
+
         let degree_plus_one = (degree + 1) as usize;
         quote! {
-            let res = (0..largest_even_below(v1.len()))
-                #iter
-                .map(|b| {
-                    #additive_array_items
-                })
-                .sum::<AdditiveArray<_, #degree_plus_one>>();
-            let res = if v1.len() == 1 {
-                let b = 0;
-                AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
-            } else {
-                res
-            };
-            let num_vars_multiplicity = self.poly.aux_info.max_num_variables - (ceil_log2(v1.len()).max(1) + self.round - 1);
-            if num_vars_multiplicity > 0 {
-                AdditiveArray(res.0.map(|e| e * E::BaseField::from_u64(1 << num_vars_multiplicity)))
-            } else {
-                res
-            }
+            // To deal with different num_vars, we exploit a fact that for each product which num_vars < max_num_vars
+            // we actually need to have a full sum, times 2^(bh_num_vars - num_vars) to accumulate into univariate computation
+            // E.g. Giving multivariate poly f(X) = f_1(X1) + f_2(X), X1 \in {F}^{n'}, X \in {F}^{n}, |X1| := n', |X| = n, n' <= n
+            // For i < n - n', to compute univariate poly, f^i(x), b is i-th round boolean hypercube
+            // f^i[0] = \sum_b f(r, 0, b), b \in {0, 1}^{n-i-1}, r \in {F}^{n-i-1} challenge get from prev rounds
+            //        = \sum_b f_1(b) + f_2(r, 0, b)
+            //        = 2^(|b| - |b1|)  * \sum_b1 f_1(b1)  + \sum_b f_2(r, 0, b)
+            // b1 is suffix alignment with b
+            // same applied on f^i[1], f^i[2], ... f^i[degree + 1]
+            // It imply that, for every evals in f_1, to compute univariate poly, we just need to times a factor 2^(|b| - |b1|) for it evaluation value
 
+            // NOTE: current method work in suffix alignment order
+            let num_var = ceil_log2(v1.len());
+            let expected_numvars_at_round = self.expected_numvars_at_round();
+            if num_var < expected_numvars_at_round {
+                // TODO optimize by caching computed result for later round reuse
+                // need to figure out how to cache in one place to support base/extension field
+                let mut sum = (0..largest_even_below(v1.len())).map(
+                    |b| {
+                        #product
+                    },
+                ).sum();
+                // calculate multiplicity term
+                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                let num_vars_multiplicity = self.expected_numvars_at_round().saturating_sub(1).saturating_sub(num_var);
+                if num_vars_multiplicity > 0 {
+                    sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                }
+                AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
+            } else {
+                if v1.len() == 1 {
+                    let b = 0;
+                    AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
+                } else {
+                    (0..largest_even_below(v1.len()))
+                        #iter
+                        .map(|b| {
+                            #additive_array_items
+                        })
+                        .sum::<AdditiveArray<_, #degree_plus_one>>()
+                }
+            }
         }
     };
 
@@ -314,7 +349,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     // Generate the second match statement that maps f vars to AdditiveArray.
     out = quote! {
         {
-           #out
+            #out
             match (#match_input) {
                 #match_arms
                 _ => unreachable!(),
