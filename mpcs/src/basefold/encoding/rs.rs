@@ -129,7 +129,7 @@ where
             ));
         }
 
-        // initialize twiddles in dft to accelarate the process
+        // warm up twiddles structure within dft to accelarate the first time encoding
         let prover_dft: Radix2DitParallel<E::BaseField> = Default::default();
         (0..max_message_size_log + Spec::get_rate_log()).for_each(|n| {
             prover_dft.dft_batch(p3::matrix::dense::DenseMatrix::new_col(

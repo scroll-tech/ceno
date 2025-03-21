@@ -447,7 +447,6 @@ where
         if proof.is_trivial() {
             let trivial_proof = proof.trivial_proof.as_ref().unwrap();
             let mmcs = poseidon2_merkle_tree::<E>();
-            // TODO remove clone here
             let (root, _) = mmcs.commit_matrix(trivial_proof.clone());
             if comm.pi_d_digest() == root {
                 return Ok(());
