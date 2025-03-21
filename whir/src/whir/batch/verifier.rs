@@ -375,47 +375,34 @@ impl<E: ExtensionField> Verifier<E> {
         let mut folding_randomness: Vec<E>;
         let initial_combination_randomness;
 
-        if self.params.initial_statement {
-            // Derive combination randomness and first sumcheck polynomial
-            let combination_randomness_gen = transcript
-                .sample_and_append_challenge(b"combination_randomness")
+        assert!(self.params.initial_statement, "must be true for pcs");
+        // Derive combination randomness and first sumcheck polynomial
+        let combination_randomness_gen = transcript
+            .sample_and_append_challenge(b"combination_randomness")
+            .elements;
+        initial_combination_randomness = expand_randomness(
+            combination_randomness_gen,
+            parsed_commitment.ood_points.len() + statement.points.len(),
+        );
+
+        // Initial sumcheck
+        sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
+        for _ in 0..self.params.folding_factor.at_round(0) {
+            let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
+                .next()
+                .ok_or(Error::InvalidProof(
+                    "Insufficient number of sumcheck polynomial evaluations".to_string(),
+                ))?
+                .clone();
+            transcript.append_field_element_exts(&sumcheck_poly_evals);
+            let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
+            let folding_randomness_single = transcript
+                .sample_and_append_challenge(b"folding_randomness")
                 .elements;
-            initial_combination_randomness = expand_randomness(
-                combination_randomness_gen,
-                parsed_commitment.ood_points.len() + statement.points.len(),
-            );
+            sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
+        }
 
-            // Initial sumcheck
-            sumcheck_rounds.reserve_exact(self.params.folding_factor.at_round(0));
-            for _ in 0..self.params.folding_factor.at_round(0) {
-                let sumcheck_poly_evals: Vec<E> = sumcheck_poly_evals_iter
-                    .next()
-                    .ok_or(Error::InvalidProof(
-                        "Insufficient number of sumcheck polynomial evaluations".to_string(),
-                    ))?
-                    .clone();
-                transcript.append_field_element_exts(&sumcheck_poly_evals);
-                let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
-                let folding_randomness_single = transcript
-                    .sample_and_append_challenge(b"folding_randomness")
-                    .elements;
-                sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
-            }
-
-            folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).collect();
-        } else {
-            assert_eq!(parsed_commitment.ood_points.len(), 0);
-            assert_eq!(statement.points.len(), 0);
-
-            initial_combination_randomness = vec![E::ONE];
-            folding_randomness = (0..self.params.folding_factor.at_round(0))
-                .map(|_| {
-                    transcript
-                        .sample_and_append_challenge(b"folding_randomness")
-                        .elements
-                })
-                .collect();
-        };
+        folding_randomness = sumcheck_rounds.iter().map(|&(_, r)| r).collect();
 
         let mut prev_root = parsed_commitment.root.clone();
         let domain_gen = self.params.starting_domain.backing_domain_group_gen();
