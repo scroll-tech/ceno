@@ -18,7 +18,7 @@ pub struct VirtualPolynomials<'a, E: ExtensionField> {
 
 impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     pub fn new(num_threads: usize, max_num_variables: usize) -> Self {
-        println!("ceil_log2(num_threads) {}", ceil_log2(num_threads));
+        debug_assert!(num_threads > 0);
         VirtualPolynomials {
             num_threads,
             polys: (0..num_threads)

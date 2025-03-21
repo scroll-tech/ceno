@@ -2603,6 +2603,7 @@ dependencies = [
  "p3",
  "proc-macro2",
  "quote",
+ "rand",
  "sumcheck",
  "syn 2.0.100",
 ]

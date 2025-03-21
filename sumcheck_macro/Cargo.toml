@@ -17,6 +17,7 @@ itertools.workspace = true
 p3.workspace = true
 proc-macro2 = "1.0.92"
 quote = "1.0"
+rand.workspace = true
 syn = { version = "2.0", features = ["full"] }
 
 [dev-dependencies]
