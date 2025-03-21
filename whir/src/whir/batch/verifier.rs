@@ -332,6 +332,7 @@ impl<E: ExtensionField> Verifier<E> {
             .map(|(point, randomness)| *randomness * eq_eval(point, &folded_point))
             .collect();
         let folded_evals = whir_proof.folded_evals.clone();
+        transcript.append_field_element_exts(&folded_evals);
         let sumcheck_claim = sumcheck_rounds[num_variables - 1]
             .0
             .evaluate_at_point(&vec![sumcheck_rounds[num_variables - 1].1]);
