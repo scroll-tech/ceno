@@ -243,7 +243,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             // we actually need to have a full sum, times 2^(bh_num_vars - num_vars) to accumulate into univariate computation
             // E.g. Giving multivariate poly f(X) = f_1(X1) + f_2(X), X1 \in {F}^{n'}, X \in {F}^{n}, |X1| := n', |X| = n, n' <= n
             // For i < n - n', to compute univariate poly, f^i(x), b is i-th round boolean hypercube
-            // f^i[0] = \sum_b f(r, 0, b), b \in {0, 1}^{n-i-1}, r \in {F}^{n-i-1} chanllenge get from prev rounds
+            // f^i[0] = \sum_b f(r, 0, b), b \in {0, 1}^{n-i-1}, r \in {F}^{n-i-1} challenge get from prev rounds
             //        = \sum_b f_1(b) + f_2(r, 0, b)
             //        = 2^(|b| - |b1|)  * \sum_b1 f_1(b1)  + \sum_b f_2(r, 0, b)
             // b1 is suffix alignment with b
@@ -269,17 +269,16 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                 }
                 AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
             } else {
-                let res = (0..largest_even_below(v1.len()))
-                    #iter
-                    .map(|b| {
-                        #additive_array_items
-                    })
-                    .sum::<AdditiveArray<_, #degree_plus_one>>();
                 if v1.len() == 1 {
                     let b = 0;
                     AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
                 } else {
-                    res
+                    (0..largest_even_below(v1.len()))
+                        #iter
+                        .map(|b| {
+                            #additive_array_items
+                        })
+                        .sum::<AdditiveArray<_, #degree_plus_one>>()
                 }
             }
         }
