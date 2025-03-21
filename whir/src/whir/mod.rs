@@ -204,8 +204,10 @@ mod tests {
                 &evals_per_point,
                 &proof,
             )
-            .unwrap();
-        println!("PASSED!");
+            .expect(&format!(
+                "Failed at number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
+                num_variables, folding_factor, num_points, soundness_type, fold_type
+            ));
     }
 
     fn make_whir_batch_things_diff_point(

@@ -227,14 +227,14 @@ impl<E: ExtensionField> Verifier<E> {
         let final_folds = &computed_folds[computed_folds.len() - 1];
         let final_evaluations =
             evaluate_as_univariate(&parsed.final_evaluations, &parsed.final_randomness_points);
-        if !final_folds
-            .iter()
-            .zip(final_evaluations)
-            .all(|(&fold, eval)| fold == eval)
-        {
-            return Err(Error::InvalidProof(
-                "Final foldings mismatched with final evaluations".to_string(),
-            ));
+
+        for (index, (&fold, eval)) in final_folds.iter().zip(final_evaluations).enumerate() {
+            if fold != eval {
+                return Err(Error::InvalidProof(format!(
+                    "Simple batched verifier: Final foldings mismatch with final evaluations: at {}, {} != {}",
+                    index, fold, eval
+                )));
+            }
         }
 
         // Check the final sumchecks
@@ -640,7 +640,7 @@ impl<E: ExtensionField> Verifier<E> {
             let sumcheck_poly = SumcheckPolynomial::new(sumcheck_poly_evals.to_vec(), 1);
             transcript.append_field_element_exts(sumcheck_poly.evaluations());
             let folding_randomness_single = transcript
-                .sample_and_append_challenge(b"filding_randomness")
+                .sample_and_append_challenge(b"folding_randomness")
                 .elements;
             final_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
         }
