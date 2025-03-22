@@ -21,14 +21,13 @@ ceno_emul = { path = "../ceno_emul" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+p3 = { path = "../p3" }
 sumcheck = { version = "0", path = "../sumcheck" }
 transcript = { path = "../transcript" }
+witness = { path = "../witness" }
 
 itertools.workspace = true
 num-traits.workspace = true
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-mds.workspace = true
 paste.workspace = true
 poseidon.workspace = true
 prettytable-rs.workspace = true
@@ -46,6 +45,7 @@ parse-size = "1.1"
 rand.workspace = true
 tempfile = "3.14"
 thread_local = "1.1"
+tiny-keccak.workspace = true
 
 [dev-dependencies]
 cfg-if.workspace = true

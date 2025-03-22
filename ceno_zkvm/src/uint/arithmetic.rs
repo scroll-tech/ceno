@@ -9,7 +9,7 @@ use crate::{
     gadgets::AssertLtConfig,
     instructions::riscv::config::IsEqualConfig,
 };
-use p3_field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -83,7 +83,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             // convert Expression::Constant to limbs
             let b_limbs = (0..Self::NUM_LIMBS)
                 .map(|i| {
-                    Expression::Constant(E::BaseField::from_canonical_u64(
+                    Expression::Constant(E::BaseField::from_u64(
                         (b >> (C * i)) & Self::LIMB_BIT_MASK,
                     ))
                 })
@@ -486,13 +486,10 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_canonical_u64)
+                .map(E::from_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(
-                    eval_by_expr(&wit, &[], &challenges, c),
-                    E::from_canonical_u64(ret)
-                );
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
             });
 
             // overflow
@@ -666,13 +663,10 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_canonical_u64)
+                .map(E::from_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(
-                    eval_by_expr(&wit, &[], &challenges, c),
-                    E::from_canonical_u64(ret)
-                );
+                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
             });
 
             // overflow
@@ -700,7 +694,7 @@ mod tests {
         use multilinear_extensions::{
             mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
         };
-        use p3_field::FieldAlgebra;
+        use p3::field::PrimeCharacteristicRing;
 
         type E = GoldilocksExt2; // 18446744069414584321
 
@@ -715,7 +709,7 @@ mod tests {
                     .map(|a| {
                         let mle: ArcMultilinearExtension<E> =
                             DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
-                                E::BaseField::from_canonical_u64(*a),
+                                E::BaseField::from_u64(*a),
                             ])
                             .into();
                         mle

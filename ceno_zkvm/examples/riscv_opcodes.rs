@@ -9,7 +9,7 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
-use p3_field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 
 use ceno_emul::{
     CENO_PLATFORM, EmuContext,
@@ -25,7 +25,7 @@ use ceno_zkvm::{
 use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use p3_goldilocks::Goldilocks;
+use p3::goldilocks::Goldilocks;
 use sumcheck::macros::{entered_span, exit_span};
 use tracing_subscriber::{EnvFilter, Registry, fmt, fmt::format::FmtSpan, layer::SubscriberExt};
 use transcript::BasicTranscript as Transcript;

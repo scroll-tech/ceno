@@ -16,15 +16,15 @@ bitvec = "1.0"
 ctr = "0.9"
 ff_ext = { path = "../ff_ext" }
 # TODO: move to version 1, once our dependencies are updated
+ark-ff = "0.5"
+ark-serialize = { version = "0.5", features = ["derive"] }
+bincode = "1.3.3"
 generic-array = { version = "0.14", features = ["serde"] }
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-mds.workspace = true
-p3-symmetric.workspace = true
+p3 = { path = "../p3" }
 plonky2.workspace = true
 poseidon.workspace = true
 rand.workspace = true
@@ -32,6 +32,9 @@ rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
 transcript = { path = "../transcript" }
+whir = { path = "../whir", features = ["ceno"] }
+witness = { path = "../witness" }
+zeroize = "1.8"
 
 [dev-dependencies]
 criterion.workspace = true
@@ -40,7 +43,7 @@ criterion.workspace = true
 benchmark = ["parallel"]
 default = ["parallel"] # Add "sanity-check" to debug
 parallel = ["dep:rayon"]
-print-trace = ["ark-std/print-trace"]
+print-trace = ["ark-std/print-trace", "whir/print-trace"]
 sanity-check = []
 
 [[bench]]
@@ -66,3 +69,7 @@ name = "fft"
 [[bench]]
 harness = false
 name = "utils"
+
+[[bench]]
+harness = false
+name = "whir"

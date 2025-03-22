@@ -1,8 +1,7 @@
 use ark_std::test_rng;
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use ff_ext::FromUniformBytes;
-use p3_field::FieldAlgebra;
-use p3_goldilocks::Goldilocks;
+use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Sample},
     hash::{
@@ -109,7 +108,7 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     });
 }
 
-use p3_symmetric::Permutation;
+use p3::symmetric::Permutation;
 
 // bench permutation
 pub fn permutation_benchmark(c: &mut Criterion) {

@@ -1,5 +1,5 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger, FieldChallengerExt};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
@@ -25,12 +25,12 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 
     fn append_field_element_ext(&mut self, element: &E) {
-        self.challenger.observe_ext_element(*element);
+        self.challenger.observe_algebra_element(*element);
     }
 
     fn read_challenge(&mut self) -> Challenge<E> {
         Challenge {
-            elements: self.challenger.sample_ext_element(),
+            elements: self.challenger.sample_algebra_element(),
         }
     }
 
@@ -48,6 +48,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
 
     fn commit_rolling(&mut self) {
         // do nothing
+    }
+
+    fn sample_vec(&mut self, n: usize) -> Vec<E> {
+        self.challenger.sample_ext_vec(n)
     }
 }
 

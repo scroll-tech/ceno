@@ -12,7 +12,7 @@ use classic::{ClassicSumCheckRoundMessage, SumcheckProof};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use p3_field::Field;
+use p3::field::Field;
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
@@ -135,8 +135,5 @@ pub fn eq_xy_eval<F: Field>(x: &[F], y: &[F]) -> F {
 }
 
 fn identity_eval<F: Field>(x: &[F]) -> F {
-    inner_product(
-        x,
-        &powers(F::from_canonical_u64(2)).take(x.len()).collect_vec(),
-    )
+    inner_product(x, &powers(F::from_u64(2)).take(x.len()).collect_vec())
 }

@@ -1,10 +1,9 @@
 use core::fmt::Debug;
 use ff_ext::ExtensionField;
-use p3_field::{FieldExtensionAlgebra, PrimeField};
-use p3_symmetric::CryptographicPermutation;
+use p3::{field::PrimeField, symmetric::CryptographicPermutation};
 use std::ops::{Deref, DerefMut};
 
-pub use p3_challenger::*;
+pub use p3::challenger::*;
 
 use ff_ext::PoseidonField;
 
@@ -67,11 +66,11 @@ where
 pub trait FieldChallengerExt<F: PoseidonField>: FieldChallenger<F> {
     fn observe_ext_slice<E: ExtensionField<BaseField = F>>(&mut self, exts: &[E]) {
         exts.iter()
-            .for_each(|ext| self.observe_slice(ext.as_base_slice()));
+            .for_each(|ext| self.observe_slice(ext.as_basis_coefficients_slice()));
     }
 
-    fn sample_ext_vec<EF: FieldExtensionAlgebra<F>>(&mut self, n: usize) -> Vec<EF> {
-        (0..n).map(|_| self.sample_ext_element()).collect()
+    fn sample_ext_vec<E: ExtensionField<BaseField = F>>(&mut self, n: usize) -> Vec<E> {
+        (0..n).map(|_| self.sample_algebra_element()).collect()
     }
 }
 

@@ -1,7 +1,7 @@
 use ceno_emul::{Cycle, StepRecord, Word, WriteOp};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
-use p3_field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing};
 
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
@@ -436,7 +436,7 @@ impl<E: ExtensionField> MemAddr<E> {
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
-        let shift_right = E::BaseField::from_canonical_u64(1 << Self::N_LOW_BITS)
+        let shift_right = E::BaseField::from_u64(1 << Self::N_LOW_BITS)
             .inverse()
             .expr();
         let mid_u14 = (&limbs[0] - low_sum) * shift_right;
@@ -486,15 +486,15 @@ impl<E: ExtensionField> MemAddr<E> {
 mod test {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
-    use p3_goldilocks::Goldilocks as F;
+    use p3::goldilocks::Goldilocks as F;
+    use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
     use crate::{
         ROMType,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         error::ZKVMError,
-        instructions::InstancePaddingStrategy,
         scheme::mock_prover::MockProver,
-        witness::{LkMultiplicity, RowMajorMatrix},
+        witness::LkMultiplicity,
     };
 
     use super::MemAddr;
@@ -562,7 +562,7 @@ mod test {
         MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
-                .into_mles()
+                .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),

@@ -11,7 +11,7 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, op_mle, virtual_poly::VirtualPolynomial,
 };
-use p3_field::Field;
+use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
 
 use crate::structs::IOPProverState;
@@ -155,7 +155,7 @@ pub(crate) fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
 
     // `prod = \prod_{j} (eval_at - j)`
     for e in 1..len {
-        let tmp = eval_at - F::from_canonical_u64(e as u64);
+        let tmp = eval_at - F::from_u64(e as u64);
         evals.push(tmp);
         prod *= tmp;
     }
@@ -186,8 +186,8 @@ pub(crate) fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
 
         // compute denom for the next step is current_denom * (len-i)/i
         if i != 0 {
-            denom_up *= -F::from_canonical_u64((len - i) as u64);
-            denom_down *= F::from_canonical_u64(i as u64);
+            denom_up *= -F::from_u64((len - i) as u64);
+            denom_down *= F::from_u64(i as u64);
         }
     }
     end_timer!(start);
@@ -199,7 +199,7 @@ pub(crate) fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
 fn field_factorial<F: Field>(a: usize) -> F {
     let mut res = F::ONE;
     for i in 2..=a {
-        res *= F::from_canonical_u64(i as u64);
+        res *= F::from_u64(i as u64);
     }
     res
 }

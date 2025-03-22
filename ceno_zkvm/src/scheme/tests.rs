@@ -24,11 +24,11 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
-use mpcs::{Basefold, BasefoldDefault, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{PolynomialCommitmentScheme, WhirDefault};
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
-use p3_field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
 
 use super::{
@@ -88,11 +88,11 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
         type E = GoldilocksExt2;
-        type Pcs = BasefoldDefault<E>;
+        type Pcs = WhirDefault<E>;
 
         // pcs setup
-        let param = Pcs::setup(1 << 13).unwrap();
-        let (pp, vp) = Pcs::trim(param, 1 << 13).unwrap();
+        Pcs::setup(1 << 8).unwrap();
+        let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
 
         // configure
         let name = TestCircuit::<E, RW, L>::name();
@@ -124,14 +124,10 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZKVMProver::new(pk);
         let mut transcript = BasicTranscript::new(b"test");
-        let wits_in = zkvm_witness
-            .into_iter_sorted()
-            .next()
-            .unwrap()
-            .1
-            .into_mles();
+        let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
+        let wits_in = rmm.to_mles();
         // commit to main traces
-        let commit = Pcs::batch_commit_and_write(&prover.pk.pp, &wits_in, &mut transcript).unwrap();
+        let commit = Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript).unwrap();
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
         let prover_challenges = [
             transcript.read_challenge().elements,
@@ -200,7 +196,7 @@ const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type Pcs = WhirDefault<E>;
 
     // set up program
     let program = Program::new(
@@ -210,8 +206,8 @@ fn test_single_add_instance_e2e() {
         Default::default(),
     );
 
-    let pcs_param = Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
@@ -292,8 +288,7 @@ fn test_single_add_instance_e2e() {
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let encoded_bin = bincode::serialize(&zkvm_proof).unwrap();
-
+    println!("encoded zkvm proof {}", &zkvm_proof,);
     let stat_recorder = StatisticRecorder::default();
     {
         let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
@@ -304,8 +299,7 @@ fn test_single_add_instance_e2e() {
         );
     }
     println!(
-        "encoded zkvm proof size: {}, hash_num: {}",
-        encoded_bin.len(),
+        "hash_num: {}",
         stat_recorder.into_inner().field_appended_num
     );
 }

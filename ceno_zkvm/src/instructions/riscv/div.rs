@@ -64,7 +64,7 @@
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
-use p3_goldilocks::Goldilocks;
+use p3::goldilocks::Goldilocks;
 
 use super::{
     RIVInstruction,
@@ -598,7 +598,7 @@ mod test {
         MockProver::assert_with_expected_errors(
             &cb,
             &raw_witin
-                .into_mles()
+                .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),

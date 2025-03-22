@@ -6,6 +6,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 use transcript::{BasicTranscript, Transcript};
 use util::hash::Digest;
+use witness::RowMajorMatrix;
 
 pub mod sum_check;
 pub mod util;
@@ -49,17 +50,17 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit(pp, polys)
+    Pcs::batch_commit(pp, rmm)
 }
 
 pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[DenseMultilinearExtension<E>],
+    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit_and_write(pp, polys, transcript)
+    Pcs::batch_commit_and_write(pp, rmm, transcript)
 }
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -149,15 +150,15 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        polys: RowMajorMatrix<E::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        polys: &[DenseMultilinearExtension<E>],
+        rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
-        let comm = Self::batch_commit(pp, polys)?;
+        let comm = Self::batch_commit(pp, rmm)?;
         Self::write_commitment(&Self::get_pure_commitment(&comm), transcript)?;
         Ok(comm)
     }
@@ -311,6 +312,7 @@ pub enum Error {
     PolynomialTooLarge(usize),
     PolynomialSizesNotEqual,
     MerkleRootMismatch,
+    WhirError(whir::Error),
 }
 
 mod basefold;
@@ -320,7 +322,9 @@ pub use basefold::{
     EncodingScheme, RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table, one_level_eval_hc,
     one_level_interp_hc,
 };
+mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
 
 fn validate_input<E: ExtensionField>(
     function: &str,
@@ -381,8 +385,13 @@ pub mod test_util {
     };
     use rand::rngs::OsRng;
     #[cfg(test)]
+    use rand::{distributions::Standard, prelude::Distribution};
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
+    #[cfg(test)]
     use transcript::BasicTranscript;
     use transcript::Transcript;
+    #[cfg(test)]
+    use witness::RowMajorMatrix;
 
     pub fn setup_pcs<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         num_vars: usize,
@@ -406,22 +415,21 @@ pub mod test_util {
     }
 
     pub fn gen_rand_polys<E: ExtensionField>(
-        num_vars: impl Fn(usize) -> usize,
+        num_vars: impl Fn(usize) -> usize + Sync,
         batch_size: usize,
         gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
     ) -> Vec<DenseMultilinearExtension<E>> {
         (0..batch_size)
+            .into_par_iter()
             .map(|i| gen_rand_poly(num_vars(i)))
-            .collect_vec()
+            .collect::<Vec<_>>()
     }
 
     pub fn get_point_from_challenge<E: ExtensionField>(
         num_vars: usize,
         transcript: &mut impl Transcript<E>,
     ) -> Vec<E> {
-        (0..num_vars)
-            .map(|_| transcript.get_and_append_challenge(b"Point").elements)
-            .collect()
+        transcript.sample_and_append_vec(b"Point", num_vars)
     }
     pub fn get_points_from_challenge<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
@@ -477,10 +485,16 @@ pub mod test_util {
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_ext(&eval);
+
                 Pcs::verify(&vp, &comm, &point, &eval, &proof, &mut transcript).unwrap();
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for single poly: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
@@ -562,28 +576,35 @@ pub mod test_util {
                 Pcs::batch_verify(&vp, &comms, &points, &evals, &proof, &mut transcript).unwrap();
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for batch: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }
 
     #[cfg(test)]
     pub(super) fn run_simple_batch_commit_open_verify<E, Pcs>(
-        gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
+        _gen_rand_poly: fn(usize) -> DenseMultilinearExtension<E>,
         num_vars_start: usize,
         num_vars_end: usize,
         batch_size: usize,
     ) where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
+        Standard: Distribution<E::BaseField>,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
-                let polys = gen_rand_polys(|_| num_vars, batch_size, gen_rand_poly);
-                let comm =
-                    Pcs::batch_commit_and_write(&pp, polys.as_slice(), &mut transcript).unwrap();
+                let rmm =
+                    RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
+                let polys = rmm.to_mles();
+                let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
@@ -615,6 +636,11 @@ pub mod test_util {
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for simple batch: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
             }
         }
     }

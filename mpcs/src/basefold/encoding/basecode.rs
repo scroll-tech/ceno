@@ -13,7 +13,7 @@ use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use generic_array::GenericArray;
 use multilinear_extensions::mle::FieldType;
-use p3_field::{Field, FieldAlgebra, batch_multiplicative_inverse};
+use p3::field::{Field, PrimeCharacteristicRing, batch_multiplicative_inverse};
 use rand::SeedableRng;
 use rayon::prelude::{ParallelIterator, ParallelSlice, ParallelSliceMut};
 

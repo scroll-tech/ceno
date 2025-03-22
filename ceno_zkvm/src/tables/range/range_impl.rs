@@ -1,18 +1,16 @@
 //! The implementation of range tables. No generics.
 
 use ff_ext::{ExtensionField, SmallField};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::collections::HashMap;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     expression::{StructuralWitIn, ToExpr, WitIn},
-    instructions::InstancePaddingStrategy,
-    scheme::constants::MIN_PAR_SIZE,
     set_val,
     structs::ROMType,
-    witness::RowMajorMatrix,
 };
 
 #[derive(Clone, Debug)]
@@ -53,10 +51,12 @@ impl RangeTableConfig {
         multiplicity: &HashMap<u64, usize>,
         content: Vec<u64>,
         length: usize,
-    ) -> Result<RowMajorMatrix<F>, ZKVMError> {
-        let mut witness = RowMajorMatrix::<F>::new(
+    ) -> Result<[RowMajorMatrix<F>; 2], ZKVMError> {
+        let mut witness: RowMajorMatrix<F> =
+            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
+        let mut structural_witness = RowMajorMatrix::<F>::new(
             length,
-            num_witin + num_structural_witin,
+            num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
@@ -65,21 +65,16 @@ impl RangeTableConfig {
             mlts[*idx as usize] = *mlt;
         }
 
-        let offset_range = StructuralWitIn {
-            id: self.range.id + (num_witin as u16),
-            ..self.range
-        };
-
         witness
-            .par_iter_mut()
-            .with_min_len(MIN_PAR_SIZE)
-            .zip(mlts.into_par_iter())
-            .zip(content.into_par_iter())
-            .for_each(|((row, mlt), i)| {
-                set_val!(row, self.mlt, F::from_canonical_u64(mlt as u64));
-                set_val!(row, offset_range, F::from_canonical_u64(i));
+            .par_rows_mut()
+            .zip(structural_witness.par_rows_mut())
+            .zip(mlts)
+            .zip(content)
+            .for_each(|(((row, structural_row), mlt), i)| {
+                set_val!(row, self.mlt, F::from_u64(mlt as u64));
+                set_val!(structural_row, self.range, F::from_u64(i));
             });
 
-        Ok(witness)
+        Ok([witness, structural_witness])
     }
 }

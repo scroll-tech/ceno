@@ -60,7 +60,6 @@ where
     let build_eq_timer = start_timer!(|| "Basefold::open");
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
-    reverse_index_bits_in_place(&mut eq);
 
     let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round_field_type(&mut eq, &mut running_evals);
@@ -87,7 +86,7 @@ where
         transcript.append_field_element_exts(&last_sumcheck_message);
         sumcheck_messages.push(last_sumcheck_message);
 
-        let challenge = transcript.get_and_append_challenge(b"commit round");
+        let challenge = transcript.sample_and_append_challenge(b"commit round");
 
         // Fold the current oracle for FRI
         let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
@@ -132,9 +131,6 @@ where
             // running_evals is exactly the evaluation representation of the
             // folded polynomial so far.
             sum_check_last_round(&mut eq, &mut running_evals, challenge.elements);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut running_evals);
             transcript.append_field_element_exts(&running_evals);
             final_message = running_evals;
             // To prevent the compiler from complaining that the value is moved
@@ -146,7 +142,8 @@ where
 
                 let mut coeffs = final_message.clone();
                 interpolate_over_boolean_hypercube(&mut coeffs);
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding()
+                {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode(
@@ -234,7 +231,6 @@ where
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let mut eq = build_eq_x_r_vec(point);
-    reverse_index_bits_in_place(&mut eq);
 
     let sumcheck_timer = start_timer!(|| "Basefold first round");
     let mut sumcheck_messages = Vec::with_capacity(num_rounds + 1);
@@ -254,7 +250,7 @@ where
         transcript.append_field_element_exts(&last_sumcheck_message);
 
         let challenge = transcript
-            .get_and_append_challenge(b"commit round")
+            .sample_and_append_challenge(b"commit round")
             .elements;
 
         // Fold the current oracle for FRI
@@ -304,9 +300,6 @@ where
             // sum_of_all_evals_for_sumcheck is exactly the evaluation representation of the
             // folded polynomial so far.
             sum_check_last_round(&mut eq, &mut sum_of_all_evals_for_sumcheck, challenge);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut sum_of_all_evals_for_sumcheck);
             transcript.append_field_element_exts(&sum_of_all_evals_for_sumcheck);
             final_message = sum_of_all_evals_for_sumcheck;
             // To prevent the compiler from complaining that the value is moved
@@ -317,7 +310,8 @@ where
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
                 let mut coeffs = final_message.clone();
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding()
+                {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 interpolate_over_boolean_hypercube(&mut coeffs);
@@ -383,10 +377,6 @@ where
     let mut eq = build_eq_x_r_vec(point);
     end_timer!(build_eq_timer);
 
-    let reverse_bits_timer = start_timer!(|| "Basefold::reverse bits");
-    reverse_index_bits_in_place(&mut eq);
-    end_timer!(reverse_bits_timer);
-
     let sumcheck_timer = start_timer!(|| "Basefold sumcheck first round");
     let mut last_sumcheck_message = sum_check_first_round(&mut eq, &mut running_evals);
     end_timer!(sumcheck_timer);
@@ -404,7 +394,7 @@ where
         sumcheck_messages.push(last_sumcheck_message);
 
         let challenge = transcript
-            .get_and_append_challenge(b"commit round")
+            .sample_and_append_challenge(b"commit round")
             .elements;
 
         // Fold the current oracle for FRI
@@ -442,9 +432,6 @@ where
             // running_evals is exactly the evaluation representation of the
             // folded polynomial so far.
             sum_check_last_round(&mut eq, &mut running_evals, challenge);
-            // For the FRI part, we send the current polynomial as the message.
-            // Transform it back into little endiean before sending it
-            reverse_index_bits_in_place(&mut running_evals);
             transcript.append_field_element_exts(&running_evals);
             final_message = running_evals;
             // To avoid the compiler complaining that running_evals is moved.
@@ -455,7 +442,8 @@ where
                 // on the prover side should be exactly the encoding of the folded polynomial.
 
                 let mut coeffs = final_message.clone();
-                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_even_and_odd_folding() {
+                if <Spec::EncodingScheme as EncodingScheme<E>>::message_is_left_and_right_folding()
+                {
                     reverse_index_bits_in_place(&mut coeffs);
                 }
                 interpolate_over_boolean_hypercube(&mut coeffs);
@@ -467,7 +455,6 @@ where
                     FieldType::Ext(basecode) => basecode,
                     _ => panic!("Should be ext field"),
                 };
-
                 let mut new_running_oracle = new_running_oracle;
                 reverse_index_bits_in_place(&mut new_running_oracle);
                 assert_eq!(basecode, new_running_oracle);

@@ -13,16 +13,16 @@ use crate::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
         TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
-    witness::{LkMultiplicity, LkMultiplicityRaw, RowMajorMatrix},
+    witness::{LkMultiplicity, LkMultiplicityRaw},
 };
 use ark_std::test_rng;
-use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
-use p3_field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -35,6 +35,8 @@ use std::{
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
+use tiny_keccak::{Hasher, Keccak};
+use witness::RowMajorMatrix;
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -405,9 +407,14 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
         let mut rng = test_rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
-        let base64_encoded =
-            STANDARD_NO_PAD.encode(serde_json::to_string(&challenge).unwrap().as_bytes());
-        let file_path = format!("table_cache_dev_{:?}.json", base64_encoded);
+        let mut keccak = Keccak::v256();
+        let mut filename_digest = [0u8; 32];
+        keccak.update(serde_json::to_string(&challenge).unwrap().as_bytes());
+        keccak.finalize(&mut filename_digest);
+        let file_path = format!(
+            "table_cache_dev_{:?}.json",
+            URL_SAFE_NO_PAD.encode(filename_digest)
+        );
         let table = match File::open(&file_path) {
             Ok(file) => {
                 let reader = BufReader::new(file);
@@ -741,7 +748,7 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         let wits_in = raw_witin
-            .into_mles()
+            .to_mles()
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
@@ -799,13 +806,20 @@ Hints:
 
         // Process all circuits.
         for (circuit_name, cs) in &cs.circuit_css {
+            let empty_rmm = RowMajorMatrix::empty();
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
-            let witness = if is_opcode {
-                witnesses
-                    .get_opcode_witness(circuit_name)
-                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
+            let [witness, structural_witness] = if is_opcode {
+                &[
+                    witnesses
+                        .get_opcode_witness(circuit_name)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            panic!("witness for {} should not be None", circuit_name)
+                        }),
+                    empty_rmm,
+                ]
             } else {
                 witnesses
                     .get_table_witness(circuit_name)
@@ -821,8 +835,9 @@ Hints:
                 continue;
             }
             let mut witness = witness
-                .into_mles()
+                .to_mles()
                 .into_iter()
+                .chain(structural_witness.to_mles())
                 .map(|w| w.into())
                 .collect_vec();
             let structural_witness = witness.split_off(cs.num_witin as usize);
@@ -831,11 +846,7 @@ Hints:
                 .remove(circuit_name)
                 .and_then(|fixed| fixed)
                 .map_or(vec![], |fixed| {
-                    fixed
-                        .into_mles()
-                        .into_iter()
-                        .map(|f| f.into())
-                        .collect_vec()
+                    fixed.to_mles().into_iter().map(|f| f.into()).collect_vec()
                 });
             if is_opcode {
                 tracing::info!(
@@ -1243,13 +1254,13 @@ mod tests {
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLtConfig, IsLtConfig},
-        instructions::InstancePaddingStrategy,
         set_val,
-        witness::{LkMultiplicity, RowMajorMatrix},
+        witness::LkMultiplicity,
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::mle::IntoMLE;
-    use p3_goldilocks::Goldilocks;
+    use p3::goldilocks::Goldilocks;
+    use witness::InstancePaddingStrategy;
 
     #[derive(Debug)]
     struct AssertZeroCircuit {
@@ -1328,12 +1339,9 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![
-                Goldilocks::from_canonical_u64(3u64),
-                Goldilocks::from_canonical_u64(5u64),
-            ]
-            .into_mle()
-            .into(),
+            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
+                .into_mle()
+                .into(),
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
@@ -1365,9 +1373,7 @@ mod tests {
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                    Box::new(Expression::Constant(Goldilocks::from_canonical_u64(
-                        U5 as u64
-                    ))),
+                    Box::new(Expression::Constant(Goldilocks::from_u64(U5 as u64))),
                 )),
                 Box::new(Expression::Challenge(
                     0,

@@ -1,17 +1,87 @@
-use std::sync::Arc;
-
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
     util::interpolate_uni_poly,
 };
 use ark_std::{rand::RngCore, test_rng};
 use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
-use multilinear_extensions::{mle::DenseMultilinearExtension, virtual_poly::VirtualPolynomial};
-use p3_field::FieldAlgebra;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use multilinear_extensions::{
+    util::max_usable_threads,
+    virtual_poly::{VPAuxInfo, VirtualPolynomial},
+    virtual_polys::VirtualPolynomials,
+};
+use p3::field::PrimeCharacteristicRing;
 use transcript::{BasicTranscript, Transcript};
 
-// TODO add more tests related to various num_vars combination after PR #162
+#[test]
+fn test_sumcheck_with_different_degree() {
+    // test polynomial mixed with different num_var
+    let nv = vec![3, 4, 5];
+    let num_polys = nv.len();
+    for num_threads in 1..num_polys.min(max_usable_threads()) {
+        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(num_threads, &nv);
+    }
+}
+
+fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
+    let mut rng = test_rng();
+    let degree = 2;
+    let num_multiplicands_range = (degree, degree + 1);
+    let num_products = 1;
+    let mut transcript = BasicTranscript::<E>::new(b"test");
+
+    let max_num_variables = *nv.iter().max().unwrap();
+    let poly = VirtualPolynomials::new(num_threads, max_num_variables);
+
+    let input_polys = nv
+        .iter()
+        .map(|nv| {
+            VirtualPolynomial::<E>::random(*nv, num_multiplicands_range, num_products, &mut rng)
+        })
+        .collect::<Vec<_>>();
+
+    let (poly, asserted_sum) =
+        input_polys
+            .iter()
+            .fold((poly, E::ZERO), |(mut poly, sum), (new_poly, new_sum)| {
+                poly.merge(new_poly);
+                (
+                    poly,
+                    sum + E::from_u64(
+                        1 << (max_num_variables - new_poly.aux_info.max_num_variables),
+                    ) * *new_sum,
+                )
+            });
+
+    let batch_poly = poly.get_batched_polys();
+    let (proof, _) =
+        IOPProverState::<E>::prove_batch_polys(num_threads, batch_poly.clone(), &mut transcript);
+    let mut transcript = BasicTranscript::new(b"test");
+    let subclaim = IOPVerifierState::<E>::verify(
+        asserted_sum,
+        &proof,
+        &VPAuxInfo {
+            max_degree: 2,
+            max_num_variables,
+            ..Default::default()
+        },
+        &mut transcript,
+    );
+    let r = subclaim
+        .point
+        .iter()
+        .map(|c| c.elements)
+        .collect::<Vec<_>>();
+    assert_eq!(r.len(), max_num_variables);
+    // r are right alignment
+    assert!(
+        input_polys
+            .iter()
+            .map(|(poly, _)| { poly.evaluate(&r[r.len() - poly.aux_info.max_num_variables..]) })
+            .sum::<E>()
+            == subclaim.expected_evaluation,
+        "wrong subclaim"
+    );
+}
 
 fn test_sumcheck<E: ExtensionField>(
     nv: usize,
@@ -74,28 +144,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     if let Some(p) = challenge {
         prover_state.challenges.push(p);
         // fix last challenge to collect final evaluation
-        prover_state
-            .poly
-            .flattened_ml_extensions
-            .par_iter_mut()
-            .for_each(|mle| {
-                if num_variables == 1 {
-                    // first time fix variable should be create new instance
-                    if mle.num_vars() > 0 {
-                        *mle = mle.fix_variables(&[p.elements]).into();
-                    } else {
-                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            0,
-                            mle.get_base_field_vec().to_vec(),
-                        ))
-                    }
-                } else {
-                    let mle = Arc::get_mut(mle).unwrap();
-                    if mle.num_vars() > 0 {
-                        mle.fix_variables_in_place(&[p.elements]);
-                    }
-                }
-            });
+        prover_state.fix_var(p.elements);
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);
     assert!(
@@ -138,16 +187,6 @@ fn test_normal_polynomial_helper<E: ExtensionField>() {
     test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
     test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
 }
-
-// #[test]
-// fn zero_polynomial_should_error() {
-//     let nv = 0;
-//     let num_multiplicands_range = (4, 13);
-//     let num_products = 5;
-
-//     assert!(test_sumcheck(nv, num_multiplicands_range, num_products).is_err());
-//     assert!(test_sumcheck_internal(nv, num_multiplicands_range, num_products).is_err());
-// }
 
 #[test]
 fn test_extract_sum() {
@@ -192,7 +231,7 @@ fn test_interpolation() {
     // test a polynomial with 20 known points, i.e., with degree 19
     let poly = DensePolynomial::rand(20 - 1, &mut prng);
     let evals = (0..20)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
@@ -201,7 +240,7 @@ fn test_interpolation() {
     // test a polynomial with 33 known points, i.e., with degree 32
     let poly = DensePolynomial::rand(33 - 1, &mut prng);
     let evals = (0..33)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
@@ -210,7 +249,7 @@ fn test_interpolation() {
     // test a polynomial with 64 known points, i.e., with degree 63
     let poly = DensePolynomial::rand(64 - 1, &mut prng);
     let evals = (0..64)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 

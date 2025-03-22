@@ -7,7 +7,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::{ExtensionField, FieldInto};
-use p3_field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 
 /// Extract the most significant bit from an expression previously constrained
@@ -103,7 +103,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         };
 
         assert_ux(lk_multiplicity, 2 * val - (msb << self.n_bits));
-        set_val!(instance, self.msb, E::BaseField::from_canonical_u64(msb));
+        set_val!(instance, self.msb, E::BaseField::from_u64(msb));
 
         Ok(())
     }
