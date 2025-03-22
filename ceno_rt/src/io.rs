@@ -84,7 +84,8 @@ mod macros {
             {
                 let _ = core::writeln!($crate::info_out(), $($arg)*);
             }
-            //compiles only in production mode
+
+            // compiles only in production mode
             #[cfg(not(debug_assertions))]
             {
 

@@ -102,11 +102,19 @@ fn test_ceno_rt_io() -> Result<()> {
     let _steps = run(&mut state)?;
 
     let all_messages = messages_to_strings(&read_all_messages(&state));
-    for msg in &all_messages {
-        print!("{msg}");
+
+    if cfg!(debug_assertions) {
+        println!("Running in debug mode\n");
+        for msg in &all_messages {
+            print!("Message: {msg}");
+        }
+        assert_eq!(&all_messages[0], "📜📜📜 Hello, World!\n");
+        assert_eq!(&all_messages[1], "🌏🌍🌎\n");
+    } else {
+        println!("Running in production mode\n");
+        assert_eq!(all_messages.len(),0);
     }
-    assert_eq!(&all_messages[0], "📜📜📜 Hello, World!\n");
-    assert_eq!(&all_messages[1], "🌏🌍🌎\n");
+
     Ok(())
 }
 
