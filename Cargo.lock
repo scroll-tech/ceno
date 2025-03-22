@@ -1168,6 +1168,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
+name = "gkr_iop"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "ff_ext",
+ "itertools 0.13.0",
+ "multilinear_extensions",
+ "p3-field",
+ "p3-goldilocks",
+ "rand",
+ "rayon",
+ "subprotocols",
+ "thiserror 1.0.69",
+ "transcript",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2654,6 +2671,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "subprotocols"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "criterion",
+ "ff_ext",
+ "itertools 0.13.0",
+ "multilinear_extensions",
+ "p3-field",
+ "p3-goldilocks",
+ "rand",
+ "rayon",
+ "thiserror 1.0.69",
+ "transcript",
+]
+
+[[package]]
 name = "substrate-bn"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2683,6 +2717,7 @@ dependencies = [
  "itertools 0.13.0",
  "multilinear_extensions",
  "p3",
+ "p3-goldilocks",
  "poseidon",
  "rayon",
  "serde",
