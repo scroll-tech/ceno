@@ -179,6 +179,7 @@ where
     sigma: E,
     expr: Expression,
     proof: SumcheckProof<E>,
+    expr_names: Vec<String>,
     challenges: &'a [E],
     transcript: &'a mut Trans,
     out_points: Vec<&'a [E]>,
@@ -202,6 +203,7 @@ where
         proof: SumcheckProof<E>,
         challenges: &'a [E],
         transcript: &'a mut Trans,
+        expr_names: Vec<String>,
     ) -> Self {
         Self {
             sigma,
@@ -210,6 +212,7 @@ where
             challenges,
             transcript,
             out_points,
+            expr_names,
         }
     }
 
@@ -221,6 +224,7 @@ where
             challenges,
             transcript,
             out_points,
+            expr_names,
         } = self;
         let SumcheckProof {
             univariate_polys,
@@ -262,6 +266,7 @@ where
                 expr,
                 expected_claim,
                 got_claim,
+                "placeholder".to_string(),
             ));
         }
 
@@ -324,6 +329,7 @@ mod test {
             proof,
             &challenges,
             &mut verifier_transcript,
+            vec![],
         );
 
         verifier.verify().expect("verification failed");

@@ -1,5 +1,6 @@
 use std::array;
 
+use itertools::Itertools;
 use subprotocols::expression::{Constant, Witness};
 
 use crate::{
@@ -22,10 +23,11 @@ impl Chip {
         array::from_fn(|i| i + self.n_committed_exts - N)
     }
 
-    /// Allocate `Witness` and `EvalExpression` for the input polynomials in a layer.
-    /// Where `Witness` denotes the index and `EvalExpression` denotes the position
-    /// to place the evaluation of the polynomial after processing the layer prover
-    /// for each polynomial. This should be called at most once for each layer!
+    /// Allocate `Witness` and `EvalExpression` for the input polynomials in a
+    /// layer. Where `Witness` denotes the index and `EvalExpression`
+    /// denotes the position to place the evaluation of the polynomial after
+    /// processing the layer prover for each polynomial. This should be
+    /// called at most once for each layer!
     #[allow(clippy::type_complexity)]
     pub fn allocate_wits_in_layer<const M: usize, const N: usize>(
         &mut self,
@@ -51,9 +53,16 @@ impl Chip {
     }
 
     /// Generate the evaluation expression for each output.
-    pub fn allocate_output_evals<const N: usize>(&mut self) -> [EvalExpression; N] {
+    pub fn allocate_output_evals<const N: usize>(&mut self) -> Vec<EvalExpression>
+// -> [EvalExpression; N]
+    {
         self.n_evaluations += N;
-        array::from_fn(|i| EvalExpression::Single(i + self.n_evaluations - N))
+        //array::from_fn(|i| EvalExpression::Single(i + self.n_evaluations - N))
+        // TODO: hotfix to avoid stack overflow, fix later
+        (0..N)
+            .into_iter()
+            .map(|i| EvalExpression::Single(i + self.n_evaluations - N))
+            .collect_vec()
     }
 
     /// Allocate challenges.
@@ -62,14 +71,16 @@ impl Chip {
         array::from_fn(|i| Constant::Challenge(i + self.n_challenges - N))
     }
 
-    /// Allocate a PCS opening action to a base polynomial with index `wit_index`.
-    /// The `EvalExpression` represents the expression to compute the evaluation.
+    /// Allocate a PCS opening action to a base polynomial with index
+    /// `wit_index`. The `EvalExpression` represents the expression to
+    /// compute the evaluation.
     pub fn allocate_base_opening(&mut self, wit_index: usize, eval: EvalExpression) {
         self.base_openings.push((wit_index, eval));
     }
 
-    /// Allocate a PCS opening action to an ext polynomial with index `wit_index`.
-    /// The `EvalExpression` represents the expression to compute the evaluation.
+    /// Allocate a PCS opening action to an ext polynomial with index
+    /// `wit_index`. The `EvalExpression` represents the expression to
+    /// compute the evaluation.
     pub fn allocate_ext_opening(&mut self, wit_index: usize, eval: EvalExpression) {
         self.ext_openings.push((wit_index, eval));
     }

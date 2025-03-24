@@ -14,10 +14,23 @@ ark-std.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+ndarray.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
 rand.workspace = true
 rayon.workspace = true
 subprotocols = { path = "../subprotocols" }
 thiserror = "1"
+tiny-keccak.workspace = true
 transcript = { path = "../transcript" }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+harness = false
+name = "keccak_f"
+
+[[bench]]
+harness = false
+name = "faster_keccak"
