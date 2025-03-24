@@ -303,7 +303,6 @@ where
     fn commit(
         pp: &Self::ProverParam,
         poly: &DenseMultilinearExtension<E>,
-        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         let timer = start_timer!(|| "Basefold::commit");
 
@@ -350,15 +349,12 @@ where
 
         end_timer!(timer);
 
-        Self::write_commitment(&ret.to_commitment(), transcript);
-
         Ok(ret)
     }
 
     fn batch_commit(
         pp: &Self::ProverParam,
         rmm: witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>,
-        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         let polys = rmm.to_mles();
         // assumptions
@@ -446,8 +442,6 @@ where
         };
 
         end_timer!(timer);
-
-        Self::write_commitment(&ret.to_commitment(), transcript);
 
         Ok(ret)
     }

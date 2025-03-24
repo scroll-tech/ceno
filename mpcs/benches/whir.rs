@@ -44,13 +44,13 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(c: &m
         let mut transcript = T::new(b"BaseFold");
         let transcript_for_bench = transcript.clone();
         let poly = gen_rand_poly_base(num_vars);
-        let comm = Pcs::commit(&pp, &poly, &mut transcript).unwrap();
+        let comm = Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
 
         group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
             b.iter_batched(
                 || transcript_for_bench.clone(),
                 |mut transcript| {
-                    Pcs::commit(&pp, &poly, &mut transcript).unwrap();
+                    Pcs::commit_and_write(&pp, &poly, &mut transcript).unwrap();
                 },
                 BatchSize::SmallInput,
             )
@@ -111,7 +111,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
                             let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
                             let mut transcript = T::new(b"BaseFold");
                             let instant = std::time::Instant::now();
-                            Pcs::batch_commit(&pp, rmm, &mut transcript).unwrap();
+                            Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
                             let elapsed = instant.elapsed();
                             time += elapsed;
                         }
@@ -122,7 +122,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let mut transcript = T::new(b"BaseFold");
             let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
             let polys = rmm.to_mles();
-            let comm = Pcs::batch_commit(&pp, rmm, &mut transcript).unwrap();
+            let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
             let point = get_point_from_challenge(num_vars, &mut transcript);
             let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
             transcript.append_field_element_exts(&evals);

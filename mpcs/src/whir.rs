@@ -1,8 +1,6 @@
 mod spec;
 mod structure;
 
-use std::marker::PhantomData;
-
 use crate::util::log2_strict;
 
 use super::PolynomialCommitmentScheme;
@@ -11,19 +9,14 @@ use multilinear_extensions::mle::MultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
+use structure::WhirCommitment;
 pub use structure::{Whir, WhirDefault};
-use structure::{WhirCommitment, digest_to_bytes};
 use transcript::BasicTranscript;
 use whir_external::{
-    crypto::write_digest_to_transcript,
     parameters::MultivariateParameters,
     whir::{
-        Statement, WhirProof,
-        batch::Witnesses,
-        committer::Committer,
-        parameters::WhirConfig,
-        prover::Prover,
-        verifier::{Verifier, WhirCommitmentInTranscript},
+        Statement, WhirProof, batch::Witnesses, committer::Committer, parameters::WhirConfig,
+        prover::Prover, verifier::Verifier,
     },
 };
 
@@ -40,7 +33,7 @@ where
     type CommitmentWithWitness = Witnesses<E>;
     type CommitmentChunk = WhirCommitment<E>;
 
-    fn setup(poly_size: usize) -> Result<Self::Param, crate::Error> {
+    fn setup(_poly_size: usize) -> Result<Self::Param, crate::Error> {
         Ok(())
     }
 
@@ -53,6 +46,14 @@ where
 
     fn commit(
         pp: &Self::ProverParam,
+        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+    ) -> Result<Self::CommitmentWithWitness, crate::Error> {
+        let mut transcript = BasicTranscript::<E>::new(b"committing_transcript");
+        Self::commit_and_write(pp, poly, &mut transcript)
+    }
+
+    fn commit_and_write(
+        _pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
@@ -77,7 +78,7 @@ where
     }
 
     fn open(
-        pp: &Self::ProverParam,
+        _pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
@@ -99,7 +100,7 @@ where
     }
 
     fn verify(
-        vp: &Self::VerifierParam,
+        _vp: &Self::VerifierParam,
         comm: &Self::Commitment,
         point: &[E],
         eval: &E,
@@ -132,6 +133,14 @@ where
     fn batch_commit(
         pp: &Self::ProverParam,
         rmm: witness::RowMajorMatrix<E::BaseField>,
+    ) -> Result<Self::CommitmentWithWitness, crate::Error> {
+        let mut transcript = BasicTranscript::<E>::new(b"committing_transcript");
+        Self::batch_commit_and_write(pp, rmm, &mut transcript)
+    }
+
+    fn batch_commit_and_write(
+        _pp: &Self::ProverParam,
+        rmm: witness::RowMajorMatrix<E::BaseField>,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(false);
@@ -158,7 +167,7 @@ where
     }
 
     fn simple_batch_open(
-        pp: &Self::ProverParam,
+        _pp: &Self::ProverParam,
         polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
         comm: &Self::CommitmentWithWitness,
         point: &[E],
@@ -185,7 +194,7 @@ where
     }
 
     fn simple_batch_verify(
-        vp: &Self::VerifierParam,
+        _vp: &Self::VerifierParam,
         comm: &Self::Commitment,
         point: &[E],
         evals: &[E],
