@@ -1,12 +1,12 @@
 use core::{fmt, panic};
 use derive_more::Debug;
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use std::{f64::consts::LOG2_10, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::{Poseidon2ExtMerkleMmcs, Poseidon2MerkleMmcs},
+    crypto::Poseidon2ExtMerkleMmcs,
     domain::Domain,
     parameters::{FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters},
 };

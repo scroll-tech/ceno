@@ -1,6 +1,5 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::field::Field;
 
 use crate::{utils::base_decomposition, whir::fold::LagrangePolynomialIterator};
 

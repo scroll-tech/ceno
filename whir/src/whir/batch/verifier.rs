@@ -18,7 +18,7 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3::{commit::Mmcs, util::log2_strict_usize};
+use p3::util::log2_strict_usize;
 use transcript::Transcript;
 
 impl<E: ExtensionField> Verifier<E> {

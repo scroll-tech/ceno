@@ -2,7 +2,7 @@ use crate::{
     crypto::{Digest, verify_multi_proof, write_digest_to_transcript},
     utils::{evaluate_as_univariate, evaluate_over_hypercube},
 };
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,

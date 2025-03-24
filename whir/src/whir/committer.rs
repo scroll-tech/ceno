@@ -1,6 +1,6 @@
 use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::{MerkleTree, MerkleTreeExt, write_digest_to_transcript},
+    crypto::write_digest_to_transcript,
     end_timer,
     error::Error,
     ntt::expand_from_coeff,
@@ -8,11 +8,9 @@ use crate::{
     utils::{self, interpolate_over_boolean_hypercube},
     whir::{
         fold::{expand_from_univariate, restructure_evaluations},
-        fs_utils::MmcsCommitmentWriter,
         verifier::WhirCommitmentInTranscript,
     },
 };
-use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3::matrix::dense::RowMajorMatrix;
@@ -31,7 +29,7 @@ impl<E: ExtensionField> Committer<E> {
 
     pub fn commit(
         &self,
-        mut polynomial: DenseMultilinearExtension<E>,
+        polynomial: DenseMultilinearExtension<E>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let timer = start_timer!(|| "Single Commit");
         let mut transcript = BasicTranscript::new(b"commitment");

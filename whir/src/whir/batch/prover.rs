@@ -1,6 +1,6 @@
 use super::committer::Witnesses;
 use crate::{
-    crypto::{Digest, MerkleTree, MerkleTreeExt, generate_multi_proof, write_digest_to_transcript},
+    crypto::{Digest, MerkleTreeExt, generate_multi_proof, write_digest_to_transcript},
     end_timer,
     error::Error,
     ntt::expand_from_coeff,
@@ -24,7 +24,7 @@ use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, Multilin
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
 use transcript::Transcript;
 
-use crate::whir::fs_utils::{MmcsCommitmentWriter, get_challenge_stir_queries};
+use crate::whir::fs_utils::get_challenge_stir_queries;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 

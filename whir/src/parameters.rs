@@ -1,9 +1,9 @@
 use std::{fmt::Display, marker::PhantomData, str::FromStr};
 
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{Poseidon2ExtMerkleMmcs, Poseidon2MerkleMmcs};
+use crate::crypto::Poseidon2ExtMerkleMmcs;
 
 pub fn default_max_pow(num_variables: usize, log_inv_rate: usize) -> usize {
     num_variables + log_inv_rate - 3

@@ -1,4 +1,4 @@
-use super::{proof::SumcheckPolynomial, prover_single::SumcheckSingle};
+use super::prover_single::SumcheckSingle;
 use crate::error::Error;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;

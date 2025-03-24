@@ -1,6 +1,5 @@
 use crate::crypto::{Digest, MultiPath};
-use ff_ext::{ExtensionField, PoseidonField};
-use p3::commit::Mmcs;
+use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod batch;

@@ -1,7 +1,5 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use nimue_pow::PoWChallenge;
-use p3::field::Field;
 use transcript::Transcript;
 
 use crate::error::Error;

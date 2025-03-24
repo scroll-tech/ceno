@@ -17,7 +17,6 @@ use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, Multilin
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
 use transcript::{BasicTranscript, Transcript};
 
-use crate::whir::fs_utils::MmcsCommitmentWriter;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
