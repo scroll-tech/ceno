@@ -10,7 +10,7 @@ use multilinear_extensions::{
 use p3::field::{Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::iter;
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 use super::{Statement, WhirProof, fold::expand_from_univariate, parameters::WhirConfig};
 use crate::{
@@ -79,13 +79,18 @@ impl<E: ExtensionField> Verifier<E> {
         transcript: &mut T,
     ) {
         write_digest_to_transcript(&commitment.root, transcript);
+
+        // Now check the ood points and ood answers, because they
+        // are sampled using a separate transcript.
+        let mut local_transcript = BasicTranscript::<E>::new(b"commitment");
+        write_digest_to_transcript(&commitment.root, &mut local_transcript);
         if self.params.committment_ood_samples > 0 {
             assert_eq!(
                 commitment.ood_points,
-                transcript
+                local_transcript
                     .sample_and_append_vec(b"ood_points", self.params.committment_ood_samples)
             );
-            transcript.append_field_element_exts(&commitment.ood_answers);
+            local_transcript.append_field_element_exts(&commitment.ood_answers);
         }
     }
 

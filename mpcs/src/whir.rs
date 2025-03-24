@@ -45,22 +45,13 @@ where
     }
 
     fn commit(
-        pp: &Self::ProverParam,
-        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
-    ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let mut transcript = BasicTranscript::<E>::new(b"committing_transcript");
-        Self::commit_and_write(pp, poly, &mut transcript)
-    }
-
-    fn commit_and_write(
         _pp: &Self::ProverParam,
         poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
-        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(false);
         let whir_config = WhirConfig::new(MultivariateParameters::new(poly.num_vars()), parameters);
         let (witness, _commitment) = Committer::new(whir_config)
-            .commit(transcript, poly.clone())
+            .commit(poly.clone())
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness.into())
@@ -131,17 +122,8 @@ where
     }
 
     fn batch_commit(
-        pp: &Self::ProverParam,
-        rmm: witness::RowMajorMatrix<E::BaseField>,
-    ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let mut transcript = BasicTranscript::<E>::new(b"committing_transcript");
-        Self::batch_commit_and_write(pp, rmm, &mut transcript)
-    }
-
-    fn batch_commit_and_write(
         _pp: &Self::ProverParam,
         rmm: witness::RowMajorMatrix<E::BaseField>,
-        transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(false);
         let whir_config = WhirConfig::new(
@@ -149,7 +131,7 @@ where
             parameters,
         );
         let (witness, _commitment) = Committer::new(whir_config)
-            .batch_commit(transcript, rmm)
+            .batch_commit(rmm)
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness.into())

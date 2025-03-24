@@ -112,7 +112,8 @@ mod tests {
 
         let committer = Committer::new(params.clone());
         let (witness, commitment): (_, WhirCommitmentInTranscript<_>) =
-            committer.commit(&mut transcript, polynomial).unwrap();
+            committer.commit(polynomial).unwrap();
+        committer.write_commitment_to_transcript(&commitment, &mut transcript);
 
         let prover = Prover(params.clone());
 
@@ -178,9 +179,8 @@ mod tests {
         let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
-        let (witnesses, commitment) = committer
-            .batch_commit(&mut transcript, polynomials)
-            .unwrap();
+        let (witnesses, commitment) = committer.batch_commit(polynomials).unwrap();
+        committer.write_commitment_to_transcript(&commitment, &mut transcript);
 
         let prover = Prover(params.clone());
 
@@ -253,9 +253,8 @@ mod tests {
         let mut transcript = T::new(b"test");
 
         let committer = Committer::new(params.clone());
-        let (witnesses, commitment) = committer
-            .batch_commit(&mut transcript, polynomials)
-            .unwrap();
+        let (witnesses, commitment) = committer.batch_commit(polynomials).unwrap();
+        committer.write_commitment_to_transcript(&commitment, &mut transcript);
 
         let prover = Prover(params.clone());
 

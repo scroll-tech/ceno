@@ -16,7 +16,7 @@ use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3::matrix::dense::RowMajorMatrix;
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 use p3::commit::Mmcs;
 #[cfg(feature = "parallel")]
@@ -29,12 +29,12 @@ impl<E: ExtensionField> Committer<E> {
         Self(config)
     }
 
-    pub fn commit<T: Transcript<E>>(
+    pub fn commit(
         &self,
-        transcript: &mut T,
         mut polynomial: DenseMultilinearExtension<E>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let timer = start_timer!(|| "Single Commit");
+        let mut transcript = BasicTranscript::new(b"commitment");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
         let mut evaluations = match polynomial.evaluations() {
             FieldType::Base(evals) => evals.iter().map(|x| E::from_base(x)).collect(),
@@ -80,7 +80,7 @@ impl<E: ExtensionField> Committer<E> {
             .hash_params
             .commit_matrix(RowMajorMatrix::new(folded_evals.clone(), fold_size));
         end_timer!(merkle_build_timer);
-        write_digest_to_transcript(&root, transcript);
+        write_digest_to_transcript(&root, &mut transcript);
 
         let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
             let ood_points =
@@ -122,5 +122,15 @@ impl<E: ExtensionField> Committer<E> {
             },
             commitment,
         ))
+    }
+
+    pub fn write_commitment_to_transcript<T: Transcript<E>>(
+        &self,
+        commitment: &WhirCommitmentInTranscript<E>,
+        transcript: &mut T,
+    ) {
+        write_digest_to_transcript(&commitment.root, transcript);
+        // No need to write the ood points and ood answers to transcript, because
+        // they are deterministic functions of the Merkle root.
     }
 }

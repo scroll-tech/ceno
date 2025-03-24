@@ -139,7 +139,8 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     let whir_prover_time = Instant::now();
 
     let committer = Committer::new(params.clone());
-    let (witness, commitment) = committer.commit(&mut transcript, polynomial).unwrap();
+    let (witness, commitment) = committer.commit(polynomial).unwrap();
+    committer.write_commitment_to_transcript(&commitment, &mut transcript);
 
     let prover = Prover(params.clone());
 
@@ -240,7 +241,8 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     let whir_prover_time = Instant::now();
 
     let committer = Committer::new(params.clone());
-    let (witness, commitment) = committer.commit(&mut transcript, polynomial).unwrap();
+    let (witness, commitment) = committer.commit(polynomial).unwrap();
+    committer.write_commitment_to_transcript(&commitment, &mut transcript);
 
     let prover = Prover(params.clone());
 

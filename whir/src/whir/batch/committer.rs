@@ -15,7 +15,7 @@ use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 use crate::whir::fs_utils::MmcsCommitmentWriter;
 #[cfg(feature = "parallel")]
@@ -54,11 +54,11 @@ impl<E: ExtensionField> Witnesses<E> {
 }
 
 impl<E: ExtensionField> Committer<E> {
-    pub fn batch_commit<T: Transcript<E>>(
+    pub fn batch_commit(
         &self,
-        transcript: &mut T,
         polys: witness::RowMajorMatrix<E::BaseField>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
+        let mut transcript = BasicTranscript::<E>::new(b"commitment");
         let polys = polys.to_mles();
         let timer = start_timer!(|| "Batch Commit");
         let base_domain = self.0.starting_domain.base_domain.unwrap();
@@ -145,7 +145,7 @@ impl<E: ExtensionField> Committer<E> {
 
         let root = merkle_tree.root();
 
-        write_digest_to_transcript(&root, transcript);
+        write_digest_to_transcript(&root, &mut transcript);
 
         let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
             let ood_points =
