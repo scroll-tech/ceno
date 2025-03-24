@@ -2,6 +2,7 @@
 //! This repo is not properly implemented
 //! Transcript APIs are placeholders; the actual logic is to be implemented later.
 #![feature(generic_arg_infer)]
+#![feature(generic_const_exprs)]
 
 pub mod basic;
 mod statistics;

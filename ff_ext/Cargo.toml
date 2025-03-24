@@ -13,3 +13,8 @@ version.workspace = true
 p3 = { path = "../p3" }
 rand_core.workspace = true
 serde.workspace = true
+
+[features]
+default = ["babybear"]
+babybear = []
+goldilocks = []

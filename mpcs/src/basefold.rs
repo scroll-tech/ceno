@@ -26,7 +26,7 @@ pub use encoding::{
     Basecode, BasecodeDefaultSpec, EncodingProverParameters, EncodingScheme, RSCode,
     RSCodeDefaultSpec,
 };
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::mle::MultilinearExtension;
 use query_phase::{
     BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
@@ -265,6 +265,7 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> PolynomialCommitmentScheme<E> for
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     type Param = BasefoldParams<E, Spec>;
     type ProverParam = BasefoldProverParams<E, Spec>;
@@ -1105,6 +1106,7 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
 }
 

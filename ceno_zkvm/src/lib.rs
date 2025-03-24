@@ -4,6 +4,7 @@
 #![feature(variant_count)]
 #![feature(strict_overflow_ops)]
 #![feature(let_chains)]
+#![feature(generic_const_exprs)]
 
 pub mod error;
 pub mod instructions;

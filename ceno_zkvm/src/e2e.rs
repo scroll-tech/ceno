@@ -18,7 +18,7 @@ use ceno_emul::{
     Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::PolynomialCommitmentScheme;
 use std::{
@@ -382,7 +382,10 @@ pub fn run_e2e_with_checkpoint<
     hints: Vec<u32>,
     max_steps: usize,
     checkpoint: Checkpoint,
-) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
+) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>)
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     let mem_init = init_mem(&program, &platform);
 
     let pub_io_len = platform.public_io.iter_addresses().len();
@@ -500,7 +503,10 @@ pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommi
     pk: ZKVMProvingKey<E, PCS>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
     is_mock_proving: bool,
-) -> ZKVMProof<E, PCS> {
+) -> ZKVMProof<E, PCS>
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     // Emulate program
     let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
 
@@ -535,7 +541,9 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     zkvm_proof: ZKVMProof<E, PCS>,
     exit_code: Option<u32>,
     max_steps: usize,
-) {
+) where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     let transcript = Transcript::new(b"riscv");
     assert!(
         verifier

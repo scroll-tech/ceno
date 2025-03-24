@@ -1,4 +1,4 @@
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use itertools::Itertools;
 use multilinear_extensions::mle::FieldType;
 use rayon::{
@@ -27,6 +27,7 @@ use super::hash::write_digest_to_transcript;
 pub struct MerkleTree<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<Vec<Digest<E::BaseField>>>,
     leaves: Vec<FieldType<E>>,
@@ -35,6 +36,7 @@ where
 impl<E: ExtensionField> MerkleTree<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn compute_inner(leaves: &FieldType<E>) -> Vec<Vec<Digest<E::BaseField>>> {
         merkelize::<E>(&[leaves])
@@ -165,6 +167,7 @@ where
 impl<E: ExtensionField> MerklePathWithoutLeafOrRoot<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn new(inner: Vec<Digest<E::BaseField>>) -> Self {
         Self { inner }
@@ -253,7 +256,10 @@ where
 
 /// Merkle tree construction
 /// TODO: Support merkelizing mixed-type values
-fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::BaseField>>> {
+fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::BaseField>>>
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     #[cfg(feature = "sanity-check")]
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
@@ -321,7 +327,10 @@ fn merkelize<E: ExtensionField>(values: &[&FieldType<E>]) -> Vec<Vec<Digest<E::B
     tree
 }
 
-fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Digest<E::BaseField>>> {
+fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Digest<E::BaseField>>>
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     #[cfg(feature = "sanity-check")]
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
@@ -366,7 +375,10 @@ fn merkelize_base<E: ExtensionField>(values: &[&[E::BaseField]]) -> Vec<Vec<Dige
     tree
 }
 
-fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseField>>> {
+fn merkelize_ext<E: ExtensionField>(values: &[&[E]]) -> Vec<Vec<Digest<E::BaseField>>>
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     #[cfg(feature = "sanity-check")]
     for i in 0..(values.len() - 1) {
         assert_eq!(values[i].len(), values[i + 1].len());
@@ -416,7 +428,9 @@ fn authenticate_merkle_path_root<E: ExtensionField>(
     leaves: FieldType<E>,
     x_index: usize,
     root: &Digest<E::BaseField>,
-) {
+) where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     let mut x_index = x_index;
     assert_eq!(leaves.len(), 2);
     let mut hash = match leaves {
@@ -444,7 +458,9 @@ fn authenticate_merkle_path_root_batch<E: ExtensionField>(
     right: FieldType<E>,
     x_index: usize,
     root: &Digest<E::BaseField>,
-) {
+) where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     let mut x_index = x_index;
     let mut hash = if left.len() > 1 {
         match (left, right) {

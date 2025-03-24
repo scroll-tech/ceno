@@ -14,7 +14,10 @@ pub struct PoseidonHash<F> {
 
 impl<F: PoseidonField> PoseidonHash<F> {}
 
-impl<F: PoseidonField> PoseidonHash<F> {
+impl<F: PoseidonField> PoseidonHash<F>
+where
+    [(); F::PERM_WIDTH + F::RATE]:,
+{
     pub fn two_to_one(left: &Digest<F>, right: &Digest<F>) -> Digest<F> {
         compress::<F>(left, right)
     }
@@ -36,7 +39,10 @@ impl<F: PoseidonField> PoseidonHash<F> {
     }
 }
 
-pub fn hash_n_to_m_no_pad<F: PoseidonField>(inputs: &[F], num_outputs: usize) -> Vec<F> {
+pub fn hash_n_to_m_no_pad<F: PoseidonField>(inputs: &[F], num_outputs: usize) -> Vec<F>
+where
+    [(); F::PERM_WIDTH + F::RATE]:,
+{
     let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
     challenger.observe_slice(inputs);
     challenger.sample_vec(num_outputs)
@@ -45,25 +51,37 @@ pub fn hash_n_to_m_no_pad<F: PoseidonField>(inputs: &[F], num_outputs: usize) ->
 pub fn hash_n_to_m_no_pad_ext<F: PoseidonField, E: ExtensionField<BaseField = F>>(
     inputs: &[E],
     num_outputs: usize,
-) -> Vec<F> {
+) -> Vec<F>
+where
+    [(); F::PERM_WIDTH + F::RATE]:,
+{
     let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
     challenger.observe_ext_slice(inputs);
     challenger.sample_vec(num_outputs)
 }
 
-pub fn hash_n_to_hash_no_pad<F: PoseidonField>(inputs: &[F]) -> Digest<F> {
+pub fn hash_n_to_hash_no_pad<F: PoseidonField>(inputs: &[F]) -> Digest<F>
+where
+    [(); F::PERM_WIDTH + F::RATE]:,
+{
     hash_n_to_m_no_pad(inputs, DIGEST_WIDTH).try_into().unwrap()
 }
 
 pub fn hash_n_to_hash_no_pad_ext<F: PoseidonField, E: ExtensionField<BaseField = F>>(
     inputs: &[E],
-) -> Digest<F> {
+) -> Digest<F>
+where
+    [(); F::PERM_WIDTH + F::RATE]:,
+{
     hash_n_to_m_no_pad_ext(inputs, DIGEST_WIDTH)
         .try_into()
         .unwrap()
 }
 
-pub fn compress<F: PoseidonField>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
+pub fn compress<F: PoseidonField>(x: &Digest<F>, y: &Digest<F>) -> Digest<F>
+where
+    [(); F::PERM_WIDTH + F::RATE]:,
+{
     let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
     challenger.observe_slice(x.elements());
     challenger.observe_slice(y.elements());

@@ -5,11 +5,17 @@ use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
 
 #[derive(Clone)]
-pub struct BasicTranscript<E: ExtensionField> {
+pub struct BasicTranscript<E: ExtensionField>
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     challenger: DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>,
 }
 
-impl<E: ExtensionField> BasicTranscript<E> {
+impl<E: ExtensionField> BasicTranscript<E>
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
         let mut challenger = DefaultChallenger::<E::BaseField, <E::BaseField as PoseidonField>::T>::new_poseidon_default();
@@ -19,7 +25,10 @@ impl<E: ExtensionField> BasicTranscript<E> {
     }
 }
 
-impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
+impl<E: ExtensionField> Transcript<E> for BasicTranscript<E>
+where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+{
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
         self.challenger.observe_slice(elements);
     }
@@ -55,4 +64,7 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 }
 
-impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}
+impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> where
+    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:
+{
+}

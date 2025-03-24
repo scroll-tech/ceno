@@ -1,3 +1,4 @@
+pub use p3_baby_bear as babybear;
 pub use p3_challenger as challenger;
 pub use p3_field as field;
 pub use p3_goldilocks as goldilocks;
