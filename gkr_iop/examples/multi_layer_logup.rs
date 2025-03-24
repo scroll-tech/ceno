@@ -2,18 +2,18 @@ use std::{marker::PhantomData, mem, sync::Arc};
 
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     evaluation::{EvalExpression, PointAndEval},
     gkr::{
-        GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
+        GKRCircuitWitness, GKRProverOutput,
     },
+    ProtocolBuilder, ProtocolWitnessGenerator,
 };
-use itertools::{Itertools, izip};
-use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
+use itertools::{izip, Itertools};
+use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
 use p3_goldilocks::Goldilocks;
-use rand::{Rng, rngs::OsRng};
+use rand::{rngs::OsRng, Rng};
 use subprotocols::expression::{Constant, Expression};
 use transcript::{BasicTranscript, Transcript};
 
@@ -64,14 +64,15 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
         let height = self.params.height;
         let lookup_challenge = Expression::Const(self.lookup_challenge.clone());
 
-        self.output_cumulative_sum = chip.allocate_output_evals();
+        self.output_cumulative_sum = chip.allocate_output_evals::<2>().try_into().unwrap();
 
         // Tower layers
         let ([updated_table, count], challenges) = (0..height).fold(
             (self.output_cumulative_sum.clone(), vec![]),
             |([den, num], challenges), i| {
                 let [den_0, den_1, num_0, num_1] = if i == height - 1 {
-                    // Allocate witnesses in the extension field, except numerator inputs in the base field.
+                    // Allocate witnesses in the extension field, except numerator inputs in the
+                    // base field.
                     let ([num_0, num_1], [den_0, den_1]) = chip.allocate_wits_in_layer();
                     [den_0, den_1, num_0, num_1]
                 } else {
@@ -86,17 +87,20 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
                     num_1.0.into(),
                 ];
                 let (in_bases, in_exts) = if i == height - 1 {
-                    (vec![num_0.1.clone(), num_1.1.clone()], vec![
-                        den_0.1.clone(),
-                        den_1.1.clone(),
-                    ])
+                    (
+                        vec![num_0.1.clone(), num_1.1.clone()],
+                        vec![den_0.1.clone(), den_1.1.clone()],
+                    )
                 } else {
-                    (vec![], vec![
-                        den_0.1.clone(),
-                        den_1.1.clone(),
-                        num_0.1.clone(),
-                        num_1.1.clone(),
-                    ])
+                    (
+                        vec![],
+                        vec![
+                            den_0.1.clone(),
+                            den_1.1.clone(),
+                            num_0.1.clone(),
+                            num_1.1.clone(),
+                        ],
+                    )
                 };
                 chip.add_layer(Layer::new(
                     format!("Tower_layer_{}", i),
@@ -109,6 +113,7 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
                     in_bases,
                     in_exts,
                     vec![den, num],
+                    vec![],
                 ));
                 let [challenge] = chip.allocate_challenges();
                 (
@@ -138,6 +143,7 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
             vec![table.1.clone()],
             vec![],
             vec![updated_table],
+            vec![],
         ));
 
         chip.allocate_base_opening(self.committed_table_id, table.1);

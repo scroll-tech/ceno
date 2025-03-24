@@ -33,12 +33,13 @@ pub struct Layer {
     pub ty: LayerType,
     /// Challenges generated at the beginning of the layer protocol.
     pub challenges: Vec<Constant>,
-    /// Expressions to prove in this layer. For zerocheck and linear layers, each
-    /// expression corresponds to an output. While in sumcheck, there is only 1
-    /// expression, which corresponds to the sum of all outputs. This design is
-    /// for the convenience when building the following expression:
-    ///     `e_0 + beta * e_1 = sum_x (eq(p_0, x) + beta * eq(p_1, x)) expr(x)`.
-    /// where `vec![e_0, beta * e_1]` will be the output evaluation expressions.
+    /// Expressions to prove in this layer. For zerocheck and linear layers,
+    /// each expression corresponds to an output. While in sumcheck, there
+    /// is only 1 expression, which corresponds to the sum of all outputs.
+    /// This design is for the convenience when building the following
+    /// expression:     `e_0 + beta * e_1 = sum_x (eq(p_0, x) + beta *
+    /// eq(p_1, x)) expr(x)`. where `vec![e_0, beta * e_1]` will be the
+    /// output evaluation expressions.
     pub exprs: Vec<Expression>,
     /// Positions to place the evaluations of the base inputs of this layer.
     pub in_bases: Vec<EvalExpression>,
@@ -47,6 +48,9 @@ pub struct Layer {
     /// The expressions of the evaluations from the succeeding layers, which are
     /// connected to the outputs of this layer.
     pub outs: Vec<EvalExpression>,
+
+    // For debugging purposes
+    pub expr_names: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -66,7 +70,15 @@ impl Layer {
         in_bases: Vec<EvalExpression>,
         in_exts: Vec<EvalExpression>,
         outs: Vec<EvalExpression>,
+        expr_names: Vec<String>,
     ) -> Self {
+        let mut expr_names = expr_names;
+        if expr_names.len() < exprs.len() {
+            expr_names.extend(vec![
+                "unavailable".to_string();
+                exprs.len() - expr_names.len()
+            ]);
+        }
         Self {
             name,
             ty,
@@ -75,6 +87,7 @@ impl Layer {
             in_bases,
             in_exts,
             outs,
+            expr_names,
         }
     }
 
@@ -208,10 +221,10 @@ impl Layer {
         ext_mle_evals: &[E],
         point: &Point<E>,
     ) {
-        for (value, pos) in izip!(chain![base_mle_evals, ext_mle_evals], chain![
-            &self.in_bases,
-            &self.in_exts
-        ]) {
+        for (value, pos) in izip!(
+            chain![base_mle_evals, ext_mle_evals],
+            chain![&self.in_bases, &self.in_exts]
+        ) {
             *(pos.entry_mut(claims)) = PointAndEval {
                 point: point.clone(),
                 eval: *value,

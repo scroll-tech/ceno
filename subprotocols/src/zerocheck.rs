@@ -196,6 +196,7 @@ where
     inv_of_one_minus_points: Vec<Vec<E>>,
     exprs: Vec<(Expression, &'a [E])>,
     proof: SumcheckProof<E>,
+    expr_names: Vec<String>,
     challenges: &'a [E],
     transcript: &'a mut Trans,
 }
@@ -208,6 +209,7 @@ where
     pub fn new(
         sigmas: Vec<E>,
         exprs: Vec<Expression>,
+        expr_names: Vec<String>,
         points: Vec<&'a [E]>,
         proof: SumcheckProof<E>,
         challenges: &'a [E],
@@ -235,6 +237,7 @@ where
             proof,
             challenges,
             transcript,
+            expr_names,
         }
     }
 
@@ -246,6 +249,7 @@ where
             proof,
             challenges,
             transcript,
+            expr_names,
             ..
         } = self;
         let SumcheckProof {
@@ -285,7 +289,7 @@ where
         );
 
         // Check the final evaluations.
-        for (expected_claim, (expr, _)) in izip!(expected_claims, exprs) {
+        for (expected_claim, (expr, _), expr_name) in izip!(expected_claims, exprs, expr_names) {
             let got_claim = expr.evaluate(&ext_mle_evals, &base_mle_evals, &[], &[], challenges);
 
             if expected_claim != got_claim {
@@ -293,6 +297,7 @@ where
                     expr,
                     expected_claim,
                     got_claim,
+                    expr_name.clone(),
                 ));
             }
         }
@@ -352,6 +357,7 @@ mod test {
         let verifier = ZerocheckVerifierState::new(
             sigmas,
             exprs,
+            vec![],
             points,
             proof,
             &challenges,
