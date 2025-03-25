@@ -158,6 +158,19 @@ impl<E: ExtensionField> Committer<E> {
         let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
             let ood_points =
                 transcript.sample_and_append_vec(b"ood_points", self.0.committment_ood_samples);
+            #[cfg(feature = "parallel")]
+            let ood_answers = ood_points
+                .par_iter()
+                .flat_map(|ood_point| {
+                    polys.par_iter().map(|poly| {
+                        poly.evaluate(&expand_from_univariate(
+                            *ood_point,
+                            self.0.mv_parameters.num_variables,
+                        ))
+                    })
+                })
+                .collect::<Vec<_>>();
+            #[cfg(not(feature = "parallel"))]
             let ood_answers = ood_points
                 .iter()
                 .flat_map(|ood_point| {
@@ -178,8 +191,27 @@ impl<E: ExtensionField> Committer<E> {
             )
         };
 
+        #[cfg(feature = "parallel")]
         let polys = polys
             .into_par_iter()
+            .map(|poly| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    poly.num_vars(),
+                    match poly.evaluations() {
+                        FieldType::Base(evals) => evals
+                            .par_iter()
+                            .map(|e| E::from_base(e))
+                            .collect::<Vec<_>>(),
+                        FieldType::Ext(evals) => evals.clone(),
+                        _ => panic!("Invalid field type"),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        #[cfg(not(feature = "parallel"))]
+        let polys = polys
+            .into_iter()
             .map(|poly| {
                 DenseMultilinearExtension::from_evaluations_ext_vec(
                     poly.num_vars(),
