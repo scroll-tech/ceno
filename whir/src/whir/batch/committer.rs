@@ -101,6 +101,8 @@ impl<E: ExtensionField> Committer<E> {
         // These stacking operations are bottleneck of the commitment process.
         // Try to finish the tasks with as few allocations as possible.
         let stack_evaluations_timer = start_timer!(|| "Stack Evaluations");
+        let domain_gen_inverse = self.0.starting_domain.backing_domain_group_gen().inverse();
+        let domain_gen = self.0.starting_domain.backing_domain_group_gen();
         let folded_evals = evals
             .into_par_iter()
             .map(|evals| {
@@ -114,8 +116,8 @@ impl<E: ExtensionField> Committer<E> {
                 let ret = restructure_evaluations(
                     evals,
                     self.0.fold_optimisation,
-                    self.0.starting_domain.backing_domain_group_gen(),
-                    self.0.starting_domain.backing_domain_group_gen().inverse(),
+                    domain_gen,
+                    domain_gen_inverse,
                     self.0.folding_factor.at_round(0),
                 );
                 end_timer!(restructure_evaluations_timer);
