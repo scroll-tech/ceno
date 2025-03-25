@@ -443,7 +443,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                                     &[],
                                     pi,
                                     challenges,
-                                    expr,
+                                    &expr,
                                 )
                         })
                         .sum::<E>()
@@ -476,7 +476,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
         if cs.assert_zero_expressions.iter().any(|expr| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, &expr)
                 != E::ZERO
         }) {
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
