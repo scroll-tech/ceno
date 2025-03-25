@@ -25,7 +25,7 @@ where
 
 impl<F: PoseidonField> DefaultChallenger<F> {
     pub fn new_poseidon_default() -> Self {
-        DefaultChallenger::new(F::get_perm())
+        DefaultChallenger::new(F::get_default_challenger())
     }
 }
 

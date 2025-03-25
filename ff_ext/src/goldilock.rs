@@ -46,7 +46,7 @@ pub mod impl_goldilocks {
         type P = Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>;
         type T =
             DuplexChallenger<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>;
-        fn get_perm() -> Self::T {
+        fn get_default_challenger() -> Self::T {
             let perm = Poseidon2GoldilocksHL::new(
                 ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(
                     HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
