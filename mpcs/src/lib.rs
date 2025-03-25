@@ -1,5 +1,4 @@
 #![deny(clippy::cargo)]
-
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
@@ -393,8 +392,6 @@ pub mod test_util {
     use transcript::Transcript;
     #[cfg(test)]
     use witness::RowMajorMatrix;
-
-    
 
     pub fn setup_pcs<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         num_vars: usize,

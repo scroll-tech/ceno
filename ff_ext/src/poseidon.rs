@@ -14,8 +14,6 @@ pub trait FieldChallengerExt<F: PoseidonField>: FieldChallenger<F> {
 }
 
 pub trait PoseidonField: PrimeField + SmallField {
-    const PERM_WIDTH: usize;
-    const RATE: usize;
     type P: Clone;
     type T: FieldChallenger<Self> + Clone;
     fn get_perm() -> Self::T;

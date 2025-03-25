@@ -121,9 +121,3 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
     /// Convert a field elements to a u64 vector
     fn to_canonical_u64_vec(&self) -> Vec<u64>;
 }
-
-// #[cfg(not(feature = "babybear"))]
-// pub trait ExtensionField: ExtensionFieldInner<8> {}
-
-// #[cfg(feature = "babybear")]
-// pub trait ExtensionField: ExtensionFieldInner<16> {}

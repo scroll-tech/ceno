@@ -92,8 +92,6 @@ pub mod impl_babybear {
     }
 
     impl PoseidonField for BabyBear {
-        const PERM_WIDTH: usize = POSEIDON2_BABYBEAR_WIDTH;
-        const RATE: usize = POSEIDON2_BABYBEAR_RATE;
         type P = Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>;
         type T = DuplexChallenger<Self, Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE>;
         fn get_perm() -> Self::T {

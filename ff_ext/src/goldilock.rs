@@ -43,8 +43,6 @@ pub mod impl_goldilocks {
     pub const POSEIDON2_GOLDILICK_RATE: usize = 4;
 
     impl PoseidonField for Goldilocks {
-        const PERM_WIDTH: usize = POSEIDON2_GOLDILICK_WIDTH;
-        const RATE: usize = POSEIDON2_GOLDILICK_RATE;
         type P = Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>;
         type T =
             DuplexChallenger<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>;
