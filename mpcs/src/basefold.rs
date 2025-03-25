@@ -26,7 +26,7 @@ pub use encoding::{
     Basecode, BasecodeDefaultSpec, EncodingProverParameters, EncodingScheme, RSCode,
     RSCodeDefaultSpec,
 };
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
 use query_phase::{
     BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,

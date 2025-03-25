@@ -10,7 +10,7 @@ use crate::util::{
 };
 use ark_std::{end_timer, start_timer};
 use core::fmt::Debug;
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;

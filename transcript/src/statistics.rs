@@ -1,5 +1,5 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use std::cell::RefCell;
 
 #[derive(Debug, Default)]

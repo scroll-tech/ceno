@@ -9,7 +9,6 @@ pub mod impl_babybear {
             TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
-        symmetric::CryptographicPermutation,
     };
     use rand_core::OsRng;
 

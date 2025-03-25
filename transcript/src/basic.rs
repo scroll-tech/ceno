@@ -1,4 +1,4 @@
-use ff_ext::{ExtensionField, FieldChallengerExt, PoseidonField};
+use ff_ext::{ExtensionField, FieldChallengerExt};
 use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 
 use crate::{Challenge, ForkableTranscript, Transcript};

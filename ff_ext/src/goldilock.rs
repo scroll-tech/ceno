@@ -17,7 +17,6 @@ pub mod impl_goldilocks {
             HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
         },
         poseidon2::ExternalLayerConstants,
-        symmetric::CryptographicPermutation,
     };
 
     pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;

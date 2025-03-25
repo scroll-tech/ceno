@@ -1,6 +1,6 @@
 #![deny(clippy::cargo)]
 
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
@@ -394,8 +394,7 @@ pub mod test_util {
     #[cfg(test)]
     use witness::RowMajorMatrix;
 
-    #[cfg(test)]
-    use ff_ext::PoseidonField;
+    
 
     pub fn setup_pcs<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         num_vars: usize,

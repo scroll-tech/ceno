@@ -1,6 +1,5 @@
 use core::fmt::Debug;
-use ff_ext::{ExtensionField, FieldChallengerExt, PoseidonField};
-use p3::symmetric::CryptographicPermutation;
+use ff_ext::{FieldChallengerExt, PoseidonField};
 use std::ops::{Deref, DerefMut};
 
 pub use p3::challenger::*;

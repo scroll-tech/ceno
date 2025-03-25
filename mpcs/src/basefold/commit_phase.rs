@@ -14,7 +14,7 @@ use crate::util::{
     merkle_tree::MerkleTree,
 };
 use ark_std::{end_timer, start_timer};
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
 use transcript::Transcript;

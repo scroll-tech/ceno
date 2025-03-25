@@ -1,4 +1,4 @@
-use p3::{challenger::FieldChallenger, field::PrimeField, symmetric::CryptographicPermutation};
+use p3::{challenger::FieldChallenger, field::PrimeField};
 
 use crate::{ExtensionField, SmallField};
 

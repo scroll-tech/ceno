@@ -3,7 +3,7 @@ use crate::{
     util::{hash::Digest, merkle_tree::MerkleTree},
 };
 use core::fmt::Debug;
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 
