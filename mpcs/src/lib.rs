@@ -585,15 +585,16 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
-        println!("Start testing simple batch commit open verify.");
+        use rand::thread_rng;
+
+        let mut rng = thread_rng();
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             println!("Setup finished.");
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
-                let rmm =
-                    RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
+                let rmm = RowMajorMatrix::<E::BaseField>::rand(&mut rng, 1 << num_vars, batch_size);
                 let polys = rmm.to_mles();
                 let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
