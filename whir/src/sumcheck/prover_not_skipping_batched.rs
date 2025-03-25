@@ -61,12 +61,10 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
 #[cfg(test)]
 mod tests {
     use ff_ext::{ExtensionField, GoldilocksExt2};
-    use goldilocks::Goldilocks;
     use multilinear_extensions::{
         mle::{DenseMultilinearExtension, FieldType, MultilinearExtension as _},
         virtual_poly::eq_eval,
     };
-    use nimue_pow::blake3::Blake3PoW;
     use p3::field::PrimeCharacteristicRing;
     use transcript::{BasicTranscript, Transcript};
 
