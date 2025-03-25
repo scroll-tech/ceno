@@ -142,10 +142,10 @@ fn main() {
         platform,
         hints,
         max_steps,
-        Checkpoint::PrepSanityCheck,
+        Checkpoint::PrepProof,
     );
 
-    let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
+    let (mut zkvm_proof, verifier) = state.expect("PrepProof should yield state.");
 
     // collect zkvm proof here
 
