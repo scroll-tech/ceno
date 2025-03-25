@@ -1,5 +1,5 @@
 #![deny(clippy::cargo)]
-#![feature(generic_const_exprs)]
+
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::Itertools;
 use multilinear_extensions::mle::DenseMultilinearExtension;
@@ -227,7 +227,6 @@ pub trait NoninteractivePCS<E: ExtensionField>:
     PolynomialCommitmentScheme<E, CommitmentChunk = Digest<E::BaseField>>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn ni_open(
         pp: &Self::ProverParam,
@@ -464,7 +463,6 @@ pub mod test_util {
         num_vars_end: usize,
     ) where
         Pcs: PolynomialCommitmentScheme<E>,
-        [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
@@ -513,7 +511,6 @@ pub mod test_util {
     ) where
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
-        [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
     {
         for num_vars in num_vars_start..num_vars_end {
             let batch_size = 2;
@@ -602,7 +599,6 @@ pub mod test_util {
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
-        [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
     {
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);

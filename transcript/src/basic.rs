@@ -1,34 +1,25 @@
-use ff_ext::{ExtensionField, PoseidonField};
-use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger, FieldChallengerExt};
+use ff_ext::{ExtensionField, FieldChallengerExt, PoseidonField};
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
 
 #[derive(Clone)]
-pub struct BasicTranscript<E: ExtensionField>
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
-    challenger: DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>,
+pub struct BasicTranscript<E: ExtensionField> {
+    challenger: DefaultChallenger<E::BaseField>,
 }
 
-impl<E: ExtensionField> BasicTranscript<E>
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+impl<E: ExtensionField> BasicTranscript<E> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
-        let mut challenger = DefaultChallenger::<E::BaseField, <E::BaseField as PoseidonField>::T>::new_poseidon_default();
+        let mut challenger = DefaultChallenger::<E::BaseField>::new_poseidon_default();
         let label_f = E::BaseField::bytes_to_field_elements(label);
         challenger.observe_slice(label_f.as_slice());
         Self { challenger }
     }
 }
 
-impl<E: ExtensionField> Transcript<E> for BasicTranscript<E>
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
         self.challenger.observe_slice(elements);
     }
@@ -64,7 +55,4 @@ where
     }
 }
 
-impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:
-{
-}
+impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}

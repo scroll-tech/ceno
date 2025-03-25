@@ -40,7 +40,6 @@ pub fn commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let timer = start_timer!(|| "Commit phase");
     #[cfg(feature = "sanity-check")]
@@ -185,7 +184,6 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let timer = start_timer!(|| "Batch Commit phase");
     assert_eq!(point.len(), num_vars);
@@ -353,7 +351,6 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) -> (Vec<MerkleTree<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let timer = start_timer!(|| "Simple batch commit phase");
     assert_eq!(point.len(), num_vars);

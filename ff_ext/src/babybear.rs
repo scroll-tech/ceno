@@ -1,16 +1,21 @@
 pub mod impl_babybear {
+    use crate::array_try_from_uniform_bytes;
     use p3::{
         self,
         babybear::{BabyBear, Poseidon2BabyBear},
+        challenger::DuplexChallenger,
         field::{
-            BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32, TwoAdicField,
+            BasedVectorSpace, Field, PackedValue, PrimeCharacteristicRing, PrimeField32,
+            TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
+        symmetric::CryptographicPermutation,
     };
     use rand_core::OsRng;
 
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, PoseidonField, SmallField,
+        impl_from_uniform_bytes_for_binomial_extension,
     };
 
     pub type BabyBearExt4 = BinomialExtensionField<BabyBear, 4>;
@@ -39,9 +44,16 @@ pub mod impl_babybear {
     impl PoseidonField for BabyBear {
         const PERM_WIDTH: usize = POSEIDON2_BABYBEAR_WIDTH;
         const RATE: usize = POSEIDON2_BABYBEAR_RATE;
-        type T = Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>;
+        type P = Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>;
+        type T = DuplexChallenger<Self, Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE>;
         fn get_perm() -> Self::T {
-            Poseidon2BabyBear::new_from_rng_128(&mut OsRng)
+            let p = Poseidon2BabyBear::new_from_rng_128(&mut OsRng);
+            DuplexChallenger::<
+                Self,
+                Self::P,
+                POSEIDON2_BABYBEAR_WIDTH,
+                POSEIDON2_BABYBEAR_RATE,
+            >::new(p)
         }
     }
 
@@ -77,17 +89,17 @@ pub mod impl_babybear {
         }
     }
 
+    impl_from_uniform_bytes_for_binomial_extension!(p3::babybear::BabyBear, 4);
+
     impl ExtensionField for BabyBearExt4 {
         const DEGREE: usize = 4;
         const MULTIPLICATIVE_GENERATOR: Self = <BabyBearExt4 as Field>::GENERATOR;
         const TWO_ADICITY: usize = BabyBear::TWO_ADICITY;
         // Passing two-adacity itself to this function will get the root of unity
         // with the largest order, i.e., order = 2^two-adacity.
-        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
-            BabyBear::two_adic_generator_const(BabyBear::TWO_ADICITY);
-        const TWO_ADIC_ROOT_OF_UNITY: Self = BinomialExtensionField::new_unchecked(
-            BabyBear::ext_two_adic_generator_const(BabyBear::TWO_ADICITY),
-        );
+        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField = BabyBear::new(0x78000000);
+        const TWO_ADIC_ROOT_OF_UNITY: Self =
+            BinomialExtensionField::new_unchecked([BabyBear::new(0x78000000); 4]);
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <BabyBear as BinomiallyExtendable<4>>::W;

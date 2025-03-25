@@ -36,7 +36,6 @@ pub fn prover_query_phase<E: ExtensionField>(
 ) -> QueriesResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
@@ -68,7 +67,6 @@ pub fn batch_prover_query_phase<E: ExtensionField>(
 ) -> BatchedQueriesResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
@@ -99,7 +97,6 @@ pub fn simple_batch_prover_query_phase<E: ExtensionField>(
 ) -> SimpleBatchQueriesResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
 
@@ -138,7 +135,6 @@ pub fn verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     eval: &E,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let timer = start_timer!(|| "Verifier query phase");
 
@@ -212,7 +208,6 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     eval: &E,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let timer = start_timer!(|| "Verifier batch query phase");
     let encode_timer = start_timer!(|| "Encode final codeword");
@@ -289,7 +284,6 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     evals: &[E],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let timer = start_timer!(|| "Verifier query phase");
 
@@ -359,7 +353,6 @@ fn basefold_get_query<E: ExtensionField>(
 ) -> SingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let mut index = x_index;
     let p1 = index | 1;
@@ -407,7 +400,6 @@ fn batch_basefold_get_query<E: ExtensionField>(
 ) -> BatchedSingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let mut oracle_list_queries = Vec::with_capacity(trees.len());
 
@@ -462,7 +454,6 @@ fn simple_batch_basefold_get_query<E: ExtensionField>(
 ) -> SimpleBatchSingleQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     let mut index = x_index;
     let p1 = index | 1;
@@ -648,7 +639,6 @@ where
 impl<E: ExtensionField> CodewordSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
@@ -674,7 +664,6 @@ where
 struct OracleListQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<CodewordSingleQueryResult<E>>,
 }
@@ -687,7 +676,6 @@ where
 struct CommitmentsQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<CodewordSingleQueryResult<E>>,
 }
@@ -700,7 +688,6 @@ where
 struct OracleListQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
 }
@@ -713,7 +700,6 @@ where
 struct CommitmentsQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>,
 }
@@ -721,7 +707,6 @@ where
 impl<E: ExtensionField> ListQueryResult<E> for OracleListQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
         &self.inner
@@ -735,7 +720,6 @@ where
 impl<E: ExtensionField> ListQueryResult<E> for CommitmentsQueryResult<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResult<E>> {
         &self.inner
@@ -749,7 +733,6 @@ where
 impl<E: ExtensionField> ListQueryResultWithMerklePath<E> for OracleListQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E>> {
         &self.inner
@@ -763,7 +746,6 @@ where
 impl<E: ExtensionField> ListQueryResultWithMerklePath<E> for CommitmentsQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn get_inner(&self) -> &Vec<CodewordSingleQueryResultWithMerklePath<E>> {
         &self.inner
@@ -799,7 +781,6 @@ where
 trait ListQueryResultWithMerklePath<E: ExtensionField>: Sized
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn new(inner: Vec<CodewordSingleQueryResultWithMerklePath<E>>) -> Self;
 
@@ -844,7 +825,6 @@ where
 struct SingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     oracle_query: OracleListQueryResult<E>,
     commitment_query: CodewordSingleQueryResult<E>,
@@ -858,7 +838,6 @@ where
 struct SingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     oracle_query: OracleListQueryResultWithMerklePath<E>,
     commitment_query: CodewordSingleQueryResultWithMerklePath<E>,
@@ -867,7 +846,6 @@ where
 impl<E: ExtensionField> SingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn from_single_query_result(
         single_query_result: SingleQueryResult<E>,
@@ -948,7 +926,6 @@ where
 pub struct QueriesResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<(usize, SingleQueryResult<E>)>,
 }
@@ -961,7 +938,6 @@ where
 pub struct QueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<(usize, SingleQueryResultWithMerklePath<E>)>,
 }
@@ -969,7 +945,6 @@ where
 impl<E: ExtensionField> QueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn empty() -> Self {
         Self { inner: vec![] }
@@ -1036,7 +1011,6 @@ where
 struct BatchedSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     oracle_query: OracleListQueryResult<E>,
     commitments_query: CommitmentsQueryResult<E>,
@@ -1050,7 +1024,6 @@ where
 struct BatchedSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     oracle_query: OracleListQueryResultWithMerklePath<E>,
     commitments_query: CommitmentsQueryResultWithMerklePath<E>,
@@ -1059,7 +1032,6 @@ where
 impl<E: ExtensionField> BatchedSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn from_batched_single_query_result(
         batched_single_query_result: BatchedSingleQueryResult<E>,
@@ -1190,7 +1162,6 @@ where
 pub struct BatchedQueriesResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<(usize, BatchedSingleQueryResult<E>)>,
 }
@@ -1203,7 +1174,6 @@ where
 pub struct BatchedQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<(usize, BatchedSingleQueryResultWithMerklePath<E>)>,
 }
@@ -1211,7 +1181,6 @@ where
 impl<E: ExtensionField> BatchedQueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn from_batched_query_result(
         batched_query_result: BatchedQueriesResult<E>,
@@ -1334,7 +1303,6 @@ where
 impl<E: ExtensionField> SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn check_merkle_path(&self, root: &Digest<E::BaseField>) {
         // let timer = start_timer!(|| "CodewordSingleQuery::Check Merkle Path");
@@ -1368,7 +1336,6 @@ where
 struct SimpleBatchSingleQueryResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     oracle_query: OracleListQueryResult<E>,
     commitment_query: SimpleBatchCommitmentSingleQueryResult<E>,
@@ -1382,7 +1349,6 @@ where
 struct SimpleBatchSingleQueryResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     oracle_query: OracleListQueryResultWithMerklePath<E>,
     commitment_query: SimpleBatchCommitmentSingleQueryResultWithMerklePath<E>,
@@ -1391,7 +1357,6 @@ where
 impl<E: ExtensionField> SimpleBatchSingleQueryResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn from_single_query_result(
         single_query_result: SimpleBatchSingleQueryResult<E>,
@@ -1473,7 +1438,6 @@ where
 pub struct SimpleBatchQueriesResult<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<(usize, SimpleBatchSingleQueryResult<E>)>,
 }
@@ -1486,7 +1450,6 @@ where
 pub struct SimpleBatchQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     inner: Vec<(usize, SimpleBatchSingleQueryResultWithMerklePath<E>)>,
 }
@@ -1494,7 +1457,6 @@ where
 impl<E: ExtensionField> SimpleBatchQueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn from_query_result(
         query_result: SimpleBatchQueriesResult<E>,

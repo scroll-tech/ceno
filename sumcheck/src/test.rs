@@ -22,10 +22,7 @@ fn test_sumcheck_with_different_degree() {
     }
 }
 
-fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize])
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
     let mut rng = test_rng();
     let degree = 2;
     let num_multiplicands_range = (degree, degree + 1);
@@ -90,9 +87,7 @@ fn test_sumcheck<E: ExtensionField>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
-) where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+) {
     let mut rng = test_rng();
     let mut transcript = BasicTranscript::new(b"test");
 
@@ -121,9 +116,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     nv: usize,
     num_multiplicands_range: (usize, usize),
     num_products: usize,
-) where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+) {
     let mut rng = test_rng();
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
@@ -172,10 +165,7 @@ fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_trivial_polynomial_helper<E: ExtensionField>()
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+fn test_trivial_polynomial_helper<E: ExtensionField>() {
     let nv = 1;
     let num_multiplicands_range = (3, 5);
     let num_products = 5;
@@ -189,10 +179,7 @@ fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
 }
 
-fn test_normal_polynomial_helper<E: ExtensionField>()
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+fn test_normal_polynomial_helper<E: ExtensionField>() {
     let nv = 12;
     let num_multiplicands_range = (3, 5);
     let num_products = 5;
@@ -206,10 +193,7 @@ fn test_extract_sum() {
     test_extract_sum_helper::<GoldilocksExt2>();
 }
 
-fn test_extract_sum_helper<E: ExtensionField>()
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+fn test_extract_sum_helper<E: ExtensionField>() {
     let mut rng = test_rng();
     let mut transcript = BasicTranscript::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);

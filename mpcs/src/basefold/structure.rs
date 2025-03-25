@@ -62,7 +62,6 @@ pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
 pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub(crate) codeword_tree: MerkleTree<E>,
     pub(crate) polynomials_bh_evals: Vec<FieldType<E>>,
@@ -74,7 +73,6 @@ where
 impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
@@ -137,7 +135,6 @@ where
 impl<E: ExtensionField> From<BasefoldCommitmentWithWitness<E>> for Digest<E::BaseField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn from(val: BasefoldCommitmentWithWitness<E>) -> Self {
         val.get_root_as()
@@ -147,7 +144,6 @@ where
 impl<E: ExtensionField> From<&BasefoldCommitmentWithWitness<E>> for BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn from(val: &BasefoldCommitmentWithWitness<E>) -> Self {
         val.to_commitment()
@@ -200,7 +196,6 @@ where
 impl<E: ExtensionField> PartialEq for BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn eq(&self, other: &Self) -> bool {
         self.get_codewords().eq(other.get_codewords())
@@ -208,10 +203,8 @@ where
     }
 }
 
-impl<E: ExtensionField> Eq for BasefoldCommitmentWithWitness<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
+impl<E: ExtensionField> Eq for BasefoldCommitmentWithWitness<E> where
+    E::BaseField: Serialize + DeserializeOwned
 {
 }
 
@@ -284,7 +277,6 @@ where
 impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     fn as_ref(&self) -> &[Digest<E::BaseField>] {
         let root = self.get_root_ref();
@@ -300,7 +292,6 @@ where
 pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     Single(QueriesResultWithMerklePath<E>),
     Batched(BatchedQueriesResultWithMerklePath<E>),
@@ -310,7 +301,6 @@ where
 impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn as_single(&self) -> &QueriesResultWithMerklePath<E> {
         match self {
@@ -342,7 +332,6 @@ where
 pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) roots: Vec<Digest<E::BaseField>>,
@@ -355,7 +344,6 @@ where
 impl<E: ExtensionField> BasefoldProof<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     pub fn trivial(evals: Vec<FieldType<E>>) -> Self {
         Self {

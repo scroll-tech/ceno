@@ -2,11 +2,14 @@ pub mod impl_goldilocks {
 
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, SmallField,
+        array_try_from_uniform_bytes, impl_from_uniform_bytes_for_binomial_extension,
         poseidon::{PoseidonField, new_array},
     };
     use p3::{
+        challenger::DuplexChallenger,
         field::{
-            BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
+            BasedVectorSpace, Field, PackedValue, PrimeCharacteristicRing, PrimeField64,
+            TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
         goldilocks::{
@@ -14,6 +17,7 @@ pub mod impl_goldilocks {
             HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
         },
         poseidon2::ExternalLayerConstants,
+        symmetric::CryptographicPermutation,
     };
 
     pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
@@ -42,17 +46,24 @@ pub mod impl_goldilocks {
     impl PoseidonField for Goldilocks {
         const PERM_WIDTH: usize = POSEIDON2_GOLDILICK_WIDTH;
         const RATE: usize = POSEIDON2_GOLDILICK_RATE;
-        type T = Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>;
+        type P = Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>;
+        type T =
+            DuplexChallenger<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>;
         fn get_perm() -> Self::T {
-            Poseidon2GoldilocksHL::new(
+            let perm = Poseidon2GoldilocksHL::new(
                 ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(
                     HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
                     new_array,
                 ),
                 new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
+            );
+            DuplexChallenger::<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>::new(
+                perm,
             )
         }
     }
+
+    impl_from_uniform_bytes_for_binomial_extension!(p3::goldilocks::Goldilocks, 2);
 
     impl FromUniformBytes for Goldilocks {
         type Bytes = [u8; 8];

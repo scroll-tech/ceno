@@ -1,9 +1,6 @@
 #![deny(clippy::cargo)]
-#![feature(generic_const_exprs)]
 
-use p3::field::{
-    ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField, TwoAdicField,
-};
+use p3::field::{ExtensionField as P3ExtensionField, Field as P3Field, PrimeField, TwoAdicField};
 use rand_core::RngCore;
 use serde::Serialize;
 use std::{array::from_fn, iter::repeat_with};
@@ -12,9 +9,9 @@ pub use babybear::impl_babybear::*;
 mod goldilock;
 pub use goldilock::impl_goldilocks::*;
 mod poseidon;
-pub use poseidon::PoseidonField;
+pub use poseidon::{FieldChallengerExt, PoseidonField};
 
-fn array_try_from_uniform_bytes<
+pub(crate) fn array_try_from_uniform_bytes<
     F: Copy + Default + FromUniformBytes<Bytes = [u8; W]>,
     const W: usize,
     const N: usize,
@@ -52,6 +49,7 @@ pub trait FromUniformBytes: Sized {
     }
 }
 
+#[macro_export]
 macro_rules! impl_from_uniform_bytes_for_binomial_extension {
     ($base:ty, $degree:literal) => {
         impl FromUniformBytes for p3::field::extension::BinomialExtensionField<$base, $degree> {
@@ -69,8 +67,6 @@ macro_rules! impl_from_uniform_bytes_for_binomial_extension {
         }
     };
 }
-
-impl_from_uniform_bytes_for_binomial_extension!(p3::goldilocks::Goldilocks, 2);
 
 /// define a custom conversion trait like `From<T>`
 /// an util to simulate general from function

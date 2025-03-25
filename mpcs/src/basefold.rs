@@ -265,7 +265,6 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> PolynomialCommitmentScheme<E> for
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
     type Param = BasefoldParams<E, Spec>;
     type ProverParam = BasefoldProverParams<E, Spec>;
@@ -1106,7 +1105,6 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> NoninteractivePCS<E> for Basefold
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
 {
 }
 

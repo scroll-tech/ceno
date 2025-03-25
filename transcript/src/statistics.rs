@@ -10,18 +10,12 @@ pub struct Statistic {
 pub type StatisticRecorder = RefCell<Statistic>;
 
 #[derive(Clone)]
-pub struct BasicTranscriptWithStat<'a, E: ExtensionField>
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+pub struct BasicTranscriptWithStat<'a, E: ExtensionField> {
     inner: BasicTranscript<E>,
     stat: &'a StatisticRecorder,
 }
 
-impl<'a, E: ExtensionField> BasicTranscriptWithStat<'a, E>
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+impl<'a, E: ExtensionField> BasicTranscriptWithStat<'a, E> {
     pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
         Self {
             inner: BasicTranscript::new(label),
@@ -30,10 +24,7 @@ where
     }
 }
 
-impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E>
-where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:,
-{
+impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
         self.stat.borrow_mut().field_appended_num += 1;
         self.inner.append_field_elements(elements)
@@ -69,7 +60,4 @@ where
     }
 }
 
-impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E> where
-    [(); E::BaseField::PERM_WIDTH + E::BaseField::RATE]:
-{
-}
+impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E> {}
