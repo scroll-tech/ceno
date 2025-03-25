@@ -107,11 +107,11 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
                 |b| {
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
+                        let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
                         for _ in 0..iters {
-                            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
                             let mut transcript = T::new(b"BaseFold");
                             let instant = std::time::Instant::now();
-                            Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
+                            Pcs::batch_commit_and_write(&pp, rmm.clone(), &mut transcript).unwrap();
                             let elapsed = instant.elapsed();
                             time += elapsed;
                         }

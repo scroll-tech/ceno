@@ -95,6 +95,7 @@ impl<E: ExtensionField> Committer<E> {
             })
             .collect::<Vec<Vec<_>>>();
         end_timer!(expand_timer);
+        println!("Interpolation and FFT finished.");
 
         assert_eq!(self.0.starting_domain.size(), evals[0].len());
 
@@ -125,6 +126,7 @@ impl<E: ExtensionField> Committer<E> {
             })
             .collect::<Vec<_>>();
         end_timer!(stack_evaluations_timer);
+        println!("Restructure evaluations finished.");
 
         let allocate_timer = start_timer!(|| "Allocate buffer.");
 
@@ -142,6 +144,7 @@ impl<E: ExtensionField> Committer<E> {
             buffer.as_mut_slice(),
         );
         end_timer!(horizontal_stacking_timer);
+        println!("Horizontal stacking finished.");
 
         // Group folds together as a leaf.
         let fold_size = 1 << self.0.folding_factor.at_round(0);
@@ -152,6 +155,7 @@ impl<E: ExtensionField> Committer<E> {
             fold_size * polys.len(),
         ));
         end_timer!(merkle_build_timer);
+        println!("Commit matrix finished.");
 
         write_digest_to_transcript(&root, &mut transcript);
 

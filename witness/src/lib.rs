@@ -2,8 +2,10 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, IntoMLE},
     util::max_usable_threads,
 };
-use p3::matrix::{Matrix, bitrev::BitReversableMatrix};
-use p3::field::{Field, PrimeCharacteristicRing};
+use p3::{
+    field::{Field, PrimeCharacteristicRing},
+    matrix::{Matrix, bitrev::BitReversableMatrix},
+};
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
