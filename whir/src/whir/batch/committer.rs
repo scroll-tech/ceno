@@ -67,6 +67,16 @@ impl<E: ExtensionField> Committer<E> {
             .map(|poly| {
                 expand_from_coeff(
                     &match poly.evaluations() {
+                        #[cfg(feature = "parallel")]
+                        FieldType::Base(evals) => {
+                            let mut evals = evals
+                                .par_iter()
+                                .map(|e| E::from_base(e))
+                                .collect::<Vec<_>>();
+                            interpolate_over_boolean_hypercube(&mut evals);
+                            evals
+                        }
+                        #[cfg(not(feature = "parallel"))]
                         FieldType::Base(evals) => {
                             let mut evals =
                                 evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>();
