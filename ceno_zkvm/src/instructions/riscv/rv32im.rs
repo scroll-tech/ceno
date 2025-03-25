@@ -63,14 +63,14 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub sra_config: <SraInstruction<E> as Instruction<E>>::InstructionConfig,
     pub slt_config: <SltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sltu_config: <SltuInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub mul_config: <MulInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub mulh_config: <MulhInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub mulhsu_config: <MulhsuInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub mulhu_config: <MulhuInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub divu_config: <DivuInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub remu_config: <RemuInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub div_config: <DivInstruction<E> as Instruction<E>>::InstructionConfig,
-    // pub rem_config: <RemInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub mul_config: <MulInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub mulh_config: <MulhInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub mulhsu_config: <MulhsuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub mulhu_config: <MulhuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub divu_config: <DivuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub remu_config: <RemuInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub div_config: <DivInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub rem_config: <RemInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // ALU with imm
     pub addi_config: <AddiInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -133,14 +133,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let sra_config = cs.register_opcode_circuit::<SraInstruction<E>>();
         let slt_config = cs.register_opcode_circuit::<SltInstruction<E>>();
         let sltu_config = cs.register_opcode_circuit::<SltuInstruction<E>>();
-        // let mul_config = cs.register_opcode_circuit::<MulInstruction<E>>();
-        // let mulh_config = cs.register_opcode_circuit::<MulhInstruction<E>>();
-        // let mulhsu_config = cs.register_opcode_circuit::<MulhsuInstruction<E>>();
-        // let mulhu_config = cs.register_opcode_circuit::<MulhuInstruction<E>>();
-        // let divu_config = cs.register_opcode_circuit::<DivuInstruction<E>>();
-        // let remu_config = cs.register_opcode_circuit::<RemuInstruction<E>>();
-        // let div_config = cs.register_opcode_circuit::<DivInstruction<E>>();
-        // let rem_config = cs.register_opcode_circuit::<RemInstruction<E>>();
+        let mul_config = cs.register_opcode_circuit::<MulInstruction<E>>();
+        let mulh_config = cs.register_opcode_circuit::<MulhInstruction<E>>();
+        let mulhsu_config = cs.register_opcode_circuit::<MulhsuInstruction<E>>();
+        let mulhu_config = cs.register_opcode_circuit::<MulhuInstruction<E>>();
+        let divu_config = cs.register_opcode_circuit::<DivuInstruction<E>>();
+        let remu_config = cs.register_opcode_circuit::<RemuInstruction<E>>();
+        let div_config = cs.register_opcode_circuit::<DivInstruction<E>>();
+        let rem_config = cs.register_opcode_circuit::<RemInstruction<E>>();
 
         // alu with imm opcodes
         let addi_config = cs.register_opcode_circuit::<AddiInstruction<E>>();
@@ -200,14 +200,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             sra_config,
             slt_config,
             sltu_config,
-            // mul_config,
-            // mulh_config,
-            // mulhsu_config,
-            // mulhu_config,
-            // divu_config,
-            // remu_config,
-            // div_config,
-            // rem_config,
+            mul_config,
+            mulh_config,
+            mulhsu_config,
+            mulhu_config,
+            divu_config,
+            remu_config,
+            div_config,
+            rem_config,
             // alu with imm
             addi_config,
             andi_config,
@@ -268,14 +268,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<SraInstruction<E>>(cs);
         fixed.register_opcode_circuit::<SltInstruction<E>>(cs);
         fixed.register_opcode_circuit::<SltuInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<MulInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<MulhInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<DivuInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<RemuInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<DivInstruction<E>>(cs);
-        // fixed.register_opcode_circuit::<RemInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<MulInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<MulhInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<DivuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<RemuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<DivInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<RemInstruction<E>>(cs);
         // alu with imm
         fixed.register_opcode_circuit::<AddiInstruction<E>>(cs);
         fixed.register_opcode_circuit::<AndiInstruction<E>>(cs);
@@ -370,14 +370,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(SRA, SraInstruction<E>, sra_config);
         assign_opcode!(SLT, SltInstruction<E>, slt_config);
         assign_opcode!(SLTU, SltuInstruction<E>, sltu_config);
-        // assign_opcode!(MUL, MulInstruction<E>, mul_config);
-        // assign_opcode!(MULH, MulhInstruction<E>, mulh_config);
-        // assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
-        // assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
-        // assign_opcode!(DIVU, DivuInstruction<E>, divu_config);
-        // assign_opcode!(REMU, RemuInstruction<E>, remu_config);
-        // assign_opcode!(DIV, DivInstruction<E>, div_config);
-        // assign_opcode!(REM, RemInstruction<E>, rem_config);
+        assign_opcode!(MUL, MulInstruction<E>, mul_config);
+        assign_opcode!(MULH, MulhInstruction<E>, mulh_config);
+        assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
+        assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
+        assign_opcode!(DIVU, DivuInstruction<E>, divu_config);
+        assign_opcode!(REMU, RemuInstruction<E>, remu_config);
+        assign_opcode!(DIV, DivInstruction<E>, div_config);
+        assign_opcode!(REM, RemInstruction<E>, rem_config);
         // alu with imm
         assign_opcode!(ADDI, AddiInstruction<E>, addi_config);
         assign_opcode!(ANDI, AndiInstruction<E>, andi_config);
@@ -411,11 +411,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // ecall / halt
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
 
-        // assert_eq!(
-        //     all_records.keys().cloned().collect::<BTreeSet<_>>(),
-        //     // these are opcodes that haven't been implemented
-        //     [INVALID, ECALL].into_iter().collect::<BTreeSet<_>>(),
-        // );
+        assert_eq!(
+            all_records.keys().cloned().collect::<BTreeSet<_>>(),
+            // these are opcodes that haven't been implemented
+            [INVALID, ECALL].into_iter().collect::<BTreeSet<_>>(),
+        );
         Ok(GroupedSteps(all_records))
     }
 
@@ -621,7 +621,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
         let _ = steps.remove(&INVALID);
         let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();
-        // assert!(steps.is_empty(), "unimplemented opcodes: {:?}", keys);
+        assert!(steps.is_empty(), "unimplemented opcodes: {:?}", keys);
         Ok(())
     }
 }
