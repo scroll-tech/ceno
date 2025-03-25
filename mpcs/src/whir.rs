@@ -11,7 +11,6 @@ pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 use structure::WhirCommitment;
 pub use structure::{Whir, WhirDefault};
-use transcript::BasicTranscript;
 use whir_external::{
     parameters::MultivariateParameters,
     whir::{
