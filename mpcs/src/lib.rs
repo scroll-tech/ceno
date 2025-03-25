@@ -594,11 +594,8 @@ pub mod test_util {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
                 let rmm =
                     RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
-                println!("Random row major matrix finished.");
                 let polys = rmm.to_mles();
-                println!("To mles finished.");
                 let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
-                println!("Batch commit finished.");
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);

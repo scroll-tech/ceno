@@ -102,12 +102,13 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
+            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
                 |b| {
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
-                        let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
                         for _ in 0..iters {
                             let mut transcript = T::new(b"BaseFold");
                             let instant = std::time::Instant::now();
