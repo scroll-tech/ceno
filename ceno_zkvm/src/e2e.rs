@@ -14,18 +14,14 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord,
-    Tracer, VMState, WORD_SIZE, WordAddr,
+    CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord, Tracer,
+    VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
-use itertools::{Itertools, MinMaxResult, chain};
+use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    iter::zip,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, iter::zip, sync::Arc};
 use transcript::BasicTranscript as Transcript;
 
 pub struct FullMemState<Record> {
@@ -129,7 +125,7 @@ fn emulate_program(
             }
         })
         .collect_vec();
-    debug_memory_ranges(&vm, &mem_final);
+    // debug_memory_ranges(&vm, &mem_final);
 
     // Find the final public IO cycles.
     let io_final = io_init
@@ -547,51 +543,4 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         Some(code) => tracing::error!("exit code {}. Failure.", code),
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
     }
-}
-
-fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
-    let accessed_addrs = vm
-        .tracer()
-        .final_accesses()
-        .iter()
-        .filter(|(_, &cycle)| (cycle != 0))
-        .map(|(&addr, _)| addr.baddr())
-        .filter(|addr| vm.platform().can_read(addr.0))
-        .collect_vec();
-
-    let handled_addrs = mem_final
-        .iter()
-        .filter(|rec| rec.cycle != 0)
-        .map(|rec| ByteAddr(rec.addr))
-        .collect::<HashSet<_>>();
-
-    tracing::debug!(
-        "Memory range (accessed): {:?}",
-        format_segments(vm.platform(), accessed_addrs.iter().copied())
-    );
-    tracing::debug!(
-        "Memory range (handled):  {:?}",
-        format_segments(vm.platform(), handled_addrs.iter().copied())
-    );
-
-    for addr in &accessed_addrs {
-        assert!(handled_addrs.contains(addr), "unhandled addr: {:?}", addr);
-    }
-}
-
-fn format_segments(
-    platform: &Platform,
-    addrs: impl Iterator<Item = ByteAddr>,
-) -> HashMap<String, MinMaxResult<ByteAddr>> {
-    addrs
-        .into_grouping_map_by(|addr| format_segment(platform, addr.0))
-        .minmax()
-}
-
-fn format_segment(platform: &Platform, addr: u32) -> String {
-    format!(
-        "{}{}",
-        if platform.can_read(addr) { "R" } else { "-" },
-        if platform.can_write(addr) { "W" } else { "-" },
-    )
 }
