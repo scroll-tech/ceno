@@ -94,7 +94,7 @@ pub mod impl_babybear {
     impl PoseidonField for BabyBear {
         type P = Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>;
         type T = DuplexChallenger<Self, Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE>;
-        fn get_perm() -> Self::T {
+        fn get_default_challenger() -> Self::T {
             let p = Poseidon2BabyBear::new(
                 ExternalLayerConstants::new(
                     BABYBEAR_RC16_EXTERNAL_INITIAL.to_vec(),

@@ -16,7 +16,7 @@ pub trait FieldChallengerExt<F: PoseidonField>: FieldChallenger<F> {
 pub trait PoseidonField: PrimeField + SmallField {
     type P: Clone;
     type T: FieldChallenger<Self> + Clone;
-    fn get_perm() -> Self::T;
+    fn get_default_challenger() -> Self::T;
 }
 
 pub(crate) fn new_array<const N: usize, F: PrimeField>(input: [u64; N]) -> [F; N] {
