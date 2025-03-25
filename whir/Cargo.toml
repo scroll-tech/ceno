@@ -21,8 +21,6 @@ derivative = { version = "2", features = ["use_core"] }
 ff_ext = { path = "../ff_ext" }
 lazy_static = "1.4"
 multilinear_extensions = { path = "../multilinear_extensions" }
-nimue = { git = "https://github.com/arkworks-rs/nimue", features = ["ark"] }
-nimue-pow = { git = "https://github.com/arkworks-rs/nimue" }
 p3 = { path = "../p3" }
 poseidon = { path = "../poseidon" }
 rand = "0.8"
