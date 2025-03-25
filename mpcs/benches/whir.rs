@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use ark_std::test_rng;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
 
