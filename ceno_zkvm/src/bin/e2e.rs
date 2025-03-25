@@ -4,10 +4,10 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
-use ff_ext::{BabyBearExt4, GoldilocksExt2};
+use ff_ext::BabyBearExt4;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
-use p3::{babybear::BabyBear, field::PrimeCharacteristicRing, goldilocks::Goldilocks};
+use p3::{babybear::BabyBear, field::PrimeCharacteristicRing};
 use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -147,6 +147,9 @@ fn main() {
 
     let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
 
+    // collect zkvm proof here
+
+    return;
     // do statistics
     let stat_recorder = StatisticRecorder::default();
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
