@@ -3,7 +3,7 @@ use crate::{
     util::interpolate_uni_poly,
 };
 use ark_std::{rand::RngCore, test_rng};
-use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
+use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
 use multilinear_extensions::{
     util::max_usable_threads,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
@@ -163,6 +163,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
 #[test]
 fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
+    test_trivial_polynomial_helper::<BabyBearExt4>();
 }
 
 fn test_trivial_polynomial_helper<E: ExtensionField>() {
@@ -177,6 +178,7 @@ fn test_trivial_polynomial_helper<E: ExtensionField>() {
 #[test]
 fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
+    test_normal_polynomial_helper::<BabyBearExt4>();
 }
 
 fn test_normal_polynomial_helper<E: ExtensionField>() {
@@ -191,6 +193,7 @@ fn test_normal_polynomial_helper<E: ExtensionField>() {
 #[test]
 fn test_extract_sum() {
     test_extract_sum_helper::<GoldilocksExt2>();
+    test_extract_sum_helper::<BabyBearExt4>();
 }
 
 fn test_extract_sum_helper<E: ExtensionField>() {

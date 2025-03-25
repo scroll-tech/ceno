@@ -1,18 +1,18 @@
-use ff_ext::{ExtensionField, PoseidonField};
-use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger, FieldChallengerExt};
+use ff_ext::{ExtensionField, FieldChallengerExt};
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
 
 #[derive(Clone)]
 pub struct BasicTranscript<E: ExtensionField> {
-    challenger: DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>,
+    challenger: DefaultChallenger<E::BaseField>,
 }
 
 impl<E: ExtensionField> BasicTranscript<E> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
-        let mut challenger = DefaultChallenger::<E::BaseField, <E::BaseField as PoseidonField>::T>::new_poseidon_default();
+        let mut challenger = DefaultChallenger::<E::BaseField>::new_poseidon_default();
         let label_f = E::BaseField::bytes_to_field_elements(label);
         challenger.observe_slice(label_f.as_slice());
         Self { challenger }
