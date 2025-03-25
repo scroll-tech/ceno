@@ -585,9 +585,7 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
-        use ark_std::test_rng;
-
-        let mut rng = test_rng();
+        let mut rng = rand::thread_rng();
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 

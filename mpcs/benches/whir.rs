@@ -97,7 +97,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
 ) {
     let mut group = c.benchmark_group("simple_batch_commit_open_verify_goldilocks".to_string());
     group.sample_size(NUM_SAMPLES);
-    let mut rng = test_rng();
+    let mut rng = rand::thread_rng();
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
