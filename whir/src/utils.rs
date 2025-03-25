@@ -15,7 +15,7 @@ macro_rules! start_timer {
 #[macro_export]
 macro_rules! end_timer {
     ($exp: expr) => {
-        ()
+        let _ = $exp;
     };
 }
 

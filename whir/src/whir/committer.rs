@@ -35,6 +35,9 @@ impl<E: ExtensionField> Committer<E> {
         let mut transcript = BasicTranscript::new(b"commitment");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
         let mut evaluations = match polynomial.evaluations() {
+            #[cfg(feature = "parallel")]
+            FieldType::Base(evals) => evals.par_iter().map(|x| E::from_base(x)).collect(),
+            #[cfg(not(feature = "parallel"))]
             FieldType::Base(evals) => evals.iter().map(|x| E::from_base(x)).collect(),
             FieldType::Ext(evals) => evals.clone(),
             _ => panic!("Unsupported field type"),

@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
 use p3::field::PrimeCharacteristicRing;
-use rand::thread_rng;
 use transcript::BasicTranscript;
 use whir::{
     cmdline_utils::{AvailableFields, AvailableMerkle, WhirType},
@@ -10,8 +9,6 @@ use whir::{
     parameters::*,
     whir::Statement,
 };
-
-use nimue_pow::blake3::Blake3PoW;
 
 use clap::Parser;
 
@@ -60,8 +57,6 @@ struct Args {
     #[arg(long = "hash", default_value = "Blake3")]
     merkle_tree: AvailableMerkle,
 }
-
-type PowStrategy = Blake3PoW;
 
 fn main() {
     let mut args = Args::parse();

@@ -37,11 +37,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use core::num;
-
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3::field::PrimeCharacteristicRing;
     use rand::rngs::OsRng;
     use transcript::BasicTranscript;
     use witness::RowMajorMatrix;
@@ -72,7 +69,7 @@ mod tests {
     ) {
         let num_coeffs = 1 << num_variables;
 
-        let mut rng = OsRng;
+        let rng = OsRng;
         let hash_params = poseidon2_ext_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
@@ -139,8 +136,6 @@ mod tests {
         soundness_type: SoundnessType,
         fold_type: FoldType,
     ) {
-        let num_coeffs = 1 << num_variables;
-
         let mut rng = OsRng;
         let hash_params = poseidon2_ext_merkle_tree();
 

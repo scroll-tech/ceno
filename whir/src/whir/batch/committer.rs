@@ -60,7 +60,6 @@ impl<E: ExtensionField> Committer<E> {
         let mut transcript = BasicTranscript::<E>::new(b"commitment");
         let polys = polys.to_mles();
         let timer = start_timer!(|| "Batch Commit");
-        let base_domain = self.0.starting_domain.base_domain.unwrap();
         let expansion = self.0.starting_domain.size() / polys[0].evaluations().len();
         let expand_timer = start_timer!(|| "Batch Expand");
         let evals = polys
@@ -141,8 +140,6 @@ impl<E: ExtensionField> Committer<E> {
             fold_size * polys.len(),
         ));
         end_timer!(merkle_build_timer);
-
-        let root = merkle_tree.root();
 
         write_digest_to_transcript(&root, &mut transcript);
 

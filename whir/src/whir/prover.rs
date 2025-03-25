@@ -1,9 +1,6 @@
 use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::{
-        Digest, MerkleTreeExt, MultiPath, generate_multi_proof,
-        write_digest_to_transcript,
-    },
+    crypto::{Digest, MerkleTreeExt, MultiPath, generate_multi_proof, write_digest_to_transcript},
     domain::Domain,
     end_timer,
     error::Error,
@@ -16,15 +13,10 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::{
-    commit::Mmcs,
-    matrix::dense::RowMajorMatrix,
-};
+use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
 use transcript::Transcript;
 
 use crate::whir::fs_utils::get_challenge_stir_queries;
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 
 pub struct Prover<E: ExtensionField>(pub WhirConfig<E>);
 
