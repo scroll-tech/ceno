@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use ark_std::test_rng;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
 
@@ -96,13 +97,14 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
 ) {
     let mut group = c.benchmark_group("simple_batch_commit_open_verify_goldilocks".to_string());
     group.sample_size(NUM_SAMPLES);
+    let mut rng = test_rng();
     // Challenge is over extension field, poly over the base field
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
-            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+            let rmm = RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size);
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),

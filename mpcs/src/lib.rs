@@ -585,12 +585,11 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
-        use rand::thread_rng;
+        use ark_std::test_rng;
 
-        let mut rng = thread_rng();
+        let mut rng = test_rng();
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
-            println!("Setup finished.");
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
