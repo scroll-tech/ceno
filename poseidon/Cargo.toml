@@ -21,11 +21,6 @@ ark-std.workspace = true
 plonky2.workspace = true
 rand.workspace = true
 
-[features]
-default = ["babybear"]
-babybear = []
-goldilocks = []
-
 [[bench]]
 harness = false
 name = "hashing"
