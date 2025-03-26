@@ -23,7 +23,6 @@ use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::PolynomialCommitmentScheme;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
-    iter::zip,
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
@@ -32,7 +31,7 @@ pub struct FullMemState<Record> {
     mem: Vec<Record>,
     io: Vec<Record>,
     reg: Vec<Record>,
-    priv_io: Vec<Record>,
+    hints: Vec<Record>,
 }
 
 type InitMemState = FullMemState<MemInitRecord>;
@@ -50,19 +49,18 @@ fn emulate_program(
     max_steps: usize,
     init_mem_state: InitMemState,
     platform: &Platform,
-    hints: Vec<u32>,
 ) -> EmulationResult {
     let InitMemState {
         mem: mem_init,
         io: io_init,
         reg: reg_init,
-        priv_io: _,
+        hints: hints_init,
     } = init_mem_state;
 
     let mut vm: VMState = VMState::new(platform.clone(), program);
 
-    for (addr, value) in zip(platform.hints.iter_addresses(), &hints) {
-        vm.init_memory(addr.into(), *value);
+    for record in chain!(&hints_init, &io_init) {
+        vm.init_memory(record.addr.into(), record.value);
     }
 
     let all_records = vm
@@ -129,7 +127,6 @@ fn emulate_program(
             }
         })
         .collect_vec();
-    debug_memory_ranges(&vm, &mem_final);
 
     // Find the final public IO cycles.
     let io_final = io_init
@@ -141,13 +138,16 @@ fn emulate_program(
         })
         .collect_vec();
 
-    let priv_io_final = zip(platform.hints.iter_addresses(), &hints)
-        .map(|(addr, &value)| MemFinalRecord {
-            addr,
-            value,
-            cycle: *final_access.get(&addr.into()).unwrap_or(&0),
+    let hints_final = hints_init
+        .iter()
+        .map(|rec| MemFinalRecord {
+            addr: rec.addr,
+            value: rec.value,
+            cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
         })
         .collect_vec();
+
+    debug_memory_ranges(&vm, chain!(&mem_final, &io_final, &hints_final));
 
     EmulationResult {
         pi,
@@ -157,7 +157,7 @@ fn emulate_program(
             reg: reg_final,
             io: io_final,
             mem: mem_final,
-            priv_io: priv_io_final,
+            hints: hints_final,
         },
     }
 }
@@ -334,7 +334,7 @@ pub fn generate_witness<E: ExtensionField>(
                 .iter()
                 .map(|rec| rec.cycle)
                 .collect_vec(),
-            &emul_result.final_mem_state.priv_io,
+            &emul_result.final_mem_state.hints,
         )
         .unwrap();
     // assign program circuit
@@ -380,31 +380,36 @@ pub fn run_e2e_with_checkpoint<
     program: Program,
     platform: Platform,
     hints: Vec<u32>,
+    public_io: Vec<u32>,
     max_steps: usize,
     checkpoint: Checkpoint,
 ) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
     let mem_init = init_mem(&program, &platform);
 
-    let pub_io_len = platform.public_io.iter_addresses().len();
+    let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: program.instructions.len(),
         static_memory_len: mem_init.len(),
-        pub_io_len,
+        pubio_len,
     };
 
     let program = Arc::new(program);
     let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
 
-    // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = MemPadder::init_mem(platform.public_io.clone(), pub_io_len, &[]);
+    let io_init = MemPadder::init_mem(platform.public_io.clone(), pubio_len, &public_io);
+    let hint_init = MemPadder::init_mem(
+        platform.hints.clone(),
+        hints.len().next_power_of_two(),
+        &hints,
+    );
 
     let init_full_mem = InitMemState {
         mem: mem_init,
         reg: reg_init,
         io: io_init,
-        priv_io: vec![],
+        hints: hint_init,
     };
 
     // Generate fixed traces
@@ -431,7 +436,6 @@ pub fn run_e2e_with_checkpoint<
                     max_steps,
                     init_full_mem,
                     platform,
-                    hints,
                     &system_config,
                     pk,
                     zkvm_fixed_traces,
@@ -442,7 +446,7 @@ pub fn run_e2e_with_checkpoint<
     }
 
     // Emulate program
-    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
+    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform);
 
     // Clone some emul_result fields before consuming
     let pi = emul_result.pi.clone();
@@ -495,14 +499,13 @@ pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommi
     max_steps: usize,
     init_full_mem: InitMemState,
     platform: Platform,
-    hints: Vec<u32>,
     system_config: &ConstraintSystemConfig<E>,
     pk: ZKVMProvingKey<E, PCS>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
     is_mock_proving: bool,
 ) -> ZKVMProof<E, PCS> {
     // Emulate program
-    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
+    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform);
 
     // clone pi before consuming
     let pi = emul_result.pi.clone();
@@ -549,7 +552,7 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     }
 }
 
-fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
+fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState, mem_final: I) {
     let accessed_addrs = vm
         .tracer()
         .final_accesses()
@@ -560,7 +563,6 @@ fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
         .collect_vec();
 
     let handled_addrs = mem_final
-        .iter()
         .filter(|rec| rec.cycle != 0)
         .map(|rec| ByteAddr(rec.addr))
         .collect::<HashSet<_>>();

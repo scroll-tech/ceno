@@ -1,4 +1,5 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     with_panic_hook,
@@ -48,8 +49,11 @@ struct Args {
     /// Hints: prover-private unconstrained input.
     /// This is a raw file mapped as a memory segment.
     /// Zero-padded to the right to the next power-of-two size.
-    #[arg(long)]
-    hints: Option<String>,
+    #[arg(long, conflicts_with = "hints")]
+    hints_file: Option<String>,
+
+    #[arg(long, conflicts_with = "hints_file", value_parser, num_args = 1.., value_delimiter = ',')]
+    hints: Option<Vec<Word>>,
 
     /// Stack size in bytes.
     #[arg(long, default_value = "32k", value_parser = parse_size)]
@@ -58,6 +62,9 @@ struct Args {
     /// Heap size in bytes.
     #[arg(long, default_value = "2M", value_parser = parse_size)]
     heap_size: u32,
+
+    #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
+    public_io: Option<Vec<Word>>,
 }
 
 fn main() {
@@ -67,7 +74,6 @@ fn main() {
         args.heap_size = args.heap_size.next_multiple_of(WORD_SIZE as u32);
         args
     };
-    let pub_io_size = 16; // TODO: configure.
 
     // default filter
     let default_filter = EnvFilter::builder()
@@ -103,6 +109,26 @@ fn main() {
         .with(args.profiling.is_none().then_some(default_filter))
         .init();
 
+    // process public input first
+    let public_io = args
+        .public_io
+        .and_then(|public_io| {
+            public_io
+                .iter()
+                .try_fold(CenoStdin::default(), |mut std_in, public_io| {
+                    std_in.write(public_io)?;
+                    Ok::<CenoStdin, rkyv::rancor::Error>(std_in)
+                })
+                .ok()
+                .map(|std_in| Into::<Vec<u32>>::into(&std_in))
+        })
+        .unwrap_or_default();
+
+    // estimate required pub io size, which is required in platform/key setup phase
+    let pub_io_size: u32 = ((public_io.len() * WORD_SIZE) as u32)
+        .next_power_of_two()
+        .max(16);
+
     tracing::info!("Loading ELF file: {}", &args.elf);
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
@@ -120,13 +146,31 @@ fn main() {
         args.heap_size
     );
 
-    tracing::info!("Loading hints file: {:?}", args.hints);
-    let hints = memory_from_file(&args.hints);
-    assert!(
-        hints.len() <= platform.hints.iter_addresses().len(),
-        "hints must fit in {} bytes",
-        platform.hints.len()
-    );
+    let hints = args
+        .hints_file
+        .as_ref()
+        .map(|file_path| {
+            tracing::info!("Loading hints file: {:?}", file_path);
+            let hints = memory_from_file(file_path);
+            assert!(
+                hints.len() <= platform.hints.iter_addresses().len(),
+                "hints must fit in {} bytes",
+                platform.hints.len()
+            );
+            hints
+        })
+        .or_else(|| {
+            args.hints.and_then(|hint| {
+                hint.iter()
+                    .try_fold(CenoStdin::default(), |mut std_in, hint| {
+                        std_in.write(hint)?;
+                        Ok::<CenoStdin, rkyv::rancor::Error>(std_in)
+                    })
+                    .ok()
+                    .map(|std_in| Into::<Vec<u32>>::into(&std_in))
+            })
+        })
+        .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
@@ -138,6 +182,7 @@ fn main() {
         program,
         platform,
         hints,
+        public_io,
         max_steps,
         Checkpoint::PrepSanityCheck,
     );
@@ -190,14 +235,10 @@ fn main() {
         }
     };
 }
-fn memory_from_file(path: &Option<String>) -> Vec<u32> {
-    path.as_ref()
-        .map(|path| {
-            let mut buf = fs::read(path).expect("could not read file");
-            buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
-            buf.chunks_exact(WORD_SIZE)
-                .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
-                .collect_vec()
-        })
-        .unwrap_or_default()
+fn memory_from_file(path: &String) -> Vec<u32> {
+    let mut buf = fs::read(path).expect("could not read file");
+    buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
+    buf.chunks_exact(WORD_SIZE)
+        .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
+        .collect_vec()
 }

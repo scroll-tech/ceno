@@ -100,6 +100,7 @@ fn test_ceno_rt_io() -> Result<()> {
         prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
+    println!("platform {}", platform);
     let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
 
@@ -122,6 +123,7 @@ fn test_hints() -> Result<()> {
             .write(&"This is my hint string.".to_string())?
             .write(&1997_u32)?
             .write(&1999_u32)?,
+        None,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -138,6 +140,7 @@ fn test_bubble_sorting() -> Result<()> {
         ceno_examples::quadratic_sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
+        None,
     ));
     for msg in &all_messages {
         print!("{msg}");
@@ -152,6 +155,7 @@ fn test_sorting() -> Result<()> {
         ceno_examples::sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
+        None,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -174,6 +178,7 @@ fn test_median() -> Result<()> {
         CENO_PLATFORM,
         ceno_examples::median,
         &hints,
+        None,
     ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
@@ -195,6 +200,7 @@ fn test_hashing_fail() {
         CENO_PLATFORM,
         ceno_examples::hashing,
         CenoStdin::default().write(&nums).unwrap(),
+        None,
     );
 }
 
@@ -215,6 +221,7 @@ fn test_hashing() -> Result<()> {
         CENO_PLATFORM,
         ceno_examples::hashing,
         CenoStdin::default().write(&uniques)?,
+        None,
     ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
@@ -559,6 +566,17 @@ fn test_syscalls_compatibility() -> Result<()> {
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
 
     let _ = run(&mut state)?;
+    Ok(())
+}
+
+#[test]
+fn test_fibonacci() -> Result<()> {
+    let _ = ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::fibonacci,
+        CenoStdin::default().write(&10_u32)?,
+        Some(CenoStdin::default().write(&4191_u32)?),
+    );
     Ok(())
 }
 
