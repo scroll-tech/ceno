@@ -22,20 +22,14 @@ pub struct Platform {
 
 impl Display for Platform {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let prog_data: Option<Range<Addr>> = match (self.prog_data.first(), self.prog_data.last()) {
-            (Some(first), Some(last)) => Some(*first..*last),
-            _ => None,
+        let prog_data = match (self.prog_data.first(), self.prog_data.last()) {
+            (Some(first), Some(last)) => format!("{:#x?}", *first..*last),
+            _ => "-".to_string(),
         };
         write!(
             f,
-            "Platform {{ rom: {:?}, prog_data: {:?}, stack: {:?}, heap: {:?}, public_io: {:?}, hints: {:?}, unsafe_ecall_nop: {} }}",
-            self.rom,
-            prog_data,
-            self.stack,
-            self.heap,
-            self.public_io,
-            self.hints,
-            self.unsafe_ecall_nop
+            "Platform {{ rom: {:#x?}, prog_data: {prog_data}, stack: {:#x?}, heap: {:x?}, public_io: {:#x?}, hints: {:#x?}, unsafe_ecall_nop: {} }}",
+            self.rom, self.stack, self.heap, self.public_io, self.hints, self.unsafe_ecall_nop
         )
     }
 }
