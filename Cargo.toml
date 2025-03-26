@@ -15,6 +15,7 @@ members = [
   "whir",
   "witness",
   "p3",
+  "ff_ext",
 ]
 resolver = "2"
 
