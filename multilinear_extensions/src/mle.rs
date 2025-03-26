@@ -129,7 +129,7 @@ impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtens
 ))]
 /// Differentiate inner vector on base/extension field.
 pub enum FieldType<E: ExtensionField> {
-    Base(#[serde(skip)] Vec<E::BaseField>),
+    Base(Vec<E::BaseField>),
     Ext(Vec<E>),
     #[default]
     Unreachable,
