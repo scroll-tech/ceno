@@ -1,20 +1,17 @@
 #![deny(clippy::cargo)]
 
-use p3::{
-    field::{
-        ExtensionField as P3ExtensionField, Field as P3Field, PackedValue, PrimeField,
-        TwoAdicField, extension::BinomialExtensionField,
-    },
-    goldilocks::Goldilocks,
-};
+use p3::field::{ExtensionField as P3ExtensionField, Field as P3Field, PrimeField, TwoAdicField};
 use rand_core::RngCore;
 use serde::Serialize;
 use std::{array::from_fn, iter::repeat_with};
+mod babybear;
+pub use babybear::impl_babybear::*;
+mod goldilock;
+pub use goldilock::impl_goldilocks::*;
 mod poseidon;
-pub use poseidon::PoseidonField;
-pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
+pub use poseidon::{FieldChallengerExt, PoseidonField};
 
-fn array_try_from_uniform_bytes<
+pub(crate) fn array_try_from_uniform_bytes<
     F: Copy + Default + FromUniformBytes<Bytes = [u8; W]>,
     const W: usize,
     const N: usize,
@@ -52,6 +49,7 @@ pub trait FromUniformBytes: Sized {
     }
 }
 
+#[macro_export]
 macro_rules! impl_from_uniform_bytes_for_binomial_extension {
     ($base:ty, $degree:literal) => {
         impl FromUniformBytes for p3::field::extension::BinomialExtensionField<$base, $degree> {
@@ -70,8 +68,6 @@ macro_rules! impl_from_uniform_bytes_for_binomial_extension {
     };
 }
 
-impl_from_uniform_bytes_for_binomial_extension!(p3::goldilocks::Goldilocks, 2);
-
 /// define a custom conversion trait like `From<T>`
 /// an util to simulate general from function
 pub trait FieldFrom<T> {
@@ -84,22 +80,25 @@ pub trait FieldInto<T> {
     fn into_f(self) -> T;
 }
 
+impl<U, T> FieldInto<U> for T
+where
+    U: FieldFrom<T>,
+{
+    fn into_f(self) -> U {
+        U::from_v(self)
+    }
+}
+
 // TODO remove SmallField
 pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
     /// MODULUS as u64
     const MODULUS_U64: u64;
-
-    /// Identifier string
-    const NAME: &'static str;
 
     /// Convert a byte string into a list of field elements
     fn bytes_to_field_elements(bytes: &[u8]) -> Vec<Self>;
 
     /// Convert a field elements to a u64.
     fn to_canonical_u64(&self) -> u64;
-
-    /// Convert a field elements to a u64. Do not normalize it.
-    fn to_noncanonical_u64(&self) -> u64;
 }
 
 pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord {
@@ -121,140 +120,4 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
 
     /// Convert a field elements to a u64 vector
     fn to_canonical_u64_vec(&self) -> Vec<u64>;
-}
-
-mod impl_goldilocks {
-    use crate::{
-        ExtensionField, FieldFrom, FieldInto, FromUniformBytes, GoldilocksExt2, SmallField,
-        poseidon::{PoseidonField, new_array},
-    };
-    use p3::{
-        field::{
-            BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField,
-            extension::{BinomialExtensionField, BinomiallyExtendable},
-        },
-        goldilocks::{
-            Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
-            HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
-        },
-        poseidon2::ExternalLayerConstants,
-    };
-
-    impl FieldFrom<u64> for Goldilocks {
-        fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
-        }
-    }
-
-    impl FieldFrom<u64> for GoldilocksExt2 {
-        fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
-        }
-    }
-
-    impl<U, T> FieldInto<U> for T
-    where
-        U: FieldFrom<T>,
-    {
-        fn into_f(self) -> U {
-            U::from_v(self)
-        }
-    }
-
-    impl FieldInto<Goldilocks> for Goldilocks {
-        fn into_f(self) -> Goldilocks {
-            self
-        }
-    }
-
-    impl PoseidonField for Goldilocks {
-        type T = Poseidon2GoldilocksHL<8>;
-        fn get_perm() -> Self::T {
-            Poseidon2GoldilocksHL::new(
-                ExternalLayerConstants::<Goldilocks, 8>::new_from_saved_array(
-                    HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
-                    new_array,
-                ),
-                new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
-            )
-        }
-    }
-
-    impl FromUniformBytes for Goldilocks {
-        type Bytes = [u8; 8];
-
-        fn try_from_uniform_bytes(bytes: [u8; 8]) -> Option<Self> {
-            let value = u64::from_le_bytes(bytes);
-            let is_canonical = value < Self::ORDER_U64;
-            is_canonical.then(|| Self::from_u64(value))
-        }
-    }
-
-    impl SmallField for Goldilocks {
-        /// Identifier string
-        const NAME: &'static str = "Goldilocks";
-        const MODULUS_U64: u64 = Self::ORDER_U64;
-
-        /// Convert a byte string into a list of field elements
-        fn bytes_to_field_elements(bytes: &[u8]) -> Vec<Self> {
-            bytes
-                .chunks(8)
-                .map(|chunk| {
-                    let mut array = [0u8; 8];
-                    array[..chunk.len()].copy_from_slice(chunk);
-                    unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u64) }
-                })
-                .map(Self::from_u64)
-                .collect::<Vec<_>>()
-        }
-
-        /// Convert a field elements to a u64.
-        fn to_canonical_u64(&self) -> u64 {
-            self.as_canonical_u64()
-        }
-
-        /// Convert a field elements to a u64. Do not normalize it.
-        fn to_noncanonical_u64(&self) -> u64 {
-            self.as_canonical_u64()
-        }
-    }
-
-    impl ExtensionField for GoldilocksExt2 {
-        const DEGREE: usize = 2;
-        const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
-        const TWO_ADICITY: usize = Goldilocks::TWO_ADICITY;
-        // Passing two-adacity itself to this function will get the root of unity
-        // with the largest order, i.e., order = 2^two-adacity.
-        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
-            Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
-        const TWO_ADIC_ROOT_OF_UNITY: Self = BinomialExtensionField::new_unchecked(
-            Goldilocks::ext_two_adic_generator_const(Goldilocks::TWO_ADICITY),
-        );
-        // non-residue is the value w such that the extension field is
-        // F[X]/(X^2 - w)
-        const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
-
-        type BaseField = Goldilocks;
-
-        fn from_bases(bases: &[Goldilocks]) -> Self {
-            debug_assert_eq!(bases.len(), 2);
-            Self::from_basis_coefficients_slice(bases)
-        }
-
-        fn as_bases(&self) -> &[Goldilocks] {
-            self.as_basis_coefficients_slice()
-        }
-
-        /// Convert limbs into self
-        fn from_limbs(limbs: &[Self::BaseField]) -> Self {
-            Self::from_bases(&limbs[0..2])
-        }
-
-        fn to_canonical_u64_vec(&self) -> Vec<u64> {
-            self.as_basis_coefficients_slice()
-                .iter()
-                .map(|v: &Self::BaseField| v.as_canonical_u64())
-                .collect()
-        }
-    }
 }

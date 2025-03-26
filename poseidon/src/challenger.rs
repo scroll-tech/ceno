@@ -1,119 +1,75 @@
 use core::fmt::Debug;
-use ff_ext::ExtensionField;
-use p3::{field::PrimeField, symmetric::CryptographicPermutation};
+use ff_ext::{FieldChallengerExt, PoseidonField};
 use std::ops::{Deref, DerefMut};
 
 pub use p3::challenger::*;
 
-use ff_ext::PoseidonField;
-
 /// this wrap a DuplexChallenger as inner field,
 /// while expose some factory method to create default permutation object with defined constant
 #[derive(Clone, Debug)]
-pub struct DefaultChallenger<F, P>
+pub struct DefaultChallenger<F>
 where
-    F: PrimeField,
-    P: CryptographicPermutation<[F; 8]>,
+    F: PoseidonField,
 {
-    inner: DuplexChallenger<F, P, 8, 4>,
+    inner: F::T,
 }
 
-impl<F, P> DefaultChallenger<F, P>
+impl<F> DefaultChallenger<F>
 where
-    F: PrimeField,
-    P: CryptographicPermutation<[F; 8]>,
+    F: PoseidonField,
 {
-    pub fn new(perm: P) -> Self {
-        Self {
-            inner: DuplexChallenger::<F, P, 8, 4>::new(perm),
-        }
+    pub fn new(inner: F::T) -> Self {
+        Self { inner }
     }
 }
 
-impl<F: PoseidonField> DefaultChallenger<F, F::T>
-where
-    F::T: CryptographicPermutation<[F; 8]>,
-{
+impl<F: PoseidonField> DefaultChallenger<F> {
     pub fn new_poseidon_default() -> Self {
-        Self {
-            inner: DuplexChallenger::<F, F::T, 8, 4>::new(F::get_perm()),
-        }
+        DefaultChallenger::new(F::get_default_challenger())
     }
 }
 
-impl<F, P> Deref for DefaultChallenger<F, P>
-where
-    F: PrimeField,
-    P: CryptographicPermutation<[F; 8]>,
-{
-    type Target = DuplexChallenger<F, P, 8, 4>;
+impl<F: PoseidonField> Deref for DefaultChallenger<F> {
+    type Target = F::T;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<F, P> DerefMut for DefaultChallenger<F, P>
-where
-    F: PrimeField,
-    P: CryptographicPermutation<[F; 8]>,
-{
+impl<F: PoseidonField> DerefMut for DefaultChallenger<F> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
 }
 
-pub trait FieldChallengerExt<F: PoseidonField>: FieldChallenger<F> {
-    fn observe_ext_slice<E: ExtensionField<BaseField = F>>(&mut self, exts: &[E]) {
-        exts.iter()
-            .for_each(|ext| self.observe_slice(ext.as_basis_coefficients_slice()));
-    }
-
-    fn sample_ext_vec<E: ExtensionField<BaseField = F>>(&mut self, n: usize) -> Vec<E> {
-        (0..n).map(|_| self.sample_algebra_element()).collect()
-    }
-}
-
-impl<F, P> CanObserve<F> for DefaultChallenger<F, P>
+impl<F> CanObserve<F> for DefaultChallenger<F>
 where
     F: PoseidonField,
-    P: CryptographicPermutation<[F; 8]>,
 {
     fn observe(&mut self, value: F) {
         self.inner.observe(value);
     }
 }
 
-impl<F, P> CanSampleBits<usize> for DefaultChallenger<F, P>
+impl<F> CanSampleBits<usize> for DefaultChallenger<F>
 where
     F: PoseidonField,
-    P: CryptographicPermutation<[F; 8]>,
 {
     fn sample_bits(&mut self, _bits: usize) -> usize {
         todo!()
     }
 }
 
-impl<F, P> CanSample<F> for DefaultChallenger<F, P>
+impl<F> CanSample<F> for DefaultChallenger<F>
 where
     F: PoseidonField,
-    P: CryptographicPermutation<[F; 8]>,
 {
     fn sample(&mut self) -> F {
         self.inner.sample()
     }
 }
 
-impl<F, P> FieldChallenger<F> for DefaultChallenger<F, P>
-where
-    F: PoseidonField,
-    P: CryptographicPermutation<[F; 8]>,
-{
-}
+impl<F> FieldChallenger<F> for DefaultChallenger<F> where F: PoseidonField {}
 
-impl<F, P> FieldChallengerExt<F> for DefaultChallenger<F, P>
-where
-    F: PoseidonField,
-    P: CryptographicPermutation<[F; 8]>,
-{
-}
+impl<F> FieldChallengerExt<F> for DefaultChallenger<F> where F: PoseidonField {}
