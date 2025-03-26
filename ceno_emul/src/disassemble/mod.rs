@@ -317,7 +317,6 @@ impl InstructionProcessor for InstructionTranspiler {
     }
 
     fn process_ebreak(&mut self) -> Self::InstructionResult {
-        println!("got ebreak");
         Instruction::unimp(self.word)
     }
 

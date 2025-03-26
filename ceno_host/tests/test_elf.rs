@@ -100,7 +100,6 @@ fn test_ceno_rt_io() -> Result<()> {
         prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
-    println!("platform {}", platform);
     let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
 
