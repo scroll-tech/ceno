@@ -29,6 +29,7 @@ use super::{
     ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
 };
 
+#[derive(Clone)]
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
 }

@@ -4,10 +4,10 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
-use ff_ext::GoldilocksExt2;
+use ff_ext::BabyBearExt4;
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
-use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
+use p3::{babybear::BabyBear, field::PrimeCharacteristicRing};
 use std::{fs, panic};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -130,20 +130,26 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    type E = GoldilocksExt2;
-    type B = Goldilocks;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    // type E = GoldilocksExt2;
+    // type B = Goldilocks;
+    // type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type E = BabyBearExt4;
+    type B = BabyBear;
+    type Pcs = Basefold<E, BasefoldRSParams>;
 
     let (state, _) = run_e2e_with_checkpoint::<E, Pcs>(
         program,
         platform,
         hints,
         max_steps,
-        Checkpoint::PrepSanityCheck,
+        Checkpoint::PrepProof,
     );
 
-    let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
+    let (mut zkvm_proof, verifier) = state.expect("PrepProof should yield state.");
 
+    // collect zkvm proof here
+
+    return;
     // do statistics
     let stat_recorder = StatisticRecorder::default();
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");

@@ -353,6 +353,7 @@ pub fn generate_witness<E: ExtensionField>(
 pub enum Checkpoint {
     PrepE2EProving,
     PrepWitnessGen,
+    PrepProof,
     PrepSanityCheck,
     Complete,
 }
@@ -478,6 +479,13 @@ pub fn run_e2e_with_checkpoint<
         .expect("create_proof failed");
 
     let verifier = ZKVMVerifier::new(vk);
+
+    if let Checkpoint::PrepProof = checkpoint {
+        return (
+            Some((zkvm_proof.clone(), verifier.clone())),
+            Box::new(move || run_e2e_verify::<E, _>(&verifier, zkvm_proof, exit_code, max_steps)),
+        );
+    }
 
     run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
 
