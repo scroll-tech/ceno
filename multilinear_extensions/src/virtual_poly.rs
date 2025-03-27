@@ -231,13 +231,13 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
 pub fn eq_eval<F: Field>(x: &[F], y: &[F]) -> F {
     assert_eq!(x.len(), y.len(), "x and y have different length");
 
-    let start = start_timer!(|| "eq_eval");
+    // let start = start_timer!(|| "eq_eval");
     let mut res = F::ONE;
     for (&xi, &yi) in x.iter().zip(y.iter()) {
         let xi_yi = xi * yi;
         res *= xi_yi + xi_yi - xi - yi + F::ONE;
     }
-    end_timer!(start);
+    // end_timer!(start);
     res
 }
 

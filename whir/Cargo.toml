@@ -29,6 +29,8 @@ rayon = { workspace = true, optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha3 = "0.10"
+sumcheck = { path = "../sumcheck" }
+tracing.workspace = true
 transcript = { path = "../transcript" }
 transpose = "0.2.3"
 witness = { path = "../witness" }
@@ -47,5 +49,5 @@ default = ["parallel"]
 parallel = [
   "dep:rayon",
 ]
-print-trace = []
+print-trace = [ "tracing/log" ]
 rayon = ["dep:rayon"]

@@ -206,6 +206,7 @@ mod tests {
     };
     use ff_ext::GoldilocksExt2;
     use spec::WhirDefaultSpec;
+    use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt};
 
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
 
@@ -224,6 +225,17 @@ mod tests {
     #[test]
     #[ignore = "For benchmarking and profiling only"]
     fn bench_whir_simple_batch_commit_open_verify_goldilocks() {
+        let filter = EnvFilter::from_default_env();
+        let mut fmt_layer = tracing_subscriber::fmt::layer()
+            .compact()
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ENTER)
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::EXIT)
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+            .with_thread_ids(false)
+            .with_thread_names(false);
+        fmt_layer.set_ansi(false);
+        let subscriber = Registry::default().with(fmt_layer).with(filter);
+        tracing::subscriber::set_global_default(subscriber).unwrap();
         {
             let gen_rand_poly = gen_rand_poly_base;
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 20, 21);
