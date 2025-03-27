@@ -5,6 +5,7 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::verifier::ZKVMVerifier,
 };
 use criterion::*;
 use transcript::{BasicTranscriptWithStat, StatisticRecorder};
@@ -42,7 +43,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         let mut hints = CenoStdin::default();
         let _ = hints.write(&20);
         // estimate proof size data first
-        let (proof, verifier) = run_e2e_with_checkpoint::<E, Pcs>(
+        let (proof, vk) = run_e2e_with_checkpoint::<E, Pcs>(
             program.clone(),
             platform.clone(),
             (&hints).into(),
@@ -56,6 +57,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         println!("e2e proof {}", proof);
         let stat_recorder = StatisticRecorder::default();
         let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
         assert!(
             verifier
                 .verify_proof_halt(proof, transcript, false)

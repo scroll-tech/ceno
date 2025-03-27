@@ -9,7 +9,8 @@ use crate::{
     },
     state::GlobalState,
     structs::{
-        ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMWitnesses,
+        ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
+        ZKVMWitnesses,
     },
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
@@ -359,7 +360,7 @@ pub enum Checkpoint {
 
 // Currently handles state required by the sanity check in `bin/e2e.rs`
 // Future cases would require this to be an enum
-pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
+pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifyingKey<E, PCS>);
 
 // Runs end-to-end pipeline, stopping at a certain checkpoint and yielding useful state.
 //
@@ -374,7 +375,7 @@ pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 
 #[allow(clippy::type_complexity)]
 pub fn run_e2e_with_checkpoint<
-    E: ExtensionField + LkMultiplicityKey,
+    E: ExtensionField + LkMultiplicityKey + serde::de::DeserializeOwned,
     PCS: PolynomialCommitmentScheme<E> + 'static,
 >(
     program: Program,
@@ -481,12 +482,12 @@ pub fn run_e2e_with_checkpoint<
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
-    let verifier = ZKVMVerifier::new(vk);
+    let verifier = ZKVMVerifier::new(vk.clone());
 
     run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
 
     if let Checkpoint::PrepSanityCheck = checkpoint {
-        return (Some((zkvm_proof, verifier)), Box::new(|| ()));
+        return (Some((zkvm_proof, vk)), Box::new(|| ()));
     }
 
     (None, Box::new(|| ()))

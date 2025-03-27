@@ -2,7 +2,7 @@
 
 use p3::field::{ExtensionField as P3ExtensionField, Field as P3Field, PrimeField, TwoAdicField};
 use rand_core::RngCore;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use std::{array::from_fn, iter::repeat_with};
 mod babybear;
 pub use babybear::impl_babybear::*;
@@ -109,7 +109,13 @@ pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes +
     const TWO_ADIC_ROOT_OF_UNITY: Self;
     const NONRESIDUE: Self::BaseField;
 
-    type BaseField: SmallField + Ord + PrimeField + FromUniformBytes + TwoAdicField + PoseidonField;
+    type BaseField: SmallField
+        + Ord
+        + PrimeField
+        + FromUniformBytes
+        + TwoAdicField
+        + PoseidonField
+        + DeserializeOwned;
 
     fn from_bases(bases: &[Self::BaseField]) -> Self;
 
