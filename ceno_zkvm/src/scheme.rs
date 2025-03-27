@@ -24,7 +24,11 @@ pub mod mock_prover;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // TODO support >1 opcodes
     pub num_instances: usize,
@@ -129,7 +133,11 @@ impl PublicValues<u32> {
 /// Map circuit names to
 /// - an opcode or table proof,
 /// - an index unique across both types.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     // TODO preserve in serde only for auxiliary public input
     // other raw value can be construct by verifier directly.

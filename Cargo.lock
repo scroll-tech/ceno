@@ -454,7 +454,9 @@ dependencies = [
  "ark-std",
  "base64",
  "bincode",
+ "ceno-examples",
  "ceno_emul",
+ "ceno_host",
  "cfg-if",
  "clap",
  "criterion",
@@ -475,6 +477,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rayon",
+ "rkyv",
  "serde",
  "serde_json",
  "strum",
@@ -1621,6 +1624,7 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 name = "p3"
 version = "0.1.0"
 dependencies = [
+ "p3-baby-bear",
  "p3-challenger",
  "p3-commit",
  "p3-field",
@@ -1636,9 +1640,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-baby-bear"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
+dependencies = [
+ "p3-field",
+ "p3-mds",
+ "p3-monty-31",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "rand",
+ "serde",
+]
+
+[[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -1650,7 +1668,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -1664,7 +1682,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1677,7 +1695,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "forward_ref",
  "itertools 0.14.0",
@@ -1696,7 +1714,7 @@ dependencies = [
 [[package]]
 name = "p3-goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "num-bigint",
  "p3-dft",
@@ -1714,7 +1732,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1729,7 +1747,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "rayon",
 ]
@@ -1737,7 +1755,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "itertools 0.14.0",
  "p3-dft",
@@ -1751,7 +1769,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "itertools 0.14.0",
  "p3-commit",
@@ -1766,9 +1784,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-monty-31"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
+dependencies = [
+ "itertools 0.14.0",
+ "num-bigint",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-mds",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
+ "paste",
+ "rand",
+ "serde",
+ "tracing",
+ "transpose",
+]
+
+[[package]]
 name = "p3-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -1779,7 +1819,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "gcd",
  "p3-field",
@@ -1791,7 +1831,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1801,7 +1841,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/plonky3?rev=8d2be81#8d2be81c9827c1284ecb2d226b0ca0e08136679d"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
 dependencies = [
  "serde",
 ]
@@ -2564,6 +2604,7 @@ dependencies = [
  "p3",
  "proc-macro2",
  "quote",
+ "rand",
  "sumcheck",
  "syn 2.0.98",
 ]

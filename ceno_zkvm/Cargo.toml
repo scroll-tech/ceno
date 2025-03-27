@@ -17,7 +17,9 @@ serde.workspace = true
 serde_json.workspace = true
 
 base64 = "0.22"
+ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
+ceno_host = { path = "../ceno_host" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
@@ -31,6 +33,7 @@ num-traits.workspace = true
 paste.workspace = true
 poseidon.workspace = true
 prettytable-rs.workspace = true
+rkyv.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 tracing.workspace = true

@@ -57,4 +57,4 @@ jobs:
         env:
           RUST_LOG: debug
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --package ceno_zkvm --bin e2e -- --platform=sp1 ceno_zkvm/examples/fibonacci.elf
+        run: cargo run --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci

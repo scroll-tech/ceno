@@ -3,23 +3,15 @@ use p3::{
     commit::{ExtensionMmcs, Mmcs},
     matrix::{Dimensions, dense::RowMajorMatrix, extension::FlatMatrixView},
     merkle_tree::{MerkleTree as P3MerkleTree, MerkleTreeMmcs},
-    symmetric::{Hash as P3Hash, PaddingFreeSponge, TruncatedPermutation},
+    symmetric::Hash as P3Hash,
 };
 use poseidon::digest::DIGEST_WIDTH;
 use transcript::Transcript;
 
 use crate::error::Error;
 
-pub(crate) type Poseidon2Sponge<P> = PaddingFreeSponge<P, 8, 4, 4>;
-// TODO investigate compression setting legibility
-pub(crate) type Poseidon2Compression<P> = TruncatedPermutation<P, 2, 4, 8>;
-pub(crate) type Poseidon2MerkleMmcs<F> = MerkleTreeMmcs<
-    F,
-    F,
-    Poseidon2Sponge<<F as PoseidonField>::T>,
-    Poseidon2Compression<<F as PoseidonField>::T>,
-    DIGEST_WIDTH,
->;
+pub(crate) type Poseidon2MerkleMmcs<F> =
+    MerkleTreeMmcs<F, F, <F as PoseidonField>::S, <F as PoseidonField>::C, DIGEST_WIDTH>;
 pub type Poseidon2ExtMerkleMmcs<E> = ExtensionMmcs<
     <E as ExtensionField>::BaseField,
     E,
@@ -28,8 +20,8 @@ pub type Poseidon2ExtMerkleMmcs<E> = ExtensionMmcs<
 
 pub fn poseidon2_merkle_tree<E: ExtensionField>() -> Poseidon2MerkleMmcs<E::BaseField> {
     MerkleTreeMmcs::new(
-        Poseidon2Sponge::new(<E::BaseField as PoseidonField>::get_perm()),
-        Poseidon2Compression::new(<E::BaseField as PoseidonField>::get_perm()),
+        <E::BaseField as PoseidonField>::get_default_sponge(),
+        <E::BaseField as PoseidonField>::get_default_compression(),
     )
 }
 

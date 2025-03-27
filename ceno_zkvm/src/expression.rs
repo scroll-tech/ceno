@@ -7,6 +7,8 @@ use std::{
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
+use serde::de::DeserializeOwned;
+
 use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, SmallField};
 use p3::field::PrimeCharacteristicRing;
@@ -19,7 +21,10 @@ use crate::{
     structs::{ChallengeId, RAMType, WitnessId},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
     WitIn(WitnessId),
@@ -784,17 +789,21 @@ pub struct WitIn {
     pub id: WitnessId,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, serde::Serialize, serde::Deserialize)]
 pub struct StructuralWitIn {
     pub id: WitnessId,
     pub max_len: usize,
     pub offset: u32,
     pub multi_factor: usize,
 }
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(
+    Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Fixed(pub usize);
 
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(
+    Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Instance(pub usize);
 
 impl WitIn {

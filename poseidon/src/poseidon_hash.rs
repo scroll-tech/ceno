@@ -1,12 +1,7 @@
-use std::marker::PhantomData;
-
-use crate::{
-    challenger::{DefaultChallenger, FieldChallengerExt},
-    constants::DIGEST_WIDTH,
-    digest::Digest,
-};
-use ff_ext::{ExtensionField, PoseidonField};
+use crate::{challenger::DefaultChallenger, constants::DIGEST_WIDTH, digest::Digest};
+use ff_ext::{ExtensionField, FieldChallengerExt, PoseidonField};
 use p3::challenger::{CanObserve, CanSample};
+use std::marker::PhantomData;
 
 pub struct PoseidonHash<F> {
     _phantom: PhantomData<F>,
@@ -37,7 +32,7 @@ impl<F: PoseidonField> PoseidonHash<F> {
 }
 
 pub fn hash_n_to_m_no_pad<F: PoseidonField>(inputs: &[F], num_outputs: usize) -> Vec<F> {
-    let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
+    let mut challenger = DefaultChallenger::<F>::new_poseidon_default();
     challenger.observe_slice(inputs);
     challenger.sample_vec(num_outputs)
 }
@@ -46,7 +41,7 @@ pub fn hash_n_to_m_no_pad_ext<F: PoseidonField, E: ExtensionField<BaseField = F>
     inputs: &[E],
     num_outputs: usize,
 ) -> Vec<F> {
-    let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
+    let mut challenger = DefaultChallenger::<F>::new_poseidon_default();
     challenger.observe_ext_slice(inputs);
     challenger.sample_vec(num_outputs)
 }
@@ -64,7 +59,7 @@ pub fn hash_n_to_hash_no_pad_ext<F: PoseidonField, E: ExtensionField<BaseField =
 }
 
 pub fn compress<F: PoseidonField>(x: &Digest<F>, y: &Digest<F>) -> Digest<F> {
-    let mut challenger = DefaultChallenger::<F, F::T>::new_poseidon_default();
+    let mut challenger = DefaultChallenger::<F>::new_poseidon_default();
     challenger.observe_slice(x.elements());
     challenger.observe_slice(y.elements());
     Digest(challenger.sample_array::<DIGEST_WIDTH>())
