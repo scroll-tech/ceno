@@ -102,7 +102,7 @@ impl NonVolatileTable for PubIOTable {
     const WRITABLE: bool = false;
 
     fn len(params: &ProgramParams) -> usize {
-        params.pub_io_len
+        params.pubio_len
     }
 
     fn name() -> &'static str {

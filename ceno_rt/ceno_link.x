@@ -3,6 +3,9 @@ _stack_start = ORIGIN(REGION_STACK) + LENGTH(REGION_STACK);
 _hints_start = ORIGIN(REGION_HINTS);
 _hints_length = LENGTH(REGION_HINTS);
 _lengths_of_hints_start = ORIGIN(REGION_HINTS);
+_pubio_start = ORIGIN(REGION_PUBIO);
+_pubio_length = LENGTH(REGION_PUBIO);
+_lengths_of_pubio_start = ORIGIN(REGION_PUBIO);
 
 SECTIONS
 {
@@ -43,4 +46,10 @@ SECTIONS
   {
     *(.hints .hints.*);
   } > HINTS
+
+  /* Define a section for public io data */
+  .pubio (NOLOAD) : ALIGN(4)
+  {
+    *(.pubio .pubio.*);
+  } > PUBIO
 }
