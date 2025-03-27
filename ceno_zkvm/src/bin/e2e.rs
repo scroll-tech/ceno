@@ -1,6 +1,8 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::{ZKVMProof, verifier::ZKVMVerifier},
+    structs::ZKVMVerifyingKey,
     with_panic_hook,
 };
 use clap::Parser;
@@ -24,13 +26,20 @@ fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
         .parse_size(s)
         .map(|size| size as u32)
 }
-
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// The path to the ELF file to execute.
     elf: String,
+
+    /// The path to the proof file to write.
+    #[arg(default_value = "proof.bin")]
+    proof_file: String,
+
+    /// The path to the verification key file to write.
+    #[arg(default_value = "vk.bin")]
+    vk_file: String,
 
     /// The maximum number of steps to execute the program.
     #[arg(short, long)]
@@ -59,6 +68,10 @@ struct Args {
     #[arg(long, default_value = "2M", value_parser = parse_size)]
     heap_size: u32,
 }
+
+type E = GoldilocksExt2;
+type B = Goldilocks;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
 fn main() {
     let args = {
@@ -130,10 +143,6 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    type E = GoldilocksExt2;
-    type B = Goldilocks;
-    type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
-
     let (state, _) = run_e2e_with_checkpoint::<E, Pcs>(
         program,
         platform,
@@ -142,9 +151,25 @@ fn main() {
         Checkpoint::PrepSanityCheck,
     );
 
-    let (mut zkvm_proof, verifier) = state.expect("PrepSanityCheck should yield state.");
+    let (zkvm_proof, vk) = state.expect("PrepSanityCheck should yield state.");
 
-    // do statistics
+    let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
+    std::fs::write(&args.proof_file, proof_bytes).unwrap();
+    let vk_bytes = bincode::serialize(&vk).unwrap();
+    std::fs::write(&args.vk_file, vk_bytes).unwrap();
+
+    verify(&args.proof_file, &args.vk_file);
+}
+
+fn verify(proof_file: &str, vk_file: &str) {
+    let proof_bytes = std::fs::read(proof_file).unwrap();
+    let zkvm_proof: ZKVMProof<E, Pcs> = bincode::deserialize(&proof_bytes).unwrap();
+
+    let vk_bytes = std::fs::read(vk_file).unwrap();
+    let vk: ZKVMVerifyingKey<E, Pcs> = bincode::deserialize(&vk_bytes).unwrap();
+
+    let verifier = ZKVMVerifier::new(vk.clone());
+    // print verification statistics like proof size and hash count
     let stat_recorder = StatisticRecorder::default();
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
     assert!(
@@ -158,6 +183,11 @@ fn main() {
         stat_recorder.into_inner().field_appended_num
     );
 
+    // FIXME: it is a bit wired, let us move it else where later.
+    soundness_test(zkvm_proof, &verifier);
+}
+
+fn soundness_test(mut zkvm_proof: ZKVMProof<E, Pcs>, verifier: &ZKVMVerifier<E, Pcs>) {
     // do sanity check
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
@@ -190,6 +220,7 @@ fn main() {
         }
     };
 }
+
 fn memory_from_file(path: &Option<String>) -> Vec<u32> {
     path.as_ref()
         .map(|path| {
