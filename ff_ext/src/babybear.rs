@@ -1,6 +1,6 @@
 pub mod impl_babybear {
 
-    use crate::array_try_from_uniform_bytes;
+    use crate::{array_try_from_uniform_bytes, poseidon::PoseidonFieldExt};
     use p3::{
         self,
         babybear::{BabyBear, Poseidon2BabyBear},
@@ -10,6 +10,8 @@ pub mod impl_babybear {
             TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
+        matrix::{dense::RowMajorMatrix, extension::FlatMatrixView},
+        merkle_tree::{MerkleTree, MerkleTreeMmcs},
         poseidon2::ExternalLayerConstants,
         symmetric::{PaddingFreeSponge, TruncatedPermutation},
     };
@@ -98,6 +100,9 @@ pub mod impl_babybear {
         type T = DuplexChallenger<Self, Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE>;
         type S = PaddingFreeSponge<Self::P, 16, 8, 8>;
         type C = TruncatedPermutation<Self::P, 2, 8, 16>;
+        type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 8>;
+        type MK = MerkleTree<Self, Self, RowMajorMatrix<Self>, 8>;
+        type D = p3::symmetric::Hash<Self, Self, 8>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<
                 Self,
@@ -123,6 +128,10 @@ pub mod impl_babybear {
 
         fn get_default_compression() -> Self::C {
             TruncatedPermutation::new(Self::get_default_perm())
+        }
+
+        fn get_default_mmcs() -> Self::MMCS {
+            MerkleTreeMmcs::new(Self::get_default_sponge(), Self::get_default_compression())
         }
     }
 
@@ -181,5 +190,14 @@ pub mod impl_babybear {
                 .map(|v: &Self::BaseField| v.as_canonical_u32() as u64)
                 .collect()
         }
+    }
+
+    impl PoseidonFieldExt for BabyBearExt4 {
+        type MkExt = MerkleTree<
+            <Self as ExtensionField>::BaseField,
+            <Self as ExtensionField>::BaseField,
+            FlatMatrixView<<Self as ExtensionField>::BaseField, Self, RowMajorMatrix<Self>>,
+            8,
+        >;
     }
 }

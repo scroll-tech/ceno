@@ -3,7 +3,7 @@ pub mod impl_goldilocks {
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, SmallField,
         array_try_from_uniform_bytes, impl_from_uniform_bytes_for_binomial_extension,
-        poseidon::{PoseidonField, new_array},
+        poseidon::{PoseidonField, PoseidonFieldExt, new_array},
     };
     use p3::{
         challenger::DuplexChallenger,
@@ -16,6 +16,8 @@ pub mod impl_goldilocks {
             Goldilocks, HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
             HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS, Poseidon2GoldilocksHL,
         },
+        matrix::{dense::RowMajorMatrix, extension::FlatMatrixView},
+        merkle_tree::{MerkleTree, MerkleTreeMmcs},
         poseidon2::ExternalLayerConstants,
         symmetric::{PaddingFreeSponge, TruncatedPermutation},
     };
@@ -49,7 +51,9 @@ pub mod impl_goldilocks {
             DuplexChallenger<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>;
         type S = PaddingFreeSponge<Self::P, 8, 4, 4>;
         type C = TruncatedPermutation<Self::P, 2, 4, 8>;
-
+        type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 4>;
+        type MK = MerkleTree<Self, Self, RowMajorMatrix<Self>, 4>;
+        type D = p3::symmetric::Hash<Self, Self, 4>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>::new(
                 Self::get_default_perm(),
@@ -72,6 +76,10 @@ pub mod impl_goldilocks {
 
         fn get_default_compression() -> Self::C {
             TruncatedPermutation::new(Self::get_default_perm())
+        }
+
+        fn get_default_mmcs() -> Self::MMCS {
+            MerkleTreeMmcs::new(Self::get_default_sponge(), Self::get_default_compression())
         }
     }
 
@@ -132,5 +140,14 @@ pub mod impl_goldilocks {
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()
         }
+    }
+
+    impl PoseidonFieldExt for GoldilocksExt2 {
+        type MkExt = MerkleTree<
+            <Self as ExtensionField>::BaseField,
+            <Self as ExtensionField>::BaseField,
+            FlatMatrixView<<Self as ExtensionField>::BaseField, Self, RowMajorMatrix<Self>>,
+            4,
+        >;
     }
 }
