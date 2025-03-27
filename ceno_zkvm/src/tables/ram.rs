@@ -31,6 +31,15 @@ impl DynVolatileRamTable for DynMemTable {
     }
 }
 
+#[test]
+fn test_dyn_mem_table() {
+    let mut params = ProgramParams::default();
+    params.platform.ram.start = 0;
+    params.platform.ram.end = 100;
+    let max_len_bytes = 4 * DynMemTable::max_len(&params);
+    assert_eq!(max_len_bytes, 128);
+}
+
 pub type DynMemCircuit<E> = DynVolatileRamCircuit<E, DynMemTable>;
 
 #[derive(Clone)]
