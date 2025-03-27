@@ -1,4 +1,5 @@
 
+/* The address of this variable is the start of the stack (growing downwards). */
 _stack_start = ORIGIN(REGION_STACK) + LENGTH(REGION_STACK);
 _hints_start = ORIGIN(REGION_HINTS);
 _hints_length = LENGTH(REGION_HINTS);
