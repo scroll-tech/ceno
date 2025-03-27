@@ -5,20 +5,6 @@ use p3::field::Field;
 use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
 use std::collections::BTreeSet;
 
-#[macro_export]
-macro_rules! start_timer {
-    ($exp: expr) => {
-        ()
-    };
-}
-
-#[macro_export]
-macro_rules! end_timer {
-    ($exp: expr) => {
-        let _ = $exp;
-    };
-}
-
 // checks whether the given number n is a power of two.
 pub fn is_power_of_two(n: usize) -> bool {
     n != 0 && (n & (n - 1) == 0)

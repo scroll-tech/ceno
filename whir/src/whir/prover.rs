@@ -2,11 +2,9 @@ use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
     crypto::{Digest, MerkleTreeExt, MultiPath, generate_multi_proof, write_digest_to_transcript},
     domain::Domain,
-    end_timer,
     error::Error,
     ntt::expand_from_coeff,
     parameters::FoldType,
-    start_timer,
     sumcheck::prover_not_skipping::SumcheckProverNotSkipping,
     utils::{self, evaluate_over_hypercube, expand_randomness, interpolate_over_boolean_hypercube},
     whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
@@ -14,6 +12,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
 use crate::whir::fs_utils::get_challenge_stir_queries;
@@ -67,7 +66,7 @@ impl<E: ExtensionField> Prover<E> {
         self.validate_statement(&statement);
         self.validate_witness(&witness);
 
-        let timer = start_timer!(|| "Single Prover");
+        let timer = entered_span!("Single Prover");
         let initial_claims: Vec<_> = witness
             .ood_points
             .iter()
@@ -140,7 +139,7 @@ impl<E: ExtensionField> Prover<E> {
             merkle_proofs: vec![],
         };
 
-        let round_timer = start_timer!(|| "Single Round");
+        let round_timer = entered_span!("Single Round");
         let result = self.round(
             transcript,
             &mut sumcheck_poly_evals,
@@ -148,9 +147,9 @@ impl<E: ExtensionField> Prover<E> {
             &mut merkle_roots,
             round_state,
         );
-        end_timer!(round_timer);
+        exit_span!(round_timer);
 
-        end_timer!(timer);
+        exit_span!(timer);
 
         result
     }

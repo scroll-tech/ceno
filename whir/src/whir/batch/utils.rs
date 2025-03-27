@@ -1,14 +1,13 @@
 use crate::{
-    end_timer,
     error::Error,
     ntt::{transpose, transpose_test},
-    start_timer,
     utils::expand_randomness,
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
 pub fn stack_evaluations<E: ExtensionField>(
@@ -49,16 +48,16 @@ pub fn horizontal_stacking<E: ExtensionField>(
     let fold_size = 1 << folding_factor;
     let num_polys: usize = evals.len() / domain_size;
 
-    let stack_evaluation_timer = start_timer!(|| "Stack Evaluation");
+    let stack_evaluation_timer = entered_span!("Stack Evaluation");
     let mut evals = stack_evaluations(evals, num_polys, buffer);
-    end_timer!(stack_evaluation_timer);
+    exit_span!(stack_evaluation_timer);
     #[cfg(not(feature = "parallel"))]
     let stacked_evals = evals.chunks_exact_mut(fold_size * num_polys);
     #[cfg(feature = "parallel")]
     let stacked_evals = evals.par_chunks_exact_mut(fold_size * num_polys);
-    let stack_evaluation_mut_timer = start_timer!(|| "Stack Evaluation Mut");
+    let stack_evaluation_mut_timer = entered_span!("Stack Evaluation Mut");
     stacked_evals.for_each(|eval| stack_evaluations_mut(eval, folding_factor));
-    end_timer!(stack_evaluation_mut_timer);
+    exit_span!(stack_evaluation_mut_timer);
     evals
 }
 

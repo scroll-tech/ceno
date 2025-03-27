@@ -1,11 +1,10 @@
-use crate::{end_timer, start_timer};
-
 use super::{super::utils::is_power_of_two, MatrixMut, utils::workload_size};
 use std::mem::swap;
 
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 #[cfg(feature = "parallel")]
 use rayon::join;
+use sumcheck::macros::{entered_span, exit_span};
 
 // NOTE: The assumption that rows and cols are a power of two are actually only relevant for the square matrix case.
 // (This is because the algorithm recurses into 4 sub-matrices of half dimension; we assume those to be square matrices as well, which only works for powers of two).
@@ -63,22 +62,22 @@ pub fn transpose_bench_allocate<F: Sized + Copy + Send>(
     } else {
         // TODO: Special case for rows = 2 * cols and cols = 2 * rows.
         // TODO: Special case for very wide matrices (e.g. n x 16).
-        let allocate_timer = start_timer!(|| "Allocate scratch.");
+        let allocate_timer = entered_span!("Allocate scratch.");
         let mut scratch = Vec::with_capacity(rows * cols);
         #[allow(clippy::uninit_vec)]
         unsafe {
             scratch.set_len(rows * cols);
         }
-        end_timer!(allocate_timer);
+        exit_span!(allocate_timer);
         for matrix in matrix.chunks_exact_mut(rows * cols) {
-            let copy_timer = start_timer!(|| "Copy from slice.");
+            let copy_timer = entered_span!("Copy from slice.");
             scratch.copy_from_slice(matrix);
-            end_timer!(copy_timer);
+            exit_span!(copy_timer);
             let src = MatrixMut::from_mut_slice(scratch.as_mut_slice(), rows, cols);
             let dst = MatrixMut::from_mut_slice(matrix, cols, rows);
-            let transpose_copy_timer = start_timer!(|| "Transpose Copy.");
+            let transpose_copy_timer = entered_span!("Transpose Copy.");
             transpose_copy(src, dst);
-            end_timer!(transpose_copy_timer);
+            exit_span!(transpose_copy_timer);
         }
     }
 }
@@ -105,9 +104,9 @@ pub fn transpose_test<F: Sized + Copy + Send>(
         let buffer = &mut buffer[0..rows * cols];
         // TODO: Special case for rows = 2 * cols and cols = 2 * rows.
         // TODO: Special case for very wide matrices (e.g. n x 16).
-        let transpose_timer = start_timer!(|| "Transpose.");
+        let transpose_timer = entered_span!("Transpose.");
         for matrix in matrix.chunks_exact_mut(rows * cols) {
-            let copy_timer = start_timer!(|| "Copy from slice.");
+            let copy_timer = entered_span!("Copy from slice.");
             // buffer.copy_from_slice(matrix);
             buffer
                 .par_iter_mut()
@@ -115,16 +114,16 @@ pub fn transpose_test<F: Sized + Copy + Send>(
                 .for_each(|(dst, src)| {
                     *dst = *src;
                 });
-            end_timer!(copy_timer);
-            let transform_timer = start_timer!(|| "From mut slice.");
+            exit_span!(copy_timer);
+            let transform_timer = entered_span!("From mut slice.");
             let src = MatrixMut::from_mut_slice(buffer, rows, cols);
             let dst = MatrixMut::from_mut_slice(matrix, cols, rows);
-            end_timer!(transform_timer);
-            let transpose_copy_timer = start_timer!(|| "Transpose copy.");
+            exit_span!(transform_timer);
+            let transpose_copy_timer = entered_span!("Transpose copy.");
             transpose_copy(src, dst);
-            end_timer!(transpose_copy_timer);
+            exit_span!(transpose_copy_timer);
         }
-        end_timer!(transpose_timer);
+        exit_span!(transpose_timer);
     }
 }
 

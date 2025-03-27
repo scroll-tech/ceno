@@ -1,10 +1,8 @@
 use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
     crypto::write_digest_to_transcript,
-    end_timer,
     error::Error,
     ntt::expand_from_coeff,
-    start_timer,
     utils::{self, interpolate_over_boolean_hypercube},
     whir::{
         fold::{expand_from_univariate, restructure_evaluations},
@@ -14,6 +12,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3::matrix::dense::RowMajorMatrix;
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
 
 use p3::commit::Mmcs;
@@ -31,7 +30,7 @@ impl<E: ExtensionField> Committer<E> {
         &self,
         polynomial: DenseMultilinearExtension<E>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
-        let timer = start_timer!(|| "Single Commit");
+        let timer = entered_span!("Single Commit");
         let mut transcript = BasicTranscript::new(b"commitment");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
         let mut evaluations = match polynomial.evaluations() {
@@ -75,12 +74,12 @@ impl<E: ExtensionField> Committer<E> {
 
         // Group folds together as a leaf.
         let fold_size = 1 << self.0.folding_factor.at_round(0);
-        let merkle_build_timer = start_timer!(|| "Single Merkle Tree Build");
+        let merkle_build_timer = entered_span!("Single Merkle Tree Build");
         let (root, merkle_tree) = self
             .0
             .hash_params
             .commit_matrix(RowMajorMatrix::new(folded_evals.clone(), fold_size));
-        end_timer!(merkle_build_timer);
+        exit_span!(merkle_build_timer);
         write_digest_to_transcript(&root, &mut transcript);
 
         let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
@@ -101,7 +100,7 @@ impl<E: ExtensionField> Committer<E> {
             )
         };
 
-        end_timer!(timer);
+        exit_span!(timer);
 
         let commitment = WhirCommitmentInTranscript {
             root,
