@@ -7,8 +7,7 @@ use itertools::Itertools;
 use mpcs::{coset_fft, fft_root_table};
 
 use multilinear_extensions::mle::DenseMultilinearExtension;
-use p3_field::Field;
-use p3_goldilocks::Goldilocks;
+use p3::{field::Field, goldilocks::Goldilocks};
 use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};

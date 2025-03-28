@@ -13,16 +13,16 @@ use crate::{
         AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
         TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
     },
-    witness::{LkMultiplicity, LkMultiplicityRaw, RowMajorMatrix},
+    witness::{LkMultiplicity, LkMultiplicityRaw},
 };
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
-use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -36,6 +36,7 @@ use std::{
 };
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
+use witness::RowMajorMatrix;
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -66,6 +67,12 @@ impl LkMultiplicityKey for u64 {
 }
 
 impl LkMultiplicityKey for GoldilocksExt2 {
+    fn to_u64(&self) -> Option<u64> {
+        None
+    }
+}
+
+impl LkMultiplicityKey for BabyBearExt4 {
     fn to_u64(&self) -> Option<u64> {
         None
     }
@@ -747,7 +754,7 @@ Hints:
         lkm: Option<LkMultiplicity>,
     ) {
         let wits_in = raw_witin
-            .into_mles()
+            .to_mles()
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
@@ -805,13 +812,20 @@ Hints:
 
         // Process all circuits.
         for (circuit_name, cs) in &cs.circuit_css {
+            let empty_rmm = RowMajorMatrix::empty();
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
-            let witness = if is_opcode {
-                witnesses
-                    .get_opcode_witness(circuit_name)
-                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
+            let [witness, structural_witness] = if is_opcode {
+                &[
+                    witnesses
+                        .get_opcode_witness(circuit_name)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            panic!("witness for {} should not be None", circuit_name)
+                        }),
+                    empty_rmm,
+                ]
             } else {
                 witnesses
                     .get_table_witness(circuit_name)
@@ -827,8 +841,9 @@ Hints:
                 continue;
             }
             let mut witness = witness
-                .into_mles()
+                .to_mles()
                 .into_iter()
+                .chain(structural_witness.to_mles())
                 .map(|w| w.into())
                 .collect_vec();
             let structural_witness = witness.split_off(cs.num_witin as usize);
@@ -837,11 +852,7 @@ Hints:
                 .remove(circuit_name)
                 .and_then(|fixed| fixed)
                 .map_or(vec![], |fixed| {
-                    fixed
-                        .into_mles()
-                        .into_iter()
-                        .map(|f| f.into())
-                        .collect_vec()
+                    fixed.to_mles().into_iter().map(|f| f.into()).collect_vec()
                 });
             if is_opcode {
                 tracing::info!(
@@ -1249,13 +1260,13 @@ mod tests {
         error::ZKVMError,
         expression::{ToExpr, WitIn},
         gadgets::{AssertLtConfig, IsLtConfig},
-        instructions::InstancePaddingStrategy,
         set_val,
-        witness::{LkMultiplicity, RowMajorMatrix},
+        witness::LkMultiplicity,
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::mle::IntoMLE;
-    use p3_goldilocks::Goldilocks;
+    use p3::goldilocks::Goldilocks;
+    use witness::InstancePaddingStrategy;
 
     #[derive(Debug)]
     struct AssertZeroCircuit {

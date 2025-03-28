@@ -4,8 +4,8 @@ use crate::{
     expression::Expression,
     instructions::Instruction,
     state::StateCircuit,
-    tables::TableCircuit,
-    witness::{LkMultiplicity, RowMajorMatrix},
+    tables::{RMMCollections, TableCircuit},
+    witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
+use witness::RowMajorMatrix;
 
 pub struct TowerProver;
 
@@ -244,18 +245,18 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
-    witnesses_tables: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
-    pub fn get_opcode_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
-        self.witnesses_opcodes.get(name).cloned()
+    pub fn get_opcode_witness(&self, name: &String) -> Option<&RowMajorMatrix<E::BaseField>> {
+        self.witnesses_opcodes.get(name)
     }
 
-    pub fn get_table_witness(&self, name: &String) -> Option<RowMajorMatrix<E::BaseField>> {
-        self.witnesses_tables.get(name).cloned()
+    pub fn get_table_witness(&self, name: &String) -> Option<&RMMCollections<E::BaseField>> {
+        self.witnesses_tables.get(name)
     }
 
     pub fn get_lk_mlt(&self, name: &String) -> Option<&LkMultiplicity> {
@@ -343,8 +344,17 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 
     /// Iterate opcode circuits, then table circuits, sorted by name.
-    pub fn into_iter_sorted(self) -> impl Iterator<Item = (String, RowMajorMatrix<E::BaseField>)> {
-        chain(self.witnesses_opcodes, self.witnesses_tables)
+    pub fn into_iter_sorted(
+        self,
+    ) -> impl Iterator<Item = (String, Vec<RowMajorMatrix<E::BaseField>>)> {
+        chain(
+            self.witnesses_opcodes
+                .into_iter()
+                .map(|(name, witnesses)| (name, vec![witnesses])),
+            self.witnesses_tables
+                .into_iter()
+                .map(|(name, witnesses)| (name, witnesses.to_vec())),
+        )
     }
 }
 

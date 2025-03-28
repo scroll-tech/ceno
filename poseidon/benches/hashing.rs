@@ -1,8 +1,7 @@
 use ark_std::test_rng;
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use ff_ext::FromUniformBytes;
-use p3_field::PrimeCharacteristicRing;
-use p3_goldilocks::Goldilocks;
+use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Sample},
     hash::{
@@ -109,12 +108,12 @@ pub fn hashing_benchmark(c: &mut Criterion) {
     });
 }
 
-use p3_symmetric::Permutation;
+use p3::symmetric::Permutation;
 
 // bench permutation
 pub fn permutation_benchmark(c: &mut Criterion) {
     let mut plonky_permutation = PoseidonPermutation::new(core::iter::repeat(GoldilocksField(0)));
-    let ceno_challenger = DefaultChallenger::<Goldilocks, _>::new_poseidon_default();
+    let ceno_challenger = DefaultChallenger::<Goldilocks>::new_poseidon_default();
 
     c.bench_function("plonky permute", |bencher| {
         bencher.iter(|| plonky_permutation.permute())

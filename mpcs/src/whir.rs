@@ -5,6 +5,7 @@ mod utils;
 
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
@@ -103,11 +104,11 @@ where
         }
     }
 
-    fn batch_commit(
+    fn batch_commit_polys(
         pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
+        polys: &[DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(polys))
+        let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness)

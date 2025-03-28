@@ -352,7 +352,7 @@ where
         ret
     }
 
-    fn batch_commit(
+    fn batch_commit_polys(
         pp: &Self::ProverParam,
         polys: &[DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithWitness, Error> {

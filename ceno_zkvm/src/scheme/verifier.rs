@@ -12,20 +12,17 @@ use multilinear_extensions::{
 };
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::{ForkableTranscript, Transcript};
+use witness::next_pow2_instance_padding;
 
 use crate::{
     error::ZKVMError,
     expression::{Instance, StructuralWitIn},
-    instructions::{Instruction, riscv::ecall::HaltInstruction},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
     },
     structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{
-        eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows,
-        next_pow2_instance_padding,
-    },
+    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
 };
 
 use super::{
@@ -56,18 +53,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
-        does_halt: bool,
+        expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
-        let num_instances = vm_proof
-            .opcode_proofs
-            .get(&HaltInstruction::<E>::name())
-            .map(|(_, p)| p.num_instances)
-            .unwrap_or(0);
-        if num_instances != (does_halt as usize) {
+        let has_halt = vm_proof.has_halt();
+        if has_halt != expect_halt {
             return Err(ZKVMError::VerifyError(format!(
-                "ecall/halt num_instances={}, expected={}",
-                num_instances, does_halt as usize
+                "ecall/halt mismatch: expected {expect_halt} != {has_halt}",
             )));
         }
 

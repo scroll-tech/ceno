@@ -10,14 +10,16 @@ use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
+    virtual_polys::VirtualPolynomials,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
 };
 use transcript::{ForkableTranscript, Transcript};
+use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
     error::ZKVMError,
@@ -32,8 +34,7 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{get_challenge_pows, next_pow2_instance_padding, optimal_sumcheck_threads},
-    virtual_polys::VirtualPolynomials,
+    utils::{add_mle_list_by_expr, get_challenge_pows, optimal_sumcheck_threads},
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
@@ -95,29 +96,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         let commit_to_traces_span = entered_span!("commit_to_traces", profiling_1 = true);
         // commit to opcode circuits first and then commit to table circuits, sorted by name
-        for (circuit_name, witness) in witnesses.into_iter_sorted() {
-            let num_instances = witness.num_instances();
+        for (circuit_name, mut rmm) in witnesses.into_iter_sorted() {
+            let witness_rmm = rmm.remove(0);
+            // only table got structural witness
+            let structural_witness_rmm = if !rmm.is_empty() {
+                rmm.remove(0)
+            } else {
+                RowMajorMatrix::empty()
+            };
+            let num_instances = witness_rmm.num_instances();
             let span = entered_span!(
                 "commit to iteration",
                 circuit_name = circuit_name,
                 profiling_2 = true
             );
-            let num_witin = self
-                .pk
-                .circuit_pks
-                .get(&circuit_name)
-                .unwrap()
-                .get_cs()
-                .num_witin;
 
             let (witness, structural_witness) = match num_instances {
                 0 => (vec![], vec![]),
                 _ => {
-                    let mut witness = witness.into_mles();
-                    let structural_witness = witness.split_off(num_witin as usize);
+                    let witness = witness_rmm.to_mles();
+                    let structural_witness = structural_witness_rmm.to_mles();
                     commitments.insert(
                         circuit_name.clone(),
-                        PCS::batch_commit_and_write(&self.pk.pp, &witness, &mut transcript)
+                        PCS::batch_commit_and_write(&self.pk.pp, witness_rmm, &mut transcript)
                             .map_err(ZKVMError::PCSError)?,
                     );
 
@@ -162,7 +163,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         {
             let (witness, num_instances) = wits
                 .remove(circuit_name)
-                .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
+                .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
             if witness.is_empty() {
                 continue;
             }
@@ -571,7 +572,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     }
                 }
 
-                distrinct_zerocheck_terms_set.extend(virtual_polys.add_mle_list_by_expr(
+                distrinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
+                    &mut virtual_polys,
                     sel_non_lc_zero_sumcheck.as_ref(),
                     witnesses.iter().collect_vec(),
                     expr,

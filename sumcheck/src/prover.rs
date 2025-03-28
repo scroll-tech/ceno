@@ -5,10 +5,7 @@ use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
-    op_mle,
-    util::largest_even_below,
-    virtual_poly::VirtualPolynomial,
+    mle::FieldType, op_mle, util::largest_even_below, virtual_poly::VirtualPolynomial,
 };
 use rayon::{
     Scope,
@@ -26,7 +23,7 @@ use crate::{
         merge_sumcheck_polys, serial_extrapolate,
     },
 };
-use p3_field::PrimeCharacteristicRing;
+use p3::field::PrimeCharacteristicRing;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
@@ -114,16 +111,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     if let Some(p) = challenge {
                         prover_state.challenges.push(p);
                         // fix last challenge to collect final evaluation
-                        prover_state
-                            .poly
-                            .flattened_ml_extensions
-                            .iter_mut()
-                            .for_each(|mle| {
-                                let mle = Arc::get_mut(mle).unwrap();
-                                if mle.num_vars() > 0 {
-                                    mle.fix_variables_in_place(&[p.elements]);
-                                }
-                            });
+                        prover_state.fix_var(p.elements);
+
                         tx_prover_state
                             .send(Some((thread_id, prover_state)))
                             .unwrap();
@@ -183,29 +172,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             if let Some(p) = challenge {
                 prover_state.challenges.push(p);
                 // fix last challenge to collect final evaluation
-                prover_state
-                    .poly
-                    .flattened_ml_extensions
-                    .iter_mut()
-                    .for_each(|mle| {
-                        if num_variables == 1 {
-                            // first time fix variable should be create new instance
-                            if mle.num_vars() > 0 {
-                                *mle = mle.fix_variables(&[p.elements]).into();
-                            } else {
-                                *mle =
-                                    Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                                        0,
-                                        mle.get_base_field_vec().to_vec(),
-                                    ))
-                            }
-                        } else {
-                            let mle = Arc::get_mut(mle).unwrap();
-                            if mle.num_vars() > 0 {
-                                mle.fix_variables_in_place(&[p.elements]);
-                            }
-                        }
-                    });
+                prover_state.fix_var(p.elements);
                 tx_prover_state
                     .send(Some((main_thread_id, prover_state)))
                     .unwrap();
@@ -280,21 +247,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         if let Some(p) = challenge {
             prover_state.challenges.push(p);
             // fix last challenge to collect final evaluation
-            prover_state
-                .poly
-                .flattened_ml_extensions
-                .iter_mut()
-                .for_each(
-                    |mle: &mut Arc<
-                        dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>,
-                    >| {
-                        if mle.num_vars() > 0 {
-                            Arc::get_mut(mle)
-                                .unwrap()
-                                .fix_variables_in_place(&[p.elements]);
-                        }
-                    },
-                );
+            prover_state.fix_var(p.elements);
         };
         exit_span!(span);
 
@@ -330,11 +283,14 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         let max_degree = polynomial.aux_info.max_degree;
         assert!(extrapolation_aux.len() == max_degree - 1);
+        let num_polys = polynomial.flattened_ml_extensions.len();
         Self {
+            max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
             extrapolation_aux,
+            poly_index_fixvar_in_place: vec![false; num_polys],
         }
     }
 
@@ -380,31 +336,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             let chal = challenge.unwrap();
             self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
-
-            if self.challenges.len() == 1 {
-                self.poly.flattened_ml_extensions.iter_mut().for_each(|f| {
-                    if f.num_vars() > 0 {
-                        *f = Arc::new(f.fix_variables(&[r.elements]));
-                    } else {
-                        panic!("calling sumcheck on constant")
-                    }
-                });
-            } else {
-                self.poly
-                    .flattened_ml_extensions
-                    .iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut,
-                    // which can be +5% overhead rust docs doen't explain the
-                    // reason
-                    .map(Arc::get_mut)
-                    .for_each(|f| {
-                        if let Some(f) = f {
-                            if f.num_vars() > 0 {
-                                f.fix_variables_in_place(&[r.elements]);
-                            }
-                        }
-                    });
-            }
+            self.fix_var(r.elements);
         }
         exit_span!(span);
         // end_timer!(fix_argument);
@@ -413,22 +345,11 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
-        //
-        // To deal with different num_vars, we exploit a fact that for each product which num_vars < max_num_vars,
-        // for it evaluation value we need to times 2^(max_num_vars - num_vars)
-        // E.g. Giving multivariate poly f(X) = f_1(X1) + f_2(X), X1 \in {F}^{n'}, X \in {F}^{n}, |X1| := n', |X| = n, n' <= n
-        // For i round univariate poly, f^i(x)
-        // f^i[0] = \sum_b f(r, 0, b), b \in {0, 1}^{n-i-1}, r \in {F}^{n-i-1} chanllenge get from prev rounds
-        //        = \sum_b f_1(r, 0, b1) + f_2(r, 0, b), |b| >= |b1|, |b| - |b1| = n - n'
-        //        = 2^(|b| - |b1|) * \sum_b1 f_1(r, 0, b1)  + \sum_b f_2(r, 0, b)
-        // same applied on f^i[1]
-        // It imply that, for every evals in f_1, to compute univariate poly, we just need to times a factor 2^(|b| - |b1|) for it evaluation value
         let span = entered_span!("products_sum");
         let AdditiveVec(products_sum) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
             |mut products_sum, (coefficient, products)| {
                 let span = entered_span!("sum");
-
                 let f = &self.poly.flattened_ml_extensions;
                 let mut sum: Vec<E> = match products.len() {
                     1 => sumcheck_code_gen!(1, false, |i| &f[products[i]]).to_vec(),
@@ -439,6 +360,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     _ => unimplemented!("do not support degree {} > 5", products.len()),
                 };
                 exit_span!(span);
+
                 sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                 let span = entered_span!("extrapolation");
@@ -483,6 +405,41 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 }
             })
             .collect()
+    }
+
+    pub fn expected_numvars_at_round(&self) -> usize {
+        // first round start from 1
+        let num_vars = self.max_num_variables + 1 - self.round;
+        debug_assert!(num_vars > 0, "make sumcheck work on constant");
+        num_vars
+    }
+
+    /// fix_var
+    pub fn fix_var(&mut self, r: E) {
+        let expected_numvars_at_round = self.expected_numvars_at_round();
+        self.poly_index_fixvar_in_place
+            .iter_mut()
+            .zip_eq(self.poly.flattened_ml_extensions.iter_mut())
+            .for_each(|(can_fixvar_in_place, poly)| {
+                debug_assert!(poly.num_vars() <= expected_numvars_at_round);
+                debug_assert!(poly.num_vars() > 0);
+                if *can_fixvar_in_place {
+                    // in place
+                    let poly = Arc::get_mut(poly);
+                    if let Some(f) = poly {
+                        if f.num_vars() > 0 {
+                            f.fix_variables_in_place(&[r])
+                        }
+                    };
+                } else if poly.num_vars() > 0 {
+                    if expected_numvars_at_round == poly.num_vars() {
+                        *poly = Arc::new(poly.fix_variables(&[r]));
+                        *can_fixvar_in_place = true;
+                    }
+                } else {
+                    panic!("calling sumcheck on constant")
+                }
+            });
     }
 }
 
@@ -537,28 +494,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         if let Some(p) = challenge {
             prover_state.challenges.push(p);
             // fix last challenge to collect final evaluation
-            prover_state
-                .poly
-                .flattened_ml_extensions
-                .par_iter_mut()
-                .for_each(|mle| {
-                    if num_variables == 1 {
-                        // first time fix variable should be create new instance
-                        if mle.num_vars() > 0 {
-                            *mle = mle.fix_variables(&[p.elements]).into();
-                        } else {
-                            *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                                0,
-                                mle.get_base_field_vec().to_vec(),
-                            ))
-                        }
-                    } else {
-                        let mle = Arc::get_mut(mle).unwrap();
-                        if mle.num_vars() > 0 {
-                            mle.fix_variables_in_place(&[p.elements]);
-                        }
-                    }
-                });
+            prover_state.fix_var_parallel(p.elements);
         };
         exit_span!(span);
 
@@ -587,7 +523,9 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         );
 
         let max_degree = polynomial.aux_info.max_degree;
+        let num_polys = polynomial.flattened_ml_extensions.len();
         let prover_state = Self {
+            max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
@@ -598,6 +536,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     (points, weights)
                 })
                 .collect(),
+            poly_index_fixvar_in_place: vec![false; num_polys],
         };
 
         end_timer!(start);
@@ -642,34 +581,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             let chal = challenge.unwrap();
             self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
-
-            if self.challenges.len() == 1 {
-                self.poly
-                    .flattened_ml_extensions
-                    .par_iter_mut()
-                    .for_each(|f| {
-                        if f.num_vars() > 0 {
-                            *f = Arc::new(f.fix_variables_parallel(&[r.elements]));
-                        } else {
-                            panic!("calling sumcheck on constant")
-                        }
-                    });
-            } else {
-                self.poly
-                    .flattened_ml_extensions
-                    .par_iter_mut()
-                    // benchmark result indicate make_mut achieve better performange than get_mut,
-                    // which can be +5% overhead rust docs doen't explain the
-                    // reason
-                    .map(Arc::get_mut)
-                    .for_each(|f| {
-                        if let Some(f) = f {
-                            if f.num_vars() > 0 {
-                                f.fix_variables_in_place_parallel(&[r.elements])
-                            }
-                        }
-                    });
-            }
+            self.fix_var(r.elements);
         }
         exit_span!(span);
         // end_timer!(fix_argument);
@@ -726,5 +638,31 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         IOPProverMessage {
             evaluations: products_sum,
         }
+    }
+
+    /// fix_var
+    pub fn fix_var_parallel(&mut self, r: E) {
+        let expected_numvars_at_round = self.expected_numvars_at_round();
+        self.poly_index_fixvar_in_place
+            .par_iter_mut()
+            .zip_eq(self.poly.flattened_ml_extensions.par_iter_mut())
+            .for_each(|(can_fixvar_in_place, poly)| {
+                if *can_fixvar_in_place {
+                    // in place
+                    let poly = Arc::get_mut(poly);
+                    if let Some(f) = poly {
+                        if f.num_vars() > 0 {
+                            f.fix_variables_in_place_parallel(&[r])
+                        }
+                    };
+                } else if poly.num_vars() > 0 {
+                    if expected_numvars_at_round == poly.num_vars() {
+                        *poly = Arc::new(poly.fix_variables_parallel(&[r]));
+                        *can_fixvar_in_place = true;
+                    }
+                } else {
+                    panic!("calling sumcheck on constant")
+                }
+            });
     }
 }

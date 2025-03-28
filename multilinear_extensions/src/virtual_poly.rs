@@ -7,7 +7,7 @@ use crate::{
 use ark_std::{end_timer, rand::Rng, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use p3_field::Field;
+use p3::field::Field;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -158,7 +158,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     }
 
     /// Evaluate the virtual polynomial at point `point`.
-    /// Returns an error is point.len() does not match `num_variables`.
+    /// Returns an error if point.len() does not match `num_variables`.
     pub fn evaluate(&self, point: &[E]) -> E {
         let start = start_timer!(|| "evaluation");
 
