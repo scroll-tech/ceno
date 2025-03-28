@@ -17,7 +17,7 @@ pub struct Statement<E> {
 }
 
 // Only includes the authentication paths
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"

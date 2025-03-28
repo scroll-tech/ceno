@@ -1,6 +1,9 @@
 use super::committer::Witnesses;
 use crate::{
-    crypto::{Digest, MerkleTreeExt, generate_multi_proof, write_digest_to_transcript},
+    crypto::{
+        Digest, MerklePathExt, MerkleTreeExt, Poseidon2ExtMerkleMmcs, generate_multi_proof,
+        write_digest_to_transcript,
+    },
     error::Error,
     ntt::expand_from_coeff,
     parameters::FoldType,
@@ -33,7 +36,13 @@ struct RoundStateBatch<'a, E: ExtensionField> {
     prev_merkle: &'a MerkleTreeExt<E>,
 }
 
-impl<E: ExtensionField> Prover<E> {
+impl<E: ExtensionField> Prover<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+    MerklePathExt<E>: Send + Sync,
+    MerkleTreeExt<E>: Send + Sync,
+{
     fn validate_witnesses(&self, witness: &Witnesses<E>) -> bool {
         assert_eq!(
             witness.ood_points.len() * witness.polys.len(),
@@ -97,7 +106,7 @@ impl<E: ExtensionField> Prover<E> {
         let initial_claims_timer = entered_span!("initial claims");
         let initial_claims: Vec<_> = witness
             .ood_points
-            .par_iter()
+            .iter()
             .map(|ood_point| expand_from_univariate(*ood_point, self.0.mv_parameters.num_variables))
             .chain(points.to_vec())
             .collect();
@@ -125,7 +134,7 @@ impl<E: ExtensionField> Prover<E> {
             .collect();
 
         let polynomial = (0..(1 << witness.polys[0].num_vars()))
-            .into_par_iter()
+            .into_iter()
             .map(|i| {
                 witness
                     .polys
@@ -447,7 +456,13 @@ impl<E: ExtensionField> Prover<E> {
     }
 }
 
-impl<E: ExtensionField> Prover<E> {
+impl<E: ExtensionField> Prover<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+    MerklePathExt<E>: Send + Sync,
+    MerkleTreeExt<E>: Send + Sync,
+{
     /// each poly on a different point, same size
     pub fn same_size_batch_prove<T: Transcript<E>>(
         &self,

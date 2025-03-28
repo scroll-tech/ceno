@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use whir_external::whir::verifier::WhirCommitmentInTranscript;
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -13,7 +13,7 @@ pub struct WhirCommitment<E: ExtensionField> {
     pub(crate) num_vars: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Whir<E: ExtensionField, Spec: WhirSpec<E>> {
     phantom: std::marker::PhantomData<(E, Spec)>,
 }

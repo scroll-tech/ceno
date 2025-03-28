@@ -1,33 +1,32 @@
-use std::sync::Arc;
-
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
     util::interpolate_uni_poly,
 };
 use ark_std::{rand::RngCore, test_rng};
-use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
+use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
+    util::max_usable_threads,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
 use p3::field::PrimeCharacteristicRing;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use transcript::{BasicTranscript, Transcript};
 
 #[test]
 fn test_sumcheck_with_different_degree() {
-    let nv = vec![4, 5]; // test polynomial mixed with different num_var
-    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(nv);
+    // test polynomial mixed with different num_var
+    let nv = vec![3, 4, 5];
+    let num_polys = nv.len();
+    for num_threads in 1..num_polys.min(max_usable_threads()) {
+        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(num_threads, &nv);
+    }
 }
 
-fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(nv: Vec<usize>) {
+fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
     let mut rng = test_rng();
     let degree = 2;
     let num_multiplicands_range = (degree, degree + 1);
     let num_products = 1;
-    // TODO investigate error when num_threads > 1
-    let num_threads = 1;
     let mut transcript = BasicTranscript::<E>::new(b"test");
 
     let max_num_variables = *nv.iter().max().unwrap();
@@ -73,10 +72,11 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(nv: Vec<usize>)
         .map(|c| c.elements)
         .collect::<Vec<_>>();
     assert_eq!(r.len(), max_num_variables);
+    // r are right alignment
     assert!(
         input_polys
             .iter()
-            .map(|(poly, _)| { poly.evaluate(&r[..poly.aux_info.max_num_variables]) })
+            .map(|(poly, _)| { poly.evaluate(&r[r.len() - poly.aux_info.max_num_variables..]) })
             .sum::<E>()
             == subclaim.expected_evaluation,
         "wrong subclaim"
@@ -144,28 +144,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     if let Some(p) = challenge {
         prover_state.challenges.push(p);
         // fix last challenge to collect final evaluation
-        prover_state
-            .poly
-            .flattened_ml_extensions
-            .par_iter_mut()
-            .for_each(|mle| {
-                if num_variables == 1 {
-                    // first time fix variable should be create new instance
-                    if mle.num_vars() > 0 {
-                        *mle = mle.fix_variables(&[p.elements]).into();
-                    } else {
-                        *mle = Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                            0,
-                            mle.get_base_field_vec().to_vec(),
-                        ))
-                    }
-                } else {
-                    let mle = Arc::get_mut(mle).unwrap();
-                    if mle.num_vars() > 0 {
-                        mle.fix_variables_in_place(&[p.elements]);
-                    }
-                }
-            });
+        prover_state.fix_var(p.elements);
     };
     let subclaim = IOPVerifierState::check_and_generate_subclaim(&verifier_state, &asserted_sum);
     assert!(
@@ -184,6 +163,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
 #[test]
 fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
+    test_trivial_polynomial_helper::<BabyBearExt4>();
 }
 
 fn test_trivial_polynomial_helper<E: ExtensionField>() {
@@ -198,6 +178,7 @@ fn test_trivial_polynomial_helper<E: ExtensionField>() {
 #[test]
 fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
+    test_normal_polynomial_helper::<BabyBearExt4>();
 }
 
 fn test_normal_polynomial_helper<E: ExtensionField>() {
@@ -212,6 +193,7 @@ fn test_normal_polynomial_helper<E: ExtensionField>() {
 #[test]
 fn test_extract_sum() {
     test_extract_sum_helper::<GoldilocksExt2>();
+    test_extract_sum_helper::<BabyBearExt4>();
 }
 
 fn test_extract_sum_helper<E: ExtensionField>() {

@@ -92,7 +92,6 @@ impl<E: ExtensionField> MmuConfig<E> {
         )?;
 
         witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
-
         witness.assign_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, hints_final)?;
 
         Ok(())

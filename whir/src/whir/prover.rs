@@ -1,6 +1,9 @@
 use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::{Digest, MerkleTreeExt, MultiPath, generate_multi_proof, write_digest_to_transcript},
+    crypto::{
+        Digest, MerklePathExt, MerkleTreeExt, MultiPath, Poseidon2ExtMerkleMmcs,
+        generate_multi_proof, write_digest_to_transcript,
+    },
     domain::Domain,
     error::Error,
     ntt::expand_from_coeff,
@@ -19,7 +22,13 @@ use crate::whir::fs_utils::get_challenge_stir_queries;
 
 pub struct Prover<E: ExtensionField>(pub WhirConfig<E>);
 
-impl<E: ExtensionField> Prover<E> {
+impl<E: ExtensionField> Prover<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+    MerklePathExt<E>: Send + Sync,
+    MerkleTreeExt<E>: Send + Sync,
+{
     pub(crate) fn validate_parameters(&self) -> bool {
         self.0.mv_parameters.num_variables
             == self.0.folding_factor.total_number(self.0.n_rounds()) + self.0.final_sumcheck_rounds

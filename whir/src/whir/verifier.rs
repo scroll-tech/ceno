@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Digest, verify_multi_proof, write_digest_to_transcript},
+    crypto::{Digest, Poseidon2ExtMerkleMmcs, verify_multi_proof, write_digest_to_transcript},
     utils::{evaluate_as_univariate, evaluate_over_hypercube},
 };
 use ff_ext::ExtensionField;
@@ -7,7 +7,10 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3::field::{Field, PrimeCharacteristicRing};
+use p3::{
+    commit::Mmcs,
+    field::{Field, PrimeCharacteristicRing},
+};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::iter;
@@ -27,7 +30,7 @@ pub struct Verifier<E: ExtensionField> {
     pub(crate) two_inv: E::BaseField,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -66,7 +69,11 @@ pub(crate) struct ParsedRound<E> {
     pub(crate) domain_gen_inv: E,
 }
 
-impl<E: ExtensionField> Verifier<E> {
+impl<E: ExtensionField> Verifier<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
     pub fn new(params: WhirConfig<E>) -> Self {
         Verifier {
             params,

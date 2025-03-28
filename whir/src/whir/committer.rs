@@ -1,6 +1,6 @@
 use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::write_digest_to_transcript,
+    crypto::{Poseidon2ExtMerkleMmcs, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff,
     utils::{self, interpolate_over_boolean_hypercube},
@@ -21,7 +21,11 @@ use rayon::prelude::*;
 
 pub struct Committer<E: ExtensionField>(pub(crate) WhirConfig<E>);
 
-impl<E: ExtensionField> Committer<E> {
+impl<E: ExtensionField> Committer<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
     pub fn new(config: WhirConfig<E>) -> Self {
         Self(config)
     }
@@ -103,7 +107,7 @@ impl<E: ExtensionField> Committer<E> {
         exit_span!(timer);
 
         let commitment = WhirCommitmentInTranscript {
-            root,
+            root: root.clone(),
             ood_points: ood_points.clone(),
             ood_answers: ood_answers.clone(),
         };
@@ -115,6 +119,7 @@ impl<E: ExtensionField> Committer<E> {
         Ok((
             Witnesses {
                 polys: vec![polynomial],
+                root,
                 merkle_tree,
                 ood_points,
                 ood_answers,
