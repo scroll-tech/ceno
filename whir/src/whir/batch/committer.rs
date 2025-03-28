@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Digest, MerkleTreeExt, Poseidon2ExtMerkleMmcs, write_digest_to_transcript},
+    crypto::{Digest, MerkleTreeExt, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff,
     utils::{self, interpolate_over_boolean_hypercube},
@@ -53,8 +53,7 @@ impl<E: ExtensionField> Witnesses<E> {
 
 impl<E: ExtensionField> Committer<E>
 where
-    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
-        IntoIterator<Item = E::BaseField> + PartialEq,
+    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
 {
     pub fn batch_commit(
         &self,

@@ -6,14 +6,13 @@ use crate::util::log2_strict;
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::MultilinearExtension;
-use p3::commit::Mmcs;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 use structure::WhirCommitment;
 pub use structure::{Whir, WhirDefault};
 use whir_external::{
-    crypto::Poseidon2ExtMerkleMmcs,
+    crypto::{Digest, MerklePathExt, MerkleTreeExt},
     parameters::MultivariateParameters,
     whir::{
         Statement, WhirProof, batch::Witnesses, committer::Committer, parameters::WhirConfig,
@@ -25,8 +24,9 @@ impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whi
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
-    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
-        IntoIterator<Item = E::BaseField> + PartialEq,
+    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    MerklePathExt<E>: Send + Sync,
+    MerkleTreeExt<E>: Send + Sync,
 {
     type Param = ();
     type ProverParam = ();

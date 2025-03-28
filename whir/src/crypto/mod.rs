@@ -18,8 +18,6 @@ pub fn poseidon2_ext_merkle_tree<E: ExtensionField>() -> Poseidon2ExtMerkleMmcs<
     ExtensionMmcs::new(<E::BaseField as PoseidonField>::get_default_mmcs())
 }
 
-// pub type Digest<E> = <<E as ExtensionField>::BaseField as PoseidonField>::D;
-
 pub type MerklePathExt<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Proof;
 pub type MultiPath<E> = Vec<(Vec<Vec<E>>, MerklePathExt<E>)>;
 pub type Digest<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment;

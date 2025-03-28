@@ -1,6 +1,6 @@
 use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::{Poseidon2ExtMerkleMmcs, write_digest_to_transcript},
+    crypto::{Digest, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff,
     utils::{self, interpolate_over_boolean_hypercube},
@@ -23,8 +23,7 @@ pub struct Committer<E: ExtensionField>(pub(crate) WhirConfig<E>);
 
 impl<E: ExtensionField> Committer<E>
 where
-    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
-        IntoIterator<Item = E::BaseField> + PartialEq,
+    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
 {
     pub fn new(config: WhirConfig<E>) -> Self {
         Self(config)
