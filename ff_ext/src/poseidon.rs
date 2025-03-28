@@ -22,9 +22,6 @@ pub trait PoseidonField: PrimeField + SmallField {
     type C: Clone + Sync;
     type MMCS: Mmcs<Self> + Clone + Sync;
     type T: FieldChallenger<Self> + Clone;
-    // digest
-    type D: Clone + Copy + PartialEq + Eq + IntoIterator<Item = Self>;
-    type MK;
     fn get_default_challenger() -> Self::T;
     fn get_default_perm() -> Self::P;
     fn get_default_sponge() -> Self::S;

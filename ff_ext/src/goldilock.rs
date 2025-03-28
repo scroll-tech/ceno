@@ -52,8 +52,6 @@ pub mod impl_goldilocks {
         type S = PaddingFreeSponge<Self::P, 8, 4, 4>;
         type C = TruncatedPermutation<Self::P, 2, 4, 8>;
         type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 4>;
-        type MK = MerkleTree<Self, Self, RowMajorMatrix<Self>, 4>;
-        type D = p3::symmetric::Hash<Self, Self, 4>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>::new(
                 Self::get_default_perm(),

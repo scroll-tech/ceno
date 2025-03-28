@@ -101,8 +101,6 @@ pub mod impl_babybear {
         type S = PaddingFreeSponge<Self::P, 16, 8, 8>;
         type C = TruncatedPermutation<Self::P, 2, 8, 16>;
         type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 8>;
-        type MK = MerkleTree<Self, Self, RowMajorMatrix<Self>, 8>;
-        type D = p3::symmetric::Hash<Self, Self, 8>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<
                 Self,
