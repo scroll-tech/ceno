@@ -131,8 +131,12 @@ impl<E: ExtensionField> Verifier<E> {
         let compute_dot_product =
             |evals: &[E], coeff: &[E]| -> E { zip_eq(evals, coeff).map(|(a, b)| *a * *b).sum() };
 
+        let internal_timer = entered_span!("Generate random coeff");
         let random_coeff =
             super::utils::generate_random_vector_batch_verify(transcript, num_polys)?;
+        exit_span!(internal_timer);
+
+        let internal_timer = entered_span!("Prepare initial claims");
         let initial_claims: Vec<_> = parsed_commitment
             .ood_points
             .clone()
@@ -154,7 +158,9 @@ impl<E: ExtensionField> Verifier<E> {
             .map(|evals| compute_dot_product(evals, &random_coeff));
 
         let initial_answers: Vec<_> = ood_answers.into_iter().chain(eval_per_point).collect();
+        exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("Write proof to transcript batch");
         let statement = Statement {
             points: initial_claims,
             evaluations: initial_answers,
@@ -168,9 +174,13 @@ impl<E: ExtensionField> Verifier<E> {
             num_polys,
             sumcheck_poly_evals_iter,
         )?;
+        exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("Compute folds");
         let computed_folds = self.compute_folds(&parsed);
+        exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("First round");
         let mut prev: Option<(SumcheckPolynomial<E>, E)> = None;
         if let Some(round) = parsed.initial_sumcheck_rounds.first() {
             // Check the first polynomial
@@ -203,7 +213,9 @@ impl<E: ExtensionField> Verifier<E> {
 
             prev = Some((prev_poly, randomness));
         }
+        exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("Intermediate rounds");
         for (round, folds) in parsed.rounds.iter().zip(&computed_folds) {
             let (sumcheck_poly, new_randomness) = &round.sumcheck_rounds[0].clone();
 
@@ -240,8 +252,10 @@ impl<E: ExtensionField> Verifier<E> {
                 prev = Some((sumcheck_poly.clone(), *new_randomness));
             }
         }
+        exit_span!(internal_timer);
 
         // Check the foldings computed from the proof match the evaluations of the polynomial
+        let internal_timer = entered_span!("Final evaluation");
         let final_folds = &computed_folds[computed_folds.len() - 1];
         let final_evaluations =
             evaluate_as_univariate(&parsed.final_evaluations, &parsed.final_randomness_points);
@@ -291,10 +305,14 @@ impl<E: ExtensionField> Verifier<E> {
         } else {
             E::ZERO
         };
+        exit_span!(internal_timer);
 
         // Check the final sumcheck evaluation
+        let internal_timer = entered_span!("Compute v poly for batched");
         let evaluation_of_v_poly = self.compute_v_poly_for_batched(&statement, &parsed);
+        exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("Final check");
         if prev_sumcheck_poly_eval
             != evaluation_of_v_poly
                 * DenseMultilinearExtension::from_evaluations_ext_vec(
@@ -307,6 +325,7 @@ impl<E: ExtensionField> Verifier<E> {
                 "Final sumcheck evaluation mismatched".to_string(),
             ));
         }
+        exit_span!(internal_timer);
 
         Ok(())
     }
