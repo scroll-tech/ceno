@@ -1,6 +1,6 @@
 pub mod impl_babybear {
 
-    use crate::{array_try_from_uniform_bytes, poseidon::PoseidonFieldExt};
+    use crate::array_try_from_uniform_bytes;
     use p3::{
         self,
         babybear::{BabyBear, Poseidon2BabyBear},
@@ -188,14 +188,5 @@ pub mod impl_babybear {
                 .map(|v: &Self::BaseField| v.as_canonical_u32() as u64)
                 .collect()
         }
-    }
-
-    impl PoseidonFieldExt for BabyBearExt4 {
-        type MkExt = MerkleTree<
-            <Self as ExtensionField>::BaseField,
-            <Self as ExtensionField>::BaseField,
-            FlatMatrixView<<Self as ExtensionField>::BaseField, Self, RowMajorMatrix<Self>>,
-            8,
-        >;
     }
 }

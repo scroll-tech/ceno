@@ -15,7 +15,7 @@ pub use babybear::impl_babybear::*;
 mod goldilock;
 pub use goldilock::impl_goldilocks::*;
 mod poseidon;
-pub use poseidon::{FieldChallengerExt, PoseidonField, PoseidonFieldExt};
+pub use poseidon::{FieldChallengerExt, PoseidonField};
 
 pub(crate) fn array_try_from_uniform_bytes<
     F: Copy + Default + FromUniformBytes<Bytes = [u8; W]>,
@@ -108,7 +108,7 @@ pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
 }
 
 pub trait ExtensionField:
-    P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord + TwoAdicField + PoseidonFieldExt
+    P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord + TwoAdicField
 {
     const DEGREE: usize;
     const MULTIPLICATIVE_GENERATOR: Self;

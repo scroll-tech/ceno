@@ -1,7 +1,7 @@
-use ff_ext::{ExtensionField, PoseidonField, PoseidonFieldExt};
+use ff_ext::{ExtensionField, PoseidonField};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    matrix::{Dimensions, Matrix, dense::DenseMatrix},
+    matrix::{Dimensions, dense::DenseMatrix},
 };
 use transcript::Transcript;
 
@@ -29,8 +29,8 @@ pub fn write_digest_to_transcript<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
 ) {
     // digest
-    //     .clone()
-    //     .into_iter()
+    //     .as_ref()
+    //     .iter()
     //     .for_each(|x| transcript.append_field_element(&x));
 }
 

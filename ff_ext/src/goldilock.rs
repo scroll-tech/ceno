@@ -3,7 +3,7 @@ pub mod impl_goldilocks {
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, SmallField,
         array_try_from_uniform_bytes, impl_from_uniform_bytes_for_binomial_extension,
-        poseidon::{PoseidonField, PoseidonFieldExt, new_array},
+        poseidon::{PoseidonField, new_array},
     };
     use p3::{
         challenger::DuplexChallenger,
@@ -138,14 +138,5 @@ pub mod impl_goldilocks {
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()
         }
-    }
-
-    impl PoseidonFieldExt for GoldilocksExt2 {
-        type MkExt = MerkleTree<
-            <Self as ExtensionField>::BaseField,
-            <Self as ExtensionField>::BaseField,
-            FlatMatrixView<<Self as ExtensionField>::BaseField, Self, RowMajorMatrix<Self>>,
-            4,
-        >;
     }
 }
