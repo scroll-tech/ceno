@@ -20,7 +20,7 @@ pub trait PoseidonField: PrimeField + SmallField {
     type S: Clone + Sync;
     // compression
     type C: Clone + Sync;
-    type MMCS: Mmcs<Self> + Clone;
+    type MMCS: Mmcs<Self> + Clone + Sync;
     type T: FieldChallenger<Self> + Clone;
     // digest
     type D: Clone + Copy + PartialEq + Eq + IntoIterator<Item = Self>;

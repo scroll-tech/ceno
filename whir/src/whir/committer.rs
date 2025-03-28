@@ -11,7 +11,7 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::matrix::dense::RowMajorMatrix;
+use p3::matrix::dense::{DenseMatrix, RowMajorMatrix};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
 
@@ -103,7 +103,7 @@ impl<E: ExtensionField> Committer<E> {
         exit_span!(timer);
 
         let commitment = WhirCommitmentInTranscript {
-            root,
+            root: root.clone(),
             ood_points: ood_points.clone(),
             ood_answers: ood_answers.clone(),
         };
@@ -115,6 +115,7 @@ impl<E: ExtensionField> Committer<E> {
         Ok((
             Witnesses {
                 polys: vec![polynomial],
+                root,
                 merkle_tree,
                 merkle_leaves: folded_evals,
                 ood_points,

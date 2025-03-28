@@ -98,7 +98,7 @@ impl<E: ExtensionField> Prover<E> {
         let initial_claims_timer = entered_span!("initial claims");
         let initial_claims: Vec<_> = witness
             .ood_points
-            .par_iter()
+            .iter()
             .map(|ood_point| expand_from_univariate(*ood_point, self.0.mv_parameters.num_variables))
             .chain(points.to_vec())
             .collect();
@@ -126,7 +126,7 @@ impl<E: ExtensionField> Prover<E> {
             .collect();
 
         let polynomial = (0..(1 << witness.polys[0].num_vars()))
-            .into_par_iter()
+            .into_iter()
             .map(|i| {
                 witness
                     .polys
@@ -355,7 +355,7 @@ impl<E: ExtensionField> Prover<E> {
             .map(|i| prev_merkle_answers[i * fold_size..(i + 1) * fold_size].to_vec())
             .collect::<Vec<_>>();
         let batched_answers = answers
-            .par_iter()
+            .iter()
             .map(|answer| {
                 let chunk_size = 1 << self.0.folding_factor.at_round(round_state.round);
                 let mut res = vec![E::ZERO; chunk_size];

@@ -26,7 +26,7 @@ pub struct Verifier<E: ExtensionField> {
     pub(crate) two_inv: E::BaseField,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"

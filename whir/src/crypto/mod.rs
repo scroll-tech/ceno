@@ -1,7 +1,7 @@
 use ff_ext::{ExtensionField, PoseidonField, PoseidonFieldExt};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    matrix::Dimensions,
+    matrix::{Dimensions, Matrix, dense::DenseMatrix},
 };
 use transcript::Transcript;
 
@@ -17,24 +17,26 @@ pub fn poseidon2_ext_merkle_tree<E: ExtensionField>() -> Poseidon2ExtMerkleMmcs<
     ExtensionMmcs::new(<E::BaseField as PoseidonField>::get_default_mmcs())
 }
 
-pub type Digest<E> = <<E as ExtensionField>::BaseField as PoseidonField>::D;
+// pub type Digest<E> = <<E as ExtensionField>::BaseField as PoseidonField>::D;
 
 pub type MerklePathExt<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Proof;
 pub type MultiPath<E> = Vec<(Vec<Vec<E>>, MerklePathExt<E>)>;
+pub type Digest<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment;
+pub type MerkleTreeExt<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::ProverData<DenseMatrix<E>>;
 
 pub fn write_digest_to_transcript<E: ExtensionField>(
     digest: &Digest<E>,
     transcript: &mut impl Transcript<E>,
 ) {
-    digest
-        .clone()
-        .into_iter()
-        .for_each(|x| transcript.append_field_element(&x));
+    // digest
+    //     .clone()
+    //     .into_iter()
+    //     .for_each(|x| transcript.append_field_element(&x));
 }
 
 pub fn generate_multi_proof<E: ExtensionField>(
     hash_params: &Poseidon2ExtMerkleMmcs<E>,
-    merkle_tree: &<E as PoseidonFieldExt>::MkExt,
+    merkle_tree: &MerkleTreeExt<E>,
     indices: &[usize],
 ) -> MultiPath<E> {
     indices

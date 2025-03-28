@@ -24,6 +24,7 @@ pub struct Witnesses<E: ExtensionField> {
     pub(crate) polys: Vec<DenseMultilinearExtension<E>>,
     #[debug(skip)]
     pub(crate) merkle_tree: MerkleTreeExt<E>,
+    pub(crate) root: Digest<E>,
     pub(crate) merkle_leaves: Vec<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
@@ -35,7 +36,7 @@ impl<E: ExtensionField> Witnesses<E> {
     }
 
     pub fn root(&self) -> Digest<E> {
-        self.merkle_tree.root()
+        self.root.clone()
     }
 
     pub fn to_commitment_in_transcript(&self) -> WhirCommitmentInTranscript<E> {
@@ -227,13 +228,14 @@ impl<E: ExtensionField> Committer<E> {
         exit_span!(timer);
 
         let commitment = WhirCommitmentInTranscript {
-            root,
+            root: root.clone(),
             ood_points: ood_points.clone(),
             ood_answers: ood_answers.clone(),
         };
         Ok((
             Witnesses {
                 polys,
+                root,
                 merkle_tree,
                 merkle_leaves: folded_evals,
                 ood_points,
