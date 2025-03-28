@@ -301,8 +301,8 @@ pub struct Tracer {
     record: StepRecord,
 
     // record each section max access address
-    // (start_addr -> (start_addr, end_addr, max_access_addr))
-    mmio_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr)>>,
+    // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
+    mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: HashMap<WordAddr, Cycle>,
 }
 
@@ -327,6 +327,7 @@ impl Tracer {
                 (
                     ByteAddr::from(platform.heap.start).waddr(),
                     ByteAddr::from(platform.heap.end).waddr(),
+                    ByteAddr::from(platform.heap.end).waddr(),
                     ByteAddr::from(platform.heap.start).waddr(),
                 ),
             );
@@ -335,6 +336,7 @@ impl Tracer {
                 (
                     ByteAddr::from(platform.stack.start).waddr(),
                     ByteAddr::from(platform.stack.end).waddr(),
+                    ByteAddr::from(platform.stack.end).waddr(),
                     ByteAddr::from(platform.stack.start).waddr(),
                 ),
             );
@@ -342,6 +344,7 @@ impl Tracer {
                 ByteAddr::from(platform.hints.start).waddr(),
                 (
                     ByteAddr::from(platform.hints.start).waddr(),
+                    ByteAddr::from(platform.hints.end).waddr(),
                     ByteAddr::from(platform.hints.end).waddr(),
                     ByteAddr::from(platform.hints.start).waddr(),
                 ),
@@ -352,7 +355,7 @@ impl Tracer {
         };
 
         Tracer {
-            mmio_max_access,
+            mmio_min_max_access: mmio_max_access,
             record: StepRecord {
                 cycle: Self::SUBCYCLES_PER_INSN,
                 ..StepRecord::default()
@@ -424,13 +427,18 @@ impl Tracer {
         }
 
         // update max mmio access
-        if let Some((&_, (_, end_addr, max_addr))) = self
-            .mmio_max_access
+        if let Some((&_, (_, end_addr, min_addr, max_addr))) = self
+            .mmio_min_max_access
             .as_mut()
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
         {
             if addr < *end_addr {
-                *max_addr = (*max_addr).max(addr);
+                if addr >= *max_addr {
+                    *max_addr = addr + WordAddr::from(1); // end exclusive
+                }
+                if addr < *min_addr {
+                    *min_addr = addr; // start inclusive
+                }
             }
         }
 
@@ -469,13 +477,23 @@ impl Tracer {
     }
 
     /// giving a start_addr address, return max accessed address within section
-    fn probe_max_address_by_start_addr(&self, start_addr: WordAddr) -> Option<WordAddr> {
-        self.mmio_max_access.as_ref().and_then(|mmio_max_access| {
-            mmio_max_access
-                .range(..=start_addr)
-                .next_back()
-                .and_then(|(_, &(s, e, max))| if start_addr <= e { Some(max) } else { None })
-        })
+    pub fn probe_min_max_address_by_start_addr(
+        &self,
+        start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)> {
+        self.mmio_min_max_access
+            .as_ref()
+            .and_then(|mmio_max_access| {
+                mmio_max_access.range(..=start_addr).next_back().and_then(
+                    |(_, &(_, e, min, max))| {
+                        if start_addr <= e && min < max {
+                            Some((min, max))
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
     }
 }
 
