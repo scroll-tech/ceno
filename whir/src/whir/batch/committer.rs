@@ -24,7 +24,6 @@ pub struct Witnesses<E: ExtensionField> {
     pub(crate) polys: Vec<DenseMultilinearExtension<E>>,
     #[debug(skip)]
     pub(crate) merkle_tree: MerkleTreeExt<E>,
-    pub(crate) merkle_leaves: Vec<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
@@ -141,7 +140,7 @@ impl<E: ExtensionField> Committer<E> {
 
         let (root, merkle_tree) = {
             let clone_timer = entered_span!("Clone into rmm");
-            let rmm = RowMajorMatrix::new(folded_evals.clone(), fold_size * polys.len());
+            let rmm = RowMajorMatrix::new(folded_evals, fold_size * polys.len());
             exit_span!(clone_timer);
             self.0.hash_params.commit_matrix(rmm)
         };
@@ -235,7 +234,6 @@ impl<E: ExtensionField> Committer<E> {
             Witnesses {
                 polys,
                 merkle_tree,
-                merkle_leaves: folded_evals,
                 ood_points,
                 ood_answers,
             },

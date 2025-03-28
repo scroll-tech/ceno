@@ -135,7 +135,6 @@ impl<E: ExtensionField> Prover<E> {
             folding_randomness,
             evaluations: witness.polys[0].clone(),
             prev_merkle: Some(&witness.merkle_tree),
-            prev_merkle_answers: witness.merkle_leaves.clone(),
             merkle_proofs: vec![],
         };
 
@@ -197,17 +196,7 @@ impl<E: ExtensionField> Prover<E> {
                 &round_state.prev_merkle.unwrap(),
                 &final_challenge_indexes,
             );
-            // Every query requires opening these many in the previous Merkle tree
-            let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
-            let answers = final_challenge_indexes
-                .into_iter()
-                .map(|i| {
-                    round_state.prev_merkle_answers[i * fold_size..(i + 1) * fold_size].to_vec()
-                })
-                .collect();
-            round_state
-                .merkle_proofs
-                .push((merkle_proof_with_leaves, answers));
+            round_state.merkle_proofs.push(merkle_proof_with_leaves);
 
             // Final sumcheck
             if self.0.final_sumcheck_rounds > 0 {
@@ -308,10 +297,9 @@ impl<E: ExtensionField> Prover<E> {
             &round_state.prev_merkle.unwrap(),
             &stir_challenges_indexes,
         );
-        let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
-        let answers: Vec<_> = stir_challenges_indexes
+        let answers: Vec<_> = merkle_proof_with_leaves
             .iter()
-            .map(|i| round_state.prev_merkle_answers[i * fold_size..(i + 1) * fold_size].to_vec())
+            .map(|(answers, _)| answers[0].clone())
             .collect();
         // Evaluate answers in the folding randomness.
         let mut stir_evaluations = ood_answers_round.clone();
@@ -372,9 +360,7 @@ impl<E: ExtensionField> Prover<E> {
                 .evaluate(&round_state.folding_randomness)
             })),
         }
-        round_state
-            .merkle_proofs
-            .push((merkle_proof_with_leaves, answers));
+        round_state.merkle_proofs.push(merkle_proof_with_leaves);
 
         // Randomness for combination
         let combination_randomness_gen = transcript
@@ -416,7 +402,6 @@ impl<E: ExtensionField> Prover<E> {
             folding_randomness,
             evaluations: folded_evaluations, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
             prev_merkle: Some(&merkle_tree),
-            prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
         };
 
@@ -439,6 +424,5 @@ pub(crate) struct RoundState<'a, E: ExtensionField> {
     pub(crate) folding_randomness: Vec<E>,
     pub(crate) evaluations: DenseMultilinearExtension<E>,
     pub(crate) prev_merkle: Option<&'a MerkleTreeExt<E>>,
-    pub(crate) prev_merkle_answers: Vec<E>,
-    pub(crate) merkle_proofs: Vec<(MultiPath<E>, Vec<Vec<E>>)>,
+    pub(crate) merkle_proofs: Vec<MultiPath<E>>,
 }

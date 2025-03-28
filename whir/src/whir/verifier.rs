@@ -161,7 +161,7 @@ impl<E: ExtensionField> Verifier<E> {
         let mut rounds = vec![];
 
         for r in 0..self.params.n_rounds() {
-            let (merkle_proof_with_answers, answers) = &whir_proof.merkle_answers[r];
+            let merkle_proof_with_answers = &whir_proof.merkle_answers[r];
             let round_params = &self.params.round_parameters[r];
 
             let new_root = whir_proof.merkle_roots[r].clone();
@@ -197,14 +197,9 @@ impl<E: ExtensionField> Verifier<E> {
                 &self.params.hash_params,
                 &prev_root,
                 &stir_challenges_indexes,
-                answers
-                    .par_iter()
-                    .map(|a| a.clone())
-                    .collect::<Vec<Vec<E>>>()
-                    .as_slice(),
                 merkle_proof_with_answers,
-                answers[0].len(),
-                p3::util::log2_strict_usize(domain_size / answers[0].len()),
+                merkle_proof_with_answers[0].0[0].len(),
+                p3::util::log2_strict_usize(domain_size / merkle_proof_with_answers[0].0[0].len()),
             )
             .is_ok()
             {
@@ -244,7 +239,10 @@ impl<E: ExtensionField> Verifier<E> {
                 ood_answers,
                 stir_challenges_indexes,
                 stir_challenges_points,
-                stir_challenges_answers: answers.to_vec(),
+                stir_challenges_answers: merkle_proof_with_answers
+                    .iter()
+                    .map(|(answers, _)| answers[0].clone())
+                    .collect(),
                 combination_randomness,
                 sumcheck_rounds,
                 domain_gen_inv,
@@ -274,20 +272,14 @@ impl<E: ExtensionField> Verifier<E> {
             .map(|index| exp_domain_gen.exp_u64(*index as u64))
             .collect();
 
-        let (final_merkle_proof, final_randomness_answers) =
-            &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
+        let final_merkle_proof = &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
         verify_multi_proof(
             &self.params.hash_params,
             &prev_root,
             &final_randomness_indexes,
-            final_randomness_answers
-                .par_iter()
-                .map(|a| a.clone())
-                .collect::<Vec<_>>()
-                .as_slice(),
             final_merkle_proof,
-            final_randomness_answers[0].len(),
-            p3::util::log2_strict_usize(domain_size / final_randomness_answers[0].len()),
+            final_merkle_proof[0].0[0].len(),
+            p3::util::log2_strict_usize(domain_size / final_merkle_proof[0].0[0].len()),
         )
         .map_err(|e| Error::InvalidProof(format!("Final Merkle proof failed: {:?}", e)))?;
 
@@ -316,7 +308,10 @@ impl<E: ExtensionField> Verifier<E> {
             final_folding_randomness: folding_randomness,
             final_randomness_indexes,
             final_randomness_points,
-            final_randomness_answers: final_randomness_answers.to_vec(),
+            final_randomness_answers: final_merkle_proof
+                .iter()
+                .map(|(answers, _)| answers[0].clone())
+                .collect(),
             final_sumcheck_rounds,
             final_sumcheck_randomness,
             final_evaluations,

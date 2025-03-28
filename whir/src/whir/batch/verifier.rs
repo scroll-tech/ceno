@@ -438,7 +438,7 @@ impl<E: ExtensionField> Verifier<E> {
         let mut rounds = vec![];
 
         for r in 0..self.params.n_rounds() {
-            let (merkle_proof_with_answers, answers) = &whir_proof.merkle_answers[r];
+            let merkle_proof_with_answers = &whir_proof.merkle_answers[r];
             let round_params = &self.params.round_parameters[r];
 
             let new_root = whir_proof.merkle_roots[r].clone();
@@ -480,40 +480,39 @@ impl<E: ExtensionField> Verifier<E> {
                 &self.params.hash_params,
                 &prev_root,
                 &stir_challenges_indexes,
-                answers
-                    .par_iter()
-                    .map(|a| a.clone())
-                    .collect::<Vec<Vec<E>>>()
-                    .as_slice(),
                 merkle_proof_with_answers,
-                answers[0].len(),
+                merkle_proof_with_answers[0].0[0].len(),
                 p3::util::log2_strict_usize(
-                    domain_size * if r == 0 { num_polys } else { 1 } / answers[0].len(),
+                    domain_size * if r == 0 { num_polys } else { 1 }
+                        / merkle_proof_with_answers[0].0[0].len(),
                 ),
             )
             .map_err(|e| Error::InvalidProof(format!("Merkle proof failed: {:?}", e)))?;
 
             let answers: Vec<_> = if r == 0 {
-                answers
+                merkle_proof_with_answers
                     .par_iter()
-                    .map(|raw_answer| {
+                    .map(|(raw_answer, _)| {
                         if !batched_randomness.is_empty() {
                             let chunk_size = 1 << self.params.folding_factor.at_round(r);
                             let mut res = vec![E::ZERO; chunk_size];
                             for i in 0..chunk_size {
                                 for j in 0..num_polys {
                                     res[i] +=
-                                        raw_answer[i + j * chunk_size] * batched_randomness[j];
+                                        raw_answer[0][i + j * chunk_size] * batched_randomness[j];
                                 }
                             }
                             res
                         } else {
-                            raw_answer.clone()
+                            raw_answer[0].clone()
                         }
                     })
                     .collect()
             } else {
-                answers.to_vec()
+                merkle_proof_with_answers
+                    .par_iter()
+                    .map(|(raw_answer, _)| raw_answer[0].clone())
+                    .collect()
             };
 
             let combination_randomness_gen = transcript
@@ -584,19 +583,13 @@ impl<E: ExtensionField> Verifier<E> {
             })
             .collect();
 
-        let (final_merkle_proof, final_randomness_answers) =
-            &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
+        let final_merkle_proof = &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
         verify_multi_proof(
             &self.params.hash_params,
             &prev_root,
             &final_randomness_indexes,
-            final_randomness_answers
-                .par_iter()
-                .map(|a| a.clone())
-                .collect::<Vec<_>>()
-                .as_slice(),
             final_merkle_proof,
-            final_randomness_answers[0].len(),
+            final_merkle_proof[0].0[0].len(),
             p3::util::log2_strict_usize(
                 domain_size
                     * if self.params.n_rounds() == 0 {
@@ -604,31 +597,34 @@ impl<E: ExtensionField> Verifier<E> {
                     } else {
                         1
                     }
-                    / final_randomness_answers[0].len(),
+                    / final_merkle_proof[0].0[0].len(),
             ),
         )
         .map_err(|e| Error::InvalidProof(format!("Final Merkle proof failed: {:?}", e)))?;
 
         let final_randomness_answers: Vec<_> = if self.params.n_rounds() == 0 {
-            final_randomness_answers
+            final_merkle_proof
                 .par_iter()
-                .map(|raw_answer| {
+                .map(|(raw_answer, _)| {
                     if !batched_randomness.is_empty() {
                         let chunk_size = 1 << self.params.folding_factor.at_round(0);
                         let mut res = vec![E::ZERO; chunk_size];
                         for i in 0..chunk_size {
                             for j in 0..num_polys {
-                                res[i] += raw_answer[i + j * chunk_size] * batched_randomness[j];
+                                res[i] += raw_answer[0][i + j * chunk_size] * batched_randomness[j];
                             }
                         }
                         res
                     } else {
-                        raw_answer.clone()
+                        raw_answer[0].clone()
                     }
                 })
                 .collect()
         } else {
-            final_randomness_answers.to_vec()
+            final_merkle_proof
+                .par_iter()
+                .map(|(raw_answer, _)| raw_answer[0].clone())
+                .collect()
         };
 
         let mut final_sumcheck_rounds = Vec::with_capacity(self.params.final_sumcheck_rounds);

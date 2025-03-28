@@ -78,7 +78,7 @@ impl<E: ExtensionField> Committer<E> {
         let (root, merkle_tree) = self
             .0
             .hash_params
-            .commit_matrix(RowMajorMatrix::new(folded_evals.clone(), fold_size));
+            .commit_matrix(RowMajorMatrix::new(folded_evals, fold_size));
         exit_span!(merkle_build_timer);
         write_digest_to_transcript(&root, &mut transcript);
 
@@ -116,7 +116,6 @@ impl<E: ExtensionField> Committer<E> {
             Witnesses {
                 polys: vec![polynomial],
                 merkle_tree,
-                merkle_leaves: folded_evals,
                 ood_points,
                 ood_answers,
             },

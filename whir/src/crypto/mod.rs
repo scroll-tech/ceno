@@ -75,7 +75,6 @@ pub fn verify_multi_proof<E: ExtensionField>(
     hash_params: &Poseidon2ExtMerkleMmcs<E>,
     root: &Digest<E>,
     indices: &[usize],
-    values: &[Vec<E>],
     proof: &MultiPath<E>,
     leaf_size: usize,
     matrix_height: usize,
@@ -83,7 +82,7 @@ pub fn verify_multi_proof<E: ExtensionField>(
     indices
         .par_iter()
         .zip(proof.par_iter())
-        .zip(values.par_iter()).map(|((index, path), value)| {
+        .map(|(index, path)| {
             hash_params
                 .verify_batch(
                     root,
@@ -92,7 +91,7 @@ pub fn verify_multi_proof<E: ExtensionField>(
                         height: 1 << matrix_height,
                     }],
                     *index,
-                    &[value.clone()],
+                    &path.0,
                     &path.1,
                 )
                 .map_err(|e| {
