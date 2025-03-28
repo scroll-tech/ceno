@@ -8,6 +8,7 @@ use multilinear_extensions::{
     virtual_poly::eq_eval,
 };
 use p3::field::{Field, PrimeCharacteristicRing};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::iter;
 use transcript::{BasicTranscript, Transcript};
@@ -188,7 +189,7 @@ impl<E: ExtensionField> Verifier<E> {
             )?;
 
             let stir_challenges_points = stir_challenges_indexes
-                .iter()
+                .par_iter()
                 .map(|index| exp_domain_gen.exp_u64(*index as u64))
                 .collect();
 
@@ -197,7 +198,7 @@ impl<E: ExtensionField> Verifier<E> {
                 &prev_root,
                 &stir_challenges_indexes,
                 answers
-                    .iter()
+                    .par_iter()
                     .map(|a| a.clone())
                     .collect::<Vec<Vec<E>>>()
                     .as_slice(),
@@ -269,7 +270,7 @@ impl<E: ExtensionField> Verifier<E> {
             transcript,
         )?;
         let final_randomness_points = final_randomness_indexes
-            .iter()
+            .par_iter()
             .map(|index| exp_domain_gen.exp_u64(*index as u64))
             .collect();
 
@@ -280,7 +281,7 @@ impl<E: ExtensionField> Verifier<E> {
             &prev_root,
             &final_randomness_indexes,
             final_randomness_answers
-                .iter()
+                .par_iter()
                 .map(|a| a.clone())
                 .collect::<Vec<_>>()
                 .as_slice(),
@@ -413,7 +414,7 @@ impl<E: ExtensionField> Verifier<E> {
 
             let evaluations: Vec<_> = round
                 .stir_challenges_indexes
-                .iter()
+                .par_iter()
                 .zip(&round.stir_challenges_answers)
                 .map(|(index, answers)| {
                     // The coset is w^index * <w_coset_generator>
@@ -441,7 +442,7 @@ impl<E: ExtensionField> Verifier<E> {
         let coset_generator_inv = domain_gen_inv.exp_u64((domain_size / coset_domain_size) as u64);
         let evaluations: Vec<_> = parsed
             .final_randomness_indexes
-            .iter()
+            .par_iter()
             .zip(&parsed.final_randomness_answers)
             .map(|(index, answers)| {
                 // The coset is w^index * <w_coset_generator>
@@ -469,7 +470,7 @@ impl<E: ExtensionField> Verifier<E> {
         for round in &parsed.rounds {
             let evaluations: Vec<_> = round
                 .stir_challenges_answers
-                .iter()
+                .par_iter()
                 .map(|answers| {
                     let mut evals = answers.clone();
                     evaluate_over_hypercube(&mut evals);
@@ -486,7 +487,7 @@ impl<E: ExtensionField> Verifier<E> {
         // Final round
         let evaluations: Vec<_> = parsed
             .final_randomness_answers
-            .iter()
+            .par_iter()
             .map(|answers| {
                 let mut evals = answers.clone();
                 evaluate_over_hypercube(&mut evals);
