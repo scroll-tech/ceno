@@ -2,8 +2,7 @@ use std::iter;
 
 use crate::{
     crypto::{
-        MerklePathExt, MerkleTreeExt, Poseidon2ExtMerkleMmcs, verify_multi_proof,
-        write_digest_to_transcript,
+        Digest, MerklePathExt, MerkleTreeExt, verify_multi_proof, write_digest_to_transcript,
     },
     error::Error,
     sumcheck::proof::SumcheckPolynomial,
@@ -21,15 +20,14 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3::{commit::Mmcs, util::log2_strict_usize};
+use p3::util::log2_strict_usize;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
 impl<E: ExtensionField> Verifier<E>
 where
-    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
-        IntoIterator<Item = E::BaseField> + PartialEq,
+    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
 {

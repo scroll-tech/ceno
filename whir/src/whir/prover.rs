@@ -1,8 +1,8 @@
 use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
     crypto::{
-        Digest, MerklePathExt, MerkleTreeExt, MultiPath, Poseidon2ExtMerkleMmcs,
-        generate_multi_proof, write_digest_to_transcript,
+        Digest, MerklePathExt, MerkleTreeExt, MultiPath, generate_multi_proof,
+        write_digest_to_transcript,
     },
     domain::Domain,
     error::Error,
@@ -24,8 +24,7 @@ pub struct Prover<E: ExtensionField>(pub WhirConfig<E>);
 
 impl<E: ExtensionField> Prover<E>
 where
-    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
-        IntoIterator<Item = E::BaseField> + PartialEq,
+    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
 {

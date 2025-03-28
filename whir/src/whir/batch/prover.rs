@@ -1,8 +1,7 @@
 use super::committer::Witnesses;
 use crate::{
     crypto::{
-        Digest, MerklePathExt, MerkleTreeExt, Poseidon2ExtMerkleMmcs, generate_multi_proof,
-        write_digest_to_transcript,
+        Digest, MerklePathExt, MerkleTreeExt, generate_multi_proof, write_digest_to_transcript,
     },
     error::Error,
     ntt::expand_from_coeff,
@@ -38,8 +37,7 @@ struct RoundStateBatch<'a, E: ExtensionField> {
 
 impl<E: ExtensionField> Prover<E>
 where
-    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
-        IntoIterator<Item = E::BaseField> + PartialEq,
+    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
 {
@@ -458,8 +456,7 @@ where
 
 impl<E: ExtensionField> Prover<E>
 where
-    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
-        IntoIterator<Item = E::BaseField> + PartialEq,
+    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
 {
