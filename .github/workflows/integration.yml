@@ -48,6 +48,11 @@ jobs:
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
+      - name: Build ceno examples
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo build -p ceno-examples --release
+
       - name: Run fibonacci
         env:
           RUST_LOG: debug
