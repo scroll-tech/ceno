@@ -100,7 +100,7 @@ pub fn verify_multi_proof<E: ExtensionField>(
                         index, leaf_size, matrix_height, e
                     ))
                 })?;
-                Ok(())
+            Ok(())
         }).collect::<Result<Vec<()>, Error>>()?;
     Ok(())
 }

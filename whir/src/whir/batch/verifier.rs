@@ -411,6 +411,8 @@ impl<E: ExtensionField> Verifier<E> {
         num_polys: usize,
         sumcheck_poly_evals_iter: &mut impl Iterator<Item = Vec<E>>,
     ) -> Result<ParsedProof<E>, Error> {
+        let internal_timer = entered_span!("Preamble");
+
         let mut initial_sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
         let initial_combination_randomness;
@@ -463,7 +465,9 @@ impl<E: ExtensionField> Verifier<E> {
             .inverse();
         let mut domain_size = self.params.starting_domain.size();
         let mut rounds = vec![];
+        exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("Rounds");
         for r in 0..self.params.n_rounds() {
             let merkle_proof_with_answers = &whir_proof.merkle_answers[r];
             let round_params = &self.params.round_parameters[r];
@@ -503,6 +507,7 @@ impl<E: ExtensionField> Verifier<E> {
                 })
                 .collect();
 
+            let internal_timer = entered_span!("Merkle proof verification");
             verify_multi_proof(
                 &self.params.hash_params,
                 &prev_root,
@@ -515,6 +520,7 @@ impl<E: ExtensionField> Verifier<E> {
                 ),
             )
             .map_err(|e| Error::InvalidProof(format!("Merkle proof failed: {:?}", e)))?;
+            exit_span!(internal_timer);
 
             let answers: Vec<_> = if r == 0 {
                 merkle_proof_with_answers
@@ -588,7 +594,9 @@ impl<E: ExtensionField> Verifier<E> {
             domain_gen_inv = domain_gen_inv * domain_gen_inv;
             domain_size >>= 1;
         }
+        exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("Final");
         let final_evaluations = whir_proof.final_poly.clone();
         transcript.append_field_element_exts(&final_evaluations);
 
@@ -611,6 +619,7 @@ impl<E: ExtensionField> Verifier<E> {
             .collect();
 
         let final_merkle_proof = &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
+
         verify_multi_proof(
             &self.params.hash_params,
             &prev_root,
@@ -671,6 +680,7 @@ impl<E: ExtensionField> Verifier<E> {
             final_sumcheck_rounds.push((sumcheck_poly, folding_randomness_single));
         }
         let final_sumcheck_randomness = final_sumcheck_rounds.iter().map(|&(_, r)| r).collect();
+        exit_span!(internal_timer);
 
         Ok(ParsedProof {
             initial_combination_randomness,
