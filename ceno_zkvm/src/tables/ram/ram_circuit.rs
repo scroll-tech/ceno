@@ -156,6 +156,7 @@ pub trait DynVolatileRamTable {
     const RAM_TYPE: RAMType;
     const V_LIMBS: usize;
     const ZERO_INIT: bool;
+    const DESCENDING: bool;
 
     fn offset_addr(params: &ProgramParams) -> Addr;
     fn end_addr(params: &ProgramParams) -> Addr;
@@ -169,7 +170,13 @@ pub trait DynVolatileRamTable {
     }
 
     fn addr(params: &ProgramParams, entry_index: usize) -> Addr {
-        Self::offset_addr(params) + (entry_index * WORD_SIZE) as Addr
+        if Self::DESCENDING {
+            // end addr is exclusive conventionally
+            Self::end_addr(params) - (entry_index * WORD_SIZE + WORD_SIZE) as Addr
+        } else {
+            // ascending
+            Self::offset_addr(params) + (entry_index * WORD_SIZE) as Addr
+        }
     }
 }
 

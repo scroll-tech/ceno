@@ -11,12 +11,13 @@ mod ram_impl;
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
 #[derive(Clone)]
-pub struct DynMemTable;
+pub struct HeapTable;
 
-impl DynVolatileRamTable for DynMemTable {
+impl DynVolatileRamTable for HeapTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const ZERO_INIT: bool = true;
+    const DESCENDING: bool = false;
 
     fn offset_addr(params: &ProgramParams) -> Addr {
         params.platform.heap.start
@@ -27,11 +28,35 @@ impl DynVolatileRamTable for DynMemTable {
     }
 
     fn name() -> &'static str {
-        "DynMemTable"
+        "HeapTable"
     }
 }
 
-pub type DynMemCircuit<E> = DynVolatileRamCircuit<E, DynMemTable>;
+pub type HeapCircuit<E> = DynVolatileRamCircuit<E, HeapTable>;
+
+#[derive(Clone)]
+pub struct StackTable;
+
+impl DynVolatileRamTable for StackTable {
+    const RAM_TYPE: RAMType = RAMType::Memory;
+    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const ZERO_INIT: bool = true;
+    const DESCENDING: bool = true;
+
+    fn offset_addr(params: &ProgramParams) -> Addr {
+        params.platform.stack.start
+    }
+
+    fn end_addr(params: &ProgramParams) -> Addr {
+        params.platform.stack.end
+    }
+
+    fn name() -> &'static str {
+        "StackTable"
+    }
+}
+
+pub type StackCircuit<E> = DynVolatileRamCircuit<E, StackTable>;
 
 #[derive(Clone)]
 pub struct HintsTable;
@@ -39,6 +64,7 @@ impl DynVolatileRamTable for HintsTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
     const V_LIMBS: usize = 1; // See `MemoryExpr`.
     const ZERO_INIT: bool = false;
+    const DESCENDING: bool = false;
 
     fn offset_addr(params: &ProgramParams) -> Addr {
         params.platform.hints.start

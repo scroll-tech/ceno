@@ -8,8 +8,9 @@ use crate::{
     error::ZKVMError,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        HintsCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable,
-        RegTable, RegTableCircuit, StaticMemCircuit, StaticMemTable, TableCircuit,
+        HeapCircuit, HintsCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit,
+        PubIOTable, RegTable, RegTableCircuit, StackCircuit, StaticMemCircuit, StaticMemTable,
+        TableCircuit,
     },
 };
 
@@ -22,6 +23,10 @@ pub struct MmuConfig<E: ExtensionField> {
     pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of hints.
     pub hints_config: <HintsCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// Initialization of heap.
+    pub heap_config: <HeapCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// Initialization of stack.
+    pub stack_config: <StackCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -32,13 +37,18 @@ impl<E: ExtensionField> MmuConfig<E> {
         let static_mem_config = cs.register_table_circuit::<StaticMemCircuit<E>>();
 
         let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
+
         let hints_config = cs.register_table_circuit::<HintsCircuit<E>>();
+        let stack_config = cs.register_table_circuit::<StackCircuit<E>>();
+        let heap_config = cs.register_table_circuit::<HeapCircuit<E>>();
 
         Self {
             reg_config,
             static_mem_config,
             public_io_config,
             hints_config,
+            stack_config,
+            heap_config,
             params: cs.params.clone(),
         }
     }
@@ -72,6 +82,8 @@ impl<E: ExtensionField> MmuConfig<E> {
 
         fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_addrs);
         fixed.register_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, &());
+        fixed.register_table_circuit::<StackCircuit<E>>(cs, &self.stack_config, &());
+        fixed.register_table_circuit::<HeapCircuit<E>>(cs, &self.heap_config, &());
     }
 
     pub fn assign_table_circuit(
@@ -82,6 +94,8 @@ impl<E: ExtensionField> MmuConfig<E> {
         static_mem_final: &[MemFinalRecord],
         io_cycles: &[Cycle],
         hints_final: &[MemFinalRecord],
+        stack_final: &[MemFinalRecord],
+        heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)?;
 
@@ -93,6 +107,8 @@ impl<E: ExtensionField> MmuConfig<E> {
 
         witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
         witness.assign_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, hints_final)?;
+        witness.assign_table_circuit::<StackCircuit<E>>(cs, &self.stack_config, stack_final)?;
+        witness.assign_table_circuit::<HeapCircuit<E>>(cs, &self.heap_config, heap_final)?;
 
         Ok(())
     }

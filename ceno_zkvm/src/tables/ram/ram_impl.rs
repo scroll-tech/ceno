@@ -318,6 +318,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             max_len,
             DVRAM::offset_addr(&cb.params),
             WORD_SIZE,
+            DVRAM::DESCENDING,
         );
 
         let final_v = (0..DVRAM::V_LIMBS)
