@@ -48,7 +48,9 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
+#[derive(
+    Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
@@ -62,7 +64,7 @@ pub enum ROMType {
     Instruction, // Decoded instruction from the fixed program.
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RAMType {
     GlobalState,
     Register,
@@ -118,7 +120,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct VerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) cs: ConstraintSystem<E>,
     pub fixed_commit: Option<PCS::Commitment>,
@@ -134,7 +137,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
 pub struct ProgramParams {
     pub platform: Platform,
     pub program_size: usize,
-    pub pub_io_len: usize,
+    pub pubio_len: usize,
     pub static_memory_len: usize,
 }
 
@@ -143,7 +146,7 @@ impl Default for ProgramParams {
         ProgramParams {
             platform: CENO_PLATFORM,
             program_size: (1 << 14),
-            pub_io_len: (1 << 2),
+            pubio_len: (1 << 2),
             static_memory_len: (1 << 16),
         }
     }
@@ -398,7 +401,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
     // vk for opcode and table circuits

@@ -28,25 +28,39 @@ impl Display for Platform {
         };
         write!(
             f,
-            "Platform {{ rom: {:?}, prog_data: {:?}, stack: {:?}, heap: {:?}, public_io: {:?}, hints: {:?}, unsafe_ecall_nop: {} }}",
-            self.rom,
-            prog_data,
-            self.stack,
-            self.heap,
-            self.public_io,
-            self.hints,
+            "Platform {{ rom: {:#x}..{:#x}, prog_data: {:#x}..{:#x}, stack: {:#x}..{:#x}, heap: {:#x}..{:#x}, \
+            public_io: {:#x}..{:#x}, hints: {:#x}..{:#x}, unsafe_ecall_nop: {} }}",
+            self.rom.start,
+            self.rom.end,
+            prog_data
+                .as_ref()
+                .map(|prog_data| prog_data.start)
+                .unwrap_or_default(),
+            prog_data
+                .as_ref()
+                .map(|prog_data| prog_data.end)
+                .unwrap_or_default(),
+            self.stack.start,
+            self.stack.end,
+            self.heap.start,
+            self.heap.end,
+            self.public_io.start,
+            self.public_io.end,
+            self.hints.start,
+            self.hints.end,
             self.unsafe_ecall_nop
         )
     }
 }
 
+// alined with [`memory.x`]
 pub const CENO_PLATFORM: Platform = Platform {
-    rom: 0x2000_0000..0x3000_0000,
+    rom: 0x2000_0000..0x2800_0000, // 128 MB
     prog_data: BTreeSet::new(),
-    stack: 0xB0000000..0xC0000000,
+    stack: 0xB0000000..0xC0000000, // stack grows downward
     heap: 0x8000_0000..0xFFFF_0000,
-    public_io: 0x3000_1000..0x3000_2000,
-    hints: 0x4000_0000..0x5000_0000,
+    public_io: 0x3000_0000..0x3004_0000,
+    hints: 0x4000_0000..0x5000_0000, // 256 MB
     unsafe_ecall_nop: false,
 };
 

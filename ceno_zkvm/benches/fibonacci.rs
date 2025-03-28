@@ -1,9 +1,11 @@
-use std::{fs, path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use ceno_emul::{Platform, Program};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::verifier::ZKVMVerifier,
 };
 use criterion::*;
 use transcript::{BasicTranscriptWithStat, StatisticRecorder};
@@ -26,24 +28,25 @@ type E = GoldilocksExt2;
 
 // Relevant init data for fibonacci run
 fn setup() -> (Program, Platform) {
-    let mut file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    file_path.push("examples/fibonacci.elf");
     let stack_size = 32768;
     let heap_size = 2097152;
     let pub_io_size = 16;
-    let elf_bytes = fs::read(&file_path).expect("read elf file");
-    let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
-    let platform = setup_platform(Preset::Sp1, &program, stack_size, heap_size, pub_io_size);
+    let program = Program::load_elf(ceno_examples::fibonacci, u32::MAX).unwrap();
+    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
     (program, platform)
 }
 
 fn fibonacci_prove(c: &mut Criterion) {
     let (program, platform) = setup();
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
+        // retrive 1 << 20th fibonacci element >> max_steps
+        let mut hints = CenoStdin::default();
+        let _ = hints.write(&20);
         // estimate proof size data first
-        let (proof, verifier) = run_e2e_with_checkpoint::<E, Pcs>(
+        let (proof, vk) = run_e2e_with_checkpoint::<E, Pcs>(
             program.clone(),
             platform.clone(),
+            (&hints).into(),
             vec![],
             max_steps,
             Checkpoint::PrepSanityCheck,
@@ -54,6 +57,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         println!("e2e proof {}", proof);
         let stat_recorder = StatisticRecorder::default();
         let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
         assert!(
             verifier
                 .verify_proof_halt(proof, transcript, false)
@@ -83,6 +87,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                         let (_, run_e2e_proof) = run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
+                            (&hints).into(),
                             vec![],
                             max_steps,
                             Checkpoint::PrepE2EProving,

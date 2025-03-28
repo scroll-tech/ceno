@@ -18,7 +18,7 @@ use crate::{
 use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
-use ff_ext::{ExtensionField, GoldilocksExt2, SmallField};
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
@@ -67,6 +67,12 @@ impl LkMultiplicityKey for u64 {
 }
 
 impl LkMultiplicityKey for GoldilocksExt2 {
+    fn to_u64(&self) -> Option<u64> {
+        None
+    }
+}
+
+impl LkMultiplicityKey for BabyBearExt4 {
     fn to_u64(&self) -> Option<u64> {
         None
     }

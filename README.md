@@ -20,6 +20,29 @@ You will also need to install the Risc-V target for Rust. You can do this with t
 rustup target add riscv32im-unknown-none-elf
 ```
 
+## Try end-to-end with examples
+A variety of [examples](https://github.com/scroll-tech/ceno/tree/master/examples/examples) are availables.
+
+To run an example in e2e, use the following command:
+
+```sh
+cargo run --release --package ceno_zkvm --bin e2e -- \
+    --profiling=1 \
+    --platform=ceno \
+    --hints=<hint value> \
+    --public-io=<pub io> \
+    examples/target/riscv32im-ceno-zkvm-elf/release/examples/<example name>
+```
+
+The example will be automatically compiled before execution
+
+For instance, with [fibonacci](https://github.com/scroll-tech/ceno/blob/master/examples/examples/fibonacci.rs)
+
+```sh
+cargo run --release --package ceno_zkvm --bin e2e -- --profiling=1 --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+```
+
+
 ## Building Ceno and running tests
 
 To run the tests, you can use the following command:
