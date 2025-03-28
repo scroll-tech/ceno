@@ -6,6 +6,7 @@ use p3::{
     symmetric::{Hash as P3Hash, PaddingFreeSponge, TruncatedPermutation},
 };
 use poseidon::digest::DIGEST_WIDTH;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use transcript::Transcript;
 
 use crate::error::Error;
@@ -65,7 +66,7 @@ pub fn generate_multi_proof<E: ExtensionField>(
     indices: &[usize],
 ) -> MultiPath<E> {
     indices
-        .iter()
+        .par_iter()
         .map(|index| hash_params.open_batch(*index, merkle_tree))
         .collect()
 }
@@ -79,24 +80,28 @@ pub fn verify_multi_proof<E: ExtensionField>(
     leaf_size: usize,
     matrix_height: usize,
 ) -> Result<(), Error> {
-    for ((index, path), value) in indices.iter().zip(proof.iter()).zip(values.iter()) {
-        hash_params
-            .verify_batch(
-                root,
-                &[Dimensions {
-                    width: leaf_size,
-                    height: 1 << matrix_height,
-                }],
-                *index,
-                &[value.clone()],
-                &path.1,
-            )
-            .map_err(|e| {
-                Error::MmcsError(format!(
-                    "Failed to verify proof for index {}, leaf size {}, matrix height log {}, error: {:?}",
-                    index, leaf_size, matrix_height, e
-                ))
-            })?
-    }
+    indices
+        .par_iter()
+        .zip(proof.par_iter())
+        .zip(values.par_iter()).map(|((index, path), value)| {
+            hash_params
+                .verify_batch(
+                    root,
+                    &[Dimensions {
+                        width: leaf_size,
+                        height: 1 << matrix_height,
+                    }],
+                    *index,
+                    &[value.clone()],
+                    &path.1,
+                )
+                .map_err(|e| {
+                    Error::MmcsError(format!(
+                        "Failed to verify proof for index {}, leaf size {}, matrix height log {}, error: {:?}",
+                        index, leaf_size, matrix_height, e
+                    ))
+                })?;
+                Ok(())
+        }).collect::<Result<Vec<()>, Error>>()?;
     Ok(())
 }
