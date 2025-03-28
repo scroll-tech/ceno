@@ -34,6 +34,8 @@ impl<E: ExtensionField> Verifier<E> {
         evals_per_point: &[Vec<E>],
         whir_proof: &WhirProof<E>,
     ) -> Result<(), Error> {
+        let timer = entered_span!("Simple batch verify");
+
         for evals in evals_per_point {
             assert_eq!(num_polys, evals.len());
         }
@@ -46,7 +48,8 @@ impl<E: ExtensionField> Verifier<E> {
         // commitment to transcript preceding the verification.
         // self.write_commitment_to_transcript(&mut parsed_commitment, transcript);
 
-        self.batch_verify_internal(
+        let internal_timer = entered_span!("Internal batch verify");
+        let result = self.batch_verify_internal(
             transcript,
             num_polys,
             points,
@@ -54,7 +57,12 @@ impl<E: ExtensionField> Verifier<E> {
             parsed_commitment,
             whir_proof,
             &mut sumcheck_poly_evals_iter,
-        )
+        );
+        exit_span!(internal_timer);
+
+        exit_span!(timer);
+
+        result
     }
 
     // Different points on each polynomial
