@@ -128,7 +128,7 @@ where
         _pp: &Self::ProverParam,
         rmm: witness::RowMajorMatrix<E::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let parameters = Spec::get_whir_parameters(false);
+        let parameters = Spec::get_whir_parameters(true);
         let whir_config = WhirConfig::new(
             MultivariateParameters::new(log2_strict(rmm.num_instances())),
             parameters,
@@ -159,12 +159,13 @@ where
         evals: &[E],
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
-        let parameters = Spec::get_whir_parameters(false);
+        let parameters = Spec::get_whir_parameters(true);
         let whir_config =
             WhirConfig::new(MultivariateParameters::new(polys[0].num_vars()), parameters);
-        Prover(whir_config)
+        let proof = Prover(whir_config)
             .simple_batch_prove(transcript, &[point.to_vec()], &[evals.to_vec()], comm)
-            .map_err(crate::Error::WhirError)
+            .map_err(crate::Error::WhirError)?;
+        Ok(proof)
     }
 
     fn batch_verify(
@@ -186,7 +187,7 @@ where
         proof: &Self::Proof,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> Result<(), crate::Error> {
-        let parameters = Spec::get_whir_parameters(false);
+        let parameters = Spec::get_whir_parameters(true);
         let whir_config = WhirConfig::new(MultivariateParameters::new(comm.num_vars), parameters);
         assert_eq!(comm.num_vars, point.len());
         Verifier::new(whir_config)

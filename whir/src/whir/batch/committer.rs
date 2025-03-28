@@ -25,7 +25,6 @@ pub struct Witnesses<E: ExtensionField> {
     #[debug(skip)]
     pub(crate) merkle_tree: MerkleTreeExt<E>,
     pub(crate) root: Digest<E>,
-    pub(crate) merkle_leaves: Vec<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
@@ -146,7 +145,7 @@ where
 
         let (root, merkle_tree) = {
             let clone_timer = entered_span!("Clone into rmm");
-            let rmm = RowMajorMatrix::new(folded_evals.clone(), fold_size * polys.len());
+            let rmm = RowMajorMatrix::new(folded_evals, fold_size * polys.len());
             exit_span!(clone_timer);
             self.0.hash_params.commit_matrix(rmm)
         };
@@ -241,7 +240,6 @@ where
                 polys,
                 root,
                 merkle_tree,
-                merkle_leaves: folded_evals,
                 ood_points,
                 ood_answers,
             },

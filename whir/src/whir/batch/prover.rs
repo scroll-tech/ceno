@@ -1,7 +1,7 @@
 use super::committer::Witnesses;
 use crate::{
     crypto::{
-        Digest, MerkleTreeExt, Poseidon2ExtMerkleMmcs, generate_multi_proof,
+        Digest, MerklePathExt, MerkleTreeExt, Poseidon2ExtMerkleMmcs, generate_multi_proof,
         write_digest_to_transcript,
     },
     error::Error,
@@ -34,13 +34,14 @@ struct RoundStateBatch<'a, E: ExtensionField> {
     round_state: RoundState<'a, E>,
     batching_randomness: Vec<E>,
     prev_merkle: &'a MerkleTreeExt<E>,
-    prev_merkle_answers: &'a Vec<E>,
 }
 
 impl<E: ExtensionField> Prover<E>
 where
     <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
         IntoIterator<Item = E::BaseField> + PartialEq,
+    MerklePathExt<E>: Send + Sync,
+    MerkleTreeExt<E>: Send + Sync,
 {
     fn validate_witnesses(&self, witness: &Witnesses<E>) -> bool {
         assert_eq!(
@@ -188,11 +189,9 @@ where
                     polynomial,
                 ),
                 prev_merkle: None,
-                prev_merkle_answers: Vec::new(),
                 merkle_proofs: vec![],
             },
             prev_merkle: &witness.merkle_tree,
-            prev_merkle_answers: &witness.merkle_leaves,
             batching_randomness: random_coeff,
         };
 
@@ -221,7 +220,6 @@ where
     ) -> Result<WhirProof<E>, Error> {
         let batching_randomness = round_state.batching_randomness;
         let prev_merkle = round_state.prev_merkle;
-        let prev_merkle_answers = round_state.prev_merkle_answers;
         let mut round_state = round_state.round_state;
         // Fold the coefficients
         let folded_evaluations = round_state
@@ -252,17 +250,8 @@ where
 
             let merkle_proof =
                 generate_multi_proof(&self.0.hash_params, prev_merkle, &final_challenge_indexes);
-            let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
-            let answers = final_challenge_indexes
-                .into_par_iter()
-                .map(|i| {
-                    prev_merkle_answers
-                        [i * (fold_size * num_polys)..(i + 1) * (fold_size * num_polys)]
-                        .to_vec()
-                })
-                .collect();
 
-            round_state.merkle_proofs.push((merkle_proof, answers));
+            round_state.merkle_proofs.push(merkle_proof);
 
             // Final sumcheck
             if self.0.final_sumcheck_rounds > 0 {
@@ -356,19 +345,14 @@ where
 
         let merkle_proof_with_leaves =
             generate_multi_proof(&self.0.hash_params, &prev_merkle, &stir_challenges_indexes);
-        let fold_size = (1 << self.0.folding_factor.at_round(round_state.round)) * num_polys;
-        let answers = stir_challenges_indexes
+        let batched_answers = merkle_proof_with_leaves
             .par_iter()
-            .map(|i| prev_merkle_answers[i * fold_size..(i + 1) * fold_size].to_vec())
-            .collect::<Vec<_>>();
-        let batched_answers = answers
-            .iter()
-            .map(|answer| {
+            .map(|(answer, _)| {
                 let chunk_size = 1 << self.0.folding_factor.at_round(round_state.round);
                 let mut res = vec![E::ZERO; chunk_size];
                 for i in 0..chunk_size {
                     for j in 0..num_polys {
-                        res[i] += answer[i + j * chunk_size] * batching_randomness[j];
+                        res[i] += answer[0][i + j * chunk_size] * batching_randomness[j];
                     }
                 }
                 res
@@ -416,9 +400,7 @@ where
                 }))
             }
         }
-        round_state
-            .merkle_proofs
-            .push((merkle_proof_with_leaves, answers));
+        round_state.merkle_proofs.push(merkle_proof_with_leaves);
 
         // Randomness for combination
         let combination_randomness_gen = transcript
@@ -460,7 +442,6 @@ where
             folding_randomness,
             evaluations: folded_evaluations, /* TODO: Is this redundant with `sumcheck_prover.coeff` ? */
             prev_merkle: Some(&merkle_tree),
-            prev_merkle_answers: folded_evals,
             merkle_proofs: round_state.merkle_proofs,
         };
         ood_answers.push(ood_answers_round);
@@ -479,6 +460,8 @@ impl<E: ExtensionField> Prover<E>
 where
     <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
         IntoIterator<Item = E::BaseField> + PartialEq,
+    MerklePathExt<E>: Send + Sync,
+    MerkleTreeExt<E>: Send + Sync,
 {
     /// each poly on a different point, same size
     pub fn same_size_batch_prove<T: Transcript<E>>(
