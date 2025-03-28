@@ -48,10 +48,10 @@ jobs:
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
-      - name: Run example
+      - name: Build ceno examples
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --package ceno_zkvm --example riscv_opcodes -- --start 10 --end 11
+        run: cargo build -p ceno-examples --release
 
       - name: Run fibonacci
         env:
