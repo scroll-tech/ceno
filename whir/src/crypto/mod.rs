@@ -27,11 +27,14 @@ pub type MerkleTreeExt<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::ProverData<D
 pub fn write_digest_to_transcript<E: ExtensionField>(
     digest: &Digest<E>,
     transcript: &mut impl Transcript<E>,
-) {
-    // digest
-    //     .as_ref()
-    //     .iter()
-    //     .for_each(|x| transcript.append_field_element(&x));
+) where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
+    digest
+        .clone()
+        .into_iter()
+        .for_each(|x| transcript.append_field_element(&x));
 }
 
 pub fn generate_multi_proof<E: ExtensionField>(

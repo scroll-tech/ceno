@@ -1,6 +1,9 @@
 use super::committer::Witnesses;
 use crate::{
-    crypto::{Digest, MerkleTreeExt, generate_multi_proof, write_digest_to_transcript},
+    crypto::{
+        Digest, MerkleTreeExt, Poseidon2ExtMerkleMmcs, generate_multi_proof,
+        write_digest_to_transcript,
+    },
     error::Error,
     ntt::expand_from_coeff,
     parameters::FoldType,
@@ -34,7 +37,11 @@ struct RoundStateBatch<'a, E: ExtensionField> {
     prev_merkle_answers: &'a Vec<E>,
 }
 
-impl<E: ExtensionField> Prover<E> {
+impl<E: ExtensionField> Prover<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
     fn validate_witnesses(&self, witness: &Witnesses<E>) -> bool {
         assert_eq!(
             witness.ood_points.len() * witness.polys.len(),
@@ -468,7 +475,11 @@ impl<E: ExtensionField> Prover<E> {
     }
 }
 
-impl<E: ExtensionField> Prover<E> {
+impl<E: ExtensionField> Prover<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
     /// each poly on a different point, same size
     pub fn same_size_batch_prove<T: Transcript<E>>(
         &self,

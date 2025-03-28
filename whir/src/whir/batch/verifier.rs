@@ -1,7 +1,7 @@
 use std::iter;
 
 use crate::{
-    crypto::{verify_multi_proof, write_digest_to_transcript},
+    crypto::{Poseidon2ExtMerkleMmcs, verify_multi_proof, write_digest_to_transcript},
     error::Error,
     sumcheck::proof::SumcheckPolynomial,
     utils::{evaluate_as_univariate, expand_randomness},
@@ -18,10 +18,14 @@ use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3::util::log2_strict_usize;
+use p3::{commit::Mmcs, util::log2_strict_usize};
 use transcript::Transcript;
 
-impl<E: ExtensionField> Verifier<E> {
+impl<E: ExtensionField> Verifier<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
     // Same multiple points on each polynomial
     pub fn simple_batch_verify<T: Transcript<E>>(
         &self,

@@ -1,6 +1,6 @@
 use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::write_digest_to_transcript,
+    crypto::{Poseidon2ExtMerkleMmcs, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff,
     utils::{self, interpolate_over_boolean_hypercube},
@@ -11,7 +11,7 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::matrix::dense::{DenseMatrix, RowMajorMatrix};
+use p3::matrix::dense::RowMajorMatrix;
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
 
@@ -21,7 +21,11 @@ use rayon::prelude::*;
 
 pub struct Committer<E: ExtensionField>(pub(crate) WhirConfig<E>);
 
-impl<E: ExtensionField> Committer<E> {
+impl<E: ExtensionField> Committer<E>
+where
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
     pub fn new(config: WhirConfig<E>) -> Self {
         Self(config)
     }
