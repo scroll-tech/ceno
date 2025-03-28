@@ -19,6 +19,8 @@ use multilinear_extensions::{
     virtual_poly::eq_eval,
 };
 use p3::util::log2_strict_usize;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
 impl<E: ExtensionField> Verifier<E> {
@@ -68,6 +70,8 @@ impl<E: ExtensionField> Verifier<E> {
         assert_eq!(num_polys, point_per_poly.len());
         assert_eq!(num_polys, eval_per_poly.len());
 
+        let timer = entered_span!("Same size batch verify");
+
         let mut sumcheck_poly_evals_iter =
             whir_proof.sumcheck_poly_evals.iter().map(|x| x.to_vec());
 
@@ -88,7 +92,8 @@ impl<E: ExtensionField> Verifier<E> {
             &mut sumcheck_poly_evals_iter,
         )?;
 
-        self.batch_verify_internal(
+        let internal_timer = entered_span!("Internal batch verify");
+        let result = self.batch_verify_internal(
             transcript,
             num_polys,
             &[folded_points],
@@ -96,7 +101,12 @@ impl<E: ExtensionField> Verifier<E> {
             parsed_commitment,
             whir_proof,
             &mut sumcheck_poly_evals_iter,
-        )
+        );
+        exit_span!(internal_timer);
+
+        exit_span!(timer);
+
+        result
     }
 
     fn batch_verify_internal<T: Transcript<E>>(
@@ -456,7 +466,7 @@ impl<E: ExtensionField> Verifier<E> {
             )?;
 
             let stir_challenges_points = stir_challenges_indexes
-                .iter()
+                .par_iter()
                 .map(|index| {
                     Self::pow_with_precomputed_squares(
                         &domain_gen_powers.as_slice()
@@ -471,7 +481,7 @@ impl<E: ExtensionField> Verifier<E> {
                 &prev_root,
                 &stir_challenges_indexes,
                 answers
-                    .iter()
+                    .par_iter()
                     .map(|a| a.clone())
                     .collect::<Vec<Vec<E>>>()
                     .as_slice(),
@@ -485,7 +495,7 @@ impl<E: ExtensionField> Verifier<E> {
 
             let answers: Vec<_> = if r == 0 {
                 answers
-                    .iter()
+                    .par_iter()
                     .map(|raw_answer| {
                         if !batched_randomness.is_empty() {
                             let chunk_size = 1 << self.params.folding_factor.at_round(r);
@@ -564,7 +574,7 @@ impl<E: ExtensionField> Verifier<E> {
             transcript,
         )?;
         let final_randomness_points = final_randomness_indexes
-            .iter()
+            .par_iter()
             .map(|index| {
                 Self::pow_with_precomputed_squares(
                     &domain_gen_powers.as_slice()[log_based_on_domain_gen
@@ -581,7 +591,7 @@ impl<E: ExtensionField> Verifier<E> {
             &prev_root,
             &final_randomness_indexes,
             final_randomness_answers
-                .iter()
+                .par_iter()
                 .map(|a| a.clone())
                 .collect::<Vec<_>>()
                 .as_slice(),
@@ -601,7 +611,7 @@ impl<E: ExtensionField> Verifier<E> {
 
         let final_randomness_answers: Vec<_> = if self.params.n_rounds() == 0 {
             final_randomness_answers
-                .iter()
+                .par_iter()
                 .map(|raw_answer| {
                     if !batched_randomness.is_empty() {
                         let chunk_size = 1 << self.params.folding_factor.at_round(0);
@@ -684,7 +694,7 @@ impl<E: ExtensionField> Verifier<E> {
             let ood_points = &round_proof.ood_points;
             let stir_challenges_points = &round_proof.stir_challenges_points;
             let stir_challenges: Vec<_> = ood_points
-                .iter()
+                .par_iter()
                 .chain(stir_challenges_points)
                 .cloned()
                 .map(|univariate| {
