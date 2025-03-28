@@ -107,14 +107,14 @@ where
     Pcs::batch_verify(vp, comms, points, evals, proof, transcript)
 }
 
-pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone + Debug {
+pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
     type Param: Clone + Debug + Serialize + DeserializeOwned;
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
-    type CommitmentWithWitness: Debug;
-    type Commitment: Clone + Debug + Serialize + DeserializeOwned;
-    type CommitmentChunk: Clone + Debug;
-    type Proof: Clone + Debug + Serialize + DeserializeOwned;
+    type CommitmentWithWitness;
+    type Commitment: Clone + Serialize + DeserializeOwned;
+    type CommitmentChunk: Clone;
+    type Proof: Clone + Serialize + DeserializeOwned;
 
     fn setup(poly_size: usize) -> Result<Self::Param, Error>;
 

@@ -1,19 +1,13 @@
 use ff_ext::{ExtensionField, PoseidonField};
-use p3::{
-    merkle_tree::MerkleTreeMmcs,
-    symmetric::{PaddingFreeSponge, TruncatedPermutation},
-};
-use poseidon::DIGEST_WIDTH;
+use p3::{self, commit::ExtensionMmcs};
 
-pub(crate) type Poseidon2Sponge<P> = PaddingFreeSponge<P, 8, 4, 4>;
-pub(crate) type Poseidon2Compression<P> = TruncatedPermutation<P, 2, 4, 8>;
-pub(crate) type Poseidon2MerkleMmcs<F, P> =
-    MerkleTreeMmcs<F, F, Poseidon2Sponge<P>, Poseidon2Compression<P>, DIGEST_WIDTH>;
+pub type Poseidon2ExtMerkleMmcs<E> = ExtensionMmcs<
+    <E as ExtensionField>::BaseField,
+    E,
+    <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
+>;
 
 pub fn poseidon2_merkle_tree<E: ExtensionField>()
--> Poseidon2MerkleMmcs<E::BaseField, <E::BaseField as PoseidonField>::T> {
-    MerkleTreeMmcs::new(
-        Poseidon2Sponge::new(<E::BaseField as PoseidonField>::get_perm()),
-        Poseidon2Compression::new(<E::BaseField as PoseidonField>::get_perm()),
-    )
+-> <<E as ExtensionField>::BaseField as PoseidonField>::MMCS {
+    <E::BaseField as PoseidonField>::get_default_mmcs()
 }

@@ -164,7 +164,13 @@ impl EmuContext for VMState {
     }
 
     fn trap(&self, cause: TrapCause) -> Result<bool> {
-        Err(anyhow!("Trap {:?}", cause)) // Crash.
+        // Crash.
+        match cause {
+            TrapCause::IllegalInstruction(raw) => {
+                Err(anyhow!("Trap IllegalInstruction({:#x})", raw))
+            }
+            _ => Err(anyhow!("Trap {:?}", cause)),
+        }
     }
 
     fn on_normal_end(&mut self, _decoded: &Instruction) {

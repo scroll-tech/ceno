@@ -2,8 +2,10 @@ use crate::{
     Error, Evaluation, PolynomialCommitmentScheme,
     sum_check::eq_xy_eval,
     util::{
-        arithmetic::inner_product, ext_to_usize, hash::write_digest_to_transcript,
-        merkle_tree::poseidon2_merkle_tree,
+        arithmetic::inner_product,
+        ext_to_usize,
+        hash::write_digest_to_transcript,
+        merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
     },
 };
 use ark_std::{end_timer, start_timer};
@@ -169,6 +171,8 @@ where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
     Spec: BasefoldSpec<E, EncodingScheme = RSCode<RSCodeDefaultSpec>>,
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
 {
     type Param = BasefoldParams<E, Spec>;
     type ProverParam = BasefoldProverParams<E, Spec>;

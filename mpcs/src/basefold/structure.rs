@@ -1,36 +1,23 @@
 use crate::{
     sum_check::classic::{Coefficients, SumcheckProof},
-    util::merkle_tree::poseidon2_merkle_tree,
+    util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
 };
 use core::fmt::Debug;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use itertools::izip;
 use p3::{
     commit::Mmcs,
-    matrix::{
-        Matrix,
-        dense::{DenseMatrix, RowMajorMatrix},
-        extension::FlatMatrixView,
-    },
-    merkle_tree::MerkleTree as P3MerkleTree,
-    symmetric::Hash as P3Hash,
+    matrix::{Matrix, dense::DenseMatrix},
 };
-use poseidon::DIGEST_WIDTH;
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
 use std::marker::PhantomData;
 
-pub type Digest<E> =
-    P3Hash<<E as ExtensionField>::BaseField, <E as ExtensionField>::BaseField, DIGEST_WIDTH>;
-pub type MerkleTree<F> = P3MerkleTree<F, F, RowMajorMatrix<F>, DIGEST_WIDTH>;
-pub type MerkleTreeExt<E> = P3MerkleTree<
-    <E as ExtensionField>::BaseField,
-    <E as ExtensionField>::BaseField,
-    FlatMatrixView<<E as ExtensionField>::BaseField, E, RowMajorMatrix<E>>,
-    DIGEST_WIDTH,
->;
+pub type Digest<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment;
+pub type MerkleTree<F> = <<F as PoseidonField>::MMCS as Mmcs<F>>::ProverData<DenseMatrix<F>>;
+pub type MerkleTreeExt<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::ProverData<DenseMatrix<E>>;
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
 
@@ -72,7 +59,6 @@ pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
 /// used to generate this commitment and for assistant in opening
-#[derive(Debug)]
 pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -91,7 +77,7 @@ where
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
-            self.pi_d_digest,
+            self.pi_d_digest.clone(),
             self.num_vars,
             self.is_base,
             self.num_polys,
@@ -126,7 +112,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
 pub struct BasefoldCommitment<E: ExtensionField>
 where
@@ -152,7 +138,7 @@ where
     }
 
     pub fn pi_d_digest(&self) -> Digest<E> {
-        self.pi_d_digest
+        self.pi_d_digest.clone()
     }
 
     pub fn num_vars(&self) -> Option<usize> {
@@ -227,15 +213,27 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     }
 }
 
-pub type MKProofNTo1<F1, F2> = (Vec<F1>, Vec<[F2; DIGEST_WIDTH]>);
+pub type MKProofNTo1<F1, P> = (Vec<F1>, P);
 // for 2 to 1, leaf layer just need one value, as the other can be interpolated from previous layer
-pub type MKProof2To1<F1, F2> = (F1, Vec<[F2; DIGEST_WIDTH]>);
+pub type MKProof2To1<F1, P> = (F1, P);
 pub type QueryOpeningProofs<E> = Vec<(
-    MKProofNTo1<<E as ExtensionField>::BaseField, <E as ExtensionField>::BaseField>,
-    Vec<MKProof2To1<E, <E as ExtensionField>::BaseField>>,
+    MKProofNTo1<
+        <E as ExtensionField>::BaseField,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
+            <E as ExtensionField>::BaseField,
+        >>::Proof,
+    >,
+    Vec<
+        MKProof2To1<
+            E,
+            <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
+                <E as ExtensionField>::BaseField,
+            >>::Proof,
+        >,
+    >,
 )>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -272,7 +270,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"

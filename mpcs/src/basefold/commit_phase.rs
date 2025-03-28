@@ -5,7 +5,10 @@ use super::{
     structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTreeExt},
     sumcheck::{sum_check_challenge_round, sum_check_first_round, sum_check_last_round},
 };
-use crate::util::{hash::write_digest_to_transcript, merkle_tree::poseidon2_merkle_tree};
+use crate::util::{
+    hash::write_digest_to_transcript,
+    merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
+};
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::izip;
@@ -43,6 +46,8 @@ pub fn simple_batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) -> (Vec<MerkleTreeExt<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
 {
     let timer = start_timer!(|| "Simple batch commit phase");
     assert_eq!(point.len(), num_vars);
