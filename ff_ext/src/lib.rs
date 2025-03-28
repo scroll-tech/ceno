@@ -127,7 +127,7 @@ pub trait ExtensionField:
 
     fn from_base(base: &Self::BaseField) -> Self {
         Self::from_basis_coefficients_iter(
-            iter::once(*base).chain(iter::repeat(Self::BaseField::ZERO)),
+            iter::once(*base).chain(iter::repeat_n(Self::BaseField::ZERO, Self::DEGREE - 1)),
         )
     }
 
