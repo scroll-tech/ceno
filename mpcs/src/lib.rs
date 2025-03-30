@@ -77,6 +77,8 @@ fn compute_binary_with_length(length: usize, mut value: usize) -> Vec<bool> {
     bin
 }
 
+/* Old Interleaving Approach for bookkeeping
+
 // Given the sizes of a list of polys sorted in decreasing order,
 // Compute which list each entry of their interleaved form belong to
 // e.g.: [4, 2, 1, 1] => [0, 1, 0, 2, 0, 1, 0, 3]
@@ -165,6 +167,61 @@ fn interleave_polys<E: ExtensionField>(
     }
     DenseMultilinearExtension { num_vars: interleaved_num_vars, evaluations: interleaved_evaluations }
 }
+*/
+
+// Interleave the polys give their position on the binary tree
+// Assume the polys are sorted by decreasing size
+// Denote: N - size of the interleaved poly; M - num of polys
+// This function performs interleave in O(M) + O(N) time and is *potentially* parallelizable (maybe? idk)
+fn interleave_polys<E: ExtensionField>(
+    polys: Vec<&DenseMultilinearExtension<E>>,
+    comps: &Vec<Vec<bool>>,
+) -> DenseMultilinearExtension<E> {
+    assert!(polys.len() > 0);
+    let sizes: Vec<usize> = polys.iter().map(|p| p.evaluations.len()).collect();
+    let interleaved_size = sizes.iter().sum::<usize>().next_power_of_two();
+    let interleaved_num_vars = interleaved_size.ilog2() as usize;
+    // Initialize the interleaved poly
+    // Is there a better way to deal with field types?
+    let mut interleaved_evaluations = match polys[0].evaluations {
+        FieldType::Base(_) => FieldType::Base(vec![E::BaseField::ZERO; interleaved_size]),
+        FieldType::Ext(_) => FieldType::Ext(vec![E::ZERO; interleaved_size]),
+        _ => unreachable!()
+    };
+    // For every poly, determine its:
+    // * Start: where's its first entry in the interleaved poly?
+    // * Gap: how many entires are between its consecutive entries in the interleaved poly?
+    // Then fill in the corresponding entries in the interleaved poly
+    for (poly, comp) in polys.iter().zip(comps) {
+        // Start is the decimal representation of the inverse of comp
+        let mut start = 0;
+        let mut pow_2 = 1;
+        for b in comp {
+            start += if *b { pow_2 } else { 0 };
+            pow_2 *= 2;
+        }
+        // Gap is 2 ** (interleaved_num_vars - poly_num_vars)
+        let gap = 1 << (interleaved_num_vars - poly.num_vars);
+        // Fill in the blank
+        match (&mut interleaved_evaluations, &poly.evaluations) {
+            (FieldType::Base(ie), FieldType::Base(pe)) => {
+                for (i, e) in pe.iter().enumerate() {
+                    ie[start + gap * i] = *e;
+                }
+            }
+            (FieldType::Ext(ie), FieldType::Ext(pe)) => { 
+                for (i, e) in pe.iter().enumerate() {
+                    ie[start + gap * i] = *e;
+                }
+            }
+            (a, b) => panic!(
+                "do not support merge different field type DME a: {:?} b: {:?}",
+                a, b
+            ),
+        }
+    }
+    DenseMultilinearExtension { num_vars: interleaved_num_vars, evaluations: interleaved_evaluations }
+}
 
 // Pack polynomials of different sizes into the same, returns
 // 0: A list of packed polys
@@ -239,8 +296,10 @@ fn pack_poly_prover<E: ExtensionField>(
         }
     }
     // Interleave every poly
-    let mut packed_polys: Vec<_> = packed_polys.into_iter().map(|ps| interleave_polys(ps)).collect();
-    let next_packed_poly = interleave_polys(next_packed_poly);
+    let mut packed_polys: Vec<_> = packed_polys.into_iter().zip(&packed_comps).map(|(ps, pc)| 
+        interleave_polys(ps, pc)
+    ).collect();
+    let next_packed_poly = interleave_polys(next_packed_poly, &next_packed_comp);
     
     // Final packed poly
     if next_packed_poly.num_vars == max_poly_num_vars {
@@ -1119,7 +1178,7 @@ pub mod test_util {
     {
         use crate::{pcs_batch_commit_diff_size_and_write, pcs_batch_open_diff_size, pcs_batch_verify_diff_size};
 
-        for vars_gap in 1..=max_vars_gap {
+        for vars_gap in 0..=max_vars_gap {
             println!("GAP: {vars_gap}");
             assert!(max_num_vars > vars_gap * batch_size);
             let (pp, vp) = setup_pcs::<E, Pcs>(max_num_vars);
@@ -1182,19 +1241,19 @@ mod test {
     use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks;
 
-    use crate::interleave_pattern;
+    // use crate::interleave_pattern;
     type E = GoldilocksExt2;
 
-    #[test]
-    fn test_interleave() {
-        let poly_num_vars = [vec![27, 26, 25, 25], vec![4, 4, 4, 4, 4], vec![8], vec![23, 23, 19, 13]];
-        for num_vars in poly_num_vars {
-            println!("NUM_VARS: {:?}", num_vars);
-            let sizes = num_vars.iter().map(|n| 2_i32.pow(*n) as usize).collect();
-            let interleaved_indices = interleave_pattern(sizes);
-            println!("INDICES: {:?}", interleaved_indices);
-        }
-    }
+    // #[test]
+    // fn test_interleave() {
+    //     let poly_num_vars = [vec![27, 26, 25, 25], vec![4, 4, 4, 4, 4], vec![8], vec![23, 23, 19, 13]];
+    //     for num_vars in poly_num_vars {
+    //         println!("NUM_VARS: {:?}", num_vars);
+    //         let sizes = num_vars.iter().map(|n| 2_i32.pow(*n) as usize).collect();
+    //         let interleaved_indices = interleave_pattern(sizes);
+    //         println!("INDICES: {:?}", interleaved_indices);
+    //     }
+    // }
 
     #[test]
     fn test_packing() {
