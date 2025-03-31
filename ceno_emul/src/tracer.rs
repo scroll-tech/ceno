@@ -3,6 +3,8 @@ use std::{
     fmt, mem,
 };
 
+use ceno_rt::WORD_SIZE;
+
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
@@ -434,7 +436,7 @@ impl Tracer {
         {
             if addr < *end_addr {
                 if addr >= *max_addr {
-                    *max_addr = addr + WordAddr::from(1); // end exclusive
+                    *max_addr = addr + WordAddr::from(WORD_SIZE as u32); // end exclusive
                 }
                 if addr < *min_addr {
                     *min_addr = addr; // start inclusive

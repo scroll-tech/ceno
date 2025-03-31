@@ -164,15 +164,19 @@ pub trait DynVolatileRamTable {
     fn name() -> &'static str;
 
     fn max_len(params: &ProgramParams) -> usize {
-        let max_size =
-            (Self::end_addr(params) - Self::offset_addr(params)).div_ceil(WORD_SIZE as u32) as Addr;
+        let max_size = (if Self::DESCENDING {
+            Self::offset_addr(params) - Self::end_addr(params)
+        } else {
+            Self::end_addr(params) - Self::offset_addr(params)
+        })
+        .div_ceil(WORD_SIZE as u32) as Addr;
         1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 
     fn addr(params: &ProgramParams, entry_index: usize) -> Addr {
         if Self::DESCENDING {
             // end addr is exclusive conventionally
-            Self::end_addr(params) - (entry_index * WORD_SIZE + WORD_SIZE) as Addr
+            Self::offset_addr(params) - (entry_index * WORD_SIZE) as Addr
         } else {
             // ascending
             Self::offset_addr(params) + (entry_index * WORD_SIZE) as Addr

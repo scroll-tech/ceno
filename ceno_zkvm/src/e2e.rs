@@ -243,12 +243,13 @@ pub fn setup_platform(
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
     let stack = preset.stack.end - stack_size..preset.stack.end;
+
     let heap = {
         // Detect heap as starting after program data.
         let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
         let heap = heap_start..heap_start + heap_size;
-        // Pad the total size to the next power of two.
-        let mem_size = prog_data.len() + stack.iter_addresses().len() + heap.iter_addresses().len();
+        // pad the total size to the next power of two.
+        let mem_size = heap.iter_addresses().len();
         let pad_size = mem_size.next_power_of_two() - mem_size;
         let heap_end = heap.end as usize + pad_size * WORD_SIZE;
         assert!(
@@ -257,6 +258,8 @@ pub fn setup_platform(
         );
         heap.start..heap_end as u32
     };
+
+    // TODO check AFTER padding, all addresses no overlapping
 
     Platform {
         rom: program.base_address
@@ -280,7 +283,11 @@ fn init_program_addrs(program: &Program) -> Vec<MemInitRecord> {
         .sorted_by_key(|record| record.addr)
         .collect_vec();
 
-    assert!(program_addrs.len().is_power_of_two());
+    assert!(
+        program_addrs.len().is_power_of_two(),
+        "program_addrs.len {} is not pow2",
+        program_addrs.len(),
+    );
     program_addrs
 }
 

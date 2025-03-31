@@ -156,21 +156,29 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
     ans
 }
 
-/// evaluate MLE M(x0, x1, x2, ..., xn) address vector with it evaluation format a*[0, 1, 2, 3, ....2^n-1] + b
-/// on r = [r0, r1, r2, ...rn] succintly
-/// a, b, is constant
-/// the result M(r0, r1,... rn) = r0 + r1 * 2 + r2 * 2^2 + .... rn * 2^n
-pub fn eval_wellform_address_vec<E: ExtensionField>(offset: u64, scaled: u64, r: &[E]) -> E {
+/// evaluate MLE M(x0, x1, x2, ..., xn) address vector with it evaluation format
+/// on r = [r0, r1, r2, ...rn] succinctly
+/// where `M = descending * scaled * M' + offset`
+/// offset, scaled, is constant, descending = +1/-1
+/// and M' := [0, 1, 2, 3, ....2^n-1]
+/// succinctly format of M'(r) = r0 + r1 * 2 + r2 * 2^2 + .... rn * 2^n
+pub fn eval_wellform_address_vec<E: ExtensionField>(
+    offset: u64,
+    scaled: u64,
+    r: &[E],
+    descending: bool,
+) -> E {
     let (offset, scaled) = (E::from_u64(offset), E::from_u64(scaled));
-    offset
-        + scaled
-            * r.iter()
-                .scan(E::ONE, |state, x| {
-                    let result = *x * *state;
-                    *state *= E::from_u64(2); // Update the state for the next power of 2
-                    Some(result)
-                })
-                .sum::<E>()
+    let tmp = scaled
+        * r.iter()
+            .scan(E::ONE, |state, x| {
+                let result = *x * *state;
+                *state *= E::from_u64(2); // Update the state for the next power of 2
+                Some(result)
+            })
+            .sum::<E>();
+    let tmp = if descending { tmp.neg() } else { tmp };
+    offset + tmp
 }
 
 pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
