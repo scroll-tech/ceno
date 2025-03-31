@@ -58,7 +58,6 @@ impl DynVolatileRamTable for StackTable {
         let max_size = (Self::offset_addr(params) - Self::end_addr(params))
             .div_ceil(WORD_SIZE as u32) as Addr
             + 1;
-        println!("stack max size {}", max_size);
         1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 
