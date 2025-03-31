@@ -86,6 +86,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         fixed.register_table_circuit::<HeapCircuit<E>>(cs, &self.heap_config, &());
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn assign_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
