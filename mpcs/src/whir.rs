@@ -5,6 +5,7 @@ mod utils;
 
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
+use multilinear_extensions::mle::DenseMultilinearExtension;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
@@ -103,11 +104,10 @@ where
         }
     }
 
-    fn batch_commit(
+    fn batch_commit_polys(
         pp: &Self::ProverParam,
-        polys: witness::RowMajorMatrix<E::BaseField>,
+        polys: &[DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let polys = polys.to_mles();
         let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;
 
@@ -180,7 +180,7 @@ where
 mod tests {
     use super::*;
     use crate::test_util::{
-        gen_rand_poly_base, run_commit_open_verify, run_simple_batch_commit_open_verify,
+        gen_rand_poly_base, run_commit_open_verify, run_diff_size_batch_commit_open_verify, run_simple_batch_commit_open_verify
     };
     use ff_ext::GoldilocksExt2;
     use spec::WhirDefaultSpec;
@@ -258,5 +258,16 @@ mod tests {
                 1,
             );
         }
+    }
+
+    #[test]
+    fn batch_commit_diff_size_open_verify() {
+        let gen_rand_poly = gen_rand_poly_base;
+        run_diff_size_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
+            gen_rand_poly,
+            20,
+            3,
+            3,
+        );
     }
 }

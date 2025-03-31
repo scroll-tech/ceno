@@ -352,11 +352,10 @@ where
         ret
     }
 
-    fn batch_commit(
+    fn batch_commit_polys(
         pp: &Self::ProverParam,
-        rmm: witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>,
+        polys: &[DenseMultilinearExtension<E>],
     ) -> Result<Self::CommitmentWithWitness, Error> {
-        let polys = rmm.to_mles();
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
@@ -1115,8 +1114,7 @@ mod test {
     use crate::{
         basefold::Basefold,
         test_util::{
-            gen_rand_poly_base, gen_rand_poly_ext, run_batch_commit_open_verify,
-            run_commit_open_verify, run_simple_batch_commit_open_verify,
+            gen_rand_poly_base, gen_rand_poly_ext, run_batch_commit_open_verify, run_commit_open_verify, run_diff_size_batch_commit_open_verify, run_simple_batch_commit_open_verify
         },
     };
 
@@ -1215,5 +1213,16 @@ mod test {
                 11,
             );
         }
+    }
+
+    #[test]
+    fn batch_commit_diff_size_open_verify() {
+        let gen_rand_poly = gen_rand_poly_base;
+        run_diff_size_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksBaseCode>(
+            gen_rand_poly,
+            20,
+            3,
+            5,
+        );
     }
 }
