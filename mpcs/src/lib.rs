@@ -1,6 +1,6 @@
 #![deny(clippy::cargo)]
 use ff_ext::ExtensionField;
-use itertools::{interleave, Either, Itertools};
+use itertools::{Either, Itertools};
 use multilinear_extensions::{mle::{DenseMultilinearExtension, FieldType, MultilinearExtension}, virtual_poly::{build_eq_x_r, eq_eval, VPAuxInfo}};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
@@ -10,6 +10,8 @@ use p3_field::PrimeCharacteristicRing;
 use multilinear_extensions::virtual_poly::VirtualPolynomial;
 use sumcheck::structs::{IOPProof, IOPProverState, IOPVerifierState};
 use witness::RowMajorMatrix;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 pub mod sum_check;
 pub mod util;
@@ -172,7 +174,8 @@ fn interleave_polys<E: ExtensionField>(
 // Interleave the polys give their position on the binary tree
 // Assume the polys are sorted by decreasing size
 // Denote: N - size of the interleaved poly; M - num of polys
-// This function performs interleave in O(M) + O(N) time and is *potentially* parallelizable (maybe? idk)
+// This function performs interleave in O(M) + O(N) time
+#[cfg(not(feature = "parallel"))]
 fn interleave_polys<E: ExtensionField>(
     polys: Vec<&DenseMultilinearExtension<E>>,
     comps: &Vec<Vec<bool>>,
@@ -222,6 +225,84 @@ fn interleave_polys<E: ExtensionField>(
     }
     DenseMultilinearExtension { num_vars: interleaved_num_vars, evaluations: interleaved_evaluations }
 }
+
+// Parallel version: divide interleaved_evaluation into chunks
+#[cfg(feature = "parallel")]
+fn interleave_polys<E: ExtensionField>(
+    polys: Vec<&DenseMultilinearExtension<E>>,
+    comps: &Vec<Vec<bool>>,
+) -> DenseMultilinearExtension<E> {
+    use std::cmp::min;
+
+    assert!(polys.len() > 0);
+    let sizes: Vec<usize> = polys.iter().map(|p| p.evaluations.len()).collect();
+    let interleaved_size = sizes.iter().sum::<usize>().next_power_of_two();
+    let interleaved_num_vars = interleaved_size.ilog2() as usize;
+
+    // Compute Start and Gap for each poly
+    // * Start: where's its first entry in the interleaved poly?
+    // * Gap: how many entires are between its consecutive entries in the interleaved poly?
+    let start_list: Vec<usize> = comps.iter().map(|comp| {
+        let mut start = 0;
+        let mut pow_2 = 1;
+        for b in comp {
+            start += if *b { pow_2 } else { 0 };
+            pow_2 *= 2;
+        }
+        start
+    }).collect();
+    let gap_list: Vec<usize> = polys.iter().map(|poly|
+        1 << (interleaved_num_vars - poly.num_vars)
+    ).collect();
+    // Minimally each chunk needs one entry from the smallest poly
+    let num_chunks = min(rayon::current_num_threads().next_power_of_two(), sizes[sizes.len() - 1]);
+    let interleaved_chunk_size = interleaved_size / num_chunks;
+    // Length of the poly each thread processes
+    let poly_chunk_size: Vec<usize> = sizes.iter().map(|s| s / num_chunks).collect();
+
+    // Initialize the interleaved poly
+    // Is there a better way to deal with field types?
+    let interleaved_evaluations = match polys[0].evaluations {
+        FieldType::Base(_) => {
+            let mut interleaved_eval = vec![E::BaseField::ZERO; interleaved_size];
+            interleaved_eval.par_chunks_exact_mut(interleaved_chunk_size).enumerate().for_each(|(i, chunk)| {
+                for (p, poly) in polys.iter().enumerate() {
+                    match &poly.evaluations {
+                        FieldType::Base(pe) => {
+                            // Each thread processes a chunk of pe
+                            for (j, e) in pe[i * poly_chunk_size[p]..(i+1) * poly_chunk_size[p]].iter().enumerate() {
+                                chunk[start_list[p] + gap_list[p] * j] = *e;
+                            }
+                        }
+                        b => panic!("do not support merge BASE field type with b: {:?}", b)
+                    }
+                }
+            });
+            FieldType::Base(interleaved_eval)
+        }
+        FieldType::Ext(_) => {
+            let mut interleaved_eval = vec![E::ZERO; interleaved_size];
+            interleaved_eval.par_chunks_exact_mut(num_chunks).enumerate().for_each(|(i, chunk)| {
+                for (p, poly) in polys.iter().enumerate() {
+                    match &poly.evaluations {
+                        FieldType::Ext(pe) => {
+                            // Each thread processes a chunk of pe
+                            for (j, e) in pe[i * poly_chunk_size[p]..(i+1) * poly_chunk_size[p]].iter().enumerate() {
+                                chunk[start_list[p] + gap_list[p] * j] = *e;
+                            }
+                        }
+                        b => panic!("do not support merge EXT field type with b: {:?}", b)
+                    }
+                }
+            });
+            FieldType::Ext(interleaved_eval)
+        }
+        _ => unreachable!()
+    };
+
+    DenseMultilinearExtension { num_vars: interleaved_num_vars, evaluations: interleaved_evaluations }
+}
+
 
 // Pack polynomials of different sizes into the same, returns
 // 0: A list of packed polys
