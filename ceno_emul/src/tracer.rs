@@ -428,8 +428,8 @@ impl Tracer {
             unimplemented!("Only one memory access is supported");
         }
 
-        // update max mmio access
-        if let Some((&_, (_, end_addr, min_addr, max_addr))) = self
+        // update min/max mmio access
+        if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
@@ -478,7 +478,7 @@ impl Tracer {
         self.record.cycle
     }
 
-    /// giving a start_addr address, return max accessed address within section
+    /// giving a start address, return max accessed address within section
     pub fn probe_min_max_address_by_start_addr(
         &self,
         start_addr: WordAddr,
