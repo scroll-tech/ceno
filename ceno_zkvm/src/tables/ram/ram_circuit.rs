@@ -175,7 +175,6 @@ pub trait DynVolatileRamTable {
 
     fn addr(params: &ProgramParams, entry_index: usize) -> Addr {
         if Self::DESCENDING {
-            // end addr is exclusive conventionally
             Self::offset_addr(params) - (entry_index * WORD_SIZE) as Addr
         } else {
             // ascending

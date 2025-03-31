@@ -62,16 +62,6 @@ impl DynVolatileRamTable for StackTable {
         1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
     }
 
-    fn addr(params: &ProgramParams, entry_index: usize) -> Addr {
-        if Self::DESCENDING {
-            // end addr is exclusive conventionally
-            Self::offset_addr(params) - (entry_index * WORD_SIZE) as Addr
-        } else {
-            // ascending
-            Self::offset_addr(params) + (entry_index * WORD_SIZE) as Addr
-        }
-    }
-
     fn name() -> &'static str {
         "StackTable"
     }
