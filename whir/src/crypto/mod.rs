@@ -3,7 +3,7 @@ use p3::{
     commit::{ExtensionMmcs, Mmcs},
     matrix::{Dimensions, dense::DenseMatrix},
 };
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use transcript::Transcript;
 
 use crate::error::Error;
@@ -58,10 +58,17 @@ pub fn verify_multi_proof<E: ExtensionField>(
     proof: &MultiPath<E>,
     leaf_size: usize,
     matrix_height: usize,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    MerklePathExt<E>: Send + Sync,
+    <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+        Send + Sync,
+    <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+        Send + Sync,
+{
     indices
-        .iter()
-        .zip(proof.iter())
+        .par_iter()
+        .zip(proof.par_iter())
         .map(|(index, path)| {
             hash_params
                 .verify_batch(

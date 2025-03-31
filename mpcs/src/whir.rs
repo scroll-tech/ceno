@@ -4,8 +4,9 @@ mod structure;
 use crate::util::log2_strict;
 
 use super::PolynomialCommitmentScheme;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::mle::MultilinearExtension;
+use p3::commit::Mmcs;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
@@ -27,6 +28,10 @@ where
     Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
+    <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+        Send + Sync,
+    <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+        Send + Sync,
 {
     type Param = ();
     type ProverParam = ();

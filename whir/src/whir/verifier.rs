@@ -1,16 +1,20 @@
 use crate::{
-    crypto::{Digest, verify_multi_proof, write_digest_to_transcript},
+    crypto::{Digest, MerklePathExt, verify_multi_proof, write_digest_to_transcript},
     utils::{evaluate_as_univariate, evaluate_over_hypercube},
 };
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3::field::{Field, PrimeCharacteristicRing};
+use p3::{
+    commit::Mmcs,
+    field::{Field, PrimeCharacteristicRing},
+};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::iter;
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
 
 use super::{Statement, WhirProof, fold::expand_from_univariate, parameters::WhirConfig};
@@ -102,9 +106,15 @@ where
         &self,
         transcript: &mut T,
         parsed_commitment: &WhirCommitmentInTranscript<E>,
-        statement: &Statement<E>, // Will be needed later
+    statement: &Statement<E>, // Will be needed later
         whir_proof: &WhirProof<E>,
-    ) -> Result<ParsedProof<E>, Error> {
+    ) -> Result<ParsedProof<E>, Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
         let mut initial_sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
         let initial_combination_randomness;
@@ -196,6 +206,7 @@ where
                 .map(|index| exp_domain_gen.exp_u64(*index as u64))
                 .collect();
 
+            let internal_timer = entered_span!("Verify multi proof");
             if !verify_multi_proof(
                 &self.params.hash_params,
                 &prev_root,
@@ -208,6 +219,7 @@ where
             {
                 return Err(Error::InvalidProof("Merkle proof failed".to_string()));
             }
+            exit_span!(internal_timer);
 
             let combination_randomness_gen = transcript
                 .sample_and_append_challenge(b"combination_randomness")
@@ -276,6 +288,7 @@ where
             .collect();
 
         let final_merkle_proof = &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
+        let internal_timer = entered_span!("Final merkle proof verify");
         verify_multi_proof(
             &self.params.hash_params,
             &prev_root,
@@ -285,6 +298,7 @@ where
             p3::util::log2_strict_usize(domain_size / final_merkle_proof[0].0[0].len()),
         )
         .map_err(|e| Error::InvalidProof(format!("Final Merkle proof failed: {:?}", e)))?;
+        exit_span!(internal_timer);
 
         let mut final_sumcheck_rounds = Vec::with_capacity(self.params.final_sumcheck_rounds);
         for _ in 0..self.params.final_sumcheck_rounds {
@@ -507,7 +521,15 @@ where
         transcript: &mut T,
         statement: &Statement<E>,
         whir_proof: &WhirProof<E>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
+        let timer = entered_span!("Whir verify");
+
         let parsed_commitment = commitment;
 
         // It is possible that the committing and the opening of the polynomial
@@ -515,8 +537,10 @@ where
         // commitment to transcript preceding the verification.
         // self.write_commitment_to_transcript(&mut parsed_commitment, transcript);
 
+        let internal_timer = entered_span!("Write proof to transcript");
         let parsed =
             self.write_proof_to_transcript(transcript, parsed_commitment, statement, whir_proof)?;
+        exit_span!(internal_timer);
 
         let computed_folds = self.compute_folds(&parsed);
 
@@ -666,6 +690,7 @@ where
                 prev_sumcheck_poly_eval, expected_sumcheck_poly_eval
             )));
         }
+        exit_span!(timer);
 
         Ok(())
     }

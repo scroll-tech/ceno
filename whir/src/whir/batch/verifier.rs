@@ -14,13 +14,13 @@ use crate::{
         verifier::{ParsedProof, ParsedRound, Verifier, WhirCommitmentInTranscript},
     },
 };
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use itertools::zip_eq;
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, MultilinearExtension},
     virtual_poly::eq_eval,
 };
-use p3::util::log2_strict_usize;
+use p3::{commit::Mmcs, util::log2_strict_usize};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
@@ -40,7 +40,13 @@ where
         points: &[Vec<E>],
         evals_per_point: &[Vec<E>],
         whir_proof: &WhirProof<E>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
         let timer = entered_span!("Simple batch verify");
 
         for evals in evals_per_point {
@@ -79,9 +85,15 @@ where
         transcript: &mut T,
         num_polys: usize,
         point_per_poly: &[Vec<E>],
-        eval_per_poly: &[E], // evaluations of the polys on individual points
+    eval_per_poly: &[E], // evaluations of the polys on individual points
         whir_proof: &WhirProof<E>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
         assert_eq!(num_polys, point_per_poly.len());
         assert_eq!(num_polys, eval_per_poly.len());
 
@@ -133,7 +145,13 @@ where
         parsed_commitment: &WhirCommitmentInTranscript<E>,
         whir_proof: &WhirProof<E>,
         sumcheck_poly_evals_iter: &mut impl Iterator<Item = Vec<E>>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
         // parse proof
         let compute_dot_product =
             |evals: &[E], coeff: &[E]| -> E { zip_eq(evals, coeff).map(|(a, b)| *a * *b).sum() };
@@ -412,12 +430,18 @@ where
         &self,
         transcript: &mut T,
         parsed_commitment: &WhirCommitmentInTranscript<E>,
-        statement: &Statement<E>, // Will be needed later
+    statement: &Statement<E>, // Will be needed later
         whir_proof: &WhirProof<E>,
         batched_randomness: Vec<E>,
         num_polys: usize,
         sumcheck_poly_evals_iter: &mut impl Iterator<Item = Vec<E>>,
-    ) -> Result<ParsedProof<E>, Error> {
+    ) -> Result<ParsedProof<E>, Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
         let internal_timer = entered_span!("Preamble");
 
         let mut initial_sumcheck_rounds = Vec::new();
