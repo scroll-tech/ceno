@@ -528,7 +528,7 @@ where
             )?;
 
             let stir_challenges_points = stir_challenges_indexes
-                .par_iter()
+                .iter()
                 .map(|index| {
                     Self::pow_with_precomputed_squares(
                         &domain_gen_powers.as_slice()
@@ -639,7 +639,7 @@ where
             transcript,
         )?;
         let final_randomness_points = final_randomness_indexes
-            .par_iter()
+            .iter()
             .map(|index| {
                 Self::pow_with_precomputed_squares(
                     &domain_gen_powers.as_slice()[log_based_on_domain_gen
@@ -758,7 +758,7 @@ where
             let ood_points = &round_proof.ood_points;
             let stir_challenges_points = &round_proof.stir_challenges_points;
             let stir_challenges: Vec<_> = ood_points
-                .par_iter()
+                .iter()
                 .chain(stir_challenges_points)
                 .cloned()
                 .map(|univariate| {

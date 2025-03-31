@@ -173,6 +173,7 @@ where
         let mut domain_size = self.params.starting_domain.size();
         let mut rounds = vec![];
 
+        let rounds_timer = entered_span!("Rounds");
         for r in 0..self.params.n_rounds() {
             let merkle_proof_with_answers = &whir_proof.merkle_answers[r];
             let round_params = &self.params.round_parameters[r];
@@ -201,10 +202,12 @@ where
                 transcript,
             )?;
 
+            let internal_timer = entered_span!("Compute sitr challenge points");
             let stir_challenges_points = stir_challenges_indexes
-                .par_iter()
+                .iter()
                 .map(|index| exp_domain_gen.exp_u64(*index as u64))
                 .collect();
+            exit_span!(internal_timer);
 
             let internal_timer = entered_span!("Verify multi proof");
             if !verify_multi_proof(
@@ -271,6 +274,7 @@ where
             domain_gen_inv = domain_gen_inv * domain_gen_inv;
             domain_size /= 2;
         }
+        exit_span!(rounds_timer);
 
         let final_evaluations = whir_proof.final_poly.clone();
         transcript.append_field_element_exts(&final_evaluations);
@@ -283,7 +287,7 @@ where
             transcript,
         )?;
         let final_randomness_points = final_randomness_indexes
-            .par_iter()
+            .iter()
             .map(|index| exp_domain_gen.exp_u64(*index as u64))
             .collect();
 
@@ -426,7 +430,7 @@ where
 
             let evaluations: Vec<_> = round
                 .stir_challenges_indexes
-                .par_iter()
+                .iter()
                 .zip(&round.stir_challenges_answers)
                 .map(|(index, answers)| {
                     // The coset is w^index * <w_coset_generator>
@@ -542,7 +546,9 @@ where
             self.write_proof_to_transcript(transcript, parsed_commitment, statement, whir_proof)?;
         exit_span!(internal_timer);
 
+        let internal_timer = entered_span!("Compute folds");
         let computed_folds = self.compute_folds(&parsed);
+        exit_span!(internal_timer);
 
         let mut prev: Option<(SumcheckPolynomial<E>, E)> = None;
         if let Some(round) = parsed.initial_sumcheck_rounds.first() {
