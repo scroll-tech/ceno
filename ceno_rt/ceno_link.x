@@ -37,10 +37,10 @@ SECTIONS
     *(.sbss .sbss.*);
     *(.bss .bss.*);
 
-  /* align 256Mb */
-  /* assure once we do padding to next power of 2 for rom + sdata + bss */
-  /* there is no overlap with heap */
-  /* NOTE: this will not affect binary size */
+  /* align to 256Mb boundary to ensure proper memory layout. */
+  /* this reserves some padding up to the next power of 2 for .text, .sdata, .bss sections, ensuring there is no overlap with the heap. */
+  /* NOTE 1: This works correctly **only** if the total size of .text + .rodata + .data + .bss does not exceed 256MB. */
+  /* NOTE 2: This alignment **does not** affect the binary size.  */
     . = ALIGN(0x10000000);
     _sheap = .;
   } > RAM
