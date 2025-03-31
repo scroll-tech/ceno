@@ -272,7 +272,7 @@ pub fn setup_platform(
     }
 }
 
-fn init_program_addrs(program: &Program) -> Vec<MemInitRecord> {
+fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
     let program_addrs = program
         .image
         .iter()
@@ -440,13 +440,13 @@ pub fn run_e2e_with_checkpoint<
     max_steps: usize,
     checkpoint: Checkpoint,
 ) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
-    let program_addrs = init_program_addrs(&program);
+    let static_addrs = init_static_addrs(&program);
 
     let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: program.instructions.len(),
-        static_memory_len: program_addrs.len(),
+        static_memory_len: static_addrs.len(),
         pubio_len,
     };
 
@@ -462,7 +462,7 @@ pub fn run_e2e_with_checkpoint<
     );
 
     let init_full_mem = InitMemState {
-        mem: program_addrs,
+        mem: static_addrs,
         reg: reg_init,
         io: io_init,
         hints: hint_init,
