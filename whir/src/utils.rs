@@ -2,7 +2,10 @@ use crate::ntt::{transpose, transpose_bench_allocate};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 use p3::field::Field;
-use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
+use rayon::{
+    iter::ParallelIterator,
+    slice::{ParallelSlice, ParallelSliceMut},
+};
 use std::collections::BTreeSet;
 
 // checks whether the given number n is a power of two.
@@ -148,6 +151,27 @@ pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
     coeffs.par_chunks_mut(2).for_each(|chunk| {
         chunk[1] += chunk[0];
     });
+}
+
+pub fn evaluate_as_multilinear_coeffs<E: ExtensionField>(coeffs: &[E], point: &[E]) -> E {
+    if coeffs.len() == 1 {
+        // It's a constant function, so just return the constant value.
+        return coeffs[0];
+    }
+    assert_eq!(coeffs.len(), 1 << point.len());
+    let mut fold_result = coeffs
+        .par_chunks_exact(2)
+        .map(|chunk| chunk[0] + chunk[1] * point[0])
+        .collect::<Vec<_>>();
+    let mut index = 1;
+    while fold_result.len() > 1 {
+        fold_result = fold_result
+            .par_chunks_exact(2)
+            .map(|chunk| chunk[0] + chunk[1] * point[index])
+            .collect::<Vec<_>>();
+        index += 1;
+    }
+    fold_result[0]
 }
 
 pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> Vec<E> {

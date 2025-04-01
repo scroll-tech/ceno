@@ -1,6 +1,6 @@
 use crate::{
     crypto::{Digest, MerklePathExt, verify_multi_proof, write_digest_to_transcript},
-    utils::{evaluate_as_univariate, evaluate_over_hypercube},
+    utils::{evaluate_as_multilinear_coeffs, evaluate_as_univariate, evaluate_over_hypercube},
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{
@@ -487,15 +487,7 @@ where
             let evaluations: Vec<_> = round
                 .stir_challenges_answers
                 .par_iter()
-                .map(|answers| {
-                    let mut evals = answers.clone();
-                    evaluate_over_hypercube(&mut evals);
-                    DenseMultilinearExtension::from_evaluations_ext_vec(
-                        p3::util::log2_strict_usize(evals.len()),
-                        evals.to_vec(),
-                    )
-                    .evaluate(&round.folding_randomness)
-                })
+                .map(|answers| evaluate_as_multilinear_coeffs(answers, &round.folding_randomness))
                 .collect();
             result.push(evaluations);
         }
@@ -505,13 +497,7 @@ where
             .final_randomness_answers
             .par_iter()
             .map(|answers| {
-                let mut evals = answers.clone();
-                evaluate_over_hypercube(&mut evals);
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    p3::util::log2_strict_usize(evals.len()),
-                    evals.to_vec(),
-                )
-                .evaluate(&parsed.final_folding_randomness)
+                evaluate_as_multilinear_coeffs(answers, &parsed.final_folding_randomness)
             })
             .collect();
         result.push(evaluations);
