@@ -18,7 +18,7 @@ use crate::{
         prover::{Prover, RoundState},
     },
 };
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use itertools::zip_eq;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
@@ -65,9 +65,15 @@ where
         &self,
         transcript: &mut T,
         points: &[Vec<E>],
-        evals_per_point: &[Vec<E>], // outer loop on each point, inner loop on each poly
+    evals_per_point: &[Vec<E>], // outer loop on each point, inner loop on each poly
         witness: &Witnesses<E>,
-    ) -> Result<WhirProof<E>, Error> {
+    ) -> Result<WhirProof<E>, Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
         let prove_timer = entered_span!("prove");
         let initial_timer = entered_span!("init");
         let mut sumcheck_poly_evals = Vec::new();
@@ -132,7 +138,7 @@ where
             .collect();
 
         let polynomial = (0..(1 << witness.polys[0].num_vars()))
-            .into_iter()
+            .into_par_iter()
             .map(|i| {
                 witness
                     .polys
@@ -467,7 +473,13 @@ where
         point_per_poly: &[Vec<E>],
         eval_per_poly: &[E],
         witness: &Witnesses<E>,
-    ) -> Result<WhirProof<E>, Error> {
+    ) -> Result<WhirProof<E>, Error>
+    where
+        MerklePathExt<E>: Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
+            Send + Sync,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
+    Send + Sync,{
         let prove_timer = entered_span!("prove");
         let initial_timer = entered_span!("init");
         assert!(self.0.initial_statement, "must be true for pcs");
