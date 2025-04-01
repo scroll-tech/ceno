@@ -114,25 +114,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let (witness, structural_witness) = match num_instances {
                 0 => (vec![], vec![]),
                 _ => {
-                    let witness = witness_rmm.to_mles();
                     let structural_witness = structural_witness_rmm.to_mles();
-                    commitments.insert(
-                        circuit_name.clone(),
+                    let commit =
                         PCS::batch_commit_and_write(&self.pk.pp, witness_rmm, &mut transcript)
-                            .map_err(ZKVMError::PCSError)?,
-                    );
-
+                            .map_err(ZKVMError::PCSError)?;
+                    let witness = PCS::get_arc_mle_witness_from_commitment(&commit);
+                    commitments.insert(circuit_name.clone(), commit);
                     (witness, structural_witness)
                 }
             };
             exit_span!(span);
-            wits.insert(
-                circuit_name.clone(),
-                (
-                    witness.into_iter().map(|w| w.into()).collect_vec(),
-                    num_instances,
-                ),
-            );
+            wits.insert(circuit_name.clone(), (witness, num_instances));
             structural_wits.insert(
                 circuit_name,
                 (

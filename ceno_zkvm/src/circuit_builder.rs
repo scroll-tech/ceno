@@ -13,7 +13,6 @@ use crate::{
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
 };
 use p3::field::PrimeCharacteristicRing;
-
 use witness::RowMajorMatrix;
 
 /// namespace used for annotation, preserve meta info during circuit construction

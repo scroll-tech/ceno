@@ -101,7 +101,9 @@ pub trait SmallField: Serialize + P3Field + FieldFrom<u64> + FieldInto<Self> {
     fn to_canonical_u64(&self) -> u64;
 }
 
-pub trait ExtensionField: P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord {
+pub trait ExtensionField:
+    P3ExtensionField<Self::BaseField> + FromUniformBytes + Ord + TwoAdicField
+{
     const DEGREE: usize;
     const MULTIPLICATIVE_GENERATOR: Self;
     const TWO_ADICITY: usize;
