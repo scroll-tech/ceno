@@ -18,6 +18,8 @@ use crate::{
 };
 use ndarray::{range, s, ArrayView, Ix2, Ix3};
 
+use witness::RowMajorMatrix;
+
 use super::utils::{u64s_to_felts, zero_eval, CenoLookup};
 use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
 
@@ -31,10 +33,10 @@ use transcript::BasicTranscript;
 type E = BinomialExtensionField<Goldilocks, 2>;
 
 #[derive(Clone, Debug, Default)]
-struct KeccakParams {}
+pub struct KeccakParams {}
 
 #[derive(Clone, Debug, Default)]
-struct KeccakLayout<E> {
+pub struct KeccakLayout<E> {
     params: KeccakParams,
 
     committed_bits_id: usize,
@@ -727,8 +729,17 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
     }
 }
 
+#[derive(Clone, Default)]
 pub struct KeccakTrace {
     pub instances: Vec<[u32; KECCAK_INPUT_SIZE]>,
+}
+
+use p3_field::Field;
+
+impl<F: Field> From<RowMajorMatrix<F>> for KeccakTrace {
+    fn from(value: RowMajorMatrix<F>) -> Self {
+        unimplemented!();
+    }
 }
 
 impl<E> ProtocolWitnessGenerator<E> for KeccakLayout<E>

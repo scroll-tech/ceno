@@ -578,6 +578,7 @@ dependencies = [
  "criterion",
  "ff_ext",
  "generic_static",
+ "gkr_iop",
  "glob",
  "itertools 0.13.0",
  "mpcs",
@@ -1185,6 +1186,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tiny-keccak",
  "transcript",
+ "witness",
 ]
 
 [[package]]

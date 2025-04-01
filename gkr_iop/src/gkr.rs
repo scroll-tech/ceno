@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, izip};
+use itertools::{chain, izip, Itertools};
 use layer::{Layer, LayerWitness};
 use subprotocols::{expression::Point, sumcheck::SumcheckProof};
 use transcript::Transcript;
@@ -13,13 +13,13 @@ pub mod layer;
 pub mod mock;
 
 #[derive(Clone, Debug)]
-pub struct GKRCircuit<'a> {
-    pub layers: &'a [Layer],
+pub struct GKRCircuit {
+    pub layers: Vec<Layer>,
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub base_openings: &'a [(usize, EvalExpression)],
-    pub ext_openings: &'a [(usize, EvalExpression)],
+    pub base_openings: Vec<(usize, EvalExpression)>,
+    pub ext_openings: Vec<(usize, EvalExpression)>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +42,7 @@ pub struct Evaluation<E: ExtensionField> {
 
 pub struct GKRClaims<Evaluation>(pub Vec<Evaluation>);
 
-impl GKRCircuit<'_> {
+impl GKRCircuit {
     pub fn prove<E>(
         &self,
         circuit_wit: GKRCircuitWitness<E>,
@@ -56,7 +56,7 @@ impl GKRCircuit<'_> {
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
-        let sumcheck_proofs = izip!(self.layers, circuit_wit.layers)
+        let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
             .map(|(layer, layer_wit)| {
                 layer.prove(layer_wit, &mut evaluations, &mut challenges, transcript)
             })
@@ -85,7 +85,7 @@ impl GKRCircuit<'_> {
         let mut challenges = challenges.to_vec();
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
-        for (layer, layer_proof) in izip!(self.layers, sumcheck_proofs) {
+        for (layer, layer_proof) in izip!(self.layers.clone(), sumcheck_proofs) {
             layer.verify(layer_proof, &mut evaluations, &mut challenges, transcript)?;
         }
 
@@ -99,7 +99,7 @@ impl GKRCircuit<'_> {
         evaluations: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<Evaluation<E>> {
-        chain!(self.base_openings, self.ext_openings)
+        chain!(&self.base_openings, &self.ext_openings)
             .map(|(poly, eval)| {
                 let poly = *poly;
                 let PointAndEval { point, eval: value } = eval.evaluate(evaluations, challenges);

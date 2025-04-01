@@ -2,13 +2,17 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::Expression,
-    instructions::Instruction,
+    instructions::{Instruction, riscv::dummy::LargeEcallDummy},
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
+use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord};
 use ff_ext::ExtensionField;
+use gkr_iop::{
+    ProtocolWitnessGenerator,
+    precompiles::{KeccakLayout, KeccakTrace},
+};
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
@@ -130,6 +134,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
     }
 }
 
+#[derive(Clone)]
+pub struct KeccakGKRIOP<E> {
+    pub chip: gkr_iop::chip::Chip,
+    pub layout: KeccakLayout<E>,
+    pub circuit: gkr_iop::gkr::GKRCircuit,
+}
+
 #[derive(Clone, Debug)]
 pub struct ProgramParams {
     pub platform: Platform,
@@ -154,6 +165,7 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
     pub(crate) initial_global_state_expr: Expression<E>,
     pub(crate) finalize_global_state_expr: Expression<E>,
+    pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
     pub params: ProgramParams,
 }
 
@@ -164,6 +176,7 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
             params: ProgramParams::default(),
+            keccak_gkr_iop: None,
         }
     }
 }
@@ -175,6 +188,25 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             ..Default::default()
         }
     }
+
+    pub fn register_keccakf_circuit(
+        &mut self,
+    ) -> <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig {
+        // Add GKR-IOP instance
+        let params = gkr_iop::precompiles::KeccakParams {};
+        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder>::build(params);
+        let circuit = chip.gkr_circuit();
+
+        assert!(self.keccak_gkr_iop.is_none());
+        self.keccak_gkr_iop = Some(KeccakGKRIOP {
+            layout,
+            chip,
+            circuit,
+        });
+
+        self.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>()
+    }
+
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder =
@@ -220,6 +252,14 @@ pub struct ZKVMFixedTraces<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZKVMFixedTraces<E> {
+    pub fn register_keccakf_circuit(&mut self, _cs: &ZKVMConstraintSystem<E>) {
+        assert!(
+            self.circuit_fixed_traces
+                .insert(LargeEcallDummy::<E, KeccakSpec>::name(), None)
+                .is_none()
+        );
+    }
+
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self, _cs: &ZKVMConstraintSystem<E>) {
         assert!(self.circuit_fixed_traces.insert(OC::name(), None).is_none());
     }
@@ -244,6 +284,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
+    keccak_trace: <KeccakLayout<E> as gkr_iop::ProtocolWitnessGenerator<E>>::Trace,
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
@@ -261,6 +302,44 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     pub fn get_lk_mlt(&self, name: &String) -> Option<&LkMultiplicity> {
         self.lk_mlts.get(name)
+    }
+
+    pub fn assign_keccakf_circuit(
+        &mut self,
+        css: &mut ZKVMConstraintSystem<E>,
+        config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
+        records: Vec<StepRecord>,
+    ) -> Result<(), ZKVMError> {
+        // Ugly copy paste from assign_opcode_circuit, but we need to use the row major matrix
+        let cs = css
+            .get_cs(&LargeEcallDummy::<E, KeccakSpec>::name())
+            .unwrap();
+        let (witness, logup_multiplicity) = LargeEcallDummy::<E, KeccakSpec>::assign_instances(
+            config,
+            cs.num_witin as usize,
+            records,
+        )?;
+
+        // GKR-IOP-specific trace from row major witness
+        self.keccak_trace = KeccakTrace::from(witness.clone());
+
+        assert!(
+            self.witnesses_opcodes
+                .insert(LargeEcallDummy::<E, KeccakSpec>::name(), witness)
+                .is_none()
+        );
+        assert!(
+            !self
+                .witnesses_tables
+                .contains_key(&LargeEcallDummy::<E, KeccakSpec>::name())
+        );
+        assert!(
+            self.lk_mlts
+                .insert(LargeEcallDummy::<E, KeccakSpec>::name(), logup_multiplicity)
+                .is_none()
+        );
+
+        Ok(())
     }
 
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
