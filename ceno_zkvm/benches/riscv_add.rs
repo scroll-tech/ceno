@@ -82,7 +82,7 @@ fn bench_add(c: &mut Criterion) {
                         let commit =
                             Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript)
                                 .unwrap();
-                        let polys = Pcs::get_arcmle_witness_from_commitment(&commit);
+                        let polys = Pcs::get_arc_mle_witness_from_commitment(&commit);
                         let challenges = [
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,

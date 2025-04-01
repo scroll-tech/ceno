@@ -218,7 +218,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 
-    fn get_arcmle_witness_from_commitment(
+    fn get_arc_mle_witness_from_commitment(
         commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>>;
 }

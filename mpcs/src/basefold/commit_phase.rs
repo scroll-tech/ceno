@@ -14,7 +14,7 @@ use ff_ext::ExtensionField;
 use itertools::izip;
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    field::dot_product,
+    field::{Field, PrimeCharacteristicRing, dot_product},
     matrix::dense::RowMajorMatrix,
     util::log2_strict_usize,
 };
@@ -195,6 +195,7 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
     let folding_coeffs =
         <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level);
     debug_assert_eq!(folding_coeffs.len(), 1 << level);
+    let inv_2 = E::BaseField::from_u64(2).inverse();
     RowMajorMatrix::new(
         values
             .par_chunks_exact(2)
@@ -202,8 +203,8 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
             .map(|(ys, coeff)| {
                 let (left, right) = (ys[0], ys[1]);
                 // original (left, right) = (a + bx, a - bx), a, b are codeword, but after times x it's not codeword
-                // recover left & right codeword via (c, d) = ((left + right) / 2, (left - right) / 2x)
-                let (lo, hi) = ((left + right).halve(), (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
+                // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
+                let (lo, hi) = ((left + right) * inv_2, (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
                 // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
                 lo + (hi - lo) * challenge
             })

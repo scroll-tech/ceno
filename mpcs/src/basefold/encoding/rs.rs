@@ -185,9 +185,6 @@ where
     }
 
     fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData {
-        // bh_evals is just a copy of poly.evals().
-        // Note that this function implicitly assumes that the size of poly.evals() is a
-        // power of two. Otherwise, the function crashes with index out of bound.
         let num_vars = rmm.num_vars();
         let num_polys = rmm.width();
         if num_vars > pp.get_max_message_size_log() {
@@ -208,9 +205,10 @@ where
             .dft
             .dft_batch(m)
             // The encoding scheme always folds the codeword in left-and-right
-            // manner. However, in query phase the two folded positions are
-            // always opened together, so it will be more efficient if the
-            // folded positions are simultaneously sibling nodes in the Merkle
+            // manner. However to benefit from
+            // - in commit phase of vector locality access
+            // - in query phase the two folded positions are always opened together
+            // so it will be more efficient if the folded positions are simultaneously sibling nodes in the Merkle
             // tree. Therefore, instead of left-and-right folding, we bit-reverse
             // the codeword to make the folding even-and-odd, i.e., adjacent
             // positions are folded.
@@ -233,13 +231,7 @@ where
         m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), E::ZERO);
         vp.dft
             .dft_batch(m)
-            // The encoding scheme always folds the codeword in left-and-right
-            // manner. However, in query phase the two folded positions are
-            // always opened together, so it will be more efficient if the
-            // folded positions are simultaneously sibling nodes in the Merkle
-            // tree. Therefore, instead of left-and-right folding, we bit-reverse
-            // the codeword to make the folding even-and-odd, i.e., adjacent
-            // positions are folded.
+            // refer to `encode` function comment for why reverse
             .bit_reverse_rows()
             .to_row_major_matrix()
     }
@@ -253,13 +245,7 @@ where
         let mut m = rmm.to_row_major_matrix();
         m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), F::ZERO);
         dft.dft_batch(m)
-            // The encoding scheme always folds the codeword in left-and-right
-            // manner. However, in query phase the two folded positions are
-            // always opened together, so it will be more efficient if the
-            // folded positions are simultaneously sibling nodes in the Merkle
-            // tree. Therefore, instead of left-and-right folding, we bit-reverse
-            // the codeword to make the folding even-and-odd, i.e., adjacent
-            // positions are folded.
+            // refer to `encode` function comment for why reverse
             .bit_reverse_rows()
             .to_row_major_matrix()
     }
