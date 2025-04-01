@@ -104,9 +104,9 @@ pub fn transpose_test<F: Sized + Copy + Send>(
         let buffer = &mut buffer[0..rows * cols];
         // TODO: Special case for rows = 2 * cols and cols = 2 * rows.
         // TODO: Special case for very wide matrices (e.g. n x 16).
-        let transpose_timer = entered_span!("Transpose.");
+        let transpose_timer = entered_span!("Transpose");
         for matrix in matrix.chunks_exact_mut(rows * cols) {
-            let copy_timer = entered_span!("Copy from slice.");
+            let copy_timer = entered_span!("Copy from slice");
             // buffer.copy_from_slice(matrix);
             buffer
                 .par_iter_mut()
@@ -115,11 +115,11 @@ pub fn transpose_test<F: Sized + Copy + Send>(
                     *dst = *src;
                 });
             exit_span!(copy_timer);
-            let transform_timer = entered_span!("From mut slice.");
+            let transform_timer = entered_span!("From mut slice");
             let src = MatrixMut::from_mut_slice(buffer, rows, cols);
             let dst = MatrixMut::from_mut_slice(matrix, cols, rows);
             exit_span!(transform_timer);
-            let transpose_copy_timer = entered_span!("Transpose copy.");
+            let transpose_copy_timer = entered_span!("Transpose copy");
             transpose_copy(src, dst);
             exit_span!(transpose_copy_timer);
         }

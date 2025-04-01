@@ -11,6 +11,7 @@ use self::matrix::MatrixMut;
 use ff_ext::ExtensionField;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+use tracing::instrument;
 
 pub use self::{
     ntt_impl::{intt, intt_batch, ntt, ntt_batch},
@@ -19,6 +20,7 @@ pub use self::{
 };
 
 /// RS encode at a rate 1/`expansion`.
+#[instrument(name = "expand_from_coeff", level = "trace", skip_all)]
 pub fn expand_from_coeff<F: ExtensionField>(coeffs: &[F], expansion: usize) -> Vec<F> {
     let engine = ntt_impl::NttEngine::<F>::new_from_cache();
     let expanded_size = coeffs.len() * expansion;

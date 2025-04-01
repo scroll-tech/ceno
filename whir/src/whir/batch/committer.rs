@@ -12,7 +12,7 @@ use crate::{
 use derive_more::Debug;
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
+use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix, util::log2_strict_usize};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
 
@@ -61,39 +61,43 @@ where
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let mut transcript = BasicTranscript::<E>::new(b"commitment");
         let polys = polys.to_mles();
+        let polys = polys
+            .into_par_iter()
+            .map(|poly| match poly.evaluations() {
+                #[cfg(feature = "parallel")]
+                FieldType::Base(evals) => {
+                    let prepare_timer = entered_span!("Prepare (Base)");
+                    let evals = evals
+                        .par_iter()
+                        .map(|e| E::from_base(e))
+                        .collect::<Vec<_>>();
+                    exit_span!(prepare_timer);
+                    evals
+                }
+                #[cfg(not(feature = "parallel"))]
+                FieldType::Base(evals) => {
+                    let mut evals = evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>();
+                    interpolate_over_boolean_hypercube(&mut evals);
+                    evals
+                }
+                FieldType::Ext(evals) => {
+                    let prepare_timer = entered_span!("Prepare (Ext)");
+                    let evals = evals.clone();
+                    exit_span!(prepare_timer);
+                    evals
+                }
+                _ => panic!("Invalid field type"),
+            })
+            .collect::<Vec<_>>();
         let timer = entered_span!("Batch Commit");
-        let expansion = self.0.starting_domain.size() / polys[0].evaluations().len();
+        let expansion = self.0.starting_domain.size() / polys[0].len();
         let expand_timer = entered_span!("Batch Expand");
         let evals = polys
             .par_iter()
             .map(|poly| {
-                expand_from_coeff(
-                    &match poly.evaluations() {
-                        #[cfg(feature = "parallel")]
-                        FieldType::Base(evals) => {
-                            let mut evals = evals
-                                .par_iter()
-                                .map(|e| E::from_base(e))
-                                .collect::<Vec<_>>();
-                            interpolate_over_boolean_hypercube(&mut evals);
-                            evals
-                        }
-                        #[cfg(not(feature = "parallel"))]
-                        FieldType::Base(evals) => {
-                            let mut evals =
-                                evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>();
-                            interpolate_over_boolean_hypercube(&mut evals);
-                            evals
-                        }
-                        FieldType::Ext(evals) => {
-                            let mut evals = evals.clone();
-                            interpolate_over_boolean_hypercube(&mut evals);
-                            evals
-                        }
-                        _ => panic!("Invalid field type"),
-                    },
-                    expansion,
-                )
+                let mut poly = poly.clone();
+                interpolate_over_boolean_hypercube(&mut poly);
+                expand_from_coeff(&poly, expansion)
             })
             .collect::<Vec<Vec<_>>>();
         exit_span!(expand_timer);
@@ -143,14 +147,37 @@ where
         let merkle_build_timer = entered_span!("Build Merkle Tree");
 
         let (root, merkle_tree) = {
-            let clone_timer = entered_span!("Clone into rmm");
             let rmm = RowMajorMatrix::new(folded_evals, fold_size * polys.len());
-            exit_span!(clone_timer);
             self.0.hash_params.commit_matrix(rmm)
         };
         exit_span!(merkle_build_timer);
 
         write_digest_to_transcript(&root, &mut transcript);
+
+        let into_polys_timer = entered_span!("Into polys");
+        #[cfg(feature = "parallel")]
+        let polys = polys
+            .into_par_iter()
+            .map(|poly| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    log2_strict_usize(poly.len()),
+                    poly,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        #[cfg(not(feature = "parallel"))]
+        let polys = polys
+            .into_iter()
+            .map(|poly| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    log2_strict_usize(poly.len()),
+                    poly,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        exit_span!(into_polys_timer);
 
         let ood_timer = entered_span!("Compute OOD answers");
         let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
@@ -190,43 +217,6 @@ where
         };
         exit_span!(ood_timer);
 
-        let into_polys_timer = entered_span!("Into polys");
-        #[cfg(feature = "parallel")]
-        let polys = polys
-            .into_par_iter()
-            .map(|poly| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    poly.num_vars(),
-                    match poly.evaluations() {
-                        FieldType::Base(evals) => evals
-                            .par_iter()
-                            .map(|e| E::from_base(e))
-                            .collect::<Vec<_>>(),
-                        FieldType::Ext(evals) => evals.clone(),
-                        _ => panic!("Invalid field type"),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-
-        #[cfg(not(feature = "parallel"))]
-        let polys = polys
-            .into_iter()
-            .map(|poly| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    poly.num_vars(),
-                    match poly.evaluations() {
-                        FieldType::Base(evals) => {
-                            evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>()
-                        }
-                        FieldType::Ext(evals) => evals.clone(),
-                        _ => panic!("Invalid field type"),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-
-        exit_span!(into_polys_timer);
         exit_span!(timer);
 
         let commitment = WhirCommitmentInTranscript {
