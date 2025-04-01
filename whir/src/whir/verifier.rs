@@ -1,6 +1,6 @@
 use crate::{
     crypto::{Digest, MerklePathExt, verify_multi_proof, write_digest_to_transcript},
-    utils::{evaluate_as_multilinear_coeffs, evaluate_as_univariate, evaluate_over_hypercube},
+    utils::{evaluate_as_multilinear_coeffs, evaluate_as_univariate},
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{
