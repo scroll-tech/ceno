@@ -202,7 +202,7 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
             .zip(folding_coeffs)
             .map(|(ys, coeff)| {
                 let (left, right) = (ys[0], ys[1]);
-                // original (left, right) = (a + bx, a - bx), a, b are codeword, but after times x it's not codeword
+                // original (left, right) = (lo + hi*x, lo - hi*x), lo, hi are codeword, but after times x it's not codeword
                 // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
                 let (lo, hi) = ((left + right) * inv_2, (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
                 // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
