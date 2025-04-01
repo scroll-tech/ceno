@@ -24,8 +24,8 @@ blake3 = "1.5.0"
 clap = { version = "4.4.17", features = ["derive"] }
 derivative = { version = "2", features = ["use_core"] }
 lazy_static = "1.4"
-nimue = { git = "https://github.com/arkworks-rs/nimue", features = ["ark"] }
-nimue-pow = { git = "https://github.com/arkworks-rs/nimue" }
+nimue = { git = "https://github.com/arkworks-rs/nimue", features = ["ark"], rev="3a83250" }
+nimue-pow = { git = "https://github.com/arkworks-rs/nimue", rev="3a83250" }
 p3 = { path = "../p3" }
 rand = "0.8"
 rand_chacha = "0.3"
