@@ -1,6 +1,5 @@
 use crate::{
     Error, Evaluation, PolynomialCommitmentScheme,
-    sum_check::eq_xy_eval,
     util::{
         arithmetic::inner_product,
         ext_to_usize,
@@ -9,14 +8,14 @@ use crate::{
     },
 };
 use ark_std::{end_timer, start_timer};
-use ceno_sumcheck::macros::{entered_span, exit_span};
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::MultilinearExtension;
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::eq_eval};
 use p3::{commit::Mmcs, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{simple_batch_prover_query_phase, simple_batch_verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -29,7 +28,6 @@ use rayon::{
     iter::IntoParallelIterator,
     prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
 };
-pub use sumcheck::{one_level_eval_hc, one_level_interp_hc};
 
 mod structure;
 pub use structure::{
@@ -44,7 +42,6 @@ use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
-mod sumcheck;
 
 pub enum PolyEvalsCodeword<E: ExtensionField> {
     Normal(Box<DenseMatrix<E::BaseField>>),
@@ -494,7 +491,7 @@ where
             .collect();
 
         // coeff is the eq polynomial evaluated at the first challenge.len() variables
-        let coeff = eq_xy_eval(&point[..fold_challenges.len()], &fold_challenges);
+        let coeff = eq_eval(&point[..fold_challenges.len()], &fold_challenges);
         // Compute eq as the partially evaluated eq polynomial
         let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
         eq.par_iter_mut().for_each(|e| *e *= coeff);

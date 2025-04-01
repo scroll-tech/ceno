@@ -24,7 +24,7 @@ ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 p3.workspace = true
-sumcheck = { version = "0", path = "../sumcheck" }
+sumcheck.workspace = true
 transcript = { path = "../transcript" }
 witness = { path = "../witness" }
 
@@ -64,6 +64,7 @@ glob = "0.3"
 default = ["forbid_overflow"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
+sanity-check = ["mpcs/sanity-check"]
 
 [[bench]]
 harness = false

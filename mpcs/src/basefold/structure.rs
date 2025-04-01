@@ -1,7 +1,4 @@
-use crate::{
-    sum_check::classic::{Coefficients, SumcheckProof},
-    util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
-};
+use crate::util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree};
 use core::fmt::Debug;
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::izip;
@@ -10,6 +7,7 @@ use p3::{
     matrix::{Matrix, dense::DenseMatrix},
 };
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
+use sumcheck::structs::IOPProverMessage;
 
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
@@ -246,7 +244,7 @@ where
     pub(crate) roots: Vec<Digest<E>>,
     pub(crate) final_message: Vec<E>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
-    pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
+    pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     pub(crate) trivial_proof: Option<DenseMatrix<E::BaseField>>,
 }
 

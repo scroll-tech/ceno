@@ -17,6 +17,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
+    util::optimal_sumcheck_threads,
 };
 use transcript::{ForkableTranscript, Transcript};
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
@@ -34,7 +35,7 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{add_mle_list_by_expr, get_challenge_pows, optimal_sumcheck_threads},
+    utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
