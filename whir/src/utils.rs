@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 use p3::field::Field;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    iter::ParallelIterator,
     slice::{ParallelSlice, ParallelSliceMut},
 };
 use std::collections::BTreeSet;
