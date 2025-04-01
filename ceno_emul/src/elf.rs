@@ -16,7 +16,10 @@
 
 extern crate alloc;
 
+use std::iter::successors;
+
 use alloc::collections::BTreeMap;
+use itertools::Itertools;
 
 use crate::{CENO_PLATFORM, addr::WORD_SIZE, disassemble::transpile, rv32im::Instruction};
 use anyhow::{Context, Result, anyhow, bail};
@@ -176,10 +179,33 @@ impl Program {
 
         let instructions = transpile(base_address, &instructions);
 
+        // program data include text/rodata/data/bss
+        // truncate padding 0 section after bss
+        let mut program_data = image
+            .into_iter()
+            .sorted_by_key(|(addr, _)| *addr)
+            .collect_vec();
+        if let Some(last_non_zero_index) = program_data.iter().rposition(|(_, value)| *value > 0) {
+            program_data.truncate(last_non_zero_index + 1);
+        }
+
+        // padding program_data to next power of 2 from last addr
+        let padding_size = program_data.len().next_power_of_two() - program_data.len();
+        if padding_size > 0 {
+            program_data.extend(
+                successors(
+                    program_data.last().map(|d| (d.0 + WORD_SIZE as u32, 0)),
+                    |(prev_addr, _)| Some((prev_addr + WORD_SIZE as u32, 0)),
+                )
+                .take(padding_size)
+                .collect_vec(),
+            );
+        }
+
         Ok(Program {
             entry,
             base_address,
-            image,
+            image: program_data.into_iter().collect::<BTreeMap<u32, u32>>(),
             instructions,
         })
     }

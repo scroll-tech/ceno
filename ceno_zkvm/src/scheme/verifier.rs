@@ -722,12 +722,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         |StructuralWitIn {
                              offset,
                              multi_factor,
+                             descending,
                              ..
                          }| {
                             eval_wellform_address_vec(
                                 *offset as u64,
                                 *multi_factor as u64,
                                 &input_opening_point,
+                                *descending,
                             )
                         },
                     )

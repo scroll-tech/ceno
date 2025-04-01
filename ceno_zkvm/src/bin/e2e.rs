@@ -68,7 +68,7 @@ struct Args {
     hints: Option<Vec<Word>>,
 
     /// Stack size in bytes.
-    #[arg(long, default_value = "32k", value_parser = parse_size)]
+    #[arg(long, default_value = "2M", value_parser = parse_size)]
     stack_size: u32,
 
     /// Heap size in bytes.

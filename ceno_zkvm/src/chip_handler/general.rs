@@ -34,13 +34,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         max_len: usize,
         offset: u32,
         multi_factor: usize,
+        descending: bool,
     ) -> StructuralWitIn
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
         self.cs
-            .create_structural_witin(name_fn, max_len, offset, multi_factor)
+            .create_structural_witin(name_fn, max_len, offset, multi_factor, descending)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, ZKVMError>
