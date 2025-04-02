@@ -1,5 +1,5 @@
 use crate::{
-    Error, Evaluation, PolynomialCommitmentScheme,
+    Error, Evaluation, Point, PolynomialCommitmentScheme,
     util::{
         arithmetic::inner_product,
         ext_to_usize,
@@ -19,7 +19,7 @@ use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use serde::{Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::{mle::FieldType, virtual_poly::build_eq_x_r_vec};
@@ -35,7 +35,7 @@ pub use structure::{
     BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
 };
 mod commit_phase;
-use commit_phase::simple_batch_commit_phase;
+use commit_phase::{batch_commit_phase, simple_batch_commit_phase};
 mod encoding;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
@@ -43,6 +43,7 @@ mod query_phase;
 // This sumcheck module is different from the mpcs::sumcheck module, in that
 // it deals only with the special case of the form \sum eq(r_i)f_i().
 
+// make it pure error
 pub enum PolyEvalsCodeword<E: ExtensionField> {
     Normal(Box<DenseMatrix<E::BaseField>>),
     TooSmall(Box<DenseMatrix<E::BaseField>>), // The polynomial is too small to apply FRI
@@ -213,11 +214,8 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        rmm: witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>,
+        rmm: Vec<witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
-        let span = entered_span!("to_mles", profiling_3 = true);
-        let polys = rmm.to_mles();
-        exit_span!(span);
         // assumptions
         // 1. there must be at least one polynomial
         // 2. all polynomials must exist in the same field type
@@ -225,72 +223,41 @@ where
         //     and opening mixed-type polys)
         // 3. all polynomials must have the same number of variables
 
-        if polys.is_empty() {
+        if rmm.is_empty() {
             return Err(Error::InvalidPcsParam(
                 "cannot batch commit to zero polynomials".to_string(),
             ));
         }
 
-        let num_vars = polys[0].num_vars();
-        let num_polys = polys.len();
-
-        let is_base = match polys[0].evaluations() {
-            FieldType::Ext(_) => false,
-            FieldType::Base(_) => true,
-            _ => unreachable!(),
-        };
-
-        if !polys.iter().map(|poly| poly.num_vars()).all_equal() {
-            return Err(Error::InvalidPcsParam(
-                "cannot batch commit to polynomials with different number of variables".to_string(),
-            ));
-        }
-        let timer = start_timer!(|| "Basefold::batch commit");
-        let encode_timer = start_timer!(|| "Basefold::batch commit::encoding and interpolations");
-        let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
-
-        let evals_codewords = Spec::EncodingScheme::encode(&pp.encoding_params, rmm);
-
+        let span = entered_span!("to_mles", profiling_3 = true);
+        let polys: Vec<Vec<ArcMultilinearExtension<E>>> = rmm
+            .iter()
+            .map(|rmm| rmm.to_mles().into_iter().map(|p| p.into()).collect_vec())
+            .collect_vec();
         exit_span!(span);
-        end_timer!(encode_timer);
+
+        let timer = start_timer!(|| "Basefold::batch commit");
+        let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
+        let evals_codewords = rmm
+            .into_iter()
+            .map(|rmm| Spec::EncodingScheme::encode(&pp.encoding_params, rmm))
+            .collect::<Result<Vec<DenseMatrix<E::BaseField>>, _>>()?;
+        exit_span!(span);
 
         let span = entered_span!("build mt", profiling_3 = true);
-        // build merkle tree
-        let ret = match evals_codewords {
-            PolyEvalsCodeword::Normal(codewords) => {
-                let mmcs = poseidon2_merkle_tree::<E>();
-                let (comm, codeword) = mmcs.commit_matrix(*codewords);
-                let polys: Vec<ArcMultilinearExtension<E>> =
-                    polys.into_iter().map(|poly| poly.into()).collect_vec();
-                Self::CommitmentWithWitness {
-                    pi_d_digest: comm,
-                    codeword,
-                    polynomials_bh_evals: polys,
-                    num_vars,
-                    is_base,
-                    num_polys,
-                }
-            }
-            PolyEvalsCodeword::TooSmall(rmm_padded) => {
-                let mmcs = poseidon2_merkle_tree::<E>();
-                let (comm, codeword) = mmcs.commit_matrix(*rmm_padded);
-                let polys: Vec<ArcMultilinearExtension<E>> =
-                    polys.into_iter().map(|poly| poly.into()).collect_vec();
-                Self::CommitmentWithWitness {
-                    pi_d_digest: comm,
-                    codeword,
-                    polynomials_bh_evals: polys,
-                    num_vars,
-                    is_base,
-                    num_polys,
-                }
-            }
-            PolyEvalsCodeword::TooBig(_) => return Err(Error::PolynomialTooLarge(num_vars)),
-        };
+        let mmcs = poseidon2_merkle_tree::<E>();
+        let (comm, codeword) = mmcs.commit(evals_codewords);
         exit_span!(span);
-        end_timer!(timer);
-
-        Ok(ret)
+        let meta_info = polys
+            .iter()
+            .map(|polys| (polys[0].num_vars(), polys.len()))
+            .collect_vec();
+        Ok(Self::CommitmentWithWitness {
+            pi_d_digest: comm,
+            codeword,
+            polynomials_bh_evals: polys,
+            meta_info,
+        })
     }
 
     fn write_commitment(
@@ -320,19 +287,90 @@ where
     }
 
     /// Open a batch of polynomial commitments at several points.
-    /// The current version only supports one polynomial per commitment.
-    /// Because otherwise it is complex to match the polynomials and
-    /// the commitments, and because currently this high flexibility is
-    /// not very useful in ceno.
     fn batch_open(
-        _pp: &Self::ProverParam,
-        _polys: &[ArcMultilinearExtension<E>],
-        _comms: &[Self::CommitmentWithWitness],
-        _points: &[Vec<E>],
-        _evals: &[Evaluation<E>],
-        _transcript: &mut impl Transcript<E>,
+        pp: &Self::ProverParam,
+        comms: &Self::CommitmentWithWitness,
+        points: &[Point<E>],
+        evals: &[Vec<E>],
+        transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
-        unimplemented!()
+        let span = entered_span!("Basefold::batch_open");
+
+        // sanity check
+        // number of point match with commitment length, assuming each commitment are opening under same point
+        assert_eq!(points.len(), comms.polynomials_bh_evals.len());
+
+        assert!(izip!(&comms.polynomials_bh_evals, &comms.meta_info).all(
+            |(polynomials_bh_evals, meta_info)| {
+                let (num_var, num_polys) = meta_info;
+                // check num_vars & num_poly match
+                polynomials_bh_evals
+                    .iter()
+                    .all(|p| p.num_vars() == *num_var)
+                    && polynomials_bh_evals.len() == *num_polys
+            },
+        ));
+
+        let (min_num_vars, max_num_vars) = (
+            *comms
+                .meta_info
+                .iter()
+                .map(|(num_var, _)| num_var)
+                .min()
+                .unwrap(),
+            *comms
+                .meta_info
+                .iter()
+                .map(|(num_var, _)| num_var)
+                .max()
+                .unwrap(),
+        );
+        assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
+
+        if cfg!(feature = "sanity-check") {
+            assert!(izip!(comms.polynomials_bh_evals, points, evals).all(
+                |(polys, point, evals)| {
+                    izip!(polys, evals).all(|(poly, eval)| poly.evaluate(point) == *eval)
+                }
+            ));
+        }
+        let total_num_polys = evals.iter().map(|evals| evals.len()).sum();
+        // evals.len() is the number of polynomials
+        let batch_coeffs =
+            &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
+        // let _target_sum = inner_product(evals, batch_coeffs);
+
+        // Now the verifier has obtained the new target sum, and is able to compute the random
+        // linear coefficients.
+        // The remaining tasks for the prover is to prove that
+        // sum_i coeffs[i] poly_evals[i] is equal to
+        // the new target sum, where coeffs is computed as follows
+        let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
+            &pp.encoding_params,
+            points,
+            batch_coeffs,
+            comms,
+            transcript,
+            (min_num_vars, max_num_vars),
+            max_num_vars - Spec::get_basecode_msg_size_log(),
+        );
+
+        let query_timer = start_timer!(|| "Basefold::open::query_phase");
+        // Each entry in queried_els stores a list of triples (F, F, i) indicating the
+        // position opened at each round and the two values at that round
+        let query_opening_proof =
+            simple_batch_prover_query_phase(transcript, comm, &trees, Spec::get_number_queries());
+        end_timer!(query_timer);
+
+        end_timer!(span);
+        Ok(Self::Proof {
+            sumcheck_messages: commit_phase_proof.sumcheck_messages,
+            commits: commit_phase_proof.commits,
+            final_message: commit_phase_proof.final_message,
+            query_opening_proof,
+            sumcheck_proof: None,
+            trivial_proof: None,
+        })
     }
 
     /// This is a simple version of batch open:

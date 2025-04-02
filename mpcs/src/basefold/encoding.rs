@@ -30,7 +30,10 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error>;
 
-    fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData;
+    fn encode(
+        pp: &Self::ProverParameters,
+        rmm: RowMajorMatrix<E::BaseField>,
+    ) -> Result<Self::EncodedData, Error>;
 
     fn encode_slow_ext<F: TwoAdicField>(
         rmm: p3::matrix::dense::RowMajorMatrix<F>,

@@ -266,6 +266,37 @@ pub fn ext_try_into_base<E: ExtensionField>(x: &E) -> Result<E::BaseField, Error
     }
 }
 
+/// splits a slice into multiple sub-slices at given indices.
+///
+/// # arguments
+/// * `slice` - the slice to split.
+/// * `indices` - positions where the slice should be split.
+///
+/// # returns
+/// * a `Vec<&[T]>` containing the sub-slices.
+///
+/// # notes
+/// * indices should be in non-decreasing order.
+/// * the last segment extends to the slice end.
+///
+/// # example
+/// ```
+/// let data = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+/// let parts = split_slice(&data, &[2, 5, 7]);
+/// assert_eq!(parts, vec![&[1, 2], &[3, 4, 5], &[6, 7], &[8, 9]]);
+/// ```
+pub fn split_slice<'a, T>(slice: &'a [T], indices: &[usize]) -> Vec<&'a [T]> {
+    indices
+        .iter()
+        .chain(std::iter::once(&slice.len())) // append slice.len() as the final boundary
+        .scan(0, |start, &end| {
+            let segment = &slice[*start..end.min(slice.len())]; // slice safely within bounds
+            *start = end.min(slice.len()); // update `start` for the next iteration
+            Some(segment) // yield the segment
+        })
+        .collect()
+}
+
 #[cfg(any(test, feature = "benchmark"))]
 pub mod test {
     #[cfg(test)]

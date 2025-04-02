@@ -63,10 +63,9 @@ where
 {
     pub(crate) pi_d_digest: Digest<E>,
     pub(crate) codeword: MerkleTree<E::BaseField>,
-    pub(crate) polynomials_bh_evals: Vec<ArcMultilinearExtension<'static, E>>,
-    pub(crate) num_vars: usize,
-    pub(crate) is_base: bool,
-    pub(crate) num_polys: usize,
+    pub(crate) polynomials_bh_evals: Vec<Vec<ArcMultilinearExtension<'static, E>>>,
+    // format Vec<(num_var, num_polys)>
+    pub(crate) meta_info: Vec<(usize, usize)>,
 }
 
 impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
@@ -74,29 +73,20 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
-        BasefoldCommitment::new(
-            self.pi_d_digest.clone(),
-            self.num_vars,
-            self.is_base,
-            self.num_polys,
-        )
+        BasefoldCommitment::new(self.pi_d_digest.clone(), self.meta_info.clone())
     }
 
-    pub fn poly_size(&self) -> usize {
-        1 << self.num_vars
-    }
+    // pub fn poly_size(&self) -> usize {
+    //     1 << self.num_vars
+    // }
 
-    pub fn is_base(&self) -> bool {
-        self.is_base
-    }
+    // pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
+    //     num_vars <= Spec::get_basecode_msg_size_log()
+    // }
 
-    pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
-        num_vars <= Spec::get_basecode_msg_size_log()
-    }
-
-    pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
-        Self::trivial_num_vars::<Spec>(self.num_vars)
-    }
+    // pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
+    //     Self::trivial_num_vars::<Spec>(self.num_vars)
+    // }
 
     pub fn codeword_size(&self) -> usize {
         let mmcs = poseidon2_merkle_tree::<E>();
@@ -117,21 +107,17 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(super) pi_d_digest: Digest<E>,
-    pub(super) num_vars: Option<usize>,
-    pub(super) is_base: bool,
-    pub(super) num_polys: Option<usize>,
+    pub(crate) meta_info: Vec<(usize, usize)>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn new(pi_d_digest: Digest<E>, num_vars: usize, is_base: bool, num_polys: usize) -> Self {
+    pub fn new(pi_d_digest: Digest<E>, meta_info: Vec<(usize, usize)>) -> Self {
         Self {
             pi_d_digest,
-            num_vars: Some(num_vars),
-            is_base,
-            num_polys: Some(num_polys),
+            meta_info,
         }
     }
 
@@ -139,13 +125,9 @@ where
         self.pi_d_digest.clone()
     }
 
-    pub fn num_vars(&self) -> Option<usize> {
-        self.num_vars
-    }
-
-    pub fn is_base(&self) -> bool {
-        self.is_base
-    }
+    // pub fn num_vars(&self) -> Option<usize> {
+    //     self.num_vars
+    // }
 }
 
 impl<E: ExtensionField> PartialEq for BasefoldCommitmentWithWitness<E>
@@ -155,7 +137,11 @@ where
     fn eq(&self, other: &Self) -> bool {
         self.get_codewords().eq(other.get_codewords())
             && izip!(&self.polynomials_bh_evals, &other.polynomials_bh_evals).all(
-                |(bh_evals_a, bh_evals_b)| bh_evals_a.evaluations() == bh_evals_b.evaluations(),
+                |(bh_evals_a, bh_evals_b)| {
+                    izip!(bh_evals_a, bh_evals_b).all(|(bh_evals_a, bh_evals_b)| {
+                        bh_evals_a.evaluations() == bh_evals_b.evaluations()
+                    })
+                },
             )
     }
 }
