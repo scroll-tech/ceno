@@ -126,6 +126,7 @@ where
         .collect::<Vec<_>>();
     exit_span!(build_eq_span);
 
+    // FIXME: make num_thread dominated by thread
     let num_threads = optimal_sumcheck_threads(min_num_vars);
 
     // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
@@ -436,7 +437,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     prover_states: &mut Vec<IOPProverState<'_, E>>,
     challenge: Option<Challenge<E>>,
     sumcheck_messages: &mut Vec<Vec<E>>,
-    initial_oracle: &[E],
+    initial_oracle: &[Vec<E>],
     transcript: &mut impl Transcript<E>,
     trees: &mut Vec<MerkleTreeExt<E>>,
     commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
