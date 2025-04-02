@@ -111,13 +111,9 @@ where
             ood_answers: ood_answers.clone(),
         };
 
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
-            p3::util::log2_strict_usize(evaluations.len()),
-            evaluations,
-        );
         Ok((
             Witnesses {
-                polys: vec![polynomial],
+                polys: vec![evaluations],
                 root,
                 merkle_tree,
                 ood_points,

@@ -11,7 +11,7 @@ use crate::{
 };
 use derive_more::Debug;
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix, util::log2_strict_usize};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
@@ -21,7 +21,7 @@ use rayon::prelude::*;
 
 #[derive(Debug)]
 pub struct Witnesses<E: ExtensionField> {
-    pub(crate) polys: Vec<DenseMultilinearExtension<E>>,
+    pub(crate) polys: Vec<Vec<E>>,
     #[debug(skip)]
     pub(crate) merkle_tree: MerkleTreeExt<E>,
     pub(crate) root: Digest<E>,
@@ -47,7 +47,7 @@ impl<E: ExtensionField> Witnesses<E> {
     }
 
     pub fn num_vars(&self) -> usize {
-        self.polys[0].num_vars()
+        log2_strict_usize(self.polys[0].len())
     }
 }
 
@@ -60,18 +60,18 @@ where
         polys: witness::RowMajorMatrix<E::BaseField>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let mut transcript = BasicTranscript::<E>::new(b"commitment");
-        let polys = polys.to_mles();
-        let polys = polys
-            .into_par_iter()
+        let timer = entered_span!("Batch Commit");
+        let prepare_timer = entered_span!("Prepare");
+        let mles = polys.to_mles();
+        let polys = mles
+            .par_iter()
             .map(|poly| match poly.evaluations() {
                 #[cfg(feature = "parallel")]
                 FieldType::Base(evals) => {
-                    let prepare_timer = entered_span!("Prepare (Base)");
                     let evals = evals
                         .par_iter()
                         .map(|e| E::from_base(e))
                         .collect::<Vec<_>>();
-                    exit_span!(prepare_timer);
                     evals
                 }
                 #[cfg(not(feature = "parallel"))]
@@ -81,15 +81,13 @@ where
                     evals
                 }
                 FieldType::Ext(evals) => {
-                    let prepare_timer = entered_span!("Prepare (Ext)");
                     let evals = evals.clone();
-                    exit_span!(prepare_timer);
                     evals
                 }
                 _ => panic!("Invalid field type"),
             })
             .collect::<Vec<_>>();
-        let timer = entered_span!("Batch Commit");
+        exit_span!(prepare_timer);
         let expansion = self.0.starting_domain.size() / polys[0].len();
         let expand_timer = entered_span!("Batch Expand");
         let evals = polys
@@ -154,31 +152,6 @@ where
 
         write_digest_to_transcript(&root, &mut transcript);
 
-        let into_polys_timer = entered_span!("Into polys");
-        #[cfg(feature = "parallel")]
-        let polys = polys
-            .into_par_iter()
-            .map(|poly| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    log2_strict_usize(poly.len()),
-                    poly,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        #[cfg(not(feature = "parallel"))]
-        let polys = polys
-            .into_iter()
-            .map(|poly| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    log2_strict_usize(poly.len()),
-                    poly,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        exit_span!(into_polys_timer);
-
         let ood_timer = entered_span!("Compute OOD answers");
         let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
             let ood_points =
@@ -187,7 +160,7 @@ where
             let ood_answers = ood_points
                 .par_iter()
                 .flat_map(|ood_point| {
-                    polys.par_iter().map(|poly| {
+                    mles.par_iter().map(|poly| {
                         poly.evaluate(&expand_from_univariate(
                             *ood_point,
                             self.0.mv_parameters.num_variables,
@@ -199,7 +172,7 @@ where
             let ood_answers = ood_points
                 .iter()
                 .flat_map(|ood_point| {
-                    polys.iter().map(|poly| {
+                    mles.iter().map(|poly| {
                         poly.evaluate(&expand_from_univariate(
                             *ood_point,
                             self.0.mv_parameters.num_variables,

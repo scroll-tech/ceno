@@ -49,8 +49,8 @@ where
             assert!(witness.ood_points.is_empty());
         }
         assert_eq!(
-            witness.polys[0].num_vars(),
-            self.0.mv_parameters.num_variables
+            witness.polys[0].len(),
+            1 << self.0.mv_parameters.num_variables
         );
     }
 
@@ -141,7 +141,10 @@ where
             round: 0,
             sumcheck_prover,
             folding_randomness,
-            evaluations: witness.polys[0].clone(),
+            evaluations: DenseMultilinearExtension::from_evaluations_ext_vec(
+                self.0.mv_parameters.num_variables,
+                witness.polys[0].clone(),
+            ),
             prev_merkle: Some(&witness.merkle_tree),
             merkle_proofs: vec![],
         };
@@ -211,7 +214,12 @@ where
                 round_state
                     .sumcheck_prover
                     .unwrap_or_else(|| {
-                        SumcheckProverNotSkipping::new(folded_evaluations.clone(), &[], &[], &[])
+                        SumcheckProverNotSkipping::new(
+                            folded_evaluations_values.clone(),
+                            &[],
+                            &[],
+                            &[],
+                        )
                     })
                     .compute_sumcheck_polynomials::<T>(
                         transcript,
@@ -390,7 +398,7 @@ where
             })
             .unwrap_or_else(|| {
                 SumcheckProverNotSkipping::new(
-                    folded_evaluations.clone(),
+                    folded_evaluations_values.clone(),
                     &stir_challenges,
                     &combination_randomness,
                     &stir_evaluations,

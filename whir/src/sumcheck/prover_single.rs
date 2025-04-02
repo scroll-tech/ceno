@@ -1,7 +1,7 @@
 use super::proof::SumcheckPolynomial;
 
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use p3::util::log2_strict_usize;
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
 
@@ -21,21 +21,17 @@ where
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p(X_1, ... X_n) * (epsilon_1 eq_z_1(X) + epsilon_2 eq_z_2(X) ...)
     pub fn new(
-        coeffs: DenseMultilinearExtension<E>,
+        evals: Vec<E>,
         points: &[Vec<E>],
         combination_randomness: &[E],
         evaluations: &[E],
     ) -> Self {
         assert_eq!(points.len(), combination_randomness.len());
         assert_eq!(points.len(), evaluations.len());
-        let num_variables = coeffs.num_vars();
+        let num_variables = log2_strict_usize(evals.len());
 
         let mut prover = SumcheckSingle {
-            evaluation_of_p: match coeffs.evaluations() {
-                FieldType::Base(evals) => evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>(),
-                FieldType::Ext(evals) => evals.clone(),
-                _ => panic!("Invalid field type"),
-            },
+            evaluation_of_p: evals,
             evaluation_of_equality: vec![E::ZERO; 1 << num_variables],
 
             num_variables,
@@ -254,16 +250,19 @@ mod tests {
     #[test]
     fn test_sumcheck_folding_factor_1() {
         let eval_point = vec![E::from_u64(10), E::from_u64(11)];
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
+        let polynomial = vec![
             E::from_u64(1),
             E::from_u64(5),
             E::from_u64(10),
             E::from_u64(14),
-        ]);
+        ];
 
-        let claimed_value = polynomial.evaluate(&eval_point);
+        let claimed_value =
+            DenseMultilinearExtension::from_evaluations_ext_vec(2, polynomial.clone())
+                .evaluate(&eval_point);
 
-        let eval = polynomial.evaluate(&eval_point);
+        let eval = DenseMultilinearExtension::from_evaluations_ext_vec(2, polynomial.clone())
+            .evaluate(&eval_point);
         let mut prover = SumcheckSingle::new(polynomial, &[eval_point], &[E::from_u64(1)], &[eval]);
 
         let poly_1 = prover.compute_sumcheck_polynomial();

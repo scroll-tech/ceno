@@ -13,7 +13,6 @@ use crate::{
     utils::{self, evaluate_over_hypercube, expand_randomness, interpolate_over_boolean_hypercube},
     whir::{
         WhirProof,
-        batch::utils::field_type_index_ext,
         fold::{compute_fold, expand_from_univariate, restructure_evaluations},
         prover::{Prover, RoundState},
     },
@@ -52,12 +51,12 @@ where
         assert!(!witness.polys.is_empty(), "Input polys cannot be empty");
         witness.polys.iter().skip(1).for_each(|poly| {
             assert_eq!(
-                poly.num_vars(),
-                witness.polys[0].num_vars(),
+                poly.len(),
+                witness.polys[0].len(),
                 "All polys must have the same number of variables"
             );
         });
-        witness.polys[0].num_vars() == self.0.mv_parameters.num_variables
+        witness.polys[0].len() == (1 << self.0.mv_parameters.num_variables)
     }
 
     /// batch open the same points for multiple polys
@@ -90,6 +89,7 @@ where
             );
         }
         let num_polys = witness.polys.len();
+        let num_vars = witness.num_vars();
         for evals in evals_per_point {
             assert_eq!(
                 evals.len(),
@@ -103,8 +103,7 @@ where
         exit_span!(initial_timer);
 
         let random_coeff_timer = entered_span!("random coeff");
-        let random_coeff =
-            super::utils::generate_random_vector_batch_open(transcript, witness.polys.len())?;
+        let random_coeff = super::utils::generate_random_vector_batch_open(transcript, num_polys)?;
         exit_span!(random_coeff_timer);
 
         let initial_claims_timer = entered_span!("initial claims");
@@ -119,7 +118,7 @@ where
         let ood_answers_timer = entered_span!("ood answers");
         let ood_answers_round = witness
             .ood_answers
-            .par_chunks_exact(witness.polys.len())
+            .par_chunks_exact(num_polys)
             .map(|answer| compute_dot_product(answer, &random_coeff))
             .collect::<Vec<_>>();
         exit_span!(ood_answers_timer);
@@ -137,14 +136,14 @@ where
             .chain(eval_per_point)
             .collect();
 
-        let polynomial = (0..(1 << witness.polys[0].num_vars()))
+        let polynomial = (0..(1 << num_vars))
             .into_par_iter()
             .map(|i| {
                 witness
                     .polys
                     .iter()
                     .zip(&random_coeff)
-                    .map(|(eval, coeff)| field_type_index_ext(eval.evaluations(), i) * *coeff)
+                    .map(|(eval, coeff)| eval[i] * *coeff)
                     .sum()
             })
             .collect::<Vec<_>>();
@@ -160,10 +159,7 @@ where
 
         let sumcheck_timer = entered_span!("sumcheck");
         let mut sumcheck_prover = Some(SumcheckProverNotSkipping::new(
-            DenseMultilinearExtension::from_evaluations_ext_vec(
-                p3::util::log2_strict_usize(polynomial.len()),
-                polynomial.clone(),
-            ),
+            polynomial.clone(),
             &initial_claims,
             &combination_randomness,
             &initial_answers,
@@ -230,7 +226,7 @@ where
             .evaluations
             .fix_variables(&round_state.folding_randomness);
 
-        let folded_coefficients_evals = match folded_evaluations.evaluations() {
+        let folded_evaluations_evals = match folded_evaluations.evaluations() {
             FieldType::Ext(evals) => evals,
             _ => {
                 panic!("Impossible after folding");
@@ -242,7 +238,7 @@ where
         // Base case
         if round_state.round == self.0.n_rounds() {
             // Coefficients of the polynomial
-            transcript.append_field_element_exts(&folded_coefficients_evals);
+            transcript.append_field_element_exts(&folded_evaluations_evals);
 
             // Final verifier queries and answers
             let final_challenge_indexes = get_challenge_stir_queries(
@@ -262,7 +258,12 @@ where
                 round_state
                     .sumcheck_prover
                     .unwrap_or_else(|| {
-                        SumcheckProverNotSkipping::new(folded_evaluations.clone(), &[], &[], &[])
+                        SumcheckProverNotSkipping::new(
+                            folded_evaluations_evals.clone(),
+                            &[],
+                            &[],
+                            &[],
+                        )
                     })
                     .compute_sumcheck_polynomials::<T>(
                         transcript,
@@ -276,7 +277,7 @@ where
                 sumcheck_poly_evals: sumcheck_poly_evals.clone(),
                 merkle_roots: merkle_roots.clone(),
                 ood_answers: ood_answers.clone(),
-                final_poly: folded_coefficients_evals.clone(),
+                final_poly: folded_evaluations_evals.clone(),
                 folded_evals: Vec::new(),
             });
         }
@@ -285,8 +286,8 @@ where
 
         // Fold the coefficients, and compute fft of polynomial (and commit)
         let new_domain = round_state.domain.scale(2);
-        let expansion = new_domain.size() / folded_coefficients_evals.len();
-        let mut folded_coefficients_coeffs = folded_coefficients_evals.clone();
+        let expansion = new_domain.size() / folded_evaluations_evals.len();
+        let mut folded_coefficients_coeffs = folded_evaluations_evals.clone();
         interpolate_over_boolean_hypercube(&mut folded_coefficients_coeffs);
         let evals = expand_from_coeff(&folded_coefficients_coeffs, expansion);
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
@@ -426,7 +427,7 @@ where
             })
             .unwrap_or_else(|| {
                 SumcheckProverNotSkipping::new(
-                    folded_evaluations.clone(),
+                    folded_evaluations_evals.to_vec(),
                     &stir_challenges,
                     &combination_randomness,
                     &stir_evaluations,
@@ -502,7 +503,7 @@ where
 
         let poly_comb_randomness_timer = entered_span!("poly comb randomness");
         let poly_comb_randomness =
-            super::utils::generate_random_vector_batch_open(transcript, witness.polys.len())?;
+            super::utils::generate_random_vector_batch_open(transcript, num_polys)?;
         exit_span!(poly_comb_randomness_timer);
 
         let initial_claims_timer = entered_span!("initial claims");

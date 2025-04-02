@@ -1,8 +1,7 @@
 use super::proof::SumcheckPolynomial;
 use crate::sumcheck::prover_single::SumcheckSingle;
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::field::Field;
+use p3::{field::Field, util::log2_strict_usize};
 #[cfg(feature = "parallel")]
 use rayon::{join, prelude::*};
 
@@ -26,7 +25,7 @@ where
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p0(..) * eq0(..) + p1(..) * eq1(..) + ...
     pub fn new(
-        coeffs: Vec<DenseMultilinearExtension<F>>,
+        coeffs: Vec<Vec<F>>,
         points: &[Vec<F>],
         poly_comb_coeff: &[F], // random coefficients for combining each poly
         evals: &[F],
@@ -35,19 +34,10 @@ where
         assert_eq!(poly_comb_coeff.len(), num_polys);
         assert_eq!(points.len(), num_polys);
         assert_eq!(evals.len(), num_polys);
-        let num_variables = coeffs[0].num_vars();
+        let num_variables = log2_strict_usize(coeffs[0].len());
 
         let mut prover = SumcheckBatched {
-            evaluations_of_p: coeffs
-                .into_iter()
-                .map(|c| match c.evaluations() {
-                    FieldType::Base(evals) => {
-                        evals.iter().map(|e| F::from_base(e)).collect::<Vec<_>>()
-                    }
-                    FieldType::Ext(evals) => evals.clone(),
-                    _ => panic!("Invalid field type"),
-                })
-                .collect(),
+            evaluations_of_p: coeffs,
             evaluations_of_equality: vec![vec![F::ZERO; 1 << num_variables]; num_polys],
             comb_coeff: poly_comb_coeff.to_vec(),
             num_polys,
@@ -259,25 +249,27 @@ mod tests {
             F::from_u64(8),
         ]];
         let polynomials = vec![
-            DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
+            vec![
                 F::from_u64(1),
                 F::from_u64(5),
                 F::from_u64(10),
                 F::from_u64(14),
-            ]),
-            DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
+            ],
+            vec![
                 F::from_u64(2),
                 F::from_u64(6),
                 F::from_u64(11),
                 F::from_u64(13),
-            ]),
+            ],
         ];
         let poly_comb_coeffs = vec![F::from_u64(2), F::from_u64(3)];
 
         let evals: Vec<F> = polynomials
             .iter()
             .zip(&eval_points)
-            .map(|(poly, point)| poly.evaluate(point))
+            .map(|(poly, point)| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(2, poly.clone()).evaluate(point)
+            })
             .collect();
         let mut claimed_value: F = evals
             .iter()
@@ -305,14 +297,6 @@ mod tests {
 
             comb_randomness_list.push(next_comb_randomness);
             fold_randomness_list.extend(next_fold_randomness);
-        }
-        println!("CLAIM:");
-        for poly in prover.evaluations_of_p {
-            println!("POLY: {:?}", poly);
-        }
-        println!("EXPECTED:");
-        for poly in polynomials {
-            println!("EVAL: {:?}", poly.evaluate(&fold_randomness_list));
         }
     }
 }

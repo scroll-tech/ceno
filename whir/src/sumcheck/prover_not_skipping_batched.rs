@@ -1,5 +1,4 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::DenseMultilinearExtension;
 use transcript::Transcript;
 
 use crate::error::Error;
@@ -15,7 +14,7 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p(X_1, ... X_n) * (epsilon_1 eq_z_1(X) + epsilon_2 eq_z_2(X) ...)
     pub fn new(
-        coeffs: Vec<DenseMultilinearExtension<E>>,
+        coeffs: Vec<Vec<E>>,
         points: &[Vec<E>],
         poly_comb_coeff: &[E], // random coefficients for combining each poly
         evals: &[E],
@@ -60,12 +59,12 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
 
 #[cfg(test)]
 mod tests {
-    use ff_ext::{ExtensionField, GoldilocksExt2};
+    use ff_ext::GoldilocksExt2;
     use multilinear_extensions::{
         mle::{DenseMultilinearExtension, FieldType, MultilinearExtension as _},
         virtual_poly::eq_eval,
     };
-    use p3::field::PrimeCharacteristicRing;
+    use p3::{field::PrimeCharacteristicRing, util::log2_strict_usize};
     use transcript::{BasicTranscript, Transcript};
 
     use crate::{
@@ -80,19 +79,25 @@ mod tests {
     type F = GoldilocksExt2;
     type T = BasicTranscript<F>;
 
+    fn fix_variables(evals: &[F], folding_randomness: &[F]) -> Vec<F> {
+        let mut poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+            log2_strict_usize(evals.len()),
+            evals.to_vec(),
+        );
+        poly.fix_variables_in_place(folding_randomness);
+        match poly.evaluations() {
+            FieldType::Ext(poly) => poly.clone(),
+            _ => panic!("Expected FieldType::Ext"),
+        }
+    }
+
     #[test]
     fn test_e2e_short() -> Result<(), Error> {
         let num_variables = 2;
         let folding_factor = 2;
         let polynomials = vec![
-            DenseMultilinearExtension::from_evaluations_ext_vec(
-                num_variables,
-                (0..1 << num_variables).map(F::from_u64).collect(),
-            ),
-            DenseMultilinearExtension::from_evaluations_ext_vec(
-                num_variables,
-                (1..(1 << num_variables) + 1).map(F::from_u64).collect(),
-            ),
+            (0..1 << num_variables).map(F::from_u64).collect(),
+            (1..(1 << num_variables) + 1).map(F::from_u64).collect(),
         ];
 
         // Initial stuff
@@ -111,8 +116,16 @@ mod tests {
             &statement_points,
             &[alpha_1, alpha_2],
             &[
-                polynomials[0].evaluate(&statement_points[0]),
-                polynomials[1].evaluate(&statement_points[1]),
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    num_variables,
+                    polynomials[0].clone(),
+                )
+                .evaluate(&statement_points[0]),
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    num_variables,
+                    polynomials[1].clone(),
+                )
+                .evaluate(&statement_points[1]),
             ],
         );
         let mut sumcheck_polys = Vec::new();
@@ -126,13 +139,16 @@ mod tests {
         // Compute the answers
         let folded_polys_1: Vec<_> = polynomials
             .iter()
-            .map(|poly| poly.fix_variables(&folding_randomness_1))
+            .map(|poly| fix_variables(&poly, &folding_randomness_1))
             .collect();
 
         let statement_answers: Vec<F> = polynomials
             .iter()
             .zip(&statement_points)
-            .map(|(poly, point)| poly.evaluate(point))
+            .map(|(poly, point)| {
+                DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, poly.clone())
+                    .evaluate(point)
+            })
             .collect();
 
         // Verifier part
@@ -165,22 +181,8 @@ mod tests {
 
         let full_folding = vec![folding_randomness_11, folding_randomness_12];
 
-        let eval_coeff = match (
-            folded_polys_1[0].evaluations(),
-            folded_polys_1[1].evaluations(),
-        ) {
-            (FieldType::Base(evals_0), FieldType::Base(evals_1)) => {
-                assert_eq!(evals_0.len(), 1);
-                assert_eq!(evals_1.len(), 1);
-                [F::from_base(&evals_0[0]), F::from_base(&evals_1[0])]
-            }
-            (FieldType::Ext(evals_0), FieldType::Ext(evals_1)) => {
-                assert_eq!(evals_0.len(), 1);
-                assert_eq!(evals_1.len(), 1);
-                [evals_0[0], evals_1[0]]
-            }
-            _ => panic!("Invalid folded polynomial"),
-        };
+        let eval_coeff = vec![folded_polys_1[0][0], folded_polys_1[1][0]];
+
         assert_eq!(
             sumcheck_poly_12.evaluate_at_point(&[folding_randomness_12]),
             eval_coeff[0] * alpha_1 * eq_eval(&full_folding, &statement_points[0])
