@@ -352,11 +352,11 @@ where
         let batched_answers = merkle_proof_with_leaves
             .par_iter()
             .map(|(answer, _)| {
-                let chunk_size = 1 << self.0.folding_factor.at_round(round_state.round);
-                let mut res = vec![E::ZERO; chunk_size];
-                for i in 0..chunk_size {
+                let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
+                let mut res = vec![E::ZERO; fold_size];
+                for i in 0..fold_size {
                     for j in 0..num_polys {
-                        res[i] += answer[0][i + j * chunk_size] * batching_randomness[j];
+                        res[i] += answer[0][i * num_polys + j] * batching_randomness[j];
                     }
                 }
                 res

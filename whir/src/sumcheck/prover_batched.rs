@@ -20,24 +20,24 @@ where
     F: Field,
 {
     // Input includes the following:
-    // coeffs: coefficient of a list of polynomials p
+    // poly_evals: evaluations of a list of polynomials p
     // points: one point per poly
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p0(..) * eq0(..) + p1(..) * eq1(..) + ...
     pub fn new(
-        coeffs: Vec<Vec<F>>,
+        poly_evals: Vec<Vec<F>>,
         points: &[Vec<F>],
         poly_comb_coeff: &[F], // random coefficients for combining each poly
         evals: &[F],
     ) -> Self {
-        let num_polys = coeffs.len();
+        let num_polys = poly_evals.len();
         assert_eq!(poly_comb_coeff.len(), num_polys);
         assert_eq!(points.len(), num_polys);
         assert_eq!(evals.len(), num_polys);
-        let num_variables = log2_strict_usize(coeffs[0].len());
+        let num_variables = log2_strict_usize(poly_evals[0].len());
 
         let mut prover = SumcheckBatched {
-            evaluations_of_p: coeffs,
+            evaluations_of_p: poly_evals,
             evaluations_of_equality: vec![vec![F::ZERO; 1 << num_variables]; num_polys],
             comb_coeff: poly_comb_coeff.to_vec(),
             num_polys,
