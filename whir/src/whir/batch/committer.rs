@@ -117,12 +117,9 @@ where
         unsafe {
             buffer.set_len(folded_evals.len());
         }
-        let horizontal_stacking_timer = entered_span!("Horizontal Stacking");
-        let folded_evals = super::utils::horizontal_stacking(
-            folded_evals,
-            self.0.starting_domain.size(),
-            buffer.as_mut_slice(),
-        );
+        let horizontal_stacking_timer = entered_span!("Stacking again");
+        let folded_evals =
+            super::utils::stack_evaluations(folded_evals, num_polys, buffer.as_mut_slice());
         exit_span!(horizontal_stacking_timer);
 
         // Group folds together as a leaf.

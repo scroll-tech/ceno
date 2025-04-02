@@ -5,19 +5,18 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
 pub fn stack_evaluations<E: ExtensionField>(
     mut evals: Vec<E>,
-    folding_factor: usize,
+    row_size: usize,
     buffer: &mut [E],
 ) -> Vec<E> {
-    assert!(evals.len() % folding_factor == 0);
-    let size_of_new_domain = evals.len() / folding_factor;
+    assert!(evals.len() % row_size == 0);
+    let size_of_new_domain = evals.len() / row_size;
 
     // interpret evals as (folding_factor_exp x size_of_new_domain)-matrix and transpose in-place
-    transpose_test(&mut evals, folding_factor, size_of_new_domain, buffer);
+    transpose_test(&mut evals, row_size, size_of_new_domain, buffer);
     evals
 }
 
@@ -31,23 +30,6 @@ pub fn stack_evaluations_mut<E: ExtensionField>(evals: &mut [E], folding_factor:
 
     // interpret evals as (folding_factor_exp x size_of_new_domain)-matrix and transpose in-place
     transpose(evals, folding_factor_exp, size_of_new_domain);
-}
-
-/// Takes a vector of matrix and stacking them horizontally
-/// Use in-place matrix transposes to avoid data copy
-/// each matrix has domain_size elements
-/// each matrix has shape (*, 1<<folding_factor)
-pub fn horizontal_stacking<E: ExtensionField>(
-    evals: Vec<E>,
-    domain_size: usize,
-    buffer: &mut [E],
-) -> Vec<E> {
-    let num_polys: usize = evals.len() / domain_size;
-
-    let stack_evaluation_timer = entered_span!("Stack Evaluation");
-    let evals = stack_evaluations(evals, num_polys, buffer);
-    exit_span!(stack_evaluation_timer);
-    evals
 }
 
 // generate a random vector for batching open
