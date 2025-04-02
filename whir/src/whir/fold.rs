@@ -46,7 +46,6 @@ pub fn compute_fold<F: Field>(
 pub fn restructure_evaluations<F: ExtensionField>(
     mut stacked_evaluations: Vec<F>,
     fold_type: FoldType,
-    _domain_gen: F,
     domain_gen_inv: F,
     folding_factor: usize,
 ) -> Vec<F> {
@@ -343,7 +342,6 @@ mod tests {
         let processed = restructure_evaluations(
             unprocessed.clone(),
             crate::parameters::FoldType::ProverHelps,
-            root_of_unity,
             root_of_unity_inv,
             folding_factor,
         );

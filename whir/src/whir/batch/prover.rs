@@ -297,7 +297,6 @@ where
         let folded_evals = restructure_evaluations(
             folded_evals,
             self.0.fold_optimisation,
-            new_domain.backing_domain_group_gen(),
             new_domain.backing_domain_group_gen().inverse(),
             self.0.folding_factor.at_round(round_state.round + 1),
         );

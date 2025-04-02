@@ -70,7 +70,6 @@ where
         let folded_evals = restructure_evaluations(
             folded_evals,
             self.0.fold_optimisation,
-            self.0.starting_domain.backing_domain_group_gen(),
             self.0.starting_domain.backing_domain_group_gen().inverse(),
             self.0.folding_factor.at_round(0),
         );

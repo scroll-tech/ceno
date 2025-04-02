@@ -97,7 +97,6 @@ where
         // Try to finish the tasks with as few allocations as possible.
         let stack_evaluations_timer = entered_span!("Stack Evaluations");
         let domain_gen_inverse = self.0.starting_domain.backing_domain_group_gen().inverse();
-        let domain_gen = self.0.starting_domain.backing_domain_group_gen();
         let folded_evals = evals
             .into_par_iter()
             .flat_map(|evals| {
@@ -105,7 +104,6 @@ where
                 let ret = restructure_evaluations(
                     ret,
                     self.0.fold_optimisation,
-                    domain_gen,
                     domain_gen_inverse,
                     self.0.folding_factor.at_round(0),
                 );
