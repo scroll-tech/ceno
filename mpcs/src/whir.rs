@@ -108,9 +108,10 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: witness::RowMajorMatrix<E::BaseField>,
+        polys: Vec<witness::RowMajorMatrix<E::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let polys = polys.to_mles();
+        assert_eq!(polys.len(), 2);
+        let polys = polys[0].to_mles();
         let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;
 

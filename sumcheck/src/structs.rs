@@ -29,7 +29,7 @@ impl<E: ExtensionField> IOPProof<E> {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct IOPProverMessage<E: ExtensionField> {
-    pub(crate) evaluations: Vec<E>,
+    pub evaluations: Vec<E>,
 }
 
 /// Prover State of a PolyIOP.

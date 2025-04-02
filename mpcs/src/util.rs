@@ -38,53 +38,6 @@ pub fn num_of_bytes<F: PrimeField>(n: usize) -> usize {
     F::bits().next_power_of_two() * n / 8
 }
 
-macro_rules! impl_index {
-    (@ $name:ty, $field:tt, [$($range:ty => $output:ty),*$(,)?]) => {
-        $(
-            impl<E: ExtensionField> std::ops::Index<$range> for $name {
-                type Output = $output;
-
-                fn index(&self, index: $range) -> &$output {
-                    match &self.$field {
-                        FieldType::Ext(coeffs) => coeffs.index(index),
-                        FieldType::Base(_) => panic!("Cannot index base field"),
-                        _ => unreachable!()
-                    }
-                }
-            }
-
-            impl<E: ExtensionField> std::ops::IndexMut<$range> for $name {
-                fn index_mut(&mut self, index: $range) -> &mut $output {
-                    match &mut self.$field {
-                        FieldType::Ext(coeffs) => coeffs.index_mut(index),
-                        FieldType::Base(_) => panic!("Cannot index base field"),
-                        _ => unreachable!()
-                    }
-                }
-            }
-        )*
-    };
-    (@ $name:ty, $field:tt) => {
-        impl_index!(
-            @ $name, $field,
-            [
-                usize => E,
-                std::ops::Range<usize> => [E],
-                std::ops::RangeFrom<usize> => [E],
-                std::ops::RangeFull => [E],
-                std::ops::RangeInclusive<usize> => [E],
-                std::ops::RangeTo<usize> => [E],
-                std::ops::RangeToInclusive<usize> => [E],
-            ]
-        );
-    };
-    ($name:ident, $field:tt) => {
-        impl_index!(@ $name<E>, $field);
-    };
-}
-
-pub(crate) use impl_index;
-
 pub fn poly_index_ext<E: ExtensionField>(poly: &DenseMultilinearExtension<E>, index: usize) -> E {
     match &poly.evaluations {
         FieldType::Ext(coeffs) => coeffs[index],
@@ -311,6 +264,37 @@ pub fn ext_try_into_base<E: ExtensionField>(x: &E) -> Result<E::BaseField, Error
     } else {
         Ok(bases[0])
     }
+}
+
+/// splits a slice into multiple sub-slices at given indices.
+///
+/// # arguments
+/// * `slice` - the slice to split.
+/// * `indices` - positions where the slice should be split.
+///
+/// # returns
+/// * a `Vec<&[T]>` containing the sub-slices.
+///
+/// # notes
+/// * indices should be in non-decreasing order.
+/// * the last segment extends to the slice end.
+///
+/// # example
+/// ```
+/// let data = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+/// let parts = split_slice(&data, &[2, 5, 7]);
+/// assert_eq!(parts, vec![&[1, 2], &[3, 4, 5], &[6, 7], &[8, 9]]);
+/// ```
+pub fn split_slice<'a, T>(slice: &'a [T], indices: &[usize]) -> Vec<&'a [T]> {
+    indices
+        .iter()
+        .chain(std::iter::once(&slice.len())) // append slice.len() as the final boundary
+        .scan(0, |start, &end| {
+            let segment = &slice[*start..end.min(slice.len())]; // slice safely within bounds
+            *start = end.min(slice.len()); // update `start` for the next iteration
+            Some(segment) // yield the segment
+        })
+        .collect()
 }
 
 #[cfg(any(test, feature = "benchmark"))]

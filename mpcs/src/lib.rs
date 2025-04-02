@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
-pub mod sum_check;
 pub mod util;
 
 pub type Commitment<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Commitment;
@@ -16,6 +15,9 @@ pub type CommitmentWithWitness<E, Pcs> =
 pub type Param<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Param;
 pub type ProverParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::ProverParam;
 pub type VerifierParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::VerifierParam;
+
+/// A point is a vector of num_var length
+pub type Point<F> = Vec<F>;
 
 pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     poly_size: usize,
@@ -47,14 +49,14 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    rmm: Vec<RowMajorMatrix<<E as ExtensionField>::BaseField>>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::batch_commit(pp, rmm)
 }
 
 pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    rmm: Vec<RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::batch_commit_and_write(pp, rmm, transcript)
@@ -73,13 +75,12 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[ArcMultilinearExtension<E>],
     comms: &[Pcs::CommitmentWithWitness],
     points: &[Vec<E>],
     evals: &[Evaluation<E>],
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
-    Pcs::batch_open(pp, polys, comms, points, evals, transcript)
+    Pcs::batch_open(pp, comms, points, evals, transcript)
 }
 
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -147,12 +148,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: RowMajorMatrix<E::BaseField>,
+        polys: Vec<RowMajorMatrix<E::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
+        rmm: Vec<RowMajorMatrix<<E as ExtensionField>::BaseField>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         let comm = Self::batch_commit(pp, rmm)?;
@@ -171,10 +172,9 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_open(
         pp: &Self::ProverParam,
-        polys: &[ArcMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithWitness],
-        points: &[Vec<E>],
-        evals: &[Evaluation<E>],
+        comms: &Self::CommitmentWithWitness,
+        points: &[Point<E>],
+        evals: &[Vec<E>],
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
@@ -266,8 +266,7 @@ pub enum Error {
 mod basefold;
 pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
-    BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec, one_level_eval_hc,
-    one_level_interp_hc,
+    BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
 };
 mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
@@ -402,7 +401,7 @@ pub mod test_util {
                 let rmm =
                     RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
                 let polys = rmm.to_mles();
-                let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
+                let comm = Pcs::batch_commit_and_write(&pp, vec![rmm], &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);

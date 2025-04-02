@@ -2,14 +2,9 @@ use std::slice;
 
 use crate::{
     basefold::structure::MerkleTreeExt,
-    util::{
-        arithmetic::{degree_2_eval, degree_2_zero_plus_one, inner_product},
-        ext_to_usize,
-        merkle_tree::poseidon2_merkle_tree,
-    },
+    util::{arithmetic::inner_product, ext_to_usize, merkle_tree::poseidon2_merkle_tree},
 };
 use ark_std::{end_timer, start_timer};
-use ceno_sumcheck::macros::{entered_span, exit_span};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use p3::{
@@ -19,6 +14,10 @@ use p3::{
     util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
+use sumcheck::{
+    macros::{entered_span, exit_span},
+    util::interpolate_uni_poly,
+};
 use transcript::Transcript;
 
 use crate::basefold::structure::QueryOpeningProofs;
@@ -211,19 +210,19 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
 
     // 1. check initial claim match with first round sumcheck value
     assert_eq!(
-        &dot_product::<E, _, _>(batch_coeffs.iter().copied(), evals.iter().copied()),
-        &degree_2_zero_plus_one(&sum_check_messages[0])
+        dot_product::<E, _, _>(batch_coeffs.iter().copied(), evals.iter().copied()),
+        { sum_check_messages[0][0] + sum_check_messages[0][1] }
     );
     // 2. check every round of sumcheck match with prev claims
     for i in 0..fold_challenges.len() - 1 {
         assert_eq!(
-            degree_2_eval(&sum_check_messages[i], fold_challenges[i]),
-            degree_2_zero_plus_one(&sum_check_messages[i + 1])
+            interpolate_uni_poly(&sum_check_messages[i], fold_challenges[i]),
+            { sum_check_messages[i + 1][0] + sum_check_messages[i + 1][1] }
         );
     }
     // 3. check final evaluation are correct
     assert_eq!(
-        degree_2_eval(
+        interpolate_uni_poly(
             &sum_check_messages[fold_challenges.len() - 1],
             fold_challenges[fold_challenges.len() - 1]
         ),

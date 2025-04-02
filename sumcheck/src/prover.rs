@@ -223,7 +223,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         }
 
         // second stage sumcheck
-        let poly = merge_sumcheck_polys(&prover_states, max_thread_id);
+        let poly = merge_sumcheck_polys(&prover_states);
         let mut prover_state =
             Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone());
 
@@ -299,7 +299,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     ///
     /// Main algorithm used is from section 3.2 of [XZZPS19](https://eprint.iacr.org/2019/317.pdf#subsection.3.2).
     #[tracing::instrument(skip_all, name = "sumcheck::prove_round_and_update_state")]
-    pub(crate) fn prove_round_and_update_state(
+    pub fn prove_round_and_update_state(
         &mut self,
         challenge: &Option<Challenge<E>>,
     ) -> IOPProverMessage<E> {
@@ -389,19 +389,15 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     }
 
     /// collect all mle evaluation (claim) after sumcheck
+    /// NOTE final evaluation size of each mle could be >= 1
     pub fn get_mle_final_evaluations(&self) -> Vec<E> {
         self.poly
             .flattened_ml_extensions
             .iter()
-            .map(|mle| {
-                assert!(
-                    mle.evaluations().len() == 1,
-                    "mle.evaluations.len() {} != 1, must be called after prove_round_and_update_state",
-                    mle.evaluations().len(),
-                );
+            .flat_map(|mle| {
                 op_mle! {
-                    |mle| mle[0],
-                    |eval| E::from(eval)
+                    |mle| mle.to_vec(),
+                    |mle| mle.into_iter().map(E::from).collect_vec()
                 }
             })
             .collect()
