@@ -21,7 +21,7 @@ derivative = { version = "2", features = ["use_core"] }
 ff_ext = { path = "../ff_ext" }
 lazy_static = "1.4"
 multilinear_extensions = { path = "../multilinear_extensions" }
-p3 = { path = "../p3" }
+p3.workspace = true
 poseidon = { path = "../poseidon" }
 rand = "0.8"
 rand_chacha = "0.3"
@@ -49,5 +49,5 @@ default = ["parallel"]
 parallel = [
   "dep:rayon",
 ]
-print-trace = [ "tracing/log" ]
+print-trace = ["tracing/log"]
 rayon = ["dep:rayon"]

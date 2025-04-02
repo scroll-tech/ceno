@@ -10,8 +10,7 @@ pub mod impl_babybear {
             TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
-        matrix::{dense::RowMajorMatrix, extension::FlatMatrixView},
-        merkle_tree::{MerkleTree, MerkleTreeMmcs},
+        merkle_tree::MerkleTreeMmcs,
         poseidon2::ExternalLayerConstants,
         symmetric::{PaddingFreeSponge, TruncatedPermutation},
     };

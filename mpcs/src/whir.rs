@@ -1,12 +1,10 @@
 mod spec;
 mod structure;
 
-use crate::util::log2_strict;
-
 use super::PolynomialCommitmentScheme;
 use ff_ext::{ExtensionField, PoseidonField};
-use multilinear_extensions::mle::MultilinearExtension;
-use p3::commit::Mmcs;
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
+use p3::{commit::Mmcs, util::log2_strict_usize};
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
@@ -54,12 +52,14 @@ where
 
     fn commit(
         _pp: &Self::ProverParam,
-        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+        poly: witness::RowMajorMatrix<E::BaseField>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
+        debug_assert_eq!(poly.n_col(), 1);
+        let poly = poly.to_mles().remove(0);
         let parameters = Spec::get_whir_parameters(false);
         let whir_config = WhirConfig::new(MultivariateParameters::new(poly.num_vars()), parameters);
         let (witness, _commitment) = Committer::new(whir_config)
-            .commit(poly.clone())
+            .commit(poly)
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness.into())
@@ -78,7 +78,7 @@ where
 
     fn open(
         _pp: &Self::ProverParam,
-        poly: &multilinear_extensions::mle::DenseMultilinearExtension<E>,
+        poly: &ArcMultilinearExtension<E>,
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         eval: &E,
@@ -135,7 +135,7 @@ where
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(true);
         let whir_config = WhirConfig::new(
-            MultivariateParameters::new(log2_strict(rmm.num_instances())),
+            MultivariateParameters::new(log2_strict_usize(rmm.num_instances())),
             parameters,
         );
         let (witness, _commitment) = Committer::new(whir_config)
@@ -147,7 +147,7 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
-        _polys: &[multilinear_extensions::mle::DenseMultilinearExtension<E>],
+        _polys: &[ArcMultilinearExtension<E>],
         _comms: &[Self::CommitmentWithWitness],
         _points: &[Vec<E>],
         _evals: &[crate::Evaluation<E>],
@@ -206,14 +206,18 @@ where
             )
             .map_err(crate::Error::WhirError)
     }
+
+    fn get_arc_mle_witness_from_commitment(
+        _commitment: &Self::CommitmentWithWitness,
+    ) -> Vec<ArcMultilinearExtension<'static, E>> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{
-        gen_rand_poly_base, run_commit_open_verify, run_simple_batch_commit_open_verify,
-    };
+    use crate::test_util::{run_commit_open_verify, run_simple_batch_commit_open_verify};
     use ff_ext::GoldilocksExt2;
     use spec::WhirDefaultSpec;
     use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt};
@@ -224,11 +228,10 @@ mod tests {
     fn whir_commit_open_verify_goldilocks() {
         // TODO: Only support committing to base field polynomial now
         {
-            let gen_rand_poly = gen_rand_poly_base;
             // Challenge is over extension field, poly over the base field
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 10, 11);
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(10, 11);
             // Test trivial proof with small num vars
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 4, 6);
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(4, 6);
         }
     }
 
@@ -247,60 +250,23 @@ mod tests {
         let subscriber = Registry::default().with(fmt_layer).with(filter);
         tracing::subscriber::set_global_default(subscriber).unwrap();
         {
-            let gen_rand_poly = gen_rand_poly_base;
-            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(gen_rand_poly, 20, 21);
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
-                gen_rand_poly,
-                20,
-                21,
-                64,
-            );
+            run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(20, 21);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(20, 21, 64);
         }
     }
 
     #[test]
     fn whir_simple_batch_commit_open_verify_goldilocks() {
         {
-            let gen_rand_poly = gen_rand_poly_base;
             // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
-                gen_rand_poly,
-                10,
-                16,
-                1,
-            );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
-                gen_rand_poly,
-                10,
-                11,
-                4,
-            );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
-                gen_rand_poly,
-                7,
-                8,
-                3,
-            );
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
-                gen_rand_poly,
-                7,
-                8,
-                2,
-            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(10, 16, 1);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(10, 11, 4);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(7, 8, 3);
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(7, 8, 2);
             // Test trivial proof with small num vars
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
-                gen_rand_poly,
-                4,
-                6,
-                4,
-            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(4, 6, 4);
             // Both challenge and poly are over base field
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(
-                gen_rand_poly,
-                4,
-                6,
-                1,
-            );
+            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(4, 6, 1);
         }
     }
 }

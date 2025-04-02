@@ -12,15 +12,10 @@ version.workspace = true
 [dependencies]
 criterion.workspace = true
 ff_ext = { path = "../ff_ext" }
-p3 = { path = "../p3" }
+p3.workspace = true
 serde.workspace = true
 unroll = "0.1"
 
 [dev-dependencies]
 ark-std.workspace = true
-plonky2.workspace = true
 rand.workspace = true
-
-[[bench]]
-harness = false
-name = "hashing"

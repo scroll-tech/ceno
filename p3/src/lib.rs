@@ -1,6 +1,7 @@
 pub use p3_baby_bear as babybear;
 pub use p3_challenger as challenger;
 pub use p3_commit as commit;
+pub use p3_dft as dft;
 pub use p3_field as field;
 pub use p3_goldilocks as goldilocks;
 pub use p3_matrix as matrix;

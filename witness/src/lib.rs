@@ -1,10 +1,7 @@
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE},
-    util::max_usable_threads,
-};
+use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use p3::{
     field::{Field, PrimeCharacteristicRing},
-    matrix::{Matrix, bitrev::BitReversableMatrix},
+    matrix::Matrix,
 };
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 use rayon::{
@@ -50,13 +47,9 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         Standard: Distribution<T>,
     {
         debug_assert!(rows > 0);
-        let mut inner = p3::matrix::dense::RowMajorMatrix::rand(rng, rows, cols);
         let num_row_padded = next_pow2_instance_padding(rows);
-        if num_row_padded > rows {
-            inner.pad_to_height(num_row_padded, T::default());
-        }
         Self {
-            inner,
+            inner: p3::matrix::dense::RowMajorMatrix::rand(rng, num_row_padded, cols),
             num_rows: rows,
             is_padded: true,
             padding_strategy: InstancePaddingStrategy::Default,
@@ -70,21 +63,20 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
             padding_strategy: InstancePaddingStrategy::Default,
         }
     }
-    pub fn into_default_padded_p3_rmm(
-        self,
-        is_bit_reserse: bool,
-    ) -> p3::matrix::dense::RowMajorMatrix<T> {
+    /// convert into the p3 RowMajorMatrix, with padded to next power of 2 height filling with T::default value
+    pub fn into_default_padded_p3_rmm(self) -> p3::matrix::dense::RowMajorMatrix<T> {
         let padded_height = next_pow2_instance_padding(self.num_instances());
         let mut inner = self.inner;
-        if is_bit_reserse {
-            inner = inner.bit_reverse_rows().to_row_major_matrix();
-        }
         inner.pad_to_height(padded_height, T::default());
         inner
     }
 
     pub fn n_col(&self) -> usize {
         self.inner.width
+    }
+
+    pub fn num_vars(&self) -> usize {
+        self.inner.height().ilog2() as usize
     }
 
     pub fn new(
@@ -131,8 +123,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 
     pub fn iter_rows(&self) -> Chunks<T> {
-        let max_range = self.num_instances() * self.n_col();
-        self.inner.values[..max_range].chunks(self.inner.width)
+        self.inner.values[..self.num_instances() * self.n_col()].chunks(self.inner.width)
     }
 
     pub fn iter_mut(&mut self) -> ChunksMut<T> {
@@ -146,36 +137,19 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 
     pub fn padding_by_strategy(&mut self) {
-        debug_assert!(!self.is_padded);
         let num_instances = self.num_instances();
         let start_index = self.num_instances() * self.n_col();
-
-        if num_instances == 0 {
-            return;
-        }
 
         match &self.padding_strategy {
             InstancePaddingStrategy::Default => (),
             InstancePaddingStrategy::RepeatLast => {
-                let nthreads = max_usable_threads();
-                let num_instance_per_batch = if self.num_padding_instances() > 256 {
-                    self.num_padding_instances().div_ceil(nthreads)
-                } else {
-                    self.num_padding_instances()
+                if num_instances == 0 {
+                    return;
                 }
-                .max(1);
-
-                let last_instance = self[num_instances - 1].to_vec();
+                let padding_vec = self[num_instances - 1].to_vec();
                 self.inner.values[start_index..]
-                    .par_chunks_mut(self.inner.width * num_instance_per_batch)
-                    .for_each(|instance| {
-                        instance
-                            .iter_mut()
-                            .zip(last_instance.iter().cycle())
-                            .for_each(|(v1, v2)| {
-                                *v1 = *v2;
-                            })
-                    });
+                    .par_chunks_mut(self.inner.width)
+                    .for_each(|instance| instance.copy_from_slice(&padding_vec));
             }
             InstancePaddingStrategy::Custom(fun) => {
                 self.inner.values[start_index..]

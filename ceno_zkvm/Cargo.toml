@@ -23,7 +23,7 @@ ceno_host = { path = "../ceno_host" }
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
-p3 = { path = "../p3" }
+p3.workspace = true
 sumcheck = { version = "0", path = "../sumcheck" }
 transcript = { path = "../transcript" }
 witness = { path = "../witness" }
@@ -68,7 +68,6 @@ forbid_overflow = []
 [[bench]]
 harness = false
 name = "riscv_add"
-
 
 [[bench]]
 harness = false

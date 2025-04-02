@@ -14,7 +14,7 @@ proc-macro = true
 
 [dependencies]
 itertools.workspace = true
-p3 = { path = "../p3" }
+p3.workspace = true
 proc-macro2 = "1.0.92"
 quote = "1.0"
 rand.workspace = true

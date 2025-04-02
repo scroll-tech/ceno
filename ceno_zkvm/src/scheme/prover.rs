@@ -114,25 +114,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let (witness, structural_witness) = match num_instances {
                 0 => (vec![], vec![]),
                 _ => {
-                    let witness = witness_rmm.to_mles();
                     let structural_witness = structural_witness_rmm.to_mles();
-                    commitments.insert(
-                        circuit_name.clone(),
+                    let commit =
                         PCS::batch_commit_and_write(&self.pk.pp, witness_rmm, &mut transcript)
-                            .map_err(ZKVMError::PCSError)?,
-                    );
-
+                            .map_err(ZKVMError::PCSError)?;
+                    let witness = PCS::get_arc_mle_witness_from_commitment(&commit);
+                    commitments.insert(circuit_name.clone(), commit);
                     (witness, structural_witness)
                 }
             };
             exit_span!(span);
-            wits.insert(
-                circuit_name.clone(),
-                (
-                    witness.into_iter().map(|w| w.into()).collect_vec(),
-                    num_instances,
-                ),
-            );
+            wits.insert(circuit_name.clone(), (witness, num_instances));
             structural_wits.insert(
                 circuit_name,
                 (
@@ -201,11 +193,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .opcode_proofs
-                    .insert(circuit_name.clone(), (i, opcode_proof));
+                    .insert(circuit_name.to_string(), (i, opcode_proof));
             } else {
                 let (structural_witness, structural_num_instances) = structural_wits
                     .remove(circuit_name)
-                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
+                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
                 let (table_proof, pi_in_evals) = self.create_table_proof(
                     circuit_name,
                     &self.pk.pp,
@@ -225,7 +217,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .table_proofs
-                    .insert(circuit_name.clone(), (i, table_proof));
+                    .insert(circuit_name.to_string(), (i, table_proof));
                 for (idx, eval) in pi_in_evals {
                     vm_proof.update_pi_eval(idx, eval);
                 }
