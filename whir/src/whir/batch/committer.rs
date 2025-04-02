@@ -63,27 +63,18 @@ where
         let timer = entered_span!("Batch Commit");
         let prepare_timer = entered_span!("Prepare");
         let mles = polys.to_mles();
+        let num_polys = mles.len();
         let polys = mles
             .par_iter()
             .map(|poly| match poly.evaluations() {
                 #[cfg(feature = "parallel")]
-                FieldType::Base(evals) => {
-                    let evals = evals
-                        .par_iter()
-                        .map(|e| E::from_base(e))
-                        .collect::<Vec<_>>();
-                    evals
-                }
+                FieldType::Base(evals) => evals
+                    .par_iter()
+                    .map(|e| E::from_base(e))
+                    .collect::<Vec<_>>(),
                 #[cfg(not(feature = "parallel"))]
-                FieldType::Base(evals) => {
-                    let mut evals = evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>();
-                    interpolate_over_boolean_hypercube(&mut evals);
-                    evals
-                }
-                FieldType::Ext(evals) => {
-                    let evals = evals.clone();
-                    evals
-                }
+                FieldType::Base(evals) => evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>(),
+                FieldType::Ext(evals) => evals.clone(),
                 _ => panic!("Invalid field type"),
             })
             .collect::<Vec<_>>();
@@ -109,13 +100,10 @@ where
         let domain_gen = self.0.starting_domain.backing_domain_group_gen();
         let folded_evals = evals
             .into_par_iter()
-            .map(|evals| {
-                let ret = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
-                ret
-            })
             .flat_map(|evals| {
+                let ret = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
                 let ret = restructure_evaluations(
-                    evals,
+                    ret,
                     self.0.fold_optimisation,
                     domain_gen,
                     domain_gen_inverse,
@@ -145,7 +133,7 @@ where
         let merkle_build_timer = entered_span!("Build Merkle Tree");
 
         let (root, merkle_tree) = {
-            let rmm = RowMajorMatrix::new(folded_evals, fold_size * polys.len());
+            let rmm = RowMajorMatrix::new(folded_evals, fold_size * num_polys);
             self.0.hash_params.commit_matrix(rmm)
         };
         exit_span!(merkle_build_timer);
