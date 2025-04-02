@@ -39,7 +39,8 @@ where
 mod tests {
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use rand::rngs::OsRng;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
     use transcript::BasicTranscript;
     use witness::RowMajorMatrix;
 
@@ -69,7 +70,7 @@ mod tests {
     ) {
         let num_coeffs = 1 << num_variables;
 
-        let rng = OsRng;
+        let mut rng = ChaCha8Rng::from_seed([0; 32]);
         let hash_params = poseidon2_ext_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
@@ -93,7 +94,7 @@ mod tests {
             ]);
 
         let points: Vec<_> = (0..num_points)
-            .map(|_| E::random_vec(num_variables, rng))
+            .map(|_| E::random_vec(num_variables, &mut rng))
             .collect();
 
         let statement = Statement {
@@ -136,7 +137,7 @@ mod tests {
         soundness_type: SoundnessType,
         fold_type: FoldType,
     ) {
-        let mut rng = OsRng;
+        let mut rng = ChaCha8Rng::from_seed([0; 32]);
         let hash_params = poseidon2_ext_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
@@ -157,7 +158,7 @@ mod tests {
         let polynomials = RowMajorMatrix::rand(&mut rng, 1 << num_variables, num_polynomials);
 
         let points: Vec<Vec<E>> = (0..num_points)
-            .map(|_| E::random_vec(num_variables, rng))
+            .map(|_| E::random_vec(num_variables, &mut rng))
             .collect();
         let evals_per_point: Vec<Vec<E>> = points
             .iter()
@@ -214,7 +215,7 @@ mod tests {
         );
         let num_coeffs = 1 << num_variables;
 
-        let mut rng = OsRng;
+        let mut rng = ChaCha8Rng::from_seed([0; 32]);
         let hash_params = poseidon2_ext_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
@@ -235,7 +236,7 @@ mod tests {
         let polynomials = RowMajorMatrix::rand(&mut rng, num_coeffs, num_polynomials);
 
         let point_per_poly: Vec<Vec<E>> = (0..num_polynomials)
-            .map(|_| E::random_vec(num_variables, rng))
+            .map(|_| E::random_vec(num_variables, &mut rng))
             .collect();
         let eval_per_poly: Vec<E> = polynomials
             .to_mles()

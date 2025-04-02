@@ -5,8 +5,6 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
@@ -42,22 +40,13 @@ pub fn stack_evaluations_mut<E: ExtensionField>(evals: &mut [E], folding_factor:
 pub fn horizontal_stacking<E: ExtensionField>(
     evals: Vec<E>,
     domain_size: usize,
-    folding_factor: usize,
     buffer: &mut [E],
 ) -> Vec<E> {
-    let fold_size = 1 << folding_factor;
     let num_polys: usize = evals.len() / domain_size;
 
     let stack_evaluation_timer = entered_span!("Stack Evaluation");
-    let mut evals = stack_evaluations(evals, num_polys, buffer);
+    let evals = stack_evaluations(evals, num_polys, buffer);
     exit_span!(stack_evaluation_timer);
-    #[cfg(not(feature = "parallel"))]
-    let stacked_evals = evals.chunks_exact_mut(fold_size * num_polys);
-    #[cfg(feature = "parallel")]
-    let stacked_evals = evals.par_chunks_exact_mut(fold_size * num_polys);
-    let stack_evaluation_mut_timer = entered_span!("Stack Evaluation Mut");
-    stacked_evals.for_each(|eval| stack_evaluations_mut(eval, folding_factor));
-    exit_span!(stack_evaluation_mut_timer);
     evals
 }
 

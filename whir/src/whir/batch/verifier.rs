@@ -241,7 +241,7 @@ where
         exit_span!(internal_timer);
 
         let internal_timer = entered_span!("Intermediate rounds");
-        for (round, folds) in parsed.rounds.iter().zip(&computed_folds) {
+        for (r, (round, folds)) in parsed.rounds.iter().zip(&computed_folds).enumerate() {
             let (sumcheck_poly, new_randomness) = &round.sumcheck_rounds[0].clone();
 
             let values = round.ood_answers.iter().copied().chain(folds.clone());
@@ -258,9 +258,10 @@ where
                     .sum::<E>();
 
             if sumcheck_poly.sum_over_hypercube() != claimed_sum {
-                return Err(Error::InvalidProof(
-                    "Initial sumcheck poly sum mismatched with claimed sum".to_string(),
-                ));
+                return Err(Error::InvalidProof(format!(
+                    "Initial sumcheck poly sum mismatched with claimed sum in round {}",
+                    r
+                )));
             }
 
             prev = Some((sumcheck_poly.clone(), *new_randomness));
@@ -270,9 +271,10 @@ where
                 let (prev_poly, randomness) = prev.unwrap();
                 if sumcheck_poly.sum_over_hypercube() != prev_poly.evaluate_at_point(&[randomness])
                 {
-                    return Err(Error::InvalidProof(
-                        "Sumcheck poly sum mismatched with prev poly eval".to_string(),
-                    ));
+                    return Err(Error::InvalidProof(format!(
+                        "Sumcheck poly sum mismatched with prev poly eval in round {}",
+                        r
+                    )));
                 }
                 prev = Some((sumcheck_poly.clone(), *new_randomness));
             }
@@ -558,12 +560,12 @@ where
                     .par_iter()
                     .map(|(raw_answer, _)| {
                         if !batched_randomness.is_empty() {
-                            let chunk_size = 1 << self.params.folding_factor.at_round(r);
-                            let mut res = vec![E::ZERO; chunk_size];
-                            for i in 0..chunk_size {
+                            let fold_size = 1 << self.params.folding_factor.at_round(r);
+                            let mut res = vec![E::ZERO; fold_size];
+                            for i in 0..fold_size {
                                 for j in 0..num_polys {
                                     res[i] +=
-                                        raw_answer[0][i + j * chunk_size] * batched_randomness[j];
+                                        raw_answer[0][i * num_polys + j] * batched_randomness[j];
                                 }
                             }
                             res
@@ -674,11 +676,11 @@ where
                 .par_iter()
                 .map(|(raw_answer, _)| {
                     if !batched_randomness.is_empty() {
-                        let chunk_size = 1 << self.params.folding_factor.at_round(0);
-                        let mut res = vec![E::ZERO; chunk_size];
-                        for i in 0..chunk_size {
+                        let fold_size = 1 << self.params.folding_factor.at_round(0);
+                        let mut res = vec![E::ZERO; fold_size];
+                        for i in 0..fold_size {
                             for j in 0..num_polys {
-                                res[i] += raw_answer[0][i + j * chunk_size] * batched_randomness[j];
+                                res[i] += raw_answer[0][i * num_polys + j] * batched_randomness[j];
                             }
                         }
                         res
