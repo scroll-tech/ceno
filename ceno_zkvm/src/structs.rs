@@ -71,9 +71,6 @@ pub enum RAMType {
     Memory,
 }
 
-/// A point is a vector of num_var length
-pub type Point<F> = Vec<F>;
-
 /// A point and the evaluation of this point.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PointAndEval<F> {
