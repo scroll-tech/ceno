@@ -9,8 +9,7 @@ use std::{
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    util::max_usable_threads, virtual_poly::ArcMultilinearExtension,
-    virtual_polys::VirtualPolynomials,
+    virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
 };
 use p3::field::Field;
 use transcript::Transcript;
@@ -92,18 +91,6 @@ pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
         x >>= C;
     }
     ret
-}
-
-/// we expect each thread at least take 4 num of sumcheck variables
-/// return optimal num threads to run sumcheck
-pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
-    let expected_max_threads = max_usable_threads();
-    let min_numvar_per_thread = 4;
-    if num_vars <= min_numvar_per_thread {
-        1
-    } else {
-        (1 << (num_vars - min_numvar_per_thread)).min(expected_max_threads)
-    }
 }
 
 /// TODO this is copy from gkr crate

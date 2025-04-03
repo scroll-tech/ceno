@@ -9,7 +9,8 @@ use std::{
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension, op_mle, virtual_poly::VirtualPolynomial,
+    mle::DenseMultilinearExtension, op_mle, util::max_usable_threads,
+    virtual_poly::VirtualPolynomial,
 };
 use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
@@ -145,7 +146,7 @@ fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
 /// negligible compared to field operations.
 /// TODO: The quadratic term can be removed by precomputing the lagrange
 /// coefficients.
-pub(crate) fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
+pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
     let start = start_timer!(|| "sum check interpolate uni poly opt");
 
     let len = p_i.len();
@@ -212,34 +213,44 @@ pub fn ceil_log2(x: usize) -> usize {
     usize_bits - (x - 1).leading_zeros() as usize
 }
 
-pub(crate) fn merge_sumcheck_polys<'a, E: ExtensionField>(
+pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
     prover_states: &[IOPProverState<'a, E>],
-    max_thread_id: usize,
 ) -> VirtualPolynomial<'a, E> {
-    let log2_max_thread_id = ceil_log2(max_thread_id);
-    let mut poly = prover_states[0].poly.clone(); // giving only one evaluation left, this clone is low cost.
-    poly.aux_info.max_num_variables = log2_max_thread_id; // size_log2 variates sumcheck
+    let log2_prover_states_len = ceil_log2(prover_states.len());
+    let mut poly = prover_states[0].poly.clone(); // assume poly evaluation size already been small
+    poly.aux_info.max_num_variables = 0;
     for i in 0..poly.flattened_ml_extensions.len() {
+        let num_vars = ceil_log2(
+            prover_states[0].poly.flattened_ml_extensions[i]
+                .evaluations()
+                .len(),
+        ) + log2_prover_states_len;
+        poly.aux_info.max_num_variables = poly.aux_info.max_num_variables.max(num_vars);
         let ml_ext = DenseMultilinearExtension::from_evaluations_ext_vec(
-            log2_max_thread_id,
+            num_vars,
             prover_states
                 .iter()
-                .map(|prover_state| {
+                .flat_map(|prover_state| {
                     let mle = &prover_state.poly.flattened_ml_extensions[i];
-                    op_mle!(
-                        mle,
-                        |f| {
-                            assert!(f.len() == 1);
-                            f[0]
-                        },
-                        |_v| unreachable!()
-                    )
+                    op_mle!(mle, |f| f.to_vec(), |_v| unreachable!())
                 })
                 .collect::<Vec<E>>(),
         );
         poly.flattened_ml_extensions[i] = Arc::new(ml_ext);
     }
     poly
+}
+
+/// we expect each thread at least take 4 num of sumcheck variables
+/// return optimal num threads to run sumcheck
+pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
+    let expected_max_threads = max_usable_threads();
+    let min_numvar_per_thread = 4;
+    if num_vars <= min_numvar_per_thread {
+        1
+    } else {
+        (1 << (num_vars - min_numvar_per_thread)).min(expected_max_threads)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
