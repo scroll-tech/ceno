@@ -5,6 +5,7 @@
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use multilinear_extensions::{
     mle::FieldType, util::largest_even_below, virtual_poly::VirtualPolynomial,
+    virtual_polys::PolyMeta,
 };
 use p3::field::PrimeCharacteristicRing;
 use rand::rngs::OsRng;
@@ -13,6 +14,8 @@ use sumcheck::util::{AdditiveArray, ceil_log2};
 #[derive(Default)]
 struct Container<'a, E: ExtensionField> {
     poly: VirtualPolynomial<'a, E>,
+    is_main_worker: bool,
+    phase2_numvar: Option<usize>,
 }
 
 fn main() {
@@ -22,9 +25,9 @@ fn main() {
 
 impl<E: ExtensionField> Container<'_, E> {
     pub fn run(&self) {
-        let echo = |n| n;
         let poly = &self.poly.flattened_ml_extensions;
-        let _result = sumcheck_macro::sumcheck_code_gen!(3, false, |_| &poly[0], |n| echo(n));
+        let _result =
+            sumcheck_macro::sumcheck_code_gen!(3, false, |_| &poly[0], || PolyMeta::Normal);
     }
 
     pub fn expected_numvars_at_round(&self) -> usize {
@@ -34,6 +37,8 @@ impl<E: ExtensionField> Container<'_, E> {
     pub fn new() -> Self {
         Self {
             poly: VirtualPolynomial::random(3, (4, 5), 2, &mut OsRng).0,
+            is_main_worker: true,
+            phase2_numvar: Some(1),
         }
     }
 }

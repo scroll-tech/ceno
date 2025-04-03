@@ -89,6 +89,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let scoped_fn = |s: &Scope<'a>| {
             for (thread_id, poly) in polys.iter_mut().enumerate().take(num_worker_threads) {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
+                    false,
                     mem::take(poly),
                     extrapolation_aux.clone(),
                     Some(log2_max_thread_id),
@@ -133,6 +134,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
             let mut prover_msgs = Vec::with_capacity(num_variables);
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
+                true,
                 mem::take(&mut polys[main_thread_id]),
                 extrapolation_aux.clone(),
                 Some(log2_max_thread_id),
@@ -234,8 +236,13 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // second stage sumcheck
         let poly = merge_sumcheck_polys(&prover_states, max_thread_id);
-        let mut prover_state =
-            Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone(), None, None);
+        let mut prover_state = Self::prover_init_with_extrapolation_aux(
+            true,
+            poly,
+            extrapolation_aux.clone(),
+            None,
+            None,
+        );
 
         let mut challenge = None;
         let span = entered_span!("prove_rounds_stage2");
@@ -281,6 +288,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub fn prover_init_with_extrapolation_aux(
+        is_main_worker: bool,
         polynomial: VirtualPolynomial<'a, E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
         phase2_numvar: Option<usize>,
@@ -305,6 +313,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let num_polys = polynomial.flattened_ml_extensions.len();
 
         Self {
+            is_main_worker,
             max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
@@ -553,6 +562,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let num_polys = polynomial.flattened_ml_extensions.len();
         let poly_index_meta = vec![PolyMeta::Normal; num_polys];
         let prover_state = Self {
+            is_main_worker: true,
             max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,

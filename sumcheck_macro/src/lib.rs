@@ -274,64 +274,64 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             let get_poly_type = #get_poly_type;
             let poly_type = get_poly_type();
 
-            let compute_multiplicity = |num_var| {
-                match poly_type {
-                    PolyMeta::Normal => {
-                        // calculate multiplicity term
-                        // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
-                        self.expected_numvars_at_round()
-                            .saturating_sub(1)
-                            .saturating_sub(num_var)
-                    }
-                    // polynomial num_var <= phase2 numvar
-                    PolyMeta::Phase2Only => {
-                        println!("expected numvar {}", self
-                            // this only cover phase1 numvar
-                            .expected_numvars_at_round());
-                        println!("self.phase2_numvar.unwrap_or(0) {}", self.phase2_numvar.unwrap_or(0));
-                        println!("num_var {}", num_var);
-                        let a = self
-                            // this only cover phase1 numvar
-                            .expected_numvars_at_round()
+            match poly_type {
+                PolyMeta::Phase2Only => {
+                    // only main worker doing the calculation of phase2 only polynomial in order to avoid duplicate computation
+                    if self.is_main_worker {
+                        let mut sum = (0..largest_even_below(v1.len())).map(
+                            |b| {
+                                #product
+                            },
+                        ).sum();
+                        let num_vars_multiplicity = self.expected_numvars_at_round()
                             // the expected num_vars if working on single thread sumcheck
                             .saturating_add(self.phase2_numvar.unwrap_or(0))
                             // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
                             .saturating_sub(1)
                             // the multiplicity
-                            .saturating_sub(num_var)
-                            // we need to divide by 1 << phase2_numvar as it duplicated many times
-                            // NOTE we add it earlier then subtract, but we still keep both for documentation purpose
-                            .saturating_sub(self.phase2_numvar.unwrap_or(0));
-                        println!("phase2 only {}", a);
-                        return a
+                            .saturating_sub(num_var);
+                        if num_vars_multiplicity > 0 {
+                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                        }
+                        AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
+                    } else {
+                        // other just skip and return 0 array
+                        AdditiveArray::<_, #degree_plus_one>([Default::default(); #degree_plus_one])
                     }
-                }
-            };
-            if num_var < expected_numvars_at_round || matches!(poly_type, PolyMeta::Phase2Only) {
-                // TODO optimize by caching computed result for later round reuse
-                // need to figure out how to cache in one place to support base/extension field
-                let mut sum = (0..largest_even_below(v1.len())).map(
-                    |b| {
-                        #product
-                    },
-                ).sum();
-                let num_vars_multiplicity = compute_multiplicity(num_var);
-                if num_vars_multiplicity > 0 {
-                    sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
-                }
-                AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
-            } else {
-                if v1.len() == 1 {
-                    let b = 0;
-                    AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
-                } else {
-                    (0..largest_even_below(v1.len()))
-                        #iter
-                        .map(|b| {
-                            #additive_array_items
-                        })
-                        .sum::<AdditiveArray<_, #degree_plus_one>>()
-                }
+                },
+                PolyMeta::Normal => {
+                    if num_var < expected_numvars_at_round {
+                        // TODO optimize by caching computed result for later round reuse
+                        // need to figure out how to cache in one place to support base/extension field
+                        let mut sum = (0..largest_even_below(v1.len())).map(
+                            |b| {
+                                #product
+                            },
+                        ).sum();
+
+                        // calculate multiplicity term
+                        // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                        let num_vars_multiplicity = self.expected_numvars_at_round()
+                            .saturating_sub(1)
+                            .saturating_sub(num_var);
+                        if num_vars_multiplicity > 0 {
+                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                        }
+                        AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
+                    } else {
+                        if v1.len() == 1 {
+                            let b = 0;
+                            AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
+                        } else {
+                            (0..largest_even_below(v1.len()))
+                                #iter
+                                .map(|b| {
+                                    #additive_array_items
+                                })
+                                .sum::<AdditiveArray<_, #degree_plus_one>>()
+                        }
+                    }
+                },
             }
         }
     };

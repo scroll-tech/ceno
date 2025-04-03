@@ -35,6 +35,7 @@ pub struct IOPProverMessage<E: ExtensionField> {
 /// Prover State of a PolyIOP.
 #[derive(Default)]
 pub struct IOPProverState<'a, E: ExtensionField> {
+    pub is_main_worker: bool,
     /// sampled randomness given by the verifier
     pub challenges: Vec<Challenge<E>>,
     /// the current round number
