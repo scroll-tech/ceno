@@ -5,7 +5,6 @@ use crate::{
 use ark_std::{rand::RngCore, test_rng};
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
 use multilinear_extensions::{
-    util::max_usable_threads,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
@@ -15,14 +14,16 @@ use transcript::{BasicTranscript, Transcript};
 #[test]
 fn test_sumcheck_with_different_degree() {
     // test polynomial mixed with different num_var
-    let nv = vec![3, 4, 5];
-    let num_polys = nv.len();
-    for num_threads in 1..num_polys.min(max_usable_threads()) {
-        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(num_threads, &nv);
-    }
 
-    // test case: only partial of poly with size (1 << num_vars) > num_thread
-    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(16, &[2, 5])
+    // test single thread
+    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1, &[2, 4]);
+    // test num_threads match minimal num_var
+    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << 2, &[2, 4]);
+    // test min_num_var < num_threads < max_num_var
+    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << 3, &[2, 4]);
+
+    // test min_num_var < num_threads < max_num_var
+    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << 4, &[2, 4]);
 }
 
 fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
