@@ -9,10 +9,7 @@ use mpcs::{
     test_util::{get_point_from_challenge, setup_pcs},
 };
 
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly::ArcMultilinearExtension,
-};
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 
@@ -47,7 +44,8 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
         };
 
         let mut transcript = T::new(b"BaseFold");
-        let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
+        let mut rng = rand::thread_rng();
+        let rmm = RowMajorMatrix::rand(&mut rng, 1 << num_vars, 1);
         let comm = Pcs::commit_and_write(&pp, rmm, &mut transcript).unwrap();
         let poly = Pcs::get_arc_mle_witness_from_commitment(&comm).remove(0);
 
@@ -55,7 +53,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
+                    let rmm = RowMajorMatrix::rand(&mut rng, 1 << num_vars, 1);
                     let instant = std::time::Instant::now();
                     Pcs::commit(&pp, rmm).unwrap();
                     let elapsed = instant.elapsed();
@@ -112,17 +110,22 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
+            let mut transcript = T::new(b"BaseFold");
             let mut rng = rand::thread_rng();
-
+            let rmm = RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size);
+            let polys = rmm.to_mles();
+            let mut transcript_for_bench = transcript.clone();
+            let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
                 |b| {
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
                         for _ in 0..iters {
-                            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+                            let rmm = RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size);
                             let instant = std::time::Instant::now();
-                            Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
+                            Pcs::batch_commit_and_write(&pp, rmm, &mut transcript_for_bench)
+                                .unwrap();
                             let elapsed = instant.elapsed();
                             time += elapsed;
                         }
@@ -131,11 +134,6 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
                 },
             );
 
-            let mut transcript = T::new(b"BaseFold");
-            let mut rng = rand::thread_rng();
-            let rmm = RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size);
-            let polys = rmm.to_mles();
-            let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
             let point = get_point_from_challenge(num_vars, &mut transcript);
             let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
             transcript.append_field_element_exts(&evals);
