@@ -11,7 +11,6 @@ use crate::{
 };
 use derive_more::Debug;
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix, util::log2_strict_usize};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
@@ -62,22 +61,8 @@ where
         let mut transcript = BasicTranscript::<E>::new(b"commitment");
         let timer = entered_span!("Batch Commit");
         let prepare_timer = entered_span!("Prepare");
-        let mles = polys.to_mles();
-        let num_polys = mles.len();
-        let polys = mles
-            .par_iter()
-            .map(|poly| match poly.evaluations() {
-                #[cfg(feature = "parallel")]
-                FieldType::Base(evals) => evals
-                    .par_iter()
-                    .map(|e| E::from_base(e))
-                    .collect::<Vec<_>>(),
-                #[cfg(not(feature = "parallel"))]
-                FieldType::Base(evals) => evals.iter().map(|e| E::from_base(e)).collect::<Vec<_>>(),
-                FieldType::Ext(evals) => evals.clone(),
-                _ => panic!("Invalid field type"),
-            })
-            .collect::<Vec<_>>();
+        let polys = polys.to_cols_ext();
+        let num_polys = polys.len();
         exit_span!(prepare_timer);
         let expansion = self.0.starting_domain.size() / polys[0].len();
         let expand_timer = entered_span!("Batch Expand");

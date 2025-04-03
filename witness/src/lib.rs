@@ -188,6 +188,24 @@ impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
             })
             .collect::<Vec<_>>()
     }
+
+    pub fn to_cols_ext<E: ff_ext::ExtensionField<BaseField = F>>(&self) -> Vec<Vec<E>> {
+        debug_assert!(self.is_padded);
+        let n_column = self.inner.width;
+        (0..n_column)
+            .into_par_iter()
+            .map(|i| {
+                self.inner
+                    .values
+                    .iter()
+                    .skip(i)
+                    .step_by(n_column)
+                    .copied()
+                    .map(|v| E::from_base(&v))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> Deref
