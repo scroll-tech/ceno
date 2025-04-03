@@ -795,6 +795,7 @@ pub struct StructuralWitIn {
     pub max_len: usize,
     pub offset: u32,
     pub multi_factor: usize,
+    pub descending: bool,
 }
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,

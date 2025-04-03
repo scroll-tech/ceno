@@ -202,6 +202,7 @@ fn test_single_add_instance_e2e() {
     let program = Program::new(
         CENO_PLATFORM.pc_base(),
         CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.heap.start,
         PROGRAM_CODE.to_vec(),
         Default::default(),
     );

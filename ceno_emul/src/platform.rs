@@ -12,9 +12,10 @@ use crate::addr::{Addr, RegIdx};
 pub struct Platform {
     pub rom: Range<Addr>,
     pub prog_data: BTreeSet<Addr>,
+    pub public_io: Range<Addr>,
+
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
-    pub public_io: Range<Addr>,
     pub hints: Range<Addr>,
     /// If true, ecall instructions are no-op instead of trap. Testing only.
     pub unsafe_ecall_nop: bool,

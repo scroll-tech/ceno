@@ -215,12 +215,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         max_len: usize,
         offset: u32,
         multi_factor: usize,
+        descending: bool,
     ) -> StructuralWitIn {
         let wit_in = StructuralWitIn {
             id: self.num_structural_witin,
             max_len,
             offset,
             multi_factor,
+            descending,
         };
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
