@@ -2,7 +2,7 @@ use crate::{
     crypto::{Digest, MerkleTreeExt, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff,
-    utils::{self, interpolate_over_boolean_hypercube},
+    utils::{self, evaluate_as_multilinear_evals, interpolate_over_boolean_hypercube},
     whir::{
         committer::Committer,
         fold::{expand_from_univariate, restructure_evaluations},
@@ -131,11 +131,11 @@ where
             let ood_answers = ood_points
                 .par_iter()
                 .flat_map(|ood_point| {
-                    mles.par_iter().map(|poly| {
-                        poly.evaluate(&expand_from_univariate(
-                            *ood_point,
-                            self.0.mv_parameters.num_variables,
-                        ))
+                    polys.par_iter().map(|poly| {
+                        evaluate_as_multilinear_evals(
+                            poly,
+                            &expand_from_univariate(*ood_point, self.0.mv_parameters.num_variables),
+                        )
                     })
                 })
                 .collect::<Vec<_>>();
