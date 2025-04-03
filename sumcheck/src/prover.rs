@@ -34,8 +34,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
     /// This is experiment features. It's preferable that we move parallel level up more to
     /// "bould_poly" so it can be more isolation
-    #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys", level = "trace")]
-    pub fn prove_batch_polys(
+    #[tracing::instrument(skip_all, name = "sumcheck::prove", level = "trace")]
+    pub fn prove(
         virtual_poly: VirtualPolynomials<'a, E>,
         transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverState<'a, E>) {

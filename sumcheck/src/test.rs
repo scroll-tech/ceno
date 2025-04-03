@@ -56,7 +56,7 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
                 )
             });
 
-    let (proof, _) = IOPProverState::<E>::prove_batch_polys(poly, &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove(poly, &mut transcript);
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(
         asserted_sum,
