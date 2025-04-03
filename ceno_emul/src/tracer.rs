@@ -478,7 +478,7 @@ impl Tracer {
         self.record.cycle
     }
 
-    /// giving a start address, return max accessed address within section
+    /// giving a start address, return (min, max) accessed address within section
     pub fn probe_min_max_address_by_start_addr(
         &self,
         start_addr: WordAddr,
@@ -487,8 +487,12 @@ impl Tracer {
             .as_ref()
             .and_then(|mmio_max_access| {
                 mmio_max_access.range(..=start_addr).next_back().and_then(
-                    |(_, &(_, e, min, max))| {
-                        if start_addr <= e && min < max {
+                    |(_, &(expected_start_addr, _, min, max))| {
+                        assert_eq!(
+                            start_addr, expected_start_addr,
+                            "please use section start for searching"
+                        );
+                        if start_addr == expected_start_addr && min < max {
                             Some((min, max))
                         } else {
                             None

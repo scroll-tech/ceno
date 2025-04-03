@@ -246,7 +246,7 @@ pub fn setup_platform(
 
     let heap = {
         // Detect heap as starting after program data.
-        let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+        let heap_start = program.sheap;
         let heap = heap_start..heap_start + heap_size;
         // pad the total size to the next power of two.
         let mem_size = heap.iter_addresses().len();
