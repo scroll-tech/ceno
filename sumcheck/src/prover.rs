@@ -374,41 +374,13 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 let span = entered_span!("sum");
                 let f = &self.poly.flattened_ml_extensions;
                 let f_type = &self.poly_index_meta;
-                let multi_f = |num_var: usize| {
-                    match f_type[prod[0]] {
-                        PolyMeta::Normal => {
-                            // calculate multiplicity term
-                            // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
-                            self.expected_numvars_at_round()
-                                .saturating_sub(1)
-                                .saturating_sub(num_var)
-                        }
-                        // polynomial num_var <= phase2 numvar
-                        PolyMeta::Phase2Only => self
-                            .expected_numvars_at_round()
-                            // the expected num_vars if working on single thread sumcheck
-                            .saturating_add(self.phase2_numvar.unwrap_or(0))
-                            // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
-                            .saturating_sub(1)
-                            // the multiplicity
-                            .saturating_sub(num_var)
-                            // we need to divide by 1 << phase2_numvar as it duplicated many times
-                            // NOTE we add it earlier then subtract, but we still keep both for documentation purpose
-                            .saturating_sub(self.phase2_numvar.unwrap_or(0)),
-                    }
-                };
-
+                let get_poly_type = || f_type[prod[0]];
                 let mut sum: Vec<E> = match prod.len() {
-                    1 => sumcheck_code_gen!(1, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                        .to_vec(),
-                    2 => sumcheck_code_gen!(2, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                        .to_vec(),
-                    3 => sumcheck_code_gen!(3, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                        .to_vec(),
-                    4 => sumcheck_code_gen!(4, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                        .to_vec(),
-                    5 => sumcheck_code_gen!(5, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                        .to_vec(),
+                    1 => sumcheck_code_gen!(1, false, |i| &f[prod[i]], || get_poly_type()).to_vec(),
+                    2 => sumcheck_code_gen!(2, false, |i| &f[prod[i]], || get_poly_type()).to_vec(),
+                    3 => sumcheck_code_gen!(3, false, |i| &f[prod[i]], || get_poly_type()).to_vec(),
+                    4 => sumcheck_code_gen!(4, false, |i| &f[prod[i]], || get_poly_type()).to_vec(),
+                    5 => sumcheck_code_gen!(5, false, |i| &f[prod[i]], || get_poly_type()).to_vec(),
                     _ => unimplemented!("do not support degree {} > 5", prod.len()),
                 };
                 exit_span!(span);
@@ -660,50 +632,18 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
                     let f = &self.poly.flattened_ml_extensions;
                     let f_type = &self.poly_index_meta;
-                    let multi_f = |num_var: usize| {
-                        match f_type[prod[0]] {
-                            PolyMeta::Normal => {
-                                // calculate multiplicity term
-                                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
-                                self.expected_numvars_at_round()
-                                    .saturating_sub(1)
-                                    .saturating_sub(num_var)
-                            }
-                            // polynomial num_var <= phase2 numvar
-                            PolyMeta::Phase2Only => self
-                                .expected_numvars_at_round()
-                                // the expected num_vars if working on single thread sumcheck
-                                .saturating_add(self.phase2_numvar.unwrap_or(0))
-                                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
-                                .saturating_sub(1)
-                                // the multiplicity
-                                .saturating_sub(num_var)
-                                // we need to divide by 1 << phase2_numvar as it duplicated many times
-                                // NOTE we add it earlier then subtract, but we still keep both for documentation purpose
-                                .saturating_sub(self.phase2_numvar.unwrap_or(0)),
-                        }
-                    };
+                    let get_poly_type = || f_type[prod[0]];
                     let mut sum: Vec<E> = match prod.len() {
-                        1 => {
-                            sumcheck_code_gen!(1, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                                .to_vec()
-                        }
-                        2 => {
-                            sumcheck_code_gen!(2, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                                .to_vec()
-                        }
-                        3 => {
-                            sumcheck_code_gen!(3, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                                .to_vec()
-                        }
-                        4 => {
-                            sumcheck_code_gen!(4, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                                .to_vec()
-                        }
-                        5 => {
-                            sumcheck_code_gen!(5, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
-                                .to_vec()
-                        }
+                        1 => sumcheck_code_gen!(1, true, |i| &f[prod[i]], || get_poly_type())
+                            .to_vec(),
+                        2 => sumcheck_code_gen!(2, true, |i| &f[prod[i]], || get_poly_type())
+                            .to_vec(),
+                        3 => sumcheck_code_gen!(3, true, |i| &f[prod[i]], || get_poly_type())
+                            .to_vec(),
+                        4 => sumcheck_code_gen!(4, true, |i| &f[prod[i]], || get_poly_type())
+                            .to_vec(),
+                        5 => sumcheck_code_gen!(5, true, |i| &f[prod[i]], || get_poly_type())
+                            .to_vec(),
                         _ => unimplemented!("do not support degree {} > 5", prod.len()),
                     };
                     exit_span!(span);

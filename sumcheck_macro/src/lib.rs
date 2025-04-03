@@ -15,8 +15,8 @@ struct SumcheckCodegenMacroInput {
     parallalize: LitBool,
     /// Closure that gives access to the mle product
     product_access: ExprClosure,
-    /// Closure that retrieve multiplicity
-    get_multiplicity: ExprClosure,
+    /// get poly type
+    get_poly_type: ExprClosure,
 }
 
 impl Parse for SumcheckCodegenMacroInput {
@@ -40,11 +40,11 @@ impl Parse for SumcheckCodegenMacroInput {
             ))?,
         };
 
-        let get_multiplicity = match expr2 {
-            Expr::Closure(get_multiplicity) => get_multiplicity,
+        let get_poly_type = match expr2 {
+            Expr::Closure(get_poly_type) => get_poly_type,
             _ => Err(syn::Error::new_spanned(
                 expr2,
-                "Expected closure that get multiplicity",
+                "Expected closure that get poly type",
             ))?,
         };
 
@@ -52,7 +52,7 @@ impl Parse for SumcheckCodegenMacroInput {
             degree,
             parallalize,
             product_access,
-            get_multiplicity,
+            get_poly_type,
         })
     }
 }
@@ -66,7 +66,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let degree = input.degree.base10_parse::<u32>().unwrap();
     let parallalize = input.parallalize.value;
     let product_access = input.product_access;
-    let get_multiplicity = input.get_multiplicity;
+    let get_poly_type = input.get_poly_type;
 
     // Part 1 - Declare f vars
     // Code output
@@ -271,7 +271,43 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             // NOTE: current method work in suffix alignment order
             let num_var = ceil_log2(v1.len());
             let expected_numvars_at_round = self.expected_numvars_at_round();
-            if num_var < expected_numvars_at_round {
+            let get_poly_type = #get_poly_type;
+            let poly_type = get_poly_type();
+
+            let compute_multiplicity = |num_var| {
+                match poly_type {
+                    PolyMeta::Normal => {
+                        // calculate multiplicity term
+                        // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                        self.expected_numvars_at_round()
+                            .saturating_sub(1)
+                            .saturating_sub(num_var)
+                    }
+                    // polynomial num_var <= phase2 numvar
+                    PolyMeta::Phase2Only => {
+                        println!("expected numvar {}", self
+                            // this only cover phase1 numvar
+                            .expected_numvars_at_round());
+                        println!("self.phase2_numvar.unwrap_or(0) {}", self.phase2_numvar.unwrap_or(0));
+                        println!("num_var {}", num_var);
+                        let a = self
+                            // this only cover phase1 numvar
+                            .expected_numvars_at_round()
+                            // the expected num_vars if working on single thread sumcheck
+                            .saturating_add(self.phase2_numvar.unwrap_or(0))
+                            // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                            .saturating_sub(1)
+                            // the multiplicity
+                            .saturating_sub(num_var)
+                            // we need to divide by 1 << phase2_numvar as it duplicated many times
+                            // NOTE we add it earlier then subtract, but we still keep both for documentation purpose
+                            .saturating_sub(self.phase2_numvar.unwrap_or(0));
+                        println!("phase2 only {}", a);
+                        return a
+                    }
+                }
+            };
+            if num_var < expected_numvars_at_round || matches!(poly_type, PolyMeta::Phase2Only) {
                 // TODO optimize by caching computed result for later round reuse
                 // need to figure out how to cache in one place to support base/extension field
                 let mut sum = (0..largest_even_below(v1.len())).map(
@@ -279,8 +315,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                         #product
                     },
                 ).sum();
-                let get_multiplicity = #get_multiplicity;
-                let num_vars_multiplicity = get_multiplicity(num_var);
+                let num_vars_multiplicity = compute_multiplicity(num_var);
                 if num_vars_multiplicity > 0 {
                     sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
                 }
