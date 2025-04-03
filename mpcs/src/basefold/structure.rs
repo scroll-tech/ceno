@@ -241,7 +241,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
-    pub(crate) roots: Vec<Digest<E>>,
+    pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<E>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
@@ -255,7 +255,7 @@ where
     pub fn trivial(evals: DenseMatrix<E::BaseField>) -> Self {
         Self {
             sumcheck_messages: vec![],
-            roots: vec![],
+            commits: vec![],
             final_message: vec![],
             query_opening_proof: Default::default(),
             sumcheck_proof: None,
@@ -278,6 +278,6 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
-    pub(crate) roots: Vec<Digest<E>>,
+    pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<E>,
 }

@@ -401,7 +401,7 @@ where
         end_timer!(timer);
         Ok(Self::Proof {
             sumcheck_messages: commit_phase_proof.sumcheck_messages,
-            roots: commit_phase_proof.roots,
+            commits: commit_phase_proof.commits,
             final_message: commit_phase_proof.final_message,
             query_opening_proof,
             sumcheck_proof: None,
@@ -468,7 +468,7 @@ where
             transcript.sample_and_append_challenge_pows(evals.len(), b"batch coeffs");
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
-        let roots = &proof.roots;
+        let commits = &proof.commits;
         let sumcheck_messages = &proof.sumcheck_messages;
         for i in 0..num_rounds {
             transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
@@ -478,7 +478,7 @@ where
                     .elements,
             );
             if i < num_rounds - 1 {
-                write_digest_to_transcript(&roots[i], transcript);
+                write_digest_to_transcript(&commits[i], transcript);
             }
         }
         let final_message = &proof.final_message;
@@ -506,7 +506,7 @@ where
             num_rounds,
             num_vars,
             final_message,
-            roots,
+            commits,
             comm,
             eq.as_slice(),
             evals,

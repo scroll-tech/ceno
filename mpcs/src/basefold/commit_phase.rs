@@ -32,7 +32,7 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomials,
 };
 use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
+    iter::{IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IndexedParallelIterator, ParallelIterator, ParallelSlice},
 };
 
@@ -104,7 +104,7 @@ where
     let batched_polys = polys.get_batched_polys();
 
     let mut prover_states = batched_polys
-        .into_par_iter()
+        .into_iter()
         .map(|poly| {
             IOPProverState::prover_init_with_extrapolation_aux(poly, vec![(vec![], vec![])])
         })
@@ -113,10 +113,11 @@ where
     let mut challenge = None;
 
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
-    let mut roots = Vec::with_capacity(num_rounds - 1);
+    let mut commits = Vec::with_capacity(num_rounds - 1);
 
     let sumcheck_phase1 = entered_span!("sumcheck_phase1");
-    for i in 0..num_rounds.min(num_vars - log2_strict_usize(num_threads)) {
+    let phase1_rounds = num_rounds.min(num_vars - log2_strict_usize(num_threads));
+    for i in 0..phase1_rounds {
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
@@ -125,7 +126,7 @@ where
             &initial_oracle,
             transcript,
             &mut trees,
-            &mut roots,
+            &mut commits,
             &mmcs_ext,
             i == num_rounds - 1,
         );
@@ -150,7 +151,8 @@ where
     let mut challenge = None;
 
     let sumcheck_phase2 = entered_span!("sumcheck_phase2");
-    for i in 0..num_rounds.saturating_sub(num_vars - log2_strict_usize(num_threads)) {
+    let remaining_rounds = num_rounds.saturating_sub(num_vars - log2_strict_usize(num_threads));
+    for i in 0..remaining_rounds {
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
@@ -159,7 +161,7 @@ where
             &initial_oracle,
             transcript,
             &mut trees,
-            &mut roots,
+            &mut commits,
             &mmcs_ext,
             i == num_rounds.saturating_sub(num_vars - log2_strict_usize(num_threads)) - 1,
         );
@@ -185,12 +187,12 @@ where
             mmcs_ext.get_matrices(trees.last().unwrap())[0].values
         );
         // remove last tree/commmitment which is only for debug purpose
-        let _ = (trees.pop(), roots.pop());
+        let _ = (trees.pop(), commits.pop());
     }
     transcript.append_field_element_exts(&final_message);
     (trees, BasefoldCommitPhaseProof {
         sumcheck_messages,
-        roots,
+        commits,
         final_message,
     })
 }
@@ -237,7 +239,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     initial_oracle: &[E],
     transcript: &mut impl Transcript<E>,
     trees: &mut Vec<MerkleTreeExt<E>>,
-    roots: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
+    commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
     mmcs_ext: &ExtensionMmcs<
         E::BaseField,
         E,
@@ -291,14 +293,14 @@ where
 
     if cfg!(feature = "sanity-check") && is_last_round {
         let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_oracle.clone());
-        roots.push(commitment);
+        commits.push(commitment);
         trees.push(merkle_tree);
     }
 
     if !is_last_round {
         let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_oracle);
         write_digest_to_transcript(&commitment, transcript);
-        roots.push(commitment);
+        commits.push(commitment);
         trees.push(merkle_tree);
     }
 
