@@ -81,25 +81,13 @@ where
         exit_span!(prepare_timer);
         let expansion = self.0.starting_domain.size() / polys[0].len();
         let expand_timer = entered_span!("Batch Expand");
+        let domain_gen_inverse = self.0.starting_domain.backing_domain_group_gen().inverse();
         let evals = polys
             .par_iter()
-            .map(|poly| {
+            .flat_map(|poly| {
                 let mut poly = poly.clone();
                 interpolate_over_boolean_hypercube(&mut poly);
-                expand_from_coeff(&poly, expansion)
-            })
-            .collect::<Vec<Vec<_>>>();
-        exit_span!(expand_timer);
-
-        assert_eq!(self.0.starting_domain.size(), evals[0].len());
-
-        // These stacking operations are bottleneck of the commitment process.
-        // Try to finish the tasks with as few allocations as possible.
-        let stack_evaluations_timer = entered_span!("Stack Evaluations");
-        let domain_gen_inverse = self.0.starting_domain.backing_domain_group_gen().inverse();
-        let folded_evals = evals
-            .into_par_iter()
-            .flat_map(|evals| {
+                let evals = expand_from_coeff(&poly, expansion);
                 let ret = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
                 let ret = restructure_evaluations(
                     ret,
@@ -110,16 +98,17 @@ where
                 ret
             })
             .collect::<Vec<_>>();
-        exit_span!(stack_evaluations_timer);
+        exit_span!(expand_timer);
 
-        let mut buffer = Vec::with_capacity(folded_evals.len());
+        // These stacking operations are bottleneck of the commitment process.
+        // Try to finish the tasks with as few allocations as possible.
+        let mut buffer = Vec::with_capacity(evals.len());
         #[allow(clippy::uninit_vec)]
         unsafe {
-            buffer.set_len(folded_evals.len());
+            buffer.set_len(evals.len());
         }
         let horizontal_stacking_timer = entered_span!("Stacking again");
-        let folded_evals =
-            super::utils::stack_evaluations(folded_evals, num_polys, buffer.as_mut_slice());
+        let folded_evals = super::utils::stack_evaluations(evals, num_polys, buffer.as_mut_slice());
         exit_span!(horizontal_stacking_timer);
 
         // Group folds together as a leaf.

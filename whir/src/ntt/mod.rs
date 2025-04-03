@@ -12,6 +12,7 @@ use ff_ext::ExtensionField;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use tracing::instrument;
+use witness::{RowMajorMatrix, expand_from_coeff as expand_from_coeff_inner};
 
 pub use self::{
     ntt_impl::{intt, intt_batch, ntt, ntt_batch},
@@ -60,4 +61,11 @@ pub fn expand_from_coeff<F: ExtensionField>(coeffs: &[F], expansion: usize) -> V
     ntt_batch(&mut result, coeffs.len());
     transpose(&mut result, expansion, coeffs.len());
     result
+}
+
+pub fn expand_from_coeff_rmm<F: ExtensionField>(
+    coeffs: RowMajorMatrix<F>,
+    expansion: usize,
+) -> RowMajorMatrix<F> {
+    expand_from_coeff_inner(coeffs, expansion)
 }
