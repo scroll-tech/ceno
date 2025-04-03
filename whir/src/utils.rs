@@ -1,7 +1,10 @@
 use crate::ntt::{transpose, transpose_bench_allocate};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use p3::field::Field;
+use p3::{
+    field::Field,
+    matrix::{Matrix, dense::RowMajorMatrix},
+};
 use rayon::{
     iter::ParallelIterator,
     slice::{ParallelSlice, ParallelSliceMut},
@@ -133,6 +136,39 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
     // end_timer!(timer);
 }
 
+pub fn interpolate_over_boolean_hypercube_rmm<F: Field>(evals: &mut RowMajorMatrix<F>) {
+    // let timer = start_timer!(|| "interpolate_over_hypercube");
+    // iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
+    let n = p3::util::log2_strict_usize(evals.height());
+
+    evals.par_row_chunks_mut(2).for_each(|mut chunk| {
+        let to_subtract = chunk.row(0).collect::<Vec<_>>();
+        chunk
+            .row_mut(1)
+            .iter_mut()
+            .zip(to_subtract)
+            .for_each(|(a, b)| *a -= b);
+    });
+
+    // This code implicitly assumes that coeffs has size at least 1 << n,
+    // that means the size of evals should be a power of two
+    for i in 2..n + 1 {
+        let chunk_size = 1 << i;
+        evals.par_row_chunks_mut(chunk_size).for_each(|mut chunk| {
+            let half_chunk = chunk_size >> 1;
+            for j in half_chunk..chunk_size {
+                let to_subtract = chunk.row(j - half_chunk).collect::<Vec<_>>();
+                chunk
+                    .row_mut(j)
+                    .iter_mut()
+                    .zip(to_subtract)
+                    .for_each(|(a, b)| *a -= b);
+            }
+        });
+    }
+    // end_timer!(timer);
+}
+
 pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
     let n = p3::util::log2_strict_usize(coeffs.len());
 
@@ -196,9 +232,15 @@ pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> V
 
 #[cfg(test)]
 mod tests {
+    use multilinear_extensions::mle::FieldType;
     use p3::field::PrimeCharacteristicRing;
+    use rand::thread_rng;
+    use witness::RowMajorMatrix;
 
-    use crate::utils::base_decomposition;
+    use crate::utils::{
+        base_decomposition, interpolate_over_boolean_hypercube,
+        interpolate_over_boolean_hypercube_rmm,
+    };
 
     use super::{is_power_of_two, stack_evaluations, to_binary};
 
@@ -248,5 +290,41 @@ mod tests {
         // check truncation: This checks the current (undocumented) behaviour (compute modulo base^number_of_limbs) works as believed.
         // If we actually specify the API to have a different behaviour, this test should change.
         assert_eq!(base_decomposition(15 + 81, 3, 3), vec![0, 2, 1]);
+    }
+
+    #[test]
+    fn test_interpolate_over_boolean_hypercube_rmm() {
+        use ff_ext::GoldilocksExt2 as E;
+        use p3::goldilocks::Goldilocks as F;
+
+        let mut rng = thread_rng();
+        let num_vars = 10;
+        let mut rmm = RowMajorMatrix::<F>::rand(&mut rng, 1 << num_vars, 10);
+        let mles = rmm.to_mles::<E>();
+        interpolate_over_boolean_hypercube_rmm(&mut rmm);
+        let mut polys = mles
+            .into_iter()
+            .map(|mle| match mle.evaluations {
+                FieldType::Base(evals) => evals,
+                _ => panic!("Expected base field type"),
+            })
+            .collect::<Vec<_>>();
+        polys.iter_mut().for_each(|poly| {
+            interpolate_over_boolean_hypercube(poly);
+        });
+        let new_mles = rmm.to_mles::<E>();
+        let new_polys = new_mles
+            .into_iter()
+            .map(|mle| match mle.evaluations {
+                FieldType::Base(evals) => evals,
+                _ => panic!("Expected base field type"),
+            })
+            .collect::<Vec<_>>();
+        polys
+            .iter()
+            .zip(new_polys.iter())
+            .for_each(|(poly, new_poly)| {
+                assert_eq!(poly, new_poly);
+            });
     }
 }
