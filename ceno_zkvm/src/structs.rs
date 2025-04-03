@@ -134,11 +134,77 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS>
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+pub struct GKRIOPProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
+    pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
+    pub fixed_commit_wd: Option<PCS::CommitmentWithWitness>,
+    pub vk: GKRIOPVerifyingKey<E, PCS, State>,
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State: Default> Default
+    for GKRIOPProvingKey<E, PCS, State>
+{
+    fn default() -> Self {
+        Self {
+            fixed_traces: None,
+            fixed_commit_wd: None,
+            vk: GKRIOPVerifyingKey::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GKRIOPVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
+    pub(crate) state: State,
+    pub fixed_commit: Option<PCS::Commitment>,
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State: Default> Default
+    for GKRIOPVerifyingKey<E, PCS, State>
+{
+    fn default() -> Self {
+        Self {
+            state: State::default(),
+            fixed_commit: None,
+        }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State>
+    GKRIOPVerifyingKey<E, PCS, State>
+{
+    pub fn get_state(&self) -> &State {
+        &self.state
+    }
+}
+
+#[derive(Clone, Default, Debug)]
 pub struct KeccakGKRIOP<E> {
     pub chip: gkr_iop::chip::Chip,
     pub layout: KeccakLayout<E>,
-    pub circuit: gkr_iop::gkr::GKRCircuit,
+}
+
+impl<E: ExtensionField> KeccakGKRIOP<E> {
+    pub fn key_gen<PCS: PolynomialCommitmentScheme<E>>(
+        self,
+        pp: &PCS::ProverParam,
+        fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
+    ) -> GKRIOPProvingKey<E, PCS, KeccakGKRIOP<E>> {
+        // transpose from row-major to column-major
+        let fixed_traces_polys = fixed_traces.as_ref().map(|rmm| rmm.to_mles());
+
+        let fixed_commit_wd = fixed_traces.map(|traces| PCS::batch_commit(pp, traces).unwrap());
+        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
+
+        GKRIOPProvingKey {
+            fixed_traces: fixed_traces_polys,
+            fixed_commit_wd,
+            vk: GKRIOPVerifyingKey {
+                state: self,
+                fixed_commit,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -165,7 +231,7 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
     pub(crate) initial_global_state_expr: Expression<E>,
     pub(crate) finalize_global_state_expr: Expression<E>,
-    pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
+    pub keccak_gkr_iop: KeccakGKRIOP<E>,
     pub params: ProgramParams,
 }
 
@@ -176,7 +242,7 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
             params: ProgramParams::default(),
-            keccak_gkr_iop: None,
+            keccak_gkr_iop: KeccakGKRIOP::default(),
         }
     }
 }
@@ -195,14 +261,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         // Add GKR-IOP instance
         let params = gkr_iop::precompiles::KeccakParams {};
         let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder>::build(params);
-        let circuit = chip.gkr_circuit();
-
-        assert!(self.keccak_gkr_iop.is_none());
-        self.keccak_gkr_iop = Some(KeccakGKRIOP {
-            layout,
-            chip,
-            circuit,
-        });
+        self.keccak_gkr_iop = KeccakGKRIOP { layout, chip };
 
         self.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>()
     }
@@ -284,7 +343,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    keccak_trace: <KeccakLayout<E> as gkr_iop::ProtocolWitnessGenerator<E>>::Trace,
+    keccak_phase1wit: Vec<Vec<E::BaseField>>,
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
@@ -306,7 +365,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     pub fn assign_keccakf_circuit(
         &mut self,
-        css: &mut ZKVMConstraintSystem<E>,
+        css: &ZKVMConstraintSystem<E>,
         config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
@@ -320,8 +379,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             records,
         )?;
 
-        // GKR-IOP-specific trace from row major witness
-        self.keccak_trace = KeccakTrace::from(witness.clone());
+        // Intercept row-major matrix, convert into KeccakTrace and obtain phase1_wit
+        self.keccak_phase1wit = css
+            .keccak_gkr_iop
+            .layout
+            .phase1_witness(KeccakTrace::from(witness.clone()));
 
         assert!(
             self.witnesses_opcodes
@@ -416,7 +478,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             input,
         )?;
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
-
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 
         Ok(())
@@ -443,6 +504,7 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
+    pub keccak_pk: GKRIOPProvingKey<E, PCS, KeccakGKRIOP<E>>,
 
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
@@ -455,6 +517,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             pp,
             vp,
             circuit_pks: BTreeMap::new(),
+            keccak_pk: GKRIOPProvingKey::default(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
         }

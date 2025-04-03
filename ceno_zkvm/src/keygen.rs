@@ -1,5 +1,6 @@
 use crate::{
     error::ZKVMError,
+    instructions::riscv::dummy::LargeEcallDummy,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
@@ -29,6 +30,10 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             let circuit_pk = cs.key_gen(&vm_pk.pp, fixed_traces);
             assert!(vm_pk.circuit_pks.insert(c_name, circuit_pk).is_none());
         }
+
+        // TODO: get keccak cs manually
+        // assert_eq!(keccak_cs.num_fixed, 0);
+        vm_pk.keccak_pk = self.keccak_gkr_iop.key_gen(&vm_pk.pp, None);
 
         vm_pk.initial_global_state_expr = self.initial_global_state_expr;
         vm_pk.finalize_global_state_expr = self.finalize_global_state_expr;

@@ -1,3 +1,4 @@
+use ceno_emul::KeccakSpec;
 use ff_ext::ExtensionField;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -24,6 +25,10 @@ use witness::{RowMajorMatrix, next_pow2_instance_padding};
 use crate::{
     error::ZKVMError,
     expression::Instance,
+    instructions::{
+        Instruction,
+        riscv::{dummy::LargeEcallDummy, ecall::EcallDummy},
+    },
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
@@ -32,7 +37,8 @@ use crate::{
         },
     },
     structs::{
-        Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
+        GKRIOPProvingKey, KeccakGKRIOP, Point, ProvingKey, TowerProofs, TowerProver,
+        TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
     utils::{add_mle_list_by_expr, get_challenge_pows, optimal_sumcheck_threads},
 };
@@ -174,7 +180,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
 
-            if is_opcode_circuit {
+            if *circuit_name == <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::name() {
+                unimplemented!("keccak impl wip");
+            } else if is_opcode_circuit {
                 tracing::debug!(
                     "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
                     circuit_name,
@@ -183,10 +191,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     cs.w_expressions.len(),
                     cs.lk_expressions.len(),
                 );
+
+                // Only Keccak has non-empty GKR-IOP component
+                let gkr_iop_pk = if *circuit_name
+                    == <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::name()
+                {
+                    Some(self.pk.keccak_pk.clone())
+                } else {
+                    None
+                };
+
                 let opcode_proof = self.create_opcode_proof(
                     circuit_name,
                     &self.pk.pp,
                     pk,
+                    &gkr_iop_pk,
                     witness,
                     wits_commit,
                     &pi,
@@ -246,6 +265,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         name: &str,
         pp: &PCS::ProverParam,
         circuit_pk: &ProvingKey<E, PCS>,
+        gkr_iop_pk: &Option<GKRIOPProvingKey<E, PCS, KeccakGKRIOP<E>>>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         wits_commit: PCS::CommitmentWithWitness,
         pi: &[ArcMultilinearExtension<'_, E>],
@@ -257,6 +277,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
+
+        if let Some(gkr_iop_pk) = gkr_iop_pk {
+            let mut gkr_iop_pk = gkr_iop_pk.clone();
+            unimplemented!("cannot fully handle GKRIOP component yet")
+        }
 
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);

@@ -737,7 +737,8 @@ pub struct KeccakTrace {
 use p3_field::Field;
 
 impl<F: Field> From<RowMajorMatrix<F>> for KeccakTrace {
-    fn from(value: RowMajorMatrix<F>) -> Self {
+    fn from(rmm: RowMajorMatrix<F>) -> Self {
+        // clarify rmm encoding for large_ecall_dummy to obtain input
         unimplemented!();
     }
 }

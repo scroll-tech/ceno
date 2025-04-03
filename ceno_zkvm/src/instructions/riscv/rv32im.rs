@@ -466,7 +466,7 @@ pub struct DummyExtraConfig<E: ExtensionField> {
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        let keccak_config = cs.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>();
+        let keccak_config = cs.register_keccakf_circuit();
         let secp256k1_add_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>();
         let secp256k1_double_config =
@@ -509,7 +509,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
         fixed.register_opcode_circuit::<EcallDummy<E>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(cs);
+        fixed.register_keccakf_circuit(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
@@ -562,11 +562,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             }
         }
 
-        witness.assign_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(
-            cs,
-            &self.keccak_config,
-            keccak_steps,
-        )?;
+        witness.assign_keccakf_circuit(&cs, &self.keccak_config, keccak_steps)?;
+
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
             cs,
             &self.secp256k1_add_config,
