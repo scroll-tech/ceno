@@ -1,7 +1,7 @@
 use crate::{
     crypto::{Digest, MerkleTreeExt, write_digest_to_transcript},
     error::Error,
-    ntt::expand_from_coeff,
+    ntt::expand_from_coeff_rmm,
     utils::{self, evaluate_as_multilinear_evals, interpolate_over_boolean_hypercube_rmm},
     whir::{
         committer::Committer,
@@ -67,12 +67,12 @@ where
         let expansion = self.0.starting_domain.size() / polys[0].len();
         let expand_timer = entered_span!("Batch Expand");
         interpolate_over_boolean_hypercube_rmm(&mut rmm);
+        let rmm = expand_from_coeff_rmm(rmm, expansion);
         let polys_for_commit = rmm.to_cols_ext();
         let domain_gen_inverse = self.0.starting_domain.backing_domain_group_gen().inverse();
         let evals = polys_for_commit
-            .par_iter()
-            .flat_map(|poly| {
-                let evals = expand_from_coeff(&poly, expansion);
+            .into_par_iter()
+            .flat_map(|evals| {
                 let ret = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
                 let ret = restructure_evaluations(
                     ret,

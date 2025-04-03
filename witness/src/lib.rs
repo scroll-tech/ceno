@@ -1,8 +1,7 @@
-use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use p3::{
     dft::{Radix2DitParallel, TwoAdicSubgroupDft},
-    field::{Field, PrimeCharacteristicRing},
+    field::{Field, PrimeCharacteristicRing, TwoAdicField},
     matrix::Matrix,
 };
 use rand::{Rng, distributions::Standard, prelude::Distribution};
@@ -235,12 +234,13 @@ impl<F: Sync + Send + Copy + PrimeCharacteristicRing> Index<usize> for RowMajorM
     }
 }
 
-pub fn expand_from_coeff<F: ExtensionField>(
+pub fn expand_from_coeff<F: Ord + TwoAdicField>(
     mut coeffs: RowMajorMatrix<F>,
     expansion: usize,
 ) -> RowMajorMatrix<F> {
     let expanded_size = coeffs.height() * expansion;
     coeffs.pad_to_height(expanded_size, F::ZERO);
+    coeffs.num_rows = expanded_size;
     let dft = Radix2DitParallel::<F>::default();
     let m = coeffs.into_default_padded_p3_rmm().to_row_major_matrix();
     RowMajorMatrix::new_by_inner_matrix(

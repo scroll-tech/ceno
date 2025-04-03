@@ -9,6 +9,7 @@ mod wavelet;
 use self::matrix::MatrixMut;
 
 use ff_ext::ExtensionField;
+use p3::field::TwoAdicField;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use tracing::instrument;
@@ -63,7 +64,7 @@ pub fn expand_from_coeff<F: ExtensionField>(coeffs: &[F], expansion: usize) -> V
     result
 }
 
-pub fn expand_from_coeff_rmm<F: ExtensionField>(
+pub fn expand_from_coeff_rmm<F: TwoAdicField + Ord>(
     coeffs: RowMajorMatrix<F>,
     expansion: usize,
 ) -> RowMajorMatrix<F> {
