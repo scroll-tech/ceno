@@ -17,6 +17,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
+    util::optimal_sumcheck_threads,
 };
 use transcript::{ForkableTranscript, Transcript};
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
@@ -34,7 +35,7 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{add_mle_list_by_expr, get_challenge_pows, optimal_sumcheck_threads},
+    utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
@@ -114,25 +115,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let (witness, structural_witness) = match num_instances {
                 0 => (vec![], vec![]),
                 _ => {
-                    let witness = witness_rmm.to_mles();
                     let structural_witness = structural_witness_rmm.to_mles();
-                    commitments.insert(
-                        circuit_name.clone(),
+                    let commit =
                         PCS::batch_commit_and_write(&self.pk.pp, witness_rmm, &mut transcript)
-                            .map_err(ZKVMError::PCSError)?,
-                    );
-
+                            .map_err(ZKVMError::PCSError)?;
+                    let witness = PCS::get_arc_mle_witness_from_commitment(&commit);
+                    commitments.insert(circuit_name.clone(), commit);
                     (witness, structural_witness)
                 }
             };
             exit_span!(span);
-            wits.insert(
-                circuit_name.clone(),
-                (
-                    witness.into_iter().map(|w| w.into()).collect_vec(),
-                    num_instances,
-                ),
-            );
+            wits.insert(circuit_name.clone(), (witness, num_instances));
             structural_wits.insert(
                 circuit_name,
                 (

@@ -9,7 +9,9 @@ pub mod impl_babybear {
             TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
+        merkle_tree::MerkleTreeMmcs,
         poseidon2::ExternalLayerConstants,
+        symmetric::{PaddingFreeSponge, TruncatedPermutation},
     };
 
     use crate::{
@@ -94,20 +96,38 @@ pub mod impl_babybear {
     impl PoseidonField for BabyBear {
         type P = Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>;
         type T = DuplexChallenger<Self, Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE>;
+        type S = PaddingFreeSponge<Self::P, 16, 8, 8>;
+        type C = TruncatedPermutation<Self::P, 2, 8, 16>;
+        type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 8>;
         fn get_default_challenger() -> Self::T {
-            let p = Poseidon2BabyBear::new(
-                ExternalLayerConstants::new(
-                    BABYBEAR_RC16_EXTERNAL_INITIAL.to_vec(),
-                    BABYBEAR_RC16_EXTERNAL_FINAL.to_vec(),
-                ),
-                BABYBEAR_RC16_INTERNAL.to_vec(),
-            );
             DuplexChallenger::<
                 Self,
                 Self::P,
                 POSEIDON2_BABYBEAR_WIDTH,
                 POSEIDON2_BABYBEAR_RATE,
-            >::new(p)
+            >::new(Self::get_default_perm())
+        }
+
+        fn get_default_perm() -> Self::P {
+            Poseidon2BabyBear::new(
+                ExternalLayerConstants::new(
+                    BABYBEAR_RC16_EXTERNAL_INITIAL.to_vec(),
+                    BABYBEAR_RC16_EXTERNAL_FINAL.to_vec(),
+                ),
+                BABYBEAR_RC16_INTERNAL.to_vec(),
+            )
+        }
+
+        fn get_default_sponge() -> Self::S {
+            PaddingFreeSponge::new(Self::get_default_perm())
+        }
+
+        fn get_default_compression() -> Self::C {
+            TruncatedPermutation::new(Self::get_default_perm())
+        }
+
+        fn get_default_mmcs() -> Self::MMCS {
+            MerkleTreeMmcs::new(Self::get_default_sponge(), Self::get_default_compression())
         }
     }
 

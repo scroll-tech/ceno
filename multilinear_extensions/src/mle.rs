@@ -217,6 +217,14 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         unimplemented!("type not support")
     }
 
+    /// Create vector from field type
+    pub fn from_field_type(num_vars: usize, field_type: FieldType<E>) -> Self {
+        Self {
+            num_vars,
+            evaluations: field_type,
+        }
+    }
+
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`

@@ -14,7 +14,7 @@ proc-macro = true
 
 [dependencies]
 itertools.workspace = true
-p3 = { path = "../p3" }
+p3.workspace = true
 proc-macro2 = "1.0.92"
 quote = "1.0"
 rand.workspace = true
@@ -23,4 +23,4 @@ syn = { version = "2.0", features = ["full"] }
 [dev-dependencies]
 ff_ext = { path = "../ff_ext" }
 multilinear_extensions = { path = "../multilinear_extensions" }
-sumcheck = { path = "../sumcheck" }
+sumcheck.workspace = true

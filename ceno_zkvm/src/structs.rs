@@ -107,7 +107,7 @@ impl<F: Clone> PointAndEval<F> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
     pub fixed_commit_wd: Option<PCS::CommitmentWithWitness>,
@@ -360,8 +360,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         )
     }
 }
-
-#[derive(Debug)]
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,

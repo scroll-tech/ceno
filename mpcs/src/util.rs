@@ -2,15 +2,13 @@ pub mod arithmetic;
 pub mod expression;
 pub mod hash;
 pub mod parallel;
-pub mod plonky2_util;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools, izip};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 pub mod merkle_tree;
 use crate::{Error, util::parallel::parallelize};
 use p3::field::{PrimeCharacteristicRing, PrimeField};
-pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
     let bases = x.as_bases();
@@ -39,53 +37,6 @@ impl BitIndex for usize {
 pub fn num_of_bytes<F: PrimeField>(n: usize) -> usize {
     F::bits().next_power_of_two() * n / 8
 }
-
-macro_rules! impl_index {
-    (@ $name:ty, $field:tt, [$($range:ty => $output:ty),*$(,)?]) => {
-        $(
-            impl<E: ExtensionField> std::ops::Index<$range> for $name {
-                type Output = $output;
-
-                fn index(&self, index: $range) -> &$output {
-                    match &self.$field {
-                        FieldType::Ext(coeffs) => coeffs.index(index),
-                        FieldType::Base(_) => panic!("Cannot index base field"),
-                        _ => unreachable!()
-                    }
-                }
-            }
-
-            impl<E: ExtensionField> std::ops::IndexMut<$range> for $name {
-                fn index_mut(&mut self, index: $range) -> &mut $output {
-                    match &mut self.$field {
-                        FieldType::Ext(coeffs) => coeffs.index_mut(index),
-                        FieldType::Base(_) => panic!("Cannot index base field"),
-                        _ => unreachable!()
-                    }
-                }
-            }
-        )*
-    };
-    (@ $name:ty, $field:tt) => {
-        impl_index!(
-            @ $name, $field,
-            [
-                usize => E,
-                std::ops::Range<usize> => [E],
-                std::ops::RangeFrom<usize> => [E],
-                std::ops::RangeFull => [E],
-                std::ops::RangeInclusive<usize> => [E],
-                std::ops::RangeTo<usize> => [E],
-                std::ops::RangeToInclusive<usize> => [E],
-            ]
-        );
-    };
-    ($name:ident, $field:tt) => {
-        impl_index!(@ $name<E>, $field);
-    };
-}
-
-pub(crate) use impl_index;
 
 pub fn poly_index_ext<E: ExtensionField>(poly: &DenseMultilinearExtension<E>, index: usize) -> E {
     match &poly.evaluations {
