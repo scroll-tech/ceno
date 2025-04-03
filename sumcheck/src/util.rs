@@ -8,8 +8,10 @@ use std::{
 
 use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, op_mle, virtual_poly::VirtualPolynomial,
+    virtual_polys::PolyMeta,
 };
 use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
@@ -219,24 +221,32 @@ pub(crate) fn merge_sumcheck_polys<'a, E: ExtensionField>(
     let log2_max_thread_id = ceil_log2(max_thread_id);
     let mut poly = prover_states[0].poly.clone(); // giving only one evaluation left, this clone is low cost.
     poly.aux_info.max_num_variables = log2_max_thread_id; // size_log2 variates sumcheck
-    for i in 0..poly.flattened_ml_extensions.len() {
-        let ml_ext = DenseMultilinearExtension::from_evaluations_ext_vec(
-            log2_max_thread_id,
-            prover_states
-                .iter()
-                .map(|prover_state| {
-                    let mle = &prover_state.poly.flattened_ml_extensions[i];
-                    op_mle!(
-                        mle,
-                        |f| {
-                            assert!(f.len() == 1);
-                            f[0]
-                        },
-                        |_v| unreachable!()
-                    )
-                })
-                .collect::<Vec<E>>(),
-        );
+    let poly_index_meta = &prover_states[0].poly_index_meta;
+    for (i, poly_meta) in (0..poly.flattened_ml_extensions.len()).zip_eq(poly_index_meta) {
+        let ml_ext = match poly_meta {
+            PolyMeta::Normal => DenseMultilinearExtension::from_evaluations_ext_vec(
+                log2_max_thread_id,
+                prover_states
+                    .iter()
+                    .flat_map(|prover_state| {
+                        let mle = &prover_state.poly.flattened_ml_extensions[i];
+                        op_mle!(mle, |f| f.to_vec(), |_v| unreachable!())
+                    })
+                    .collect::<Vec<E>>(),
+            ),
+            PolyMeta::Phase2Only => {
+                let poly = &prover_states[0].poly.flattened_ml_extensions[i];
+                assert!(poly.num_vars() <= log2_max_thread_id);
+                let blow_factor = 1 << (log2_max_thread_id - poly.num_vars());
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    log2_max_thread_id,
+                    poly.get_base_field_vec()
+                        .iter()
+                        .flat_map(|e| std::iter::repeat(E::from(*e)).take(blow_factor))
+                        .collect_vec(),
+                )
+            }
+        };
         poly.flattened_ml_extensions[i] = Arc::new(ml_ext);
     }
     poly

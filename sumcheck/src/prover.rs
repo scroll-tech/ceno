@@ -5,7 +5,11 @@ use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::FieldType, op_mle, util::largest_even_below, virtual_poly::VirtualPolynomial,
+    mle::FieldType,
+    op_mle,
+    util::largest_even_below,
+    virtual_poly::VirtualPolynomial,
+    virtual_polys::{PolyMeta, VirtualPolynomials},
 };
 use rayon::{
     Scope,
@@ -32,10 +36,12 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// "bould_poly" so it can be more isolation
     #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys", level = "trace")]
     pub fn prove_batch_polys(
-        max_thread_id: usize,
-        mut polys: Vec<VirtualPolynomial<'a, E>>,
+        virtual_poly: VirtualPolynomials<'a, E>,
         transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverState<'a, E>) {
+        let max_thread_id = virtual_poly.num_threads;
+        let (mut polys, poly_meta) = virtual_poly.get_batched_polys();
+
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
         assert!(max_thread_id.is_power_of_two());
@@ -85,6 +91,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
                     mem::take(poly),
                     extrapolation_aux.clone(),
+                    Some(log2_max_thread_id),
+                    Some(poly_meta.clone()),
                 );
                 let tx_prover_state = tx_prover_state.clone();
                 let mut thread_based_transcript = thread_based_transcript.clone();
@@ -127,6 +135,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
                 mem::take(&mut polys[main_thread_id]),
                 extrapolation_aux.clone(),
+                Some(log2_max_thread_id),
+                Some(poly_meta.clone()),
             );
             let tx_prover_state = tx_prover_state.clone();
             let mut thread_based_transcript = thread_based_transcript.clone();
@@ -225,7 +235,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         // second stage sumcheck
         let poly = merge_sumcheck_polys(&prover_states, max_thread_id);
         let mut prover_state =
-            Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone());
+            Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone(), None, None);
 
         let mut challenge = None;
         let span = entered_span!("prove_rounds_stage2");
@@ -273,23 +283,35 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     pub fn prover_init_with_extrapolation_aux(
         polynomial: VirtualPolynomial<'a, E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
+        phase2_numvar: Option<usize>,
+        poly_index_meta: Option<Vec<PolyMeta>>,
     ) -> Self {
         let start = start_timer!(|| "sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
         );
+        if let Some(poly_meta) = poly_index_meta.as_ref() {
+            assert_eq!(
+                poly_meta.len(),
+                polynomial.flattened_ml_extensions.len(),
+                "num_vars too small for concurrency"
+            );
+        }
         end_timer!(start);
 
         let max_degree = polynomial.aux_info.max_degree;
         assert!(extrapolation_aux.len() == max_degree - 1);
         let num_polys = polynomial.flattened_ml_extensions.len();
+
         Self {
             max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
             extrapolation_aux,
+            poly_index_meta: poly_index_meta.unwrap_or_else(|| vec![PolyMeta::Normal; num_polys]),
+            phase2_numvar,
             poly_index_fixvar_in_place: vec![false; num_polys],
         }
     }
@@ -348,26 +370,56 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let span = entered_span!("products_sum");
         let AdditiveVec(products_sum) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-            |mut products_sum, (coefficient, products)| {
+            |mut products_sum, (coefficient, prod)| {
                 let span = entered_span!("sum");
                 let f = &self.poly.flattened_ml_extensions;
-                let mut sum: Vec<E> = match products.len() {
-                    1 => sumcheck_code_gen!(1, false, |i| &f[products[i]]).to_vec(),
-                    2 => sumcheck_code_gen!(2, false, |i| &f[products[i]]).to_vec(),
-                    3 => sumcheck_code_gen!(3, false, |i| &f[products[i]]).to_vec(),
-                    4 => sumcheck_code_gen!(4, false, |i| &f[products[i]]).to_vec(),
-                    5 => sumcheck_code_gen!(5, false, |i| &f[products[i]]).to_vec(),
-                    _ => unimplemented!("do not support degree {} > 5", products.len()),
+                let f_type = &self.poly_index_meta;
+                let multi_f = |num_var: usize| {
+                    match f_type[prod[0]] {
+                        PolyMeta::Normal => {
+                            // calculate multiplicity term
+                            // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                            self.expected_numvars_at_round()
+                                .saturating_sub(1)
+                                .saturating_sub(num_var)
+                        }
+                        // polynomial num_var <= phase2 numvar
+                        PolyMeta::Phase2Only => self
+                            .expected_numvars_at_round()
+                            // the expected num_vars if working on single thread sumcheck
+                            .saturating_add(self.phase2_numvar.unwrap_or(0))
+                            // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                            .saturating_sub(1)
+                            // the multiplicity
+                            .saturating_sub(num_var)
+                            // we need to divide by 1 << phase2_numvar as it duplicated many times
+                            // NOTE we add it earlier then subtract, but we still keep both for documentation purpose
+                            .saturating_sub(self.phase2_numvar.unwrap_or(0)),
+                    }
+                };
+
+                let mut sum: Vec<E> = match prod.len() {
+                    1 => sumcheck_code_gen!(1, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                        .to_vec(),
+                    2 => sumcheck_code_gen!(2, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                        .to_vec(),
+                    3 => sumcheck_code_gen!(3, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                        .to_vec(),
+                    4 => sumcheck_code_gen!(4, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                        .to_vec(),
+                    5 => sumcheck_code_gen!(5, false, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                        .to_vec(),
+                    _ => unimplemented!("do not support degree {} > 5", prod.len()),
                 };
                 exit_span!(span);
 
                 sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                 let span = entered_span!("extrapolation");
-                let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
+                let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
                     .map(|i| {
-                        let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                        let at = E::from_u64((products.len() + 1 + i) as u64);
+                        let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
+                        let at = E::from_u64((prod.len() + 1 + i) as u64);
                         serial_extrapolate(points, weights, &sum, &at)
                     })
                     .collect::<Vec<_>>();
@@ -420,19 +472,22 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         self.poly_index_fixvar_in_place
             .iter_mut()
             .zip_eq(self.poly.flattened_ml_extensions.iter_mut())
-            .for_each(|(can_fixvar_in_place, poly)| {
-                debug_assert!(poly.num_vars() <= expected_numvars_at_round);
+            .zip_eq(&self.poly_index_meta)
+            .for_each(|((can_fixvar_in_place, poly), poly_type)| {
                 debug_assert!(poly.num_vars() > 0);
                 if *can_fixvar_in_place {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
+                        debug_assert!(f.num_vars() <= expected_numvars_at_round);
                         if f.num_vars() > 0 {
                             f.fix_variables_in_place(&[r])
                         }
                     };
                 } else if poly.num_vars() > 0 {
-                    if expected_numvars_at_round == poly.num_vars() {
+                    if expected_numvars_at_round == poly.num_vars()
+                        && matches!(poly_type, PolyMeta::Normal)
+                    {
                         *poly = Arc::new(poly.fix_variables(&[r]));
                         *can_fixvar_in_place = true;
                     }
@@ -524,6 +579,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         let max_degree = polynomial.aux_info.max_degree;
         let num_polys = polynomial.flattened_ml_extensions.len();
+        let poly_index_meta = vec![PolyMeta::Normal; num_polys];
         let prover_state = Self {
             max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
@@ -536,6 +592,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     (points, weights)
                 })
                 .collect(),
+            poly_index_meta,
+            phase2_numvar: None,
             poly_index_fixvar_in_place: vec![false; num_polys],
         };
 
@@ -597,27 +655,66 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .par_iter()
             .fold_with(
                 AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-                |mut products_sum, (coefficient, products)| {
+                |mut products_sum, (coefficient, prod)| {
                     let span = entered_span!("sum");
 
                     let f = &self.poly.flattened_ml_extensions;
-                    let mut sum: Vec<E> = match products.len() {
-                        1 => sumcheck_code_gen!(1, true, |i| &f[products[i]]).to_vec(),
-                        2 => sumcheck_code_gen!(2, true, |i| &f[products[i]]).to_vec(),
-                        3 => sumcheck_code_gen!(3, true, |i| &f[products[i]]).to_vec(),
-                        4 => sumcheck_code_gen!(4, true, |i| &f[products[i]]).to_vec(),
-                        5 => sumcheck_code_gen!(5, true, |i| &f[products[i]]).to_vec(),
-                        _ => unimplemented!("do not support degree {} > 5", products.len()),
+                    let f_type = &self.poly_index_meta;
+                    let multi_f = |num_var: usize| {
+                        match f_type[prod[0]] {
+                            PolyMeta::Normal => {
+                                // calculate multiplicity term
+                                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                                self.expected_numvars_at_round()
+                                    .saturating_sub(1)
+                                    .saturating_sub(num_var)
+                            }
+                            // polynomial num_var <= phase2 numvar
+                            PolyMeta::Phase2Only => self
+                                .expected_numvars_at_round()
+                                // the expected num_vars if working on single thread sumcheck
+                                .saturating_add(self.phase2_numvar.unwrap_or(0))
+                                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                                .saturating_sub(1)
+                                // the multiplicity
+                                .saturating_sub(num_var)
+                                // we need to divide by 1 << phase2_numvar as it duplicated many times
+                                // NOTE we add it earlier then subtract, but we still keep both for documentation purpose
+                                .saturating_sub(self.phase2_numvar.unwrap_or(0)),
+                        }
+                    };
+                    let mut sum: Vec<E> = match prod.len() {
+                        1 => {
+                            sumcheck_code_gen!(1, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                                .to_vec()
+                        }
+                        2 => {
+                            sumcheck_code_gen!(2, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                                .to_vec()
+                        }
+                        3 => {
+                            sumcheck_code_gen!(3, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                                .to_vec()
+                        }
+                        4 => {
+                            sumcheck_code_gen!(4, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                                .to_vec()
+                        }
+                        5 => {
+                            sumcheck_code_gen!(5, true, |i| &f[prod[i]], |num_var| multi_f(num_var))
+                                .to_vec()
+                        }
+                        _ => unimplemented!("do not support degree {} > 5", prod.len()),
                     };
                     exit_span!(span);
                     sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                     let span = entered_span!("extrapolation");
-                    let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
+                    let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
                         .into_par_iter()
                         .map(|i| {
-                            let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                            let at = E::from_u64((products.len() + 1 + i) as u64);
+                            let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
+                            let at = E::from_u64((prod.len() + 1 + i) as u64);
                             extrapolate(points, weights, &sum, &at)
                         })
                         .collect::<Vec<_>>();

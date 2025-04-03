@@ -22,8 +22,9 @@ fn main() {
 
 impl<E: ExtensionField> Container<'_, E> {
     pub fn run(&self) {
-        let _result: AdditiveArray<_, 4> =
-            sumcheck_macro::sumcheck_code_gen!(3, false, |_| &self.poly.flattened_ml_extensions[0]);
+        let echo = |n| n;
+        let poly = &self.poly.flattened_ml_extensions;
+        let _result = sumcheck_macro::sumcheck_code_gen!(3, false, |_| &poly[0], |n| echo(n));
     }
 
     pub fn expected_numvars_at_round(&self) -> usize {

@@ -1276,8 +1276,7 @@ impl TowerProver {
                 // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
                 // This is likely a bug in the tracing-flame crate.
                 let (sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
-                    num_threads,
-                    virtual_polys.get_batched_polys(),
+                    virtual_polys,
                     transcript,
                 );
                 exit_span!(wrap_batch_span);

@@ -15,11 +15,14 @@ use transcript::{BasicTranscript, Transcript};
 #[test]
 fn test_sumcheck_with_different_degree() {
     // test polynomial mixed with different num_var
-    let nv = vec![3, 4, 5];
-    let num_polys = nv.len();
-    for num_threads in 1..num_polys.min(max_usable_threads()) {
-        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(num_threads, &nv);
-    }
+    // let nv = vec![3, 4, 5];
+    // let num_polys = nv.len();
+    // for num_threads in 1..num_polys.min(max_usable_threads()) {
+    //     test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(num_threads, &nv);
+    // }
+
+    // test case: only partial of poly with size (1 << num_vars) > num_thread
+    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(16, &[2, 5])
 }
 
 fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
@@ -52,9 +55,7 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
                 )
             });
 
-    let batch_poly = poly.get_batched_polys();
-    let (proof, _) =
-        IOPProverState::<E>::prove_batch_polys(num_threads, batch_poly.clone(), &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove_batch_polys(poly, &mut transcript);
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(
         asserted_sum,

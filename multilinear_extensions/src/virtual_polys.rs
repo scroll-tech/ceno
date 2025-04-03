@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use crate::{
     util::ceil_log2,
@@ -6,14 +9,23 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use p3::util::log2_strict_usize;
 
 use crate::util::transpose;
 
+#[derive(Debug, Default, Clone, Copy)]
+pub enum PolyMeta {
+    #[default]
+    Normal,
+    Phase2Only,
+}
+
 pub struct VirtualPolynomials<'a, E: ExtensionField> {
-    num_threads: usize,
+    pub num_threads: usize,
     polys: Vec<VirtualPolynomial<'a, E>>,
     /// a storage to keep thread based mles, specific to multi-thread logic
     thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
+    pub(crate) poly_index_meta: BTreeMap<usize, PolyMeta>,
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
@@ -25,6 +37,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 .map(|_| VirtualPolynomial::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
             thread_based_mles_storage: HashMap::new(),
+            poly_index_meta: BTreeMap::new(),
         }
     }
 
@@ -44,32 +57,52 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     }
 
     pub fn add_mle_list(&mut self, polys: Vec<&'a ArcMultilinearExtension<'a, E>>, coeff: E) {
-        let polys = polys
+        let log2_num_threads = log2_strict_usize(self.num_threads);
+        let (poly_meta, polys): (Vec<PolyMeta>, Vec<Vec<ArcMultilinearExtension<E>>>) = polys
             .into_iter()
             .map(|p| {
                 let mle_ptr: usize = Arc::as_ptr(p) as *const () as usize;
-                if let Some(mles) = self.thread_based_mles_storage.get(&mle_ptr) {
+                let poly_meta = if p.num_vars() > log2_num_threads {
+                    PolyMeta::Normal
+                } else {
+                    // polynomial is too small
+                    PolyMeta::Phase2Only
+                };
+                let mles_cloned = if let Some(mles) = self.thread_based_mles_storage.get(&mle_ptr) {
                     mles.clone()
                 } else {
                     let mles = (0..self.num_threads)
-                        .map(|thread_id| {
-                            self.get_range_polys_by_thread_id(thread_id, vec![p])
-                                .remove(0)
+                        .map(|thread_id| match poly_meta {
+                            PolyMeta::Normal => self
+                                .get_range_polys_by_thread_id(thread_id, vec![p])
+                                .remove(0),
+                            PolyMeta::Phase2Only => Arc::new(p.get_ranged_mle(1, 0)),
                         })
                         .collect_vec();
                     let mles_cloned = mles.clone();
                     self.thread_based_mles_storage.insert(mle_ptr, mles);
                     mles_cloned
-                }
+                };
+                (poly_meta, mles_cloned)
             })
-            .collect_vec();
+            .unzip();
 
         // poly -> thread to thread -> poly
         let polys = transpose(polys);
-        (0..self.num_threads)
+        let poly_index: &[usize] = self
+            .polys
+            .iter_mut()
             .zip_eq(polys)
-            .for_each(|(thread_id, polys)| {
-                self.polys[thread_id].add_mle_list(polys, coeff);
+            .map(|(poly, polys)| poly.add_mle_list(polys, coeff))
+            .collect_vec()
+            .first()
+            .expect("expect to get at index from first thread");
+
+        poly_index
+            .iter()
+            .zip_eq(&poly_meta)
+            .for_each(|(index, poly_meta)| {
+                self.poly_index_meta.insert(*index, *poly_meta);
             });
     }
 
@@ -84,8 +117,14 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         }
     }
 
-    pub fn get_batched_polys(self) -> Vec<VirtualPolynomial<'a, E>> {
-        self.polys
+    /// return thread_based polynomial with its polynomial type
+    pub fn get_batched_polys(self) -> (Vec<VirtualPolynomial<'a, E>>, Vec<PolyMeta>) {
+        let mut poly_index_meta =
+            vec![PolyMeta::Normal; self.polys[0].flattened_ml_extensions.len()];
+        for (index, poly_meta) in self.poly_index_meta {
+            poly_index_meta[index] = poly_meta
+        }
+        (self.polys, poly_index_meta)
     }
 
     pub fn degree(&self) -> usize {

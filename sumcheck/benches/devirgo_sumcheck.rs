@@ -1,19 +1,21 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use std::{array, time::Duration};
+use std::time::Duration;
 
 use ark_std::test_rng;
 use criterion::*;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::Itertools;
-use sumcheck::{structs::IOPProverState, util::ceil_log2};
+use p3::field::PrimeCharacteristicRing;
+use sumcheck::structs::IOPProverState;
 
 use multilinear_extensions::{
     mle::DenseMultilinearExtension,
     op_mle,
     util::max_usable_threads,
     virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
+    virtual_polys::VirtualPolynomials,
 };
 use transcript::BasicTranscript as Transcript;
 
@@ -39,49 +41,15 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
         .collect()
 }
 
-fn prepare_input<'a, E: ExtensionField>(
-    nv: usize,
-) -> (E, VirtualPolynomial<'a, E>, Vec<VirtualPolynomial<'a, E>>) {
+fn prepare_input<'a, E: ExtensionField>(nv: usize) -> (E, Vec<ArcMultilinearExtension<'a, E>>) {
     let mut rng = test_rng();
-    let max_thread_id = max_usable_threads();
-    let size_log2 = ceil_log2(max_thread_id);
-    let fs: [ArcMultilinearExtension<'a, E>; NUM_DEGREE] = array::from_fn(|_| {
-        let mle: ArcMultilinearExtension<'a, E> =
-            DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
-        mle
-    });
-
-    let mut virtual_poly_v1 = VirtualPolynomial::new(nv);
-    virtual_poly_v1.add_mle_list(fs.to_vec(), E::ONE);
-
-    // devirgo version
-    let virtual_poly_v2: Vec<Vec<ArcMultilinearExtension<'a, E>>> = transpose(
-        fs.iter()
-            .map(|f| match &f.evaluations() {
-                multilinear_extensions::mle::FieldType::Base(evaluations) => evaluations
-                    .chunks((1 << nv) >> size_log2)
-                    .map(|chunk| {
-                        let mle: ArcMultilinearExtension<'a, E> =
-                            DenseMultilinearExtension::<E>::from_evaluations_vec(
-                                nv - size_log2,
-                                chunk.to_vec(),
-                            )
-                            .into();
-                        mle
-                    })
-                    .collect_vec(),
-                _ => unreachable!(),
-            })
-            .collect(),
-    );
-    let virtual_poly_v2: Vec<VirtualPolynomial<E>> = virtual_poly_v2
-        .into_iter()
-        .map(|fs| {
-            let mut virtual_polynomial = VirtualPolynomial::new(fs[0].num_vars());
-            virtual_polynomial.add_mle_list(fs, E::ONE);
-            virtual_polynomial
+    let fs = (0..NUM_DEGREE)
+        .map(|_| {
+            let mle: ArcMultilinearExtension<'a, E> =
+                DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
+            mle
         })
-        .collect();
+        .collect_vec();
 
     let asserted_sum = fs
         .iter()
@@ -97,7 +65,7 @@ fn prepare_input<'a, E: ExtensionField>(
         .cloned()
         .sum::<E>();
 
-    (asserted_sum, virtual_poly_v1, virtual_poly_v2)
+    (asserted_sum, fs)
 }
 
 fn sumcheck_fn(c: &mut Criterion) {
@@ -116,12 +84,15 @@ fn sumcheck_fn(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
                         let mut prover_transcript = Transcript::new(b"test");
-                        let (_, virtual_poly, _) = { prepare_input(nv) };
+                        let (_, fs) = { prepare_input(nv) };
+
+                        let mut virtual_poly_v1 = VirtualPolynomial::new(nv);
+                        virtual_poly_v1.add_mle_list(fs.to_vec(), E::ONE);
 
                         let instant = std::time::Instant::now();
                         #[allow(deprecated)]
                         let (_sumcheck_proof_v1, _) = IOPProverState::<E>::prove_parallel(
-                            virtual_poly.clone(),
+                            virtual_poly_v1,
                             &mut prover_transcript,
                         );
                         let elapsed = instant.elapsed();
@@ -153,12 +124,14 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
                         let mut prover_transcript = Transcript::new(b"test");
-                        let (_, _, virtual_poly_splitted) = { prepare_input(nv) };
+                        let (_, fs) = { prepare_input(nv) };
+
+                        let mut virtual_poly_v2 = VirtualPolynomials::new(threads, nv);
+                        virtual_poly_v2.add_mle_list(fs.iter().collect_vec(), E::ONE);
 
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) = IOPProverState::<E>::prove_batch_polys(
-                            threads,
-                            virtual_poly_splitted,
+                            virtual_poly_v2,
                             &mut prover_transcript,
                         );
                         let elapsed = instant.elapsed();

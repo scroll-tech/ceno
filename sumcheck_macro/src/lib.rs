@@ -15,6 +15,8 @@ struct SumcheckCodegenMacroInput {
     parallalize: LitBool,
     /// Closure that gives access to the mle product
     product_access: ExprClosure,
+    /// Closure that retrieve multiplicity
+    get_multiplicity: ExprClosure,
 }
 
 impl Parse for SumcheckCodegenMacroInput {
@@ -25,18 +27,33 @@ impl Parse for SumcheckCodegenMacroInput {
         let parallalize: LitBool = input.parse()?; // `<bool>`
         input.parse::<Token![,]>()?; // `,`
 
-        let expr = input.parse()?;
-        match expr {
-            Expr::Closure(product_access) => Ok(Self {
-                degree,
-                parallalize,
-                product_access,
-            }),
+        let expr1: Expr = input.parse()?;
+        input.parse::<Token![,]>()?; // `,`
+
+        let expr2: Expr = input.parse()?;
+
+        let product_access = match expr1 {
+            Expr::Closure(product_access) => product_access,
             _ => Err(syn::Error::new_spanned(
-                expr,
+                expr1,
                 "Expected closure that gives access to the mle product",
-            )),
-        }
+            ))?,
+        };
+
+        let get_multiplicity = match expr2 {
+            Expr::Closure(get_multiplicity) => get_multiplicity,
+            _ => Err(syn::Error::new_spanned(
+                expr2,
+                "Expected closure that get multiplicity",
+            ))?,
+        };
+
+        Ok(Self {
+            degree,
+            parallalize,
+            product_access,
+            get_multiplicity,
+        })
     }
 }
 
@@ -49,6 +66,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let degree = input.degree.base10_parse::<u32>().unwrap();
     let parallalize = input.parallalize.value;
     let product_access = input.product_access;
+    let get_multiplicity = input.get_multiplicity;
 
     // Part 1 - Declare f vars
     // Code output
@@ -261,9 +279,8 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                         #product
                     },
                 ).sum();
-                // calculate multiplicity term
-                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
-                let num_vars_multiplicity = self.expected_numvars_at_round().saturating_sub(1).saturating_sub(num_var);
+                let get_multiplicity = #get_multiplicity;
+                let num_vars_multiplicity = get_multiplicity(num_var);
                 if num_vars_multiplicity > 0 {
                     sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
                 }
