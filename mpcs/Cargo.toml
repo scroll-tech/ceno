@@ -32,8 +32,9 @@ rayon = { workspace = true, optional = true }
 serde.workspace = true
 sumcheck.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 transcript = { path = "../transcript" }
-whir = { path = "../whir", features = ["ceno"] }
+whir = { path = "../whir" }
 witness = { path = "../witness" }
 zeroize = "1.8"
 

@@ -194,11 +194,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .opcode_proofs
-                    .insert(circuit_name.clone(), (i, opcode_proof));
+                    .insert(circuit_name.to_string(), (i, opcode_proof));
             } else {
                 let (structural_witness, structural_num_instances) = structural_wits
                     .remove(circuit_name)
-                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
+                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
                 let (table_proof, pi_in_evals) = self.create_table_proof(
                     circuit_name,
                     &self.pk.pp,
@@ -218,7 +218,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .table_proofs
-                    .insert(circuit_name.clone(), (i, table_proof));
+                    .insert(circuit_name.to_string(), (i, table_proof));
                 for (idx, eval) in pi_in_evals {
                     vm_proof.update_pi_eval(idx, eval);
                 }

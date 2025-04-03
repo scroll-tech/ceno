@@ -7,7 +7,8 @@ use super::{
     transpose,
     utils::{lcm, sqrt_factor, workload_size},
 };
-use ark_ff::{FftField, Field};
+use ff_ext::ExtensionField;
+use p3::field::{Field, TwoAdicField};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -44,26 +45,26 @@ pub struct NttEngine<F: Field> {
 }
 
 /// Compute the NTT of a slice of field elements using a cached engine.
-pub fn ntt<F: FftField>(values: &mut [F]) {
+pub fn ntt<F: ExtensionField>(values: &mut [F]) {
     NttEngine::<F>::new_from_cache().ntt(values);
 }
 
 /// Compute the many NTTs of size `size` using a cached engine.
-pub fn ntt_batch<F: FftField>(values: &mut [F], size: usize) {
+pub fn ntt_batch<F: ExtensionField>(values: &mut [F], size: usize) {
     NttEngine::<F>::new_from_cache().ntt_batch(values, size);
 }
 
 /// Compute the inverse NTT of a slice of field element without the 1/n scaling factor, using a cached engine.
-pub fn intt<F: FftField>(values: &mut [F]) {
+pub fn intt<F: ExtensionField>(values: &mut [F]) {
     NttEngine::<F>::new_from_cache().intt(values);
 }
 
 /// Compute the inverse NTT of multiple slice of field elements, each of size `size`, without the 1/n scaling factor and using a cached engine.
-pub fn intt_batch<F: FftField>(values: &mut [F], size: usize) {
+pub fn intt_batch<F: TwoAdicField>(values: &mut [F], size: usize) {
     NttEngine::<F>::new_from_cache().intt_batch(values, size);
 }
 
-impl<F: FftField> NttEngine<F> {
+impl<F: TwoAdicField> NttEngine<F> {
     /// Get or create a cached engine for the field `F`.
     pub fn new_from_cache() -> Arc<Self> {
         let mut cache = ENGINE_CACHE.lock().unwrap();
@@ -71,20 +72,24 @@ impl<F: FftField> NttEngine<F> {
         if let Some(engine) = cache.get(&type_id) {
             engine.clone().downcast::<NttEngine<F>>().unwrap()
         } else {
-            let engine = Arc::new(NttEngine::new_from_fftfield());
+            let engine = Arc::new(NttEngine::new_from_extension_field());
             cache.insert(type_id, engine.clone());
             engine
         }
     }
 
-    /// Construct a new engine from the field's `FftField` trait.
-    fn new_from_fftfield() -> Self {
+    /// Construct a new engine from the field's `ExtensionField` trait.
+    fn new_from_extension_field() -> Self {
         // TODO: Support SMALL_SUBGROUP
-        if F::TWO_ADICITY <= 63 {
-            Self::new(1 << F::TWO_ADICITY, F::TWO_ADIC_ROOT_OF_UNITY)
+        if <F as TwoAdicField>::TWO_ADICITY <= 63 {
+            Self::new(
+                1 << <F as TwoAdicField>::TWO_ADICITY,
+                <F as TwoAdicField>::two_adic_generator(<F as TwoAdicField>::TWO_ADICITY),
+            )
         } else {
-            let mut generator = F::TWO_ADIC_ROOT_OF_UNITY;
-            for _ in 0..(F::TWO_ADICITY - 63) {
+            let mut generator =
+                <F as TwoAdicField>::two_adic_generator(<F as TwoAdicField>::TWO_ADICITY);
+            for _ in 0..(<F as TwoAdicField>::TWO_ADICITY - 63) {
                 generator = generator.square();
             }
             Self::new(1 << 63, generator)
@@ -97,8 +102,8 @@ impl<F: Field> NttEngine<F> {
     pub fn new(order: usize, omega_order: F) -> Self {
         assert!(order.trailing_zeros() > 0, "Order must be a multiple of 2.");
         // TODO: Assert that omega factors into 2s and 3s.
-        assert_eq!(omega_order.pow([order as u64]), F::ONE);
-        assert_ne!(omega_order.pow([order as u64 / 2]), F::ONE);
+        assert_eq!(omega_order.exp_u64(order as u64), F::ONE);
+        assert_ne!(omega_order.exp_u64(order as u64 / 2), F::ONE);
         let mut res = NttEngine {
             order,
             omega_order,
@@ -116,20 +121,20 @@ impl<F: Field> NttEngine<F> {
             let omega_3_1 = res.root(3);
             let omega_3_2 = omega_3_1 * omega_3_1;
             // Note: char F cannot be 2 and so division by 2 works, because primitive roots of unity with even order exist.
-            res.half_omega_3_1_min_2 = (omega_3_1 - omega_3_2) / F::from(2u64);
-            res.half_omega_3_1_plus_2 = (omega_3_1 + omega_3_2) / F::from(2u64);
+            res.half_omega_3_1_min_2 = (omega_3_1 - omega_3_2) / F::from_u64(2u64);
+            res.half_omega_3_1_plus_2 = (omega_3_1 + omega_3_2) / F::from_u64(2u64);
         }
         if order % 4 == 0 {
             res.omega_4_1 = res.root(4);
         }
         if order % 8 == 0 {
             res.omega_8_1 = res.root(8);
-            res.omega_8_3 = res.omega_8_1.pow([3]);
+            res.omega_8_3 = res.omega_8_1.exp_u64(3);
         }
         if order % 16 == 0 {
             res.omega_16_1 = res.root(16);
-            res.omega_16_3 = res.omega_16_1.pow([3]);
-            res.omega_16_9 = res.omega_16_1.pow([9]);
+            res.omega_16_3 = res.omega_16_1.exp_u64(3);
+            res.omega_16_9 = res.omega_16_1.exp_u64(9);
         }
         res
     }
@@ -170,9 +175,11 @@ impl<F: Field> NttEngine<F> {
     pub fn root(&self, order: usize) -> F {
         assert!(
             self.order % order == 0,
-            "Subgroup of requested order does not exist."
+            "Subgroup of requested order {} does not exist. Total order is {}.",
+            order,
+            self.order
         );
-        self.omega_order.pow([(self.order / order) as u64])
+        self.omega_order.exp_u64((self.order / order) as u64)
     }
 
     /// Returns a cached table of roots of unity of the given order.
@@ -208,7 +215,7 @@ impl<F: Field> NttEngine<F> {
                 #[cfg(feature = "parallel")]
                 roots.par_extend((0..size).into_par_iter().map_with(F::ZERO, |root_i, i| {
                     if root_i.is_zero() {
-                        *root_i = root.pow([i as u64]);
+                        *root_i = root.exp_u64(i as u64);
                     } else {
                         *root_i *= root;
                     }
