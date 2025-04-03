@@ -60,11 +60,11 @@ pub fn intt<F: ExtensionField>(values: &mut [F]) {
 }
 
 /// Compute the inverse NTT of multiple slice of field elements, each of size `size`, without the 1/n scaling factor and using a cached engine.
-pub fn intt_batch<F: ExtensionField>(values: &mut [F], size: usize) {
+pub fn intt_batch<F: TwoAdicField>(values: &mut [F], size: usize) {
     NttEngine::<F>::new_from_cache().intt_batch(values, size);
 }
 
-impl<F: ExtensionField> NttEngine<F> {
+impl<F: TwoAdicField> NttEngine<F> {
     /// Get or create a cached engine for the field `F`.
     pub fn new_from_cache() -> Arc<Self> {
         let mut cache = ENGINE_CACHE.lock().unwrap();
@@ -84,10 +84,11 @@ impl<F: ExtensionField> NttEngine<F> {
         if <F as TwoAdicField>::TWO_ADICITY <= 63 {
             Self::new(
                 1 << <F as TwoAdicField>::TWO_ADICITY,
-                F::TWO_ADIC_ROOT_OF_UNITY,
+                <F as TwoAdicField>::two_adic_generator(<F as TwoAdicField>::TWO_ADICITY),
             )
         } else {
-            let mut generator = F::TWO_ADIC_ROOT_OF_UNITY;
+            let mut generator =
+                <F as TwoAdicField>::two_adic_generator(<F as TwoAdicField>::TWO_ADICITY);
             for _ in 0..(<F as TwoAdicField>::TWO_ADICITY - 63) {
                 generator = generator.square();
             }

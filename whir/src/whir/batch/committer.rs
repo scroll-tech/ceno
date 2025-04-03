@@ -5,7 +5,7 @@ use crate::{
     utils::{self, evaluate_as_multilinear_evals, interpolate_over_boolean_hypercube_rmm},
     whir::{
         committer::Committer,
-        fold::{expand_from_univariate, restructure_evaluations},
+        fold::{expand_from_univariate, restructure_evaluations_mut},
         verifier::WhirCommitmentInTranscript,
     },
 };
@@ -68,42 +68,32 @@ where
         let expand_timer = entered_span!("Batch Expand");
         interpolate_over_boolean_hypercube_rmm(&mut rmm);
         let rmm = expand_from_coeff_rmm(rmm, expansion);
-        let polys_for_commit = rmm.to_cols_ext();
-        let domain_gen_inverse = self.0.starting_domain.backing_domain_group_gen().inverse();
-        let evals = polys_for_commit
-            .into_par_iter()
-            .flat_map(|evals| {
-                let ret = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
-                let ret = restructure_evaluations(
-                    ret,
-                    self.0.fold_optimisation,
-                    domain_gen_inverse,
-                    self.0.folding_factor.at_round(0),
-                );
-                ret
-            })
-            .collect::<Vec<_>>();
+        let mut rmm = rmm.transpose();
+        let domain_gen_inverse = self.0.starting_domain.base_domain_group_gen_inv();
+        rmm.par_rows_mut().for_each(|row| {
+            utils::stack_evaluations_mut(row, self.0.folding_factor.at_round(0));
+            restructure_evaluations_mut(
+                row,
+                self.0.fold_optimisation,
+                domain_gen_inverse,
+                self.0.folding_factor.at_round(0),
+            );
+        });
+        let rmm = rmm.transpose();
         exit_span!(expand_timer);
-
-        // These stacking operations are bottleneck of the commitment process.
-        // Try to finish the tasks with as few allocations as possible.
-        let mut buffer = Vec::with_capacity(evals.len());
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            buffer.set_len(evals.len());
-        }
-        let horizontal_stacking_timer = entered_span!("Stacking again");
-        let folded_evals = super::utils::stack_evaluations(evals, num_polys, buffer.as_mut_slice());
-        exit_span!(horizontal_stacking_timer);
 
         // Group folds together as a leaf.
         let fold_size = 1 << self.0.folding_factor.at_round(0);
         let merkle_build_timer = entered_span!("Build Merkle Tree");
 
-        let (root, merkle_tree) = {
-            let rmm = RowMajorMatrix::new(folded_evals, fold_size * num_polys);
-            self.0.hash_params.commit_matrix(rmm)
-        };
+        let rmm = rmm
+            .values
+            .par_iter()
+            .map(|x| E::from_base(x))
+            .collect::<Vec<_>>();
+        let rmm = RowMajorMatrix::new(rmm, num_polys * fold_size);
+
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix(rmm);
         exit_span!(merkle_build_timer);
 
         write_digest_to_transcript(&root, &mut transcript);

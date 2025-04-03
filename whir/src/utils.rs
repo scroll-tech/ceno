@@ -92,6 +92,15 @@ pub fn stack_evaluations<F: Field>(mut evals: Vec<F>, folding_factor: usize) -> 
     evals
 }
 
+pub fn stack_evaluations_mut<F: Field>(evals: &mut [F], folding_factor: usize) {
+    let folding_factor_exp = 1 << folding_factor;
+    assert!(evals.len() % folding_factor_exp == 0);
+    let size_of_new_domain = evals.len() / folding_factor_exp;
+
+    // interpret evals as (folding_factor_exp x size_of_new_domain)-matrix and transpose in-place
+    transpose(evals, folding_factor_exp, size_of_new_domain);
+}
+
 pub fn stack_evaluations_bench_allocate<F: Field>(
     mut evals: Vec<F>,
     folding_factor: usize,

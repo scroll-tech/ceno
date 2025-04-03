@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use p3::{
     commit::TwoAdicMultiplicativeCoset,
-    field::{PrimeCharacteristicRing, TwoAdicField},
+    field::{Field, PrimeCharacteristicRing, TwoAdicField},
 };
 
 #[derive(Debug, Clone)]
@@ -75,6 +75,10 @@ where
 
     pub fn base_domain_group_gen(&self) -> E::BaseField {
         E::BaseField::two_adic_generator(self.backing_domain.log_n)
+    }
+
+    pub fn base_domain_group_gen_inv(&self) -> E::BaseField {
+        E::BaseField::two_adic_generator(self.backing_domain.log_n).inverse()
     }
 
     pub fn backing_domain_element(&self, index: usize) -> E {
