@@ -65,11 +65,17 @@ where
         let num_polys = polys.len();
         exit_span!(prepare_timer);
         let expansion = self.0.starting_domain.size() / polys[0].len();
-        let expand_timer = entered_span!("Batch Expand");
+        let interpolate_timer = entered_span!("Interpolate over hypercube rmm");
         interpolate_over_boolean_hypercube_rmm(&mut rmm);
+        exit_span!(interpolate_timer);
+        let expand_timer = entered_span!("Batch Expand");
         let rmm = expand_from_coeff_rmm(rmm, expansion);
+        exit_span!(expand_timer);
+        let transpose_timer = entered_span!("Transpose rmm");
         let mut rmm = rmm.transpose();
+        exit_span!(transpose_timer);
         let domain_gen_inverse = self.0.starting_domain.base_domain_group_gen_inv();
+        let restructure_timer = entered_span!("Restructure rmm");
         rmm.par_rows_mut().for_each(|row| {
             utils::stack_evaluations_mut(row, self.0.folding_factor.at_round(0));
             restructure_evaluations_mut(
@@ -79,18 +85,24 @@ where
                 self.0.folding_factor.at_round(0),
             );
         });
+        exit_span!(restructure_timer);
+        let transpose_timer = entered_span!("Transpose rmm");
         let rmm = rmm.transpose();
-        exit_span!(expand_timer);
+        exit_span!(transpose_timer);
 
-        // Group folds together as a leaf.
-        let fold_size = 1 << self.0.folding_factor.at_round(0);
-        let merkle_build_timer = entered_span!("Build Merkle Tree");
-
+        let to_ext_timer = entered_span!("Transform rmm to extension field");
         let rmm = rmm
             .values
             .par_iter()
             .map(|x| E::from_base(x))
             .collect::<Vec<_>>();
+        exit_span!(to_ext_timer);
+
+        // Group folds together as a leaf.
+        let fold_size = 1 << self.0.folding_factor.at_round(0);
+
+        let merkle_build_timer = entered_span!("Build Merkle Tree");
+
         let rmm = RowMajorMatrix::new(rmm, num_polys * fold_size);
 
         let (root, merkle_tree) = self.0.hash_params.commit_matrix(rmm);
