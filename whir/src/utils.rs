@@ -1,4 +1,4 @@
-use crate::ntt::{transpose, transpose_bench_allocate};
+use crate::ntt::{transpose, transpose_bench_allocate, transpose_rmm};
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
 use p3::{
@@ -99,6 +99,18 @@ pub fn stack_evaluations_mut<F: Field>(evals: &mut [F], folding_factor: usize) {
 
     // interpret evals as (folding_factor_exp x size_of_new_domain)-matrix and transpose in-place
     transpose(evals, folding_factor_exp, size_of_new_domain);
+}
+
+pub fn stack_evaluations_mut_rmm<F: Field>(
+    rmm: &mut witness::RowMajorMatrix<F>,
+    folding_factor: usize,
+) {
+    let folding_factor_exp = 1 << folding_factor;
+    assert!(rmm.height() % folding_factor_exp == 0);
+    let size_of_new_domain = rmm.height() / folding_factor_exp;
+
+    // interpret evals as (folding_factor_exp x size_of_new_domain)-matrix and transpose in-place
+    transpose_rmm(rmm, folding_factor_exp, size_of_new_domain);
 }
 
 pub fn stack_evaluations_bench_allocate<F: Field>(

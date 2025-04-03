@@ -1,6 +1,9 @@
+use crate::ntt::matrix_skip::MatrixMutSkip;
+
 use super::{super::utils::is_power_of_two, MatrixMut, utils::workload_size};
 use std::mem::swap;
 
+use p3::matrix::{Matrix, dense::RowMajorMatrix};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 #[cfg(feature = "parallel")]
 use rayon::join;
@@ -39,6 +42,27 @@ pub fn transpose<F: Sized + Copy + Send>(matrix: &mut [F], rows: usize, cols: us
             let dst = MatrixMut::from_mut_slice(matrix, cols, rows);
             transpose_copy(src, dst);
         }
+    }
+}
+
+/// Transpose each column of the rmm as if it is a matrix
+pub fn transpose_rmm<F: Sized + Copy + Send + Sync>(
+    matrix: &mut RowMajorMatrix<F>,
+    rows: usize,
+    cols: usize,
+) {
+    debug_assert_eq!(matrix.height(), rows * cols);
+    let skip = matrix.width();
+    let mut scratch = Vec::with_capacity(matrix.height() * matrix.width());
+    #[allow(clippy::uninit_vec)]
+    unsafe {
+        scratch.set_len(matrix.height() * matrix.width());
+    }
+    scratch.copy_from_slice(&matrix.values);
+    for i in 0..matrix.width() {
+        let src = MatrixMutSkip::from_mut_slice(scratch.as_mut_slice(), rows, cols, skip, i);
+        let dst = MatrixMutSkip::from_mut_slice(matrix.values.as_mut_slice(), cols, rows, skip, i);
+        transpose_copy_skip(src, dst);
     }
 }
 
@@ -142,6 +166,11 @@ fn transpose_copy<F: Sized + Copy + Send>(src: MatrixMut<F>, dst: MatrixMut<F>) 
     transpose_copy_parallel(src, dst);
 }
 
+fn transpose_copy_skip<F: Sized + Copy + Send>(src: MatrixMutSkip<F>, dst: MatrixMutSkip<F>) {
+    #[cfg(feature = "parallel")]
+    transpose_copy_parallel_skip(src, dst);
+}
+
 /// Sets `dst` to the transpose of `src`. This will panic if the sizes of `src` and `dst` are not compatible.
 #[cfg(feature = "parallel")]
 fn transpose_copy_parallel<F: Sized + Copy + Send>(
@@ -163,6 +192,36 @@ fn transpose_copy_parallel<F: Sized + Copy + Send>(
         join(
             || transpose_copy_parallel(a, x),
             || transpose_copy_parallel(b, y),
+        );
+    } else {
+        for i in 0..src.rows() {
+            for j in 0..src.cols() {
+                dst[(j, i)] = src[(i, j)];
+            }
+        }
+    }
+}
+
+#[cfg(feature = "parallel")]
+fn transpose_copy_parallel_skip<F: Sized + Copy + Send>(
+    src: MatrixMutSkip<'_, F>,
+    mut dst: MatrixMutSkip<'_, F>,
+) {
+    assert_eq!(src.rows(), dst.cols());
+    assert_eq!(src.cols(), dst.rows());
+    if src.rows() * src.cols() > workload_size::<F>() {
+        // Split along longest axis and recurse.
+        // This results in a cache-oblivious algorithm.
+        let ((a, b), (x, y)) = if src.rows() > src.cols() {
+            let n = src.rows() / 2;
+            (src.split_vertical(n), dst.split_horizontal(n))
+        } else {
+            let n = src.cols() / 2;
+            (src.split_horizontal(n), dst.split_vertical(n))
+        };
+        join(
+            || transpose_copy_parallel_skip(a, x),
+            || transpose_copy_parallel_skip(b, y),
         );
     } else {
         for i in 0..src.rows() {

@@ -69,15 +69,15 @@ where
         interpolate_over_boolean_hypercube_rmm(&mut rmm);
         exit_span!(interpolate_timer);
         let expand_timer = entered_span!("Batch Expand");
-        let rmm = expand_from_coeff_rmm(rmm, expansion);
+        let mut rmm = expand_from_coeff_rmm(rmm, expansion);
         exit_span!(expand_timer);
+        utils::stack_evaluations_mut_rmm(&mut rmm, self.0.folding_factor.at_round(0));
         let transpose_timer = entered_span!("Transpose rmm");
         let mut rmm = rmm.transpose();
         exit_span!(transpose_timer);
         let domain_gen_inverse = self.0.starting_domain.base_domain_group_gen_inv();
         let restructure_timer = entered_span!("Restructure rmm");
         rmm.par_rows_mut().for_each(|row| {
-            utils::stack_evaluations_mut(row, self.0.folding_factor.at_round(0));
             restructure_evaluations_mut(
                 row,
                 self.0.fold_optimisation,

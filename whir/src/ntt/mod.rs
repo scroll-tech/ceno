@@ -1,6 +1,7 @@
 //! NTT and related algorithms.
 
 mod matrix;
+mod matrix_skip;
 mod ntt_impl;
 mod transpose;
 mod utils;
@@ -17,7 +18,7 @@ use witness::{RowMajorMatrix, expand_from_coeff as expand_from_coeff_inner};
 
 pub use self::{
     ntt_impl::{intt, intt_batch, ntt, ntt_batch},
-    transpose::{transpose, transpose_bench_allocate, transpose_test},
+    transpose::{transpose, transpose_bench_allocate, transpose_rmm, transpose_test},
     wavelet::wavelet_transform,
 };
 
