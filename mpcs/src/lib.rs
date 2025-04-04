@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
-pub mod sum_check;
 pub mod util;
 
 pub type Commitment<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Commitment;
@@ -266,8 +265,7 @@ pub enum Error {
 mod basefold;
 pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
-    BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec, one_level_eval_hc,
-    one_level_interp_hc,
+    BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
 };
 mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
