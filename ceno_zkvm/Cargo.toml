@@ -61,9 +61,10 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow"]
+default = ["forbid_overflow", "parallel"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
+parallel = ["p3/parallel"]
 sanity-check = ["mpcs/sanity-check"]
 
 [[bench]]
