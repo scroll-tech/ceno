@@ -21,13 +21,14 @@ use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverState,
-    util::{AdditiveVec, merge_sumcheck_polys, optimal_sumcheck_threads},
+    util::{AdditiveVec, merge_sumcheck_prover_state, optimal_sumcheck_threads},
 };
 use transcript::{Challenge, Transcript};
 
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, IntoMLE},
+    util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,
 };
@@ -98,15 +99,23 @@ where
     end_timer!(build_eq_timer);
 
     let num_threads = optimal_sumcheck_threads(num_vars);
+    let log_num_threads = ceil_log2(num_threads);
 
     let mut polys = VirtualPolynomials::new(num_threads, num_vars);
     polys.add_mle_list(vec![&eq, &running_evals], E::ONE);
-    let batched_polys = polys.get_batched_polys();
+    let (batched_polys, poly_meta) = polys.get_batched_polys();
 
     let mut prover_states = batched_polys
         .into_iter()
-        .map(|poly| {
-            IOPProverState::prover_init_with_extrapolation_aux(poly, vec![(vec![], vec![])])
+        .enumerate()
+        .map(|(thread_id, poly)| {
+            IOPProverState::prover_init_with_extrapolation_aux(
+                thread_id == 0, // set thread_id 0 to be main worker
+                poly,
+                vec![(vec![], vec![])],
+                Some(log_num_threads),
+                Some(poly_meta.clone()),
+            )
         })
         .collect::<Vec<_>>();
 
@@ -140,13 +149,16 @@ where
     }
 
     // deal with log(#thread) basefold rounds
-    let merge_sumcheck_polys_span = entered_span!("merge_sumcheck_polys");
-    let poly = merge_sumcheck_polys(&prover_states);
+    let merge_sumcheck_prover_state_span = entered_span!("merge_sumcheck_prover_state");
+    let poly = merge_sumcheck_prover_state(prover_states);
     let mut prover_states = vec![IOPProverState::prover_init_with_extrapolation_aux(
+        true,
         poly,
         vec![(vec![], vec![])],
+        None,
+        None,
     )];
-    exit_span!(merge_sumcheck_polys_span);
+    exit_span!(merge_sumcheck_prover_state_span);
 
     let mut challenge = None;
 
