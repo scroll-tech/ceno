@@ -11,19 +11,17 @@ use multilinear_extensions::{
 use p3::field::PrimeCharacteristicRing;
 use transcript::{BasicTranscript, Transcript};
 
+// test polynomial mixed with different num_var
 #[test]
 fn test_sumcheck_with_different_degree() {
-    // test polynomial mixed with different num_var
-
     // test single thread
     test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1, &[2, 4]);
-    // test num_threads match minimal num_var
+    // test log_threads match minimal num_var
     test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << 2, &[2, 4]);
-    // test min_num_var < num_threads < max_num_var
+    // test min_num_var < log_threads < max_num_var
     test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << 3, &[2, 4]);
-
-    // test min_num_var < num_threads < max_num_var
-    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << 4, &[2, 4]);
+    // test log_threads == max_num_var
+    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << 4, &[4]);
 }
 
 fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {

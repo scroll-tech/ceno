@@ -16,7 +16,7 @@ struct SumcheckCodegenMacroInput {
     /// Closure that gives access to the mle product
     product_access: ExprClosure,
     /// get poly type
-    get_poly_type: ExprClosure,
+    get_poly_meta: ExprClosure,
 }
 
 impl Parse for SumcheckCodegenMacroInput {
@@ -40,8 +40,8 @@ impl Parse for SumcheckCodegenMacroInput {
             ))?,
         };
 
-        let get_poly_type = match expr2 {
-            Expr::Closure(get_poly_type) => get_poly_type,
+        let get_poly_meta = match expr2 {
+            Expr::Closure(get_poly_meta) => get_poly_meta,
             _ => Err(syn::Error::new_spanned(
                 expr2,
                 "Expected closure that get poly type",
@@ -52,7 +52,7 @@ impl Parse for SumcheckCodegenMacroInput {
             degree,
             parallalize,
             product_access,
-            get_poly_type,
+            get_poly_meta,
         })
     }
 }
@@ -66,7 +66,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let degree = input.degree.base10_parse::<u32>().unwrap();
     let parallalize = input.parallalize.value;
     let product_access = input.product_access;
-    let get_poly_type = input.get_poly_type;
+    let get_poly_meta = input.get_poly_meta;
 
     // Part 1 - Declare f vars
     // Code output
@@ -271,8 +271,8 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             // NOTE: current method work in suffix alignment order
             let num_var = ceil_log2(v1.len());
             let expected_numvars_at_round = self.expected_numvars_at_round();
-            let get_poly_type = #get_poly_type;
-            let poly_type = get_poly_type();
+            let get_poly_meta = #get_poly_meta;
+            let poly_type = get_poly_meta();
 
             match poly_type {
                 PolyMeta::Phase2Only => {

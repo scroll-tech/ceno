@@ -25,7 +25,7 @@ pub struct VirtualPolynomials<'a, E: ExtensionField> {
     polys: Vec<VirtualPolynomial<'a, E>>,
     /// a storage to keep thread based mles, specific to multi-thread logic
     thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
-    pub(crate) poly_index_meta: BTreeMap<usize, PolyMeta>,
+    pub(crate) poly_meta: BTreeMap<usize, PolyMeta>,
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
@@ -37,7 +37,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 .map(|_| VirtualPolynomial::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
             thread_based_mles_storage: HashMap::new(),
-            poly_index_meta: BTreeMap::new(),
+            poly_meta: BTreeMap::new(),
         }
     }
 
@@ -102,7 +102,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .iter()
             .zip_eq(&poly_meta)
             .for_each(|(index, poly_meta)| {
-                self.poly_index_meta.insert(*index, *poly_meta);
+                self.poly_meta.insert(*index, *poly_meta);
             });
     }
 
@@ -119,12 +119,11 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 
     /// return thread_based polynomial with its polynomial type
     pub fn get_batched_polys(self) -> (Vec<VirtualPolynomial<'a, E>>, Vec<PolyMeta>) {
-        let mut poly_index_meta =
-            vec![PolyMeta::Normal; self.polys[0].flattened_ml_extensions.len()];
-        for (index, poly_meta) in self.poly_index_meta {
-            poly_index_meta[index] = poly_meta
+        let mut poly_meta = vec![PolyMeta::Normal; self.polys[0].flattened_ml_extensions.len()];
+        for (index, poly_meta_by_index) in self.poly_meta {
+            poly_meta[index] = poly_meta_by_index
         }
-        (self.polys, poly_index_meta)
+        (self.polys, poly_meta)
     }
 
     pub fn degree(&self) -> usize {

@@ -214,28 +214,36 @@ pub fn ceil_log2(x: usize) -> usize {
     usize_bits - (x - 1).leading_zeros() as usize
 }
 
-pub(crate) fn merge_sumcheck_polys<'a, E: ExtensionField>(
-    prover_states: &[IOPProverState<'a, E>],
-    max_thread_id: usize,
+/// merge vector of virtual poly into single virtual poly
+pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
+    virtual_polys: Vec<&VirtualPolynomial<'a, E>>,
+    poly_meta: Option<Vec<PolyMeta>>,
 ) -> VirtualPolynomial<'a, E> {
-    let log2_max_thread_id = ceil_log2(max_thread_id);
-    let mut poly = prover_states[0].poly.clone(); // giving only one evaluation left, this clone is low cost.
+    assert!(!virtual_polys.is_empty());
+    assert!(virtual_polys.len().is_power_of_two());
+    let log2_max_thread_id = ceil_log2(virtual_polys.len());
+    let mut poly = virtual_polys[0].clone(); // giving only one evaluation left, this clone is low cost.
     poly.aux_info.max_num_variables = log2_max_thread_id; // size_log2 variates sumcheck
-    let poly_index_meta = &prover_states[0].poly_index_meta;
-    for (i, poly_meta) in (0..poly.flattened_ml_extensions.len()).zip_eq(poly_index_meta) {
+    for (i, poly_meta) in (0..poly.flattened_ml_extensions.len()).zip_eq(
+        poly_meta.unwrap_or(
+            std::iter::repeat(PolyMeta::Normal)
+                .take(virtual_polys.len())
+                .collect_vec(),
+        ),
+    ) {
         let ml_ext = match poly_meta {
             PolyMeta::Normal => DenseMultilinearExtension::from_evaluations_ext_vec(
                 log2_max_thread_id,
-                prover_states
+                virtual_polys
                     .iter()
-                    .flat_map(|prover_state| {
-                        let mle = &prover_state.poly.flattened_ml_extensions[i];
+                    .flat_map(|virtual_poly| {
+                        let mle = &virtual_poly.flattened_ml_extensions[i];
                         op_mle!(mle, |f| f.to_vec(), |_v| unreachable!())
                     })
                     .collect::<Vec<E>>(),
             ),
             PolyMeta::Phase2Only => {
-                let poly = &prover_states[0].poly.flattened_ml_extensions[i];
+                let poly = &virtual_polys[0].flattened_ml_extensions[i];
                 assert!(poly.num_vars() <= log2_max_thread_id);
                 let blow_factor = 1 << (log2_max_thread_id - poly.num_vars());
                 DenseMultilinearExtension::from_evaluations_ext_vec(
@@ -250,6 +258,16 @@ pub(crate) fn merge_sumcheck_polys<'a, E: ExtensionField>(
         poly.flattened_ml_extensions[i] = Arc::new(ml_ext);
     }
     poly
+}
+
+/// retrieve virtual poly from sumcheck prover state to single virtual poly
+pub fn merge_sumcheck_prover_state<E: ExtensionField>(
+    prover_states: Vec<IOPProverState<'_, E>>,
+) -> VirtualPolynomial<'_, E> {
+    merge_sumcheck_polys(
+        prover_states.iter().map(|ps| &ps.poly).collect_vec(),
+        Some(prover_states[0].poly_meta.clone()),
+    )
 }
 
 #[derive(Clone, Copy, Debug)]

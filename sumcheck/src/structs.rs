@@ -48,7 +48,7 @@ pub struct IOPProverState<'a, E: ExtensionField> {
     pub(crate) max_num_variables: usize,
     /// record poly should fix variable in place or not
     pub(crate) poly_index_fixvar_in_place: Vec<bool>,
-    pub(crate) poly_index_meta: Vec<PolyMeta>,
+    pub(crate) poly_meta: Vec<PolyMeta>,
     /// phase 1 and phase 2 sumcheck we share similar implementation
     /// thus this option variable only use for phase 1 sumcheck to mark how many variables belongs to phase 2
     pub(crate) phase2_numvar: Option<usize>,
