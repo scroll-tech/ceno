@@ -215,6 +215,7 @@ pub fn ceil_log2(x: usize) -> usize {
 }
 
 /// merge vector of virtual poly into single virtual poly
+/// NOTE this function assume polynomial in each virtual_polys are "small", due to this function need quite of clone
 pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
     virtual_polys: Vec<&VirtualPolynomial<'a, E>>,
     poly_meta: Option<Vec<PolyMeta>>,
@@ -227,7 +228,7 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
             .take(virtual_polys.len())
             .collect_vec(),
     );
-    let mut final_poly = virtual_polys[0].clone(); // giving only one evaluation left, this clone is low cost.
+    let mut final_poly = virtual_polys[0].clone();
     final_poly.aux_info.max_num_variables = 0;
 
     // usually phase1 lefted num_var is 0, thus only constant term lefted
