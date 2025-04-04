@@ -130,10 +130,8 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         virtual_poly_v2.add_mle_list(fs.iter().collect_vec(), E::ONE);
 
                         let instant = std::time::Instant::now();
-                        let (_sumcheck_proof_v2, _) = IOPProverState::<E>::prove(
-                            virtual_poly_v2,
-                            &mut prover_transcript,
-                        );
+                        let (_sumcheck_proof_v2, _) =
+                            IOPProverState::<E>::prove(virtual_poly_v2, &mut prover_transcript);
                         let elapsed = instant.elapsed();
                         time += elapsed;
                     }
