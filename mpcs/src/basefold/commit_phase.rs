@@ -150,7 +150,7 @@ where
 
     // deal with log(#thread) basefold rounds
     let merge_sumcheck_prover_state_span = entered_span!("merge_sumcheck_prover_state");
-    let poly = merge_sumcheck_prover_state(prover_states);
+    let poly = merge_sumcheck_prover_state(&prover_states);
     let mut prover_states = vec![IOPProverState::prover_init_with_extrapolation_aux(
         true,
         poly,

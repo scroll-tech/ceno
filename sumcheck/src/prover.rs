@@ -98,7 +98,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 .iter()
                 .map(|c| c.elements)
                 .collect_vec();
-            let poly = merge_sumcheck_prover_state(prover_states);
+            let poly = merge_sumcheck_prover_state(&prover_states);
 
             (
                 point,

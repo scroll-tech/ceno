@@ -300,9 +300,9 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
 }
 
 /// retrieve virtual poly from sumcheck prover state to single virtual poly
-pub fn merge_sumcheck_prover_state<E: ExtensionField>(
-    prover_states: Vec<IOPProverState<'_, E>>,
-) -> VirtualPolynomial<'_, E> {
+pub fn merge_sumcheck_prover_state<'a, E: ExtensionField>(
+    prover_states: &[IOPProverState<'a, E>],
+) -> VirtualPolynomial<'a, E> {
     merge_sumcheck_polys(
         prover_states.iter().map(|ps| &ps.poly).collect_vec(),
         Some(prover_states[0].poly_meta.clone()),
