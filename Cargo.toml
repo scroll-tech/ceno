@@ -37,18 +37,22 @@ itertools = "0.13"
 num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
+p3 = { path = "p3" }
 p3-baby-bear = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-challenger = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
+p3-commit = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
+p3-dft = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-field = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-goldilocks = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-matrix = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-maybe-rayon = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-mds = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
+p3-merkle-tree = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-poseidon = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-poseidon2 = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-symmetric = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
+p3-util = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 paste = "1"
-plonky2 = "0.2"
 poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
@@ -65,6 +69,7 @@ serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"
 substrate-bn = { version = "0.6.0" }
+sumcheck = { path = "sumcheck" }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing = { version = "0.1", features = [
   "attributes",

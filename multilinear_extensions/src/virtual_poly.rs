@@ -1,4 +1,6 @@
-use std::{cmp::max, collections::HashMap, marker::PhantomData, mem::MaybeUninit, sync::Arc};
+use std::{
+    cmp::max, collections::HashMap, fmt::Debug, marker::PhantomData, mem::MaybeUninit, sync::Arc,
+};
 
 use crate::{
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},

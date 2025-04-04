@@ -13,9 +13,7 @@ version.workspace = true
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 
 ff_ext = { path = "../ff_ext" }
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-matrix.workspace = true
+p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 

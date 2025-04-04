@@ -1,22 +1,13 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::FieldType;
-
-mod utils;
-
-mod basecode;
-pub use basecode::{Basecode, BasecodeDefaultSpec};
 
 mod rs;
-use plonky2::util::log2_strict;
-use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
-    slice::ParallelSlice,
-};
-pub use rs::{RSCode, RSCodeDefaultSpec, coset_fft, fft, fft_root_table};
+use p3::field::TwoAdicField;
+pub use rs::{RSCode, RSCodeDefaultSpec};
 
 use serde::{Serialize, de::DeserializeOwned};
+use witness::RowMajorMatrix;
 
-use crate::{Error, util::arithmetic::interpolate2_weights};
+use crate::Error;
 
 pub trait EncodingProverParameters {
     fn get_max_message_size_log(&self) -> usize;
@@ -28,9 +19,9 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         + std::fmt::Debug
         + Serialize
         + DeserializeOwned
-        + EncodingProverParameters
-        + Sync;
-    type VerifierParameters: Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync;
+        + EncodingProverParameters;
+    type VerifierParameters: Clone + std::fmt::Debug + Serialize + DeserializeOwned;
+    type EncodedData;
 
     fn setup(max_msg_size_log: usize) -> Self::PublicParameters;
 
@@ -39,11 +30,18 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         max_msg_size_log: usize,
     ) -> Result<(Self::ProverParameters, Self::VerifierParameters), Error>;
 
-    fn encode(pp: &Self::ProverParameters, coeffs: &FieldType<E>) -> FieldType<E>;
+    fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData;
 
-    /// Encodes a message of small length, such that the verifier is also able
+    fn encode_slow_ext<F: TwoAdicField>(
+        rmm: p3::matrix::dense::RowMajorMatrix<F>,
+    ) -> p3::matrix::dense::RowMajorMatrix<F>;
+
+    /// Encodes a message in extension field, such that the verifier is also able
     /// to execute the encoding.
-    fn encode_small(vp: &Self::VerifierParameters, coeffs: &FieldType<E>) -> FieldType<E>;
+    fn encode_small(
+        vp: &Self::VerifierParameters,
+        rmm: p3::matrix::dense::RowMajorMatrix<E>,
+    ) -> p3::matrix::dense::RowMajorMatrix<E>;
 
     fn get_number_queries() -> usize;
 
@@ -83,154 +81,10 @@ pub trait EncodingScheme<E: ExtensionField>: std::fmt::Debug + Clone {
         index: usize,
     ) -> (E, E, E);
 
-    /// Fold the given codeword into a smaller codeword of half size, using
-    /// the folding coefficients computed by `prover_folding_coeffs`.
-    /// The given codeword is assumed to be bit-reversed on the original
-    /// codeword directly produced from the `encode` method.
-    fn fold_bitreversed_codeword(
-        pp: &Self::ProverParameters,
-        codeword: &FieldType<E>,
-        challenge: E,
-    ) -> Vec<E> {
-        let level = log2_strict(codeword.len()) - 1;
-        match codeword {
-            FieldType::Ext(codeword) => codeword
-                .par_chunks_exact(2)
-                .enumerate()
-                .map(|(i, ys)| {
-                    let (x0, x1, w) = Self::prover_folding_coeffs(pp, level, i);
-                    interpolate2_weights([(x0, ys[0]), (x1, ys[1])], w, challenge)
-                })
-                .collect::<Vec<_>>(),
-            FieldType::Base(codeword) => codeword
-                .par_chunks_exact(2)
-                .enumerate()
-                .map(|(i, ys)| {
-                    let (x0, x1, w) = Self::prover_folding_coeffs(pp, level, i);
-                    interpolate2_weights([(x0, E::from(ys[0])), (x1, E::from(ys[1]))], w, challenge)
-                })
-                .collect::<Vec<_>>(),
-            _ => panic!("Unsupported field type"),
-        }
-    }
+    fn prover_folding_coeffs_level(pp: &Self::ProverParameters, level: usize) -> &[E::BaseField];
 
-    /// Fold the given message into a smaller message of half size using challenge
-    /// as the random linear combination coefficient.
-    /// Note that this is always even-odd fold, assuming the message has
-    /// been bit-reversed (or not) according to the setting
-    /// of the `message_need_bit_reversion` function.
-    fn fold_message(msg: &FieldType<E>, challenge: E) -> Vec<E> {
-        match msg {
-            FieldType::Ext(msg) => msg
-                .par_chunks_exact(2)
-                .map(|ys| ys[0] + ys[1] * challenge)
-                .collect::<Vec<_>>(),
-            FieldType::Base(msg) => msg
-                .par_chunks_exact(2)
-                .map(|ys| E::from(ys[0]) + E::from(ys[1]) * challenge)
-                .collect::<Vec<_>>(),
-            _ => panic!("Unsupported field type"),
-        }
-    }
-}
-
-fn concatenate_field_types<E: ExtensionField>(coeffs: &[FieldType<E>]) -> FieldType<E> {
-    match coeffs[0] {
-        FieldType::Ext(_) => {
-            let res = coeffs
-                .iter()
-                .flat_map(|x| match x {
-                    FieldType::Ext(x) => x.iter().copied(),
-                    _ => unreachable!(),
-                })
-                .collect::<Vec<_>>();
-            FieldType::Ext(res)
-        }
-        FieldType::Base(_) => {
-            let res = coeffs
-                .iter()
-                .flat_map(|x| match x {
-                    FieldType::Base(x) => x.iter().copied(),
-                    _ => unreachable!(),
-                })
-                .collect::<Vec<_>>();
-            FieldType::Base(res)
-        }
-        _ => unreachable!(),
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod test_util {
-    use ff_ext::ExtensionField;
-    use multilinear_extensions::mle::FieldType;
-    use rand::rngs::OsRng;
-
-    use crate::util::plonky2_util::reverse_index_bits_in_place_field_type;
-
-    use super::EncodingScheme;
-
-    pub fn test_codeword_folding<E: ExtensionField, Code: EncodingScheme<E>>() {
-        let num_vars = 12;
-
-        let poly: Vec<E> = (0..(1 << num_vars)).map(|i| E::from_u64(i)).collect();
-        let mut poly = FieldType::Ext(poly);
-
-        let pp: Code::PublicParameters = Code::setup(num_vars);
-        let (pp, _) = Code::trim(pp, num_vars).unwrap();
-        let mut codeword = Code::encode(&pp, &poly);
-        reverse_index_bits_in_place_field_type(&mut codeword);
-        if Code::message_is_left_and_right_folding() {
-            reverse_index_bits_in_place_field_type(&mut poly);
-        }
-        let challenge = E::random(&mut OsRng);
-        let folded_codeword = Code::fold_bitreversed_codeword(&pp, &codeword, challenge);
-        let mut folded_message = FieldType::Ext(Code::fold_message(&poly, challenge));
-        if Code::message_is_left_and_right_folding() {
-            // Reverse the message back before encoding if it has been
-            // bit-reversed
-            reverse_index_bits_in_place_field_type(&mut folded_message);
-        }
-        let mut encoded_folded_message = Code::encode(&pp, &folded_message);
-        reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
-        let encoded_folded_message = match encoded_folded_message {
-            FieldType::Ext(coeffs) => coeffs,
-            _ => panic!("Wrong field type"),
-        };
-        for (i, (a, b)) in folded_codeword
-            .iter()
-            .zip(encoded_folded_message.iter())
-            .enumerate()
-        {
-            assert_eq!(a, b, "Failed at index {}", i);
-        }
-
-        let mut folded_codeword = FieldType::Ext(folded_codeword);
-        for round in 0..4 {
-            let folded_codeword_vec =
-                Code::fold_bitreversed_codeword(&pp, &folded_codeword, challenge);
-
-            if Code::message_is_left_and_right_folding() {
-                reverse_index_bits_in_place_field_type(&mut folded_message);
-            }
-            folded_message = FieldType::Ext(Code::fold_message(&folded_message, challenge));
-            if Code::message_is_left_and_right_folding() {
-                reverse_index_bits_in_place_field_type(&mut folded_message);
-            }
-            let mut encoded_folded_message = Code::encode(&pp, &folded_message);
-            reverse_index_bits_in_place_field_type(&mut encoded_folded_message);
-            let encoded_folded_message = match encoded_folded_message {
-                FieldType::Ext(coeffs) => coeffs,
-                _ => panic!("Wrong field type"),
-            };
-            for (i, (a, b)) in folded_codeword_vec
-                .iter()
-                .zip(encoded_folded_message.iter())
-                .enumerate()
-            {
-                assert_eq!(a, b, "Failed at index {} in round {}", i, round);
-            }
-            folded_codeword = FieldType::Ext(folded_codeword_vec);
-        }
-    }
+    fn verifier_folding_coeffs_level(
+        vp: &Self::VerifierParameters,
+        level: usize,
+    ) -> &[E::BaseField];
 }

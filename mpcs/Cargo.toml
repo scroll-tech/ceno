@@ -24,13 +24,14 @@ itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 num-bigint = "0.4"
 num-integer = "0.1"
-p3 = { path = "../p3" }
-plonky2.workspace = true
+p3.workspace = true
 poseidon.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rayon = { workspace = true, optional = true }
 serde.workspace = true
+sumcheck.workspace = true
+tracing.workspace = true
 transcript = { path = "../transcript" }
 whir = { path = "../whir", features = ["ceno"] }
 witness = { path = "../witness" }
@@ -52,23 +53,11 @@ name = "basefold"
 
 [[bench]]
 harness = false
-name = "basecode"
-
-[[bench]]
-harness = false
 name = "rscode"
 
 [[bench]]
 harness = false
 name = "interpolate"
-
-[[bench]]
-harness = false
-name = "fft"
-
-[[bench]]
-harness = false
-name = "utils"
 
 [[bench]]
 harness = false
