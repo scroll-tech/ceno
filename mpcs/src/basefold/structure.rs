@@ -228,7 +228,7 @@ where
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<E>,
+    pub(crate) final_message: Vec<Vec<E>>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     pub(crate) trivial_proof: Option<DenseMatrix<E::BaseField>>,
@@ -265,5 +265,5 @@ where
 {
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<E>,
+    pub(crate) final_message: Vec<Vec<E>>,
 }

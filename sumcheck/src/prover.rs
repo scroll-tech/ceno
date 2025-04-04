@@ -448,18 +448,26 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     }
 
     /// collect all mle evaluation (claim) after sumcheck
-    /// NOTE final evaluation size of each mle could be >= 1
-    pub fn get_mle_final_evaluations(&self) -> Vec<E> {
+    pub fn get_mle_final_evaluations(&self) -> Vec<Vec<E>> {
         self.poly
             .flattened_ml_extensions
             .iter()
-            .flat_map(|mle| {
+            .map(|mle| {
                 op_mle! {
                     |mle| mle.to_vec(),
                     |mle| mle.into_iter().map(E::from).collect_vec()
                 }
             })
             .collect()
+    }
+
+    /// collect all mle evaluation (claim) after sumcheck
+    /// NOTE final evaluation size of each mle could be >= 1
+    pub fn get_mle_flatten_final_evaluations(&self) -> Vec<E> {
+        self.get_mle_final_evaluations()
+            .into_iter()
+            .flatten()
+            .collect_vec()
     }
 
     pub fn expected_numvars_at_round(&self) -> usize {

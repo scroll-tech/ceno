@@ -28,7 +28,7 @@ use super::{
     structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
 };
 
-pub fn simple_batch_prover_query_phase<E: ExtensionField>(
+pub fn batch_prover_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
     comm: &BasefoldCommitmentWithWitness<E>,
     trees: &[MerkleTreeExt<E>],
@@ -86,6 +86,67 @@ where
             (opening, opening_ext)
         })
         .collect_vec()
+}
+
+pub fn simple_batch_prover_query_phase<E: ExtensionField>(
+    transcript: &mut impl Transcript<E>,
+    comm: &BasefoldCommitmentWithWitness<E>,
+    trees: &[MerkleTreeExt<E>],
+    num_verifier_queries: usize,
+) -> QueryOpeningProofs<E>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    unimplemented!()
+    //     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
+    //     let mmcs = poseidon2_merkle_tree::<E>();
+
+    //     // Transform the challenge queries from field elements into integers
+    //     // TODO simplify with sample_bit
+    //     let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
+    //     let queries_usize: Vec<usize> = queries
+    //         .iter()
+    //         .map(|x_index| ext_to_usize(x_index) % comm.codeword_size())
+    //         .collect_vec();
+
+    //     queries_usize
+    //         .iter()
+    //         .map(|idx| {
+    //             let opening = {
+    //                 // extract the even part of `idx`
+    //                 // ---------------------------------
+    //                 // the oracle values are committed in a row-bit-reversed format.
+    //                 // rounding `idx` to an even value is equivalent to retrieving the "left-hand" side `j` index
+    //                 // in the original (non-row-bit-reversed) format.
+    //                 //
+    //                 // however, since `p_d[j]` and `p_d[j + n_{d-1}]` are already concatenated in the same merkle leaf,
+    //                 // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
+    //                 let idx = idx >> 1;
+    //                 let (mut values, proof) = mmcs.open_batch(idx, &comm.codeword);
+    //                 let leafs = values.pop().unwrap();
+    //                 (leafs, proof)
+    //             };
+
+    //             // this is equivalent with "idx = idx % n_{d-1}" operation in non row bit reverse format
+    //             let idx = idx >> 1;
+    //             let (_, opening_ext) = trees.iter().fold((idx, vec![]), |(idx, mut proofs), tree| {
+    //                 // differentiate interpolate to left or right position at next layer
+    //                 let is_interpolate_to_right_index = (idx & 1) == 1;
+    //                 // mask the least significant bit (LSB) for the same reason as above:
+    //                 // 1. we only need the even part of the index.
+    //                 // 2. since even and odd parts are concatenated in the same leaf,
+    //                 //    the overall merkle tree height is effectively halved,
+    //                 //    so we divide by 2.
+    //                 let (mut values, proof) = mmcs_ext.open_batch(idx >> 1, tree);
+    //                 let leafs = values.pop().unwrap();
+    //                 debug_assert_eq!(leafs.len(), 2);
+    //                 let sibling = leafs[(!is_interpolate_to_right_index) as usize];
+    //                 proofs.push((sibling, proof));
+    //                 (idx >> 1, proofs)
+    //             });
+    //             (opening, opening_ext)
+    //         })
+    //         .collect_vec()
 }
 
 #[allow(clippy::too_many_arguments)]

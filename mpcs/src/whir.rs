@@ -3,6 +3,8 @@ mod spec;
 mod structure;
 mod utils;
 
+use crate::Point;
+
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
@@ -12,6 +14,7 @@ pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 pub use structure::{Whir, WhirDefault};
 use structure::{WhirDigest, WhirInnerT, digest_to_bytes};
+use transcript::Transcript;
 use utils::{poly2whir, polys2whir};
 pub use whir::ceno_binding::Error;
 use whir::ceno_binding::PolynomialCommitmentScheme as WhirPCS;
@@ -120,11 +123,10 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
-        _polys: &[ArcMultilinearExtension<E>],
-        _comms: &[Self::CommitmentWithWitness],
-        _points: &[Vec<E>],
-        _evals: &[crate::Evaluation<E>],
-        _transcript: &mut impl transcript::Transcript<E>,
+        _comms: &Self::CommitmentWithWitness,
+        _points: &[Point<E>],
+        _evals: &[Vec<E>],
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
@@ -182,6 +184,12 @@ where
     fn get_arc_mle_witness_from_commitment(
         _commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
+        unimplemented!()
+    }
+
+    fn get_arc_mle_witness_from_commitment_v2(
+        commitment: &Self::CommitmentWithWitness,
+    ) -> Vec<Vec<ArcMultilinearExtension<'static, E>>> {
         unimplemented!()
     }
 }

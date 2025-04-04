@@ -63,6 +63,13 @@ pub trait Transcript<E: ExtensionField> {
         }
     }
 
+    /// Append a iterator of extension field elements to the transcript.
+    fn append_field_element_exts_iter<'a>(&mut self, element: impl Iterator<Item = &'a E>) {
+        for e in element {
+            self.append_field_element_ext(e);
+        }
+    }
+
     /// Append a challenge to the transcript.
     fn append_challenge(&mut self, challenge: Challenge<E>) {
         self.append_field_element_ext(&challenge.elements)

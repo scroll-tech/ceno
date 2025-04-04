@@ -54,6 +54,12 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
             .unwrap();
     }
 
+    fn append_field_element_exts_iter<'a>(&mut self, element: impl Iterator<Item = &'a E>) {
+        self.ef_append_tx[self.rolling_index]
+            .send(element.copied().collect::<Vec<_>>())
+            .unwrap();
+    }
+
     fn append_challenge(&mut self, _challenge: Challenge<E>) {
         unimplemented!()
     }

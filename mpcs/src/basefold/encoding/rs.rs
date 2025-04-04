@@ -291,9 +291,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use ff_ext::GoldilocksExt2;
     use itertools::izip;
-    use p3::{goldilocks::Goldilocks, util::log2_strict_usize};
+    use p3::{goldilocks::Goldilocks};
 
     use rand::rngs::OsRng;
 
@@ -332,8 +334,7 @@ mod tests {
         let r = E::from_u64(97);
         let folded_codeword = basefold_one_round_by_interpolation_weights::<E, BasefoldRSParams>(
             &pp,
-            log2_strict_usize(codeword_ext.values.len()) - 1,
-            &codeword_ext.values,
+            &mut [Cow::Borrowed(&codeword_ext.values)],
             r,
         );
 

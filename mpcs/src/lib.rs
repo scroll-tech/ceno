@@ -75,9 +75,9 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    comms: &[Pcs::CommitmentWithWitness],
-    points: &[Vec<E>],
-    evals: &[Evaluation<E>],
+    comms: &Pcs::CommitmentWithWitness,
+    points: &[Point<E>],
+    evals: &[Vec<E>],
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
     Pcs::batch_open(pp, comms, points, evals, transcript)
@@ -221,6 +221,10 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
     fn get_arc_mle_witness_from_commitment(
         commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>>;
+
+    fn get_arc_mle_witness_from_commitment_v2(
+        commitment: &Self::CommitmentWithWitness,
+    ) -> Vec<Vec<ArcMultilinearExtension<'static, E>>>;
 }
 
 #[derive(Clone, Debug)]

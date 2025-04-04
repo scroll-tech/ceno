@@ -580,7 +580,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(virtual_polys, transcript);
         tracing::debug!("main sel sumcheck end");
 
-        let main_sel_evals = state.get_mle_final_evaluations();
+        let main_sel_evals = state.get_mle_flatten_final_evaluations();
         assert_eq!(
             main_sel_evals.len(),
             r_counts_per_instance
@@ -1018,7 +1018,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
                 let (same_r_sumcheck_proofs, state) =
                     IOPProverState::prove(virtual_polys, transcript);
-                let evals = state.get_mle_final_evaluations();
+                let evals = state.get_mle_flatten_final_evaluations();
                 let mut evals_iter = evals.into_iter();
                 let rw_in_evals = cs
                     // r, w table len are identical
@@ -1286,7 +1286,7 @@ impl TowerProver {
                     prod_specs.len() +logup_specs.len() * 2, // logup occupy 2 sumcheck: numerator and denominator
                     transcript,
                 );
-                let evals = state.get_mle_final_evaluations();
+                let evals = state.get_mle_flatten_final_evaluations();
                 let mut evals_iter = evals.iter();
                 evals_iter.next(); // skip first eq
                 for (i, s) in enumerate(&prod_specs) {
