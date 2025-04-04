@@ -15,6 +15,8 @@ struct SumcheckCodegenMacroInput {
     parallalize: LitBool,
     /// Closure that gives access to the mle product
     product_access: ExprClosure,
+    /// get poly type
+    get_poly_meta: ExprClosure,
 }
 
 impl Parse for SumcheckCodegenMacroInput {
@@ -25,18 +27,33 @@ impl Parse for SumcheckCodegenMacroInput {
         let parallalize: LitBool = input.parse()?; // `<bool>`
         input.parse::<Token![,]>()?; // `,`
 
-        let expr = input.parse()?;
-        match expr {
-            Expr::Closure(product_access) => Ok(Self {
-                degree,
-                parallalize,
-                product_access,
-            }),
+        let expr1: Expr = input.parse()?;
+        input.parse::<Token![,]>()?; // `,`
+
+        let expr2: Expr = input.parse()?;
+
+        let product_access = match expr1 {
+            Expr::Closure(product_access) => product_access,
             _ => Err(syn::Error::new_spanned(
-                expr,
+                expr1,
                 "Expected closure that gives access to the mle product",
-            )),
-        }
+            ))?,
+        };
+
+        let get_poly_meta = match expr2 {
+            Expr::Closure(get_poly_meta) => get_poly_meta,
+            _ => Err(syn::Error::new_spanned(
+                expr2,
+                "Expected closure that get poly type",
+            ))?,
+        };
+
+        Ok(Self {
+            degree,
+            parallalize,
+            product_access,
+            get_poly_meta,
+        })
     }
 }
 
@@ -49,6 +66,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let degree = input.degree.base10_parse::<u32>().unwrap();
     let parallalize = input.parallalize.value;
     let product_access = input.product_access;
+    let get_poly_meta = input.get_poly_meta;
 
     // Part 1 - Declare f vars
     // Code output
@@ -253,33 +271,67 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             // NOTE: current method work in suffix alignment order
             let num_var = ceil_log2(v1.len());
             let expected_numvars_at_round = self.expected_numvars_at_round();
-            if num_var < expected_numvars_at_round {
-                // TODO optimize by caching computed result for later round reuse
-                // need to figure out how to cache in one place to support base/extension field
-                let mut sum = (0..largest_even_below(v1.len())).map(
-                    |b| {
-                        #product
-                    },
-                ).sum();
-                // calculate multiplicity term
-                // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
-                let num_vars_multiplicity = self.expected_numvars_at_round().saturating_sub(1).saturating_sub(num_var);
-                if num_vars_multiplicity > 0 {
-                    sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
-                }
-                AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
-            } else {
-                if v1.len() == 1 {
-                    let b = 0;
-                    AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
-                } else {
-                    (0..largest_even_below(v1.len()))
-                        #iter
-                        .map(|b| {
-                            #additive_array_items
-                        })
-                        .sum::<AdditiveArray<_, #degree_plus_one>>()
-                }
+            let get_poly_meta = #get_poly_meta;
+            let poly_type = get_poly_meta();
+
+            match poly_type {
+                PolyMeta::Phase2Only => {
+                    // only main worker doing the calculation of phase2 only polynomial in order to avoid duplicate computation
+                    if self.is_main_worker {
+                        let mut sum = (0..largest_even_below(v1.len())).map(
+                            |b| {
+                                #product
+                            },
+                        ).sum();
+                        let num_vars_multiplicity = self.expected_numvars_at_round()
+                            // the expected num_vars if working on single thread sumcheck
+                            .saturating_add(self.phase2_numvar.unwrap_or(0))
+                            // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                            .saturating_sub(1)
+                            // the multiplicity
+                            .saturating_sub(num_var);
+                        if num_vars_multiplicity > 0 {
+                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                        }
+                        AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
+                    } else {
+                        // other just skip and return 0 array
+                        AdditiveArray::<_, #degree_plus_one>([Default::default(); #degree_plus_one])
+                    }
+                },
+                PolyMeta::Normal => {
+                    if num_var < expected_numvars_at_round {
+                        // TODO optimize by caching computed result for later round reuse
+                        // need to figure out how to cache in one place to support base/extension field
+                        let mut sum = (0..largest_even_below(v1.len())).map(
+                            |b| {
+                                #product
+                            },
+                        ).sum();
+
+                        // calculate multiplicity term
+                        // minus one because when expected num of var is n_i, the boolean hypercube dimension only n_i-1
+                        let num_vars_multiplicity = self.expected_numvars_at_round()
+                            .saturating_sub(1)
+                            .saturating_sub(num_var);
+                        if num_vars_multiplicity > 0 {
+                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                        }
+                        AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
+                    } else {
+                        if v1.len() == 1 {
+                            let b = 0;
+                            AdditiveArray::<_, #degree_plus_one>([#additive_array_first_item ; #degree_plus_one])
+                        } else {
+                            (0..largest_even_below(v1.len()))
+                                #iter
+                                .map(|b| {
+                                    #additive_array_items
+                                })
+                                .sum::<AdditiveArray<_, #degree_plus_one>>()
+                        }
+                    }
+                },
             }
         }
     };
