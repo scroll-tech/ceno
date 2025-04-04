@@ -236,7 +236,6 @@ where
             .collect_vec();
         exit_span!(span);
 
-        let timer = start_timer!(|| "Basefold::batch commit");
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
         let evals_codewords = rmm
             .into_iter()

@@ -194,13 +194,6 @@ where
             return Err(Error::PolynomialTooLarge(num_vars));
         }
 
-        // // In this case, the polynomial is so small that the opening is trivial.
-        // // So we just build the Merkle tree over the polynomial evaluations.
-        // // No codeword is needed.
-        // if num_vars <= Spec::get_basecode_msg_size_log() {
-        //     return PolyEvalsCodeword::TooSmall(Box::new(rmm.into_default_padded_p3_rmm()));
-        // }
-
         // here 2 resize happend. first is padding to next pow2 height, second is extend to 2^get_rate_log times size
         let mut m = rmm.into_default_padded_p3_rmm().to_row_major_matrix();
         m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), E::BaseField::ZERO);

@@ -128,6 +128,7 @@ where
 
     // FIXME: make num_thread dominated by thread
     let num_threads = optimal_sumcheck_threads(min_num_vars);
+    let log2_num_threads = log2_strict_usize(num_threads);
 
     // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
     let mut polys = VirtualPolynomials::new(num_threads, max_num_vars);
@@ -145,7 +146,7 @@ where
                 thread_id == 0, // set thread_id 0 to be main worker
                 poly,
                 vec![(vec![], vec![])],
-                Some(log_num_threads),
+                Some(log2_num_threads),
                 Some(poly_meta.clone()),
             )
         })
@@ -157,14 +158,14 @@ where
     let mut commits = Vec::with_capacity(num_rounds - 1);
 
     let sumcheck_phase1 = entered_span!("sumcheck_phase1");
-    let phase1_rounds = num_rounds.min(num_vars - log2_strict_usize(num_threads));
+    let phase1_rounds = num_rounds.min(max_num_vars - log2_num_threads);
     for i in 0..phase1_rounds {
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
-            &initial_oracle,
+            initial_oracle.iter().map(|v| v.as_slice()).collect_vec(),
             transcript,
             &mut trees,
             &mut commits,
@@ -195,19 +196,19 @@ where
     let mut challenge = None;
 
     let sumcheck_phase2 = entered_span!("sumcheck_phase2");
-    let remaining_rounds = num_rounds.saturating_sub(num_vars - log2_strict_usize(num_threads));
+    let remaining_rounds = num_rounds.saturating_sub(max_num_vars - log2_num_threads);
     for i in 0..remaining_rounds {
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
-            &initial_oracle,
+            initial_oracle.iter().map(|v| v.as_slice()).collect_vec(),
             transcript,
             &mut trees,
             &mut commits,
             &mmcs_ext,
-            i == num_rounds.saturating_sub(max_num_vars - log2_strict_usize(num_threads)) - 1,
+            i == remaining_rounds - 1,
         );
     }
     exit_span!(sumcheck_phase2);
@@ -405,7 +406,7 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
 >(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     level: usize,
-    values: &[E],
+    values: Vec<&[E]>,
     challenge: E,
 ) -> RowMajorMatrix<E> {
     // assume values in bit_reverse_format
@@ -437,7 +438,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     prover_states: &mut Vec<IOPProverState<'_, E>>,
     challenge: Option<Challenge<E>>,
     sumcheck_messages: &mut Vec<Vec<E>>,
-    initial_oracle: &[Vec<E>],
+    initial_oracle: Vec<&[E]>,
     transcript: &mut impl Transcript<E>,
     trees: &mut Vec<MerkleTreeExt<E>>,
     commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
@@ -483,7 +484,11 @@ where
             next_challenge.elements,
         )
     } else {
-        let values = &mmcs_ext.get_matrices(trees.last().unwrap())[0].values;
+        let values = mmcs_ext
+            .get_matrices(trees.last().unwrap())
+            .iter()
+            .map(|m| m.values.as_slice())
+            .collect_vec();
         basefold_one_round_by_interpolation_weights::<E, Spec>(
             pp,
             log2_strict_usize(values.len()) - 1,
