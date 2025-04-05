@@ -5,7 +5,7 @@ use std::{
 };
 
 use itertools::{Itertools, enumerate, izip};
-use mpcs::PolynomialCommitmentScheme;
+use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
@@ -33,14 +33,14 @@ use crate::{
         },
     },
     structs::{
-        Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
+        ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
-type ResultCreateTableProof<E, PCS> = (ZKVMTableProof<E, PCS>, HashMap<usize, E>);
+type CreateTableProof<E, PCS> = (ZKVMTableProof<E, PCS>, HashMap<usize, E>, Point<E>);
 
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pk: ZKVMProvingKey<E, PCS>,
@@ -81,12 +81,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             })
             .collect();
 
-        // commit to fixed commitment
-        for pk in self.pk.circuit_pks.values() {
-            if let Some(fixed_commit) = &pk.vk.fixed_commit {
-                PCS::write_commitment(fixed_commit, &mut transcript)
-                    .map_err(ZKVMError::PCSError)?;
-            }
+        // commit to fixed commitmen
+        if let Some(fixed_commit) = &self.pk.get_vk().fixed_commit {
+            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
         exit_span!(span);
 
@@ -116,9 +113,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 0 => (vec![], vec![]),
                 _ => {
                     let structural_witness = structural_witness_rmm.to_mles();
-                    let commit =
-                        PCS::batch_commit_and_write(&self.pk.pp, witness_rmm, &mut transcript)
-                            .map_err(ZKVMError::PCSError)?;
+                    let commit = PCS::batch_commit_and_write(
+                        &self.pk.pp,
+                        vec![witness_rmm],
+                        &mut transcript,
+                    )
+                    .map_err(ZKVMError::PCSError)?;
                     let witness = PCS::get_arc_mle_witness_from_commitment(&commit);
                     commitments.insert(circuit_name.clone(), commit);
                     (witness, structural_witness)
@@ -245,7 +245,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         num_instances: usize,
         transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ZKVMOpcodeProof<E, PCS>, ZKVMError> {
+    ) -> Result<(ZKVMOpcodeProof<E, PCS>, Point<E>), ZKVMError> {
         let cs = circuit_pk.get_cs();
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
@@ -635,12 +635,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             name,
             witnesses.len()
         );
-        let wits_opening_proof = PCS::simple_batch_open(
+        let wits_opening_proof = PCS::batch_open(
             pp,
-            &witnesses,
             &wits_commit,
-            &input_open_point,
-            wits_in_evals.as_slice(),
+            &[input_open_point],
+            &[wits_in_evals],
             transcript,
         )
         .map_err(ZKVMError::PCSError)?;
@@ -652,23 +651,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(pcs_open_span);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
-        Ok(ZKVMOpcodeProof {
-            num_instances,
-            record_r_out_evals,
-            record_w_out_evals,
-            lk_p1_out_eval,
-            lk_p2_out_eval,
-            lk_q1_out_eval,
-            lk_q2_out_eval,
-            tower_proof,
-            main_sel_sumcheck_proofs: main_sel_sumcheck_proofs.proofs,
-            r_records_in_evals,
-            w_records_in_evals,
-            lk_records_in_evals,
-            wits_commit,
-            wits_opening_proof,
-            wits_in_evals,
-        })
+        Ok((
+            ZKVMOpcodeProof {
+                num_instances,
+                record_r_out_evals,
+                record_w_out_evals,
+                lk_p1_out_eval,
+                lk_p2_out_eval,
+                lk_q1_out_eval,
+                lk_q2_out_eval,
+                tower_proof,
+                main_sel_sumcheck_proofs: main_sel_sumcheck_proofs.proofs,
+                r_records_in_evals,
+                w_records_in_evals,
+                lk_records_in_evals,
+                wits_commit,
+                wits_opening_proof,
+                wits_in_evals,
+            },
+            input_open_point,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -687,7 +689,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         pi: &[ArcMultilinearExtension<'_, E>],
         transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<ResultCreateTableProof<E, PCS>, ZKVMError> {
+    ) -> Result<CreateTableProof<E, PCS>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let fixed = circuit_pk
             .fixed_traces
@@ -1077,12 +1079,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let (fixed_opening_proof, _fixed_commit) = if !fixed.is_empty() {
             (
                 Some(
-                    PCS::simple_batch_open(
+                    PCS::batch_open(
                         pp,
-                        &fixed,
                         circuit_pk.fixed_commit_wd.as_ref().unwrap(),
-                        &input_open_point,
-                        fixed_in_evals.as_slice(),
+                        &[input_open_point],
+                        &[fixed_in_evals],
                         transcript,
                     )
                     .map_err(ZKVMError::PCSError)?,
@@ -1100,12 +1101,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             name,
             fixed.len()
         );
-        let wits_opening_proof = PCS::simple_batch_open(
+        let wits_opening_proof = PCS::batch_open(
             pp,
-            &witnesses,
             &wits_commit,
-            &input_open_point,
-            wits_in_evals.as_slice(),
+            &[input_open_point],
+            &[wits_in_evals],
             transcript,
         )
         .map_err(ZKVMError::PCSError)?;

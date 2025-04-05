@@ -197,7 +197,7 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     }
 }
 
-pub type MKProofNTo1<F1, P> = (Vec<F1>, P);
+pub type MKProofNTo1<F1, P> = (Vec<Vec<F1>>, P);
 // for 2 to 1, leaf layer just need one value, as the other can be interpolated from previous layer
 pub type MKProof2To1<F1, P> = (F1, P);
 pub type QueryOpeningProofs<E> = Vec<(

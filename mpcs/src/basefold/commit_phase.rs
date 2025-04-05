@@ -12,7 +12,6 @@ use crate::{
         split_slice,
     },
 };
-use ark_std::start_timer;
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Itertools, izip};
 use p3::{
@@ -32,7 +31,6 @@ use transcript::{Challenge, Transcript};
 use multilinear_extensions::{
     commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, IntoMLE},
-    util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,
 };
@@ -85,10 +83,7 @@ where
         })
         .collect::<Vec<Vec<E>>>();
 
-    let mut running_oracle = initial_oracle
-        .iter()
-        .map(|v| Cow::Borrowed(v))
-        .collect_vec();
+    let mut running_oracle = initial_oracle.iter().map(Cow::Borrowed).collect_vec();
 
     exit_span!(batch_codewords_span);
 

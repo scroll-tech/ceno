@@ -52,7 +52,6 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     pub lk_records_in_evals: Vec<E>,
 
     pub wits_commit: PCS::Commitment,
-    pub wits_opening_proof: PCS::Proof,
     pub wits_in_evals: Vec<E>,
 }
 

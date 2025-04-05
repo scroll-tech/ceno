@@ -24,5 +24,5 @@ fn test_multiple_opcode() {
     );
     let param = Pcs::setup(1 << 10).unwrap();
     let (pp, _) = Pcs::trim(param, 1 << 10).unwrap();
-    cs.key_gen::<Pcs>(&pp, None);
+    cs.key_gen();
 }

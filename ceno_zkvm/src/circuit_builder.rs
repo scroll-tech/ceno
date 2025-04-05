@@ -178,24 +178,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn key_gen<PCS: PolynomialCommitmentScheme<E>>(
-        self,
-        pp: &PCS::ProverParam,
-        fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
-    ) -> ProvingKey<E, PCS> {
-        // transpose from row-major to column-major
-        let fixed_traces_polys = fixed_traces.as_ref().map(|rmm| rmm.to_mles());
-
-        let fixed_commit_wd = fixed_traces.map(|traces| PCS::batch_commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
-
+    pub fn key_gen(self) -> ProvingKey<E> {
         ProvingKey {
-            fixed_traces: fixed_traces_polys,
-            fixed_commit_wd,
-            vk: VerifyingKey {
-                cs: self,
-                fixed_commit,
-            },
+            vk: VerifyingKey { cs: self },
         }
     }
 

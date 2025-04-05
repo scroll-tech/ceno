@@ -10,10 +10,8 @@ use crate::{
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
-use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::{
-    mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
-};
+use mpcs::{Point, PolynomialCommitmentScheme};
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
@@ -105,13 +103,11 @@ impl<F: Clone> PointAndEval<F> {
 }
 
 #[derive(Clone)]
-pub struct ProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
-    pub fixed_commit_wd: Option<PCS::CommitmentWithWitness>,
-    pub vk: VerifyingKey<E, PCS>,
+pub struct ProvingKey<E: ExtensionField> {
+    pub vk: VerifyingKey<E>,
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
+impl<E: ExtensionField> ProvingKey<E> {
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         self.vk.get_cs()
     }
@@ -119,12 +115,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
-pub struct VerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+pub struct VerifyingKey<E: ExtensionField> {
     pub(crate) cs: ConstraintSystem<E>,
-    pub fixed_commit: Option<PCS::Commitment>,
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS> {
+impl<E: ExtensionField> VerifyingKey<E> {
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         &self.cs
     }
@@ -361,7 +356,10 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
-    pub circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
+    pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
+    // fixed commit with witness
+    pub fixed_commit_wd: Option<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>,
+    pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
 
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
@@ -376,7 +374,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
+            fixed_commit_wd: None,
+            fixed_commit: None,
         }
+    }
+
+    pub(crate) fn commit_fixed(
+        &mut self,
+        fixed_traces: Vec<RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+    ) -> Result<(), ZKVMError> {
+        // transpose from row-major to column-major
+        let fixed_commit_wd =
+            PCS::batch_commit(&self.pp, fixed_traces).map_err(|err| ZKVMError::PCSError(err))?;
+        let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
+        self.fixed_commit_wd = Some(fixed_commit_wd);
+        self.fixed_commit = Some(fixed_commit);
+        Ok(())
     }
 }
 
@@ -389,6 +402,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
+            fixed_commit: self.fixed_commit.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
@@ -401,7 +415,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
     // vk for opcode and table circuits
-    pub circuit_vks: BTreeMap<String, VerifyingKey<E, PCS>>,
+    pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
+    pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,
