@@ -100,11 +100,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
             })?;
         // write fixed commitment to transcript
-        for (_, vk) in self.vk.circuit_vks.iter() {
-            if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-                PCS::write_commitment(fixed_commit, &mut transcript)
-                    .map_err(ZKVMError::PCSError)?;
-            }
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
+            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
+        }
+
+        // write fixed commitment to transcript
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
+            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
         for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {

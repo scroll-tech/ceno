@@ -29,7 +29,7 @@ mod tests;
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+pub struct ZKVMOpcodeProof<E: ExtensionField> {
     // TODO support >1 opcodes
     pub num_instances: usize,
 
@@ -51,7 +51,6 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     pub w_records_in_evals: Vec<E>,
     pub lk_records_in_evals: Vec<E>,
 
-    pub wits_commit: PCS::Commitment,
     pub wits_in_evals: Vec<E>,
 }
 
@@ -60,7 +59,7 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+pub struct ZKVMTableProof<E: ExtensionField> {
     // tower evaluation at layer 1
     pub r_out_evals: Vec<[E; 2]>,
     pub w_out_evals: Vec<[E; 2]>,
@@ -76,10 +75,7 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub rw_hints_num_vars: Vec<usize>,
 
     pub fixed_in_evals: Vec<E>,
-    pub fixed_opening_proof: Option<PCS::Proof>,
-    pub wits_commit: PCS::Commitment,
     pub wits_in_evals: Vec<E>,
-    pub wits_opening_proof: PCS::Proof,
 }
 
 /// each field will be interpret to (constant) polynomial
@@ -143,14 +139,30 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub raw_pi: Vec<Vec<E::BaseField>>,
     // the evaluation of raw_pi.
     pub pi_evals: Vec<E>,
-    opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
-    table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E, PCS>)>,
+    opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E>)>,
+    table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E>)>,
+    pub fixed_witin_opening_proof: PCS::Proof,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
-    pub fn empty(pv: PublicValues<u32>) -> Self {
-        let raw_pi = pv.to_vec::<E>();
-        let pi_evals = raw_pi
+    pub fn new(
+        raw_pi: Vec<Vec<E::BaseField>>,
+        pi_evals: Vec<E>,
+        opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E>)>,
+        table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E>)>,
+        fixed_witin_opening_proof: PCS::Proof,
+    ) -> Self {
+        Self {
+            raw_pi,
+            pi_evals,
+            opcode_proofs,
+            table_proofs,
+            fixed_witin_opening_proof,
+        }
+    }
+
+    pub fn pi_evals(raw_pi: &Vec<Vec<E::BaseField>>) -> Vec<E> {
+        raw_pi
             .iter()
             .map(|pv| {
                 if pv.len() == 1 {
@@ -162,13 +174,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
                     E::ZERO
                 }
             })
-            .collect_vec();
-        Self {
-            raw_pi,
-            pi_evals,
-            opcode_proofs: BTreeMap::new(),
-            table_proofs: BTreeMap::new(),
-        }
+            .collect_vec()
     }
 
     pub fn update_pi_eval(&mut self, idx: usize, v: E) {

@@ -123,7 +123,10 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
-        _comms: &Self::CommitmentWithWitness,
+        _fixed_comms: &Self::CommitmentWithWitness,
+        _witin_comms: &Self::CommitmentWithWitness,
+        // witin mapping to fixed index
+        _witin_fixed_mapping: Vec<Option<usize>>,
         _points: &[Point<E>],
         _evals: &[Vec<E>],
         _transcript: &mut impl Transcript<E>,

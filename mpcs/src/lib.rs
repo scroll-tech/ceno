@@ -1,7 +1,7 @@
 #![deny(clippy::cargo)]
 use ff_ext::ExtensionField;
 use serde::{Serialize, de::DeserializeOwned};
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -75,12 +75,23 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    comms: &Pcs::CommitmentWithWitness,
+    fixed_comms: &Pcs::CommitmentWithWitness,
+    witin_comms: &Pcs::CommitmentWithWitness,
+    // witin mapping to fixed index
+    witin_fixed_mapping: Vec<Option<usize>>,
     points: &[Point<E>],
     evals: &[Vec<E>],
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
-    Pcs::batch_open(pp, comms, points, evals, transcript)
+    Pcs::batch_open(
+        pp,
+        fixed_comms,
+        witin_comms,
+        witin_fixed_mapping,
+        points,
+        evals,
+        transcript,
+    )
 }
 
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -172,7 +183,10 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_open(
         pp: &Self::ProverParam,
-        comms: &Self::CommitmentWithWitness,
+        fixed_comms: &Self::CommitmentWithWitness,
+        witin_comms: &Self::CommitmentWithWitness,
+        // witin mapping to fixed index
+        witin_fixed_mapping: Vec<Option<usize>>,
         points: &[Point<E>],
         evals: &[Vec<E>],
         transcript: &mut impl Transcript<E>,

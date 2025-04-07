@@ -338,18 +338,20 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
-    /// Iterate opcode circuits, then table circuits, sorted by name.
+    /// Iterate opcode/table circuits, sorted by alphabetical order.
     pub fn into_iter_sorted(
         self,
     ) -> impl Iterator<Item = (String, Vec<RowMajorMatrix<E::BaseField>>)> {
-        chain(
-            self.witnesses_opcodes
-                .into_iter()
-                .map(|(name, witnesses)| (name, vec![witnesses])),
-            self.witnesses_tables
-                .into_iter()
-                .map(|(name, witnesses)| (name, witnesses.to_vec())),
-        )
+        self.witnesses_opcodes
+            .into_iter()
+            .map(|(name, witness)| (name, vec![witness]))
+            .chain(
+                self.witnesses_tables
+                    .into_iter()
+                    .map(|(name, witnesses)| (name, witnesses.to_vec())),
+            )
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
     }
 }
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -357,6 +359,8 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
+    // fixed commit w.r.t circuit index
+    pub fixed_trace_index: Vec<Option<usize>>,
     // fixed commit with witness
     pub fixed_commit_wd: Option<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
@@ -376,6 +380,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             finalize_global_state_expr: Expression::ZERO,
             fixed_commit_wd: None,
             fixed_commit: None,
+            fixed_trace_index: vec![],
         }
     }
 

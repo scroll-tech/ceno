@@ -13,7 +13,7 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::eq_eval};
 use p3::{commit::Mmcs, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{
-    batch_prover_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
+    batch_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
 };
 use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
@@ -290,8 +290,13 @@ where
     /// Open a batch of polynomial commitments at several points.
     fn batch_open(
         pp: &Self::ProverParam,
-        comms: &Self::CommitmentWithWitness,
+        fixed_comms: &Self::CommitmentWithWitness,
+        witin_comms: &Self::CommitmentWithWitness,
+        // not all witins got respective fixed
+        witin_fixed_mapping: Vec<Option<usize>>,
+        // for points and evals: witness & fixed are assumed to be line up consecutively
         points: &[Point<E>],
+        // TODO this is only for debug purpose
         evals: &[Vec<E>],
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
@@ -299,27 +304,46 @@ where
 
         // sanity check
         // number of point match with commitment length, assuming each commitment are opening under same point
-        assert_eq!(points.len(), comms.polynomials_bh_evals.len());
+        assert!(
+            [
+                points.len(),
+                witin_comms.polynomials_bh_evals.len(),
+                witin_fixed_mapping.len()
+            ]
+            .iter()
+            .all_equal()
+        );
 
-        assert!(izip!(&comms.polynomials_bh_evals, &comms.meta_info).all(
-            |(polynomials_bh_evals, meta_info)| {
-                let (num_var, num_polys) = meta_info;
-                // check num_vars & num_poly match
-                polynomials_bh_evals
+        assert!(
+            izip!(
+                &witin_comms.polynomials_bh_evals,
+                witin_fixed_mapping
                     .iter()
-                    .all(|p| p.num_vars() == *num_var)
-                    && polynomials_bh_evals.len() == *num_polys
-            },
-        ));
+                    .map(|index| index.map(|index| &fixed_comms.polynomials_bh_evals[index])),
+                &witin_comms.meta_info,
+                evals,
+            )
+            .all(
+                |(polynomials_bh_evals, fixed_polynomials_bh_evals, meta_info, evals)| {
+                    let (num_var, num_polys) = meta_info;
+                    // check num_vars & num_poly match
+                    polynomials_bh_evals
+                        .iter()
+                        .chain(fixed_polynomials_bh_evals.into_iter().flatten())
+                        .all(|p| p.num_vars() == *num_var)
+                        && polynomials_bh_evals.len() == *num_polys
+                },
+            )
+        );
 
         let (min_num_vars, max_num_vars) = (
-            *comms
+            *witin_comms
                 .meta_info
                 .iter()
                 .map(|(num_var, _)| num_var)
                 .min()
                 .unwrap(),
-            *comms
+            *witin_comms
                 .meta_info
                 .iter()
                 .map(|(num_var, _)| num_var)
@@ -329,28 +353,21 @@ where
         assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
 
         if cfg!(feature = "sanity-check") {
-            assert!(izip!(&comms.polynomials_bh_evals, points, evals).all(
+            assert!(izip!(&witin_comms.polynomials_bh_evals, points, evals).all(
                 |(polys, point, evals)| {
                     izip!(polys, evals).all(|(poly, eval)| poly.evaluate(point) == *eval)
                 }
             ));
         }
-        let total_num_polys = evals.iter().map(|evals| evals.len()).sum();
-        // evals.len() is the number of polynomials
-        let batch_coeffs =
-            &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
-        // let _target_sum = inner_product(evals, batch_coeffs);
 
-        // Now the verifier has obtained the new target sum, and is able to compute the random
-        // linear coefficients.
-        // The remaining tasks for the prover is to prove that
-        // sum_i coeffs[i] poly_evals[i] is equal to
-        // the new target sum, where coeffs is computed as follows
+        // prover prove that
+        // sum_i coeffs[i] poly_evals[i]
         let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
             points,
-            batch_coeffs,
-            comms,
+            fixed_comms,
+            witin_comms,
+            &witin_fixed_mapping,
             transcript,
             (min_num_vars, max_num_vars),
             max_num_vars - Spec::get_basecode_msg_size_log(),
@@ -359,8 +376,14 @@ where
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
-        let query_opening_proof =
-            batch_prover_query_phase(transcript, comms, &trees, Spec::get_number_queries());
+        let query_opening_proof = batch_query_phase(
+            transcript,
+            fixed_comms,
+            witin_comms,
+            &witin_fixed_mapping,
+            &trees,
+            Spec::get_number_queries(),
+        );
         end_timer!(query_timer);
 
         end_timer!(span);
@@ -525,11 +548,11 @@ where
         // let final_message = &proof.final_message[0];
         // transcript.append_field_element_exts(final_message.as_slice());
 
-        // let queries: Vec<_> = transcript
-        //     .sample_and_append_vec(b"query indices", Spec::get_number_queries())
-        //     .into_iter()
-        //     .map(|r| ext_to_usize(&r) % (1 << (num_vars + Spec::get_rate_log())))
-        //     .collect();
+        // let queries: Vec<_> = transcript.sample_bits_and_append_vec(
+        //     b"query indices",
+        //     Spec::get_number_queries(),
+        //     num_vars + Spec::get_rate_log(),
+        // );
 
         // // coeff is the eq polynomial evaluated at the first challenge.len() variables
         // let coeff = eq_eval(&point[..fold_challenges.len()], &fold_challenges);

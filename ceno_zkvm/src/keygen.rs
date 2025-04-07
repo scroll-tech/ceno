@@ -14,6 +14,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     ) -> Result<ZKVMProvingKey<E, PCS>, ZKVMError> {
         let mut vm_pk = ZKVMProvingKey::new(pp.clone(), vp);
         let mut fixed_traces = Vec::with_capacity(self.circuit_css.len());
+        let mut fixed_trace_index = Vec::with_capacity(self.circuit_css.len());
 
         for (c_name, cs) in self.circuit_css {
             // fixed_traces is optional
@@ -25,7 +26,10 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
                         .remove(&c_name)
                         .flatten()
                         .ok_or(ZKVMError::FixedTraceNotFound(c_name.clone()))?,
-                )
+                );
+                fixed_trace_index.push(Some(fixed_trace_index.len()))
+            } else {
+                fixed_trace_index.push(None)
             };
 
             let circuit_pk = cs.key_gen();
@@ -36,6 +40,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
 
         vm_pk.initial_global_state_expr = self.initial_global_state_expr;
         vm_pk.finalize_global_state_expr = self.finalize_global_state_expr;
+        vm_pk.fixed_trace_index = fixed_trace_index;
 
         Ok(vm_pk)
     }

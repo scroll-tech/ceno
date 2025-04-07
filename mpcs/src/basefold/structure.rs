@@ -88,15 +88,15 @@ where
     //     Self::trivial_num_vars::<Spec>(self.num_vars)
     // }
 
-    pub fn codeword_size(&self) -> usize {
+    pub fn max_codeword_size(&self) -> usize {
         let mmcs = poseidon2_merkle_tree::<E>();
         // size = height * 2 because we concat pi[left]/pi[right] under same row index
         mmcs.get_matrices(&self.codeword)[0].height() * 2
     }
 
-    pub fn get_codewords(&self) -> &DenseMatrix<E::BaseField> {
+    pub fn get_codewords(&self) -> Vec<&DenseMatrix<E::BaseField>> {
         let mmcs = poseidon2_merkle_tree::<E>();
-        mmcs.get_matrices(&self.codeword)[0]
+        mmcs.get_matrices(&self.codeword)
     }
 }
 
@@ -135,7 +135,8 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.get_codewords().eq(other.get_codewords())
+        izip!(self.get_codewords(), other.get_codewords())
+            .all(|(codeword_a, codeword_b)| codeword_a.eq(codeword_b))
             && izip!(&self.polynomials_bh_evals, &other.polynomials_bh_evals).all(
                 |(bh_evals_a, bh_evals_b)| {
                     izip!(bh_evals_a, bh_evals_b).all(|(bh_evals_a, bh_evals_b)| {
@@ -201,6 +202,12 @@ pub type MKProofNTo1<F1, P> = (Vec<Vec<F1>>, P);
 // for 2 to 1, leaf layer just need one value, as the other can be interpolated from previous layer
 pub type MKProof2To1<F1, P> = (F1, P);
 pub type QueryOpeningProofs<E> = Vec<(
+    MKProofNTo1<
+        <E as ExtensionField>::BaseField,
+        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
+            <E as ExtensionField>::BaseField,
+        >>::Proof,
+    >,
     MKProofNTo1<
         <E as ExtensionField>::BaseField,
         <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<

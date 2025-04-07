@@ -17,7 +17,7 @@ use itertools::{Itertools, izip};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::{Field, PrimeCharacteristicRing, dot_product},
-    matrix::dense::RowMajorMatrix,
+    matrix::{Matrix, dense::RowMajorMatrix},
     util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -46,8 +46,10 @@ use super::structure::BasefoldCommitmentWithWitness;
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     point: &[Point<E>],
-    batch_coeffs: &[E],
-    comm: &BasefoldCommitmentWithWitness<E>,
+
+    fixed_comms: &BasefoldCommitmentWithWitness<E>,
+    witin_comms: &BasefoldCommitmentWithWitness<E>,
+    witin_fixed_mapping: &[Option<usize>],
     transcript: &mut impl Transcript<E>,
     (min_num_vars, max_num_vars): (usize, usize),
     num_rounds: usize,
@@ -63,45 +65,95 @@ where
     let mmcs = poseidon2_merkle_tree::<E>();
     let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(max_num_vars);
 
-    let batch_codewords_span = entered_span!("Batch codewords");
-    let num_polys = comm
-        .meta_info
-        .iter()
-        .map(|(_, num_polys)| *num_polys)
-        .collect_vec();
-    let batch_coeffs_splitted = split_slice(batch_coeffs, &num_polys);
-
-    let initial_oracle = mmcs
-        .get_matrices(&comm.codeword)
-        .par_iter()
-        .zip_eq(batch_coeffs_splitted.par_iter())
-        .map(|(rmm, batch_coeffs)| {
-            rmm.values
-                .par_chunks(batch_coeffs.len())
-                .map(|row| dot_product(batch_coeffs.iter().copied(), row.iter().copied()))
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<Vec<E>>>();
-
-    let mut running_oracle = initial_oracle.iter().map(Cow::Borrowed).collect_vec();
-
-    exit_span!(batch_codewords_span);
-
-    let running_evals: Vec<ArcMultilinearExtension<E>> = comm
+    // TODO filter too small witness (and fixed, both with same size)
+    // giving witin_polys: Vec<Vec<ArcMle>>
+    //        witin_index_mapping: Vec<Option<usize>>
+    //        fixed_polys: Vec<Vec<ArcMle>>
+    // here generate the concat fixed_polys along with witin_polys
+    // such that we take `fixed_polys` respective index from `witin_index_mapping`
+    // here we need `witin_index_mapping` because not all witin mapping with respective fixed_polys
+    let witin_concat_with_fixed_polys: Vec<Vec<ArcMultilinearExtension<E>>> = witin_comms
         .polynomials_bh_evals
+        .iter()
+        .zip_eq(witin_fixed_mapping)
+        .map(|(witin_polys, fixed_poly_option)| {
+            let fixed_iter = fixed_poly_option
+                .and_then(|idx| fixed_comms.polynomials_bh_evals.get(idx))
+                .into_iter()
+                .flatten()
+                .cloned();
+            witin_polys.iter().cloned().chain(fixed_iter).collect()
+        })
+        .collect::<Vec<Vec<_>>>();
+    let batch_group_size = witin_concat_with_fixed_polys
+        .iter()
+        .map(|v| v.len())
+        .collect_vec();
+    let total_num_polys = batch_group_size.iter().sum();
+
+    let batch_coeffs =
+        &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
+    // split batch coeffs to match with batch group for easier handling
+    let batch_coeffs_splitted = split_slice(batch_coeffs, &batch_group_size);
+
+    // prepare
+    // - codeword oracle => for FRI
+    // - evals => for sumcheck
+    let witins_codeword_oracle = mmcs.get_matrices(&witin_comms.codeword);
+    let fixed_codeword_oracle = mmcs.get_matrices(&fixed_comms.codeword);
+
+    let batch_oracle = entered_span!("batch_oracle");
+    let initial_rlc_oracle = witins_codeword_oracle
+        .iter()
+        .zip_eq(witin_fixed_mapping)
+        .zip_eq(&batch_coeffs_splitted)
+        .map(|((witin_polys, fixed_poly_option), batch_coeffs)| {
+            // batch_coeffs concat witin follow by fix, thus we need to retrieve each respective index
+            let (_, mut rlc_vector) = std::iter::once(witin_polys)
+                .chain(fixed_poly_option.and_then(|idx| fixed_codeword_oracle.get(idx)))
+                .fold((0, vec![]), |(start_index, mut aggregated), rmm| {
+                    let batch_coeffs = &batch_coeffs[start_index..start_index + rmm.width];
+                    aggregated.push(
+                        rmm.values
+                            .par_chunks(rmm.width)
+                            .map(|row| {
+                                dot_product(batch_coeffs.iter().copied(), row.iter().copied())
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                    (start_index + rmm.width, aggregated)
+                });
+            assert!(!rlc_vector.is_empty() && rlc_vector.len() <= 2);
+            // merge witin & fixed together, since both have been rlc and same length
+            if rlc_vector.len() == 1 {
+                rlc_vector.remove(0)
+            } else {
+                (0..rlc_vector[0].len())
+                    .into_par_iter()
+                    .map(|j| rlc_vector.iter().map(|row| row[j]).sum())
+                    .collect::<Vec<_>>()
+            }
+        })
+        .collect_vec();
+    assert_eq!(point.len(), initial_rlc_oracle.len());
+    let mut running_oracle = initial_rlc_oracle.iter().map(Cow::Borrowed).collect_vec();
+    exit_span!(batch_oracle);
+
+    let batched_bh_evals = entered_span!("batched_bh_evals");
+    let initial_rlc_bh_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
         .par_iter()
         .zip_eq(batch_coeffs_splitted.par_iter())
-        .zip_eq(comm.meta_info.par_iter())
-        .map(|((polynomials_bh_evals, batch_coeffs), (num_vars, _))| {
+        .map(|(witin_fixed_mle, batch_coeffs)| {
+            let num_vars = witin_fixed_mle[0].num_vars();
             let Some((running_evals, _)): Option<(ArcMultilinearExtension<E>, E)> = izip!(
-                polynomials_bh_evals.iter().cloned(),
+                witin_fixed_mle.iter().cloned(),
                 batch_coeffs.iter().copied()
             )
             .reduce(|(poly_a, coeff_a), (poly_b, coeff_b)| {
                 let next_poly = commutative_op_mle_pair!(|poly_a, poly_b| {
                     // TODO we can save a bit cost if first batch_coeffs is E::ONE so we can skip the first base * ext operation
                     Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        *num_vars,
+                        num_vars,
                         poly_a
                             .par_iter()
                             .zip(poly_b.par_iter())
@@ -116,6 +168,8 @@ where
             running_evals
         })
         .collect::<Vec<_>>();
+    assert_eq!(point.len(), initial_rlc_bh_evals.len());
+    exit_span!(batched_bh_evals);
     exit_span!(prepare_span);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
@@ -133,7 +187,7 @@ where
     // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
     let mut polys = VirtualPolynomials::new(num_threads, max_num_vars);
 
-    izip!(&eq, &running_evals)
+    izip!(&eq, &initial_rlc_bh_evals)
         .for_each(|(eq, running_evals)| polys.add_mle_list(vec![&eq, &running_evals], E::ONE));
 
     let (batched_polys, poly_meta) = polys.get_batched_polys();

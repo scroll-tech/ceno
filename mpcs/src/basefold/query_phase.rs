@@ -28,9 +28,11 @@ use super::{
     structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
 };
 
-pub fn batch_prover_query_phase<E: ExtensionField>(
+pub fn batch_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
-    comm: &BasefoldCommitmentWithWitness<E>,
+    fixed_comms: &BasefoldCommitmentWithWitness<E>,
+    witin_comms: &BasefoldCommitmentWithWitness<E>,
+    witin_fixed_mapping: &[Option<usize>],
     trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
 ) -> QueryOpeningProofs<E>
@@ -41,17 +43,18 @@ where
     let mmcs = poseidon2_merkle_tree::<E>();
 
     // Transform the challenge queries from field elements into integers
-    // TODO simplify with sample_bit
-    let queries: Vec<_> = transcript.sample_and_append_vec(b"query indices", num_verifier_queries);
-    let queries_usize: Vec<usize> = queries
-        .iter()
-        .map(|x_index| ext_to_usize(x_index) % comm.codeword_size())
-        .collect_vec();
+    let log2_witin_max_codeword_size = log2_strict_usize(witin_comms.max_codeword_size());
+    let log2_fixed_max_codeword_size = log2_strict_usize(fixed_comms.max_codeword_size());
+    let queries: Vec<_> = transcript.sample_bits_and_append_vec(
+        b"query indices",
+        num_verifier_queries,
+        log2_witin_max_codeword_size,
+    );
 
-    queries_usize
+    queries
         .iter()
         .map(|idx| {
-            let opening = {
+            let witin_base_opening = {
                 // extract the even part of `idx`
                 // ---------------------------------
                 // the oracle values are committed in a row-bit-reversed format.
@@ -61,7 +64,19 @@ where
                 // however, since `p_d[j]` and `p_d[j + n_{d-1}]` are already concatenated in the same merkle leaf,
                 // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
                 let idx = idx >> 1;
-                let (values, proof) = mmcs.open_batch(idx, &comm.codeword);
+                let (values, proof) = mmcs.open_batch(idx, &witin_comms.codeword);
+                (values, proof)
+            };
+
+            let fixed_base_opening = {
+                // follow same rule as `witin_base_opening`
+                let idx = if log2_witin_max_codeword_size > log2_fixed_max_codeword_size {
+                    idx >> (log2_witin_max_codeword_size - log2_fixed_max_codeword_size)
+                } else {
+                    idx << (log2_fixed_max_codeword_size - log2_witin_max_codeword_size)
+                };
+                let idx = idx >> 1;
+                let (values, proof) = mmcs.open_batch(idx, &fixed_comms.codeword);
                 (values, proof)
             };
 
@@ -82,7 +97,7 @@ where
                 proofs.push((sibling, proof));
                 (idx >> 1, proofs)
             });
-            (opening, opening_ext)
+            (witin_base_opening, fixed_base_opening, opening_ext)
         })
         .collect_vec()
 }
