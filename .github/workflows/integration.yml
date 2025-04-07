@@ -43,7 +43,7 @@ jobs:
         with:
           path: |
             target/
-            example/target/
+            examples/target/
             ceno_rt/target/
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
