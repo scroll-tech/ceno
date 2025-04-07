@@ -36,7 +36,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             assert!(vm_pk.circuit_pks.insert(c_name, circuit_pk).is_none());
         }
 
-        vm_pk.commit_fixed(fixed_traces);
+        vm_pk.commit_fixed(fixed_traces)?;
 
         vm_pk.initial_global_state_expr = self.initial_global_state_expr;
         vm_pk.finalize_global_state_expr = self.finalize_global_state_expr;

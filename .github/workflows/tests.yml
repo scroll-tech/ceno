@@ -35,7 +35,7 @@ jobs:
             ~/.cargo/git/db/
             target/
             ceno_rt/target/
-            example/target/
+            examples/target/
           key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: tests-${{ runner.os }}-cargo-
 

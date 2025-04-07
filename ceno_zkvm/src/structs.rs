@@ -9,7 +9,7 @@ use crate::{
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain};
+use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -348,7 +348,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .chain(
                 self.witnesses_tables
                     .into_iter()
-                    .map(|(name, witnesses)| (name, witnesses.to_vec())),
+                    .map(|(name, witnesses)| (name, witnesses.into())),
             )
             .collect::<BTreeMap<_, _>>()
             .into_iter()

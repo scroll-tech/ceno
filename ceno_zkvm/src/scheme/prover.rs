@@ -16,7 +16,7 @@ use sumcheck::{
     structs::{IOPProverMessage, IOPProverState},
     util::optimal_sumcheck_threads,
 };
-use transcript::{ForkableTranscript, Transcript};
+use transcript::Transcript;
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
@@ -59,7 +59,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         &self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues<u32>,
-        mut transcript: impl ForkableTranscript<E>,
+        mut transcript: impl Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
         let raw_pi = pi.to_vec::<E>();
@@ -128,10 +128,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             );
         }
         // batch commit witness
-        let witin_commit = PCS::batch_commit_and_write(&self.pk.pp, wits_rmms, &mut transcript)
-            .map_err(ZKVMError::PCSError)?;
+        let witin_commit_with_witness =
+            PCS::batch_commit_and_write(&self.pk.pp, wits_rmms, &mut transcript)
+                .map_err(ZKVMError::PCSError)?;
         // retrieve mle from commitment
-        let mut witness_mles = PCS::get_arc_mle_witness_from_commitment(&witin_commit);
+        let mut witness_mles = PCS::get_arc_mle_witness_from_commitment(&witin_commit_with_witness);
+        let witin_commit = PCS::get_pure_commitment(&witin_commit_with_witness);
         exit_span!(commit_to_traces_span);
 
         // retrive fixed mle from pk
@@ -161,6 +163,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 // do nothing without point and evaluation insertion
                 return Ok::<(Vec<_>, Vec<Vec<_>>, Vec<Option<usize>>), ZKVMError>((points,evaluations,witin_fixed_mapping));
             }
+            transcript.append_field_element(&E::BaseField::from_u64(index as u64));
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
             let witness_mle = witness_mles.split_off(cs.num_witin as usize);
@@ -193,7 +196,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 points.push(point);
                 evaluations.push(opcode_proof.wits_in_evals.clone());
-                witin_fixed_mapping.push(self.pk.fixed_trace_index[index].clone());
+                // there is no fixed commitment in opcode circuit
+                assert_eq!(self.pk.fixed_trace_index[index], None);
+                witin_fixed_mapping.push(None);
                 opcode_proofs
                     .insert(circuit_name.clone(), (index, opcode_proof));
             } else {
@@ -241,7 +246,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .fixed_commit_wd
                 .as_ref()
                 .expect("must have fixed commitment witness"),
-            &witin_commit,
+            &witin_commit_with_witness,
             witin_fixed_mapping,
             &points,
             &evaluations,
@@ -255,6 +260,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             pi_evals,
             opcode_proofs,
             table_proofs,
+            witin_commit,
             mpcs_opening_proof,
         );
         exit_span!(main_proofs_span);

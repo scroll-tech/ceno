@@ -127,20 +127,23 @@ fn test_rw_lk_expression_combination() {
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
         // commit to main traces
-        let commit = Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript).unwrap();
+        let commit_with_witness =
+            Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm], &mut transcript).unwrap();
+        let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
+        // write commitment into transcript and derive challenges from it
+        Pcs::write_commitment(&witin_commit, &mut transcript).unwrap();
+
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
         let prover_challenges = [
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
 
-        let proof = prover
+        let (proof, _) = prover
             .create_opcode_proof(
                 name.as_str(),
-                &prover.pk.pp,
                 prover.pk.circuit_pks.get(&name).unwrap(),
                 wits_in,
-                commit,
                 &[],
                 num_instances,
                 &mut transcript,
@@ -153,7 +156,7 @@ fn test_rw_lk_expression_combination() {
         let verifier = ZKVMVerifier::new(vk.clone());
         let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
         // write commitment into transcript and derive challenges from it
-        Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
+        Pcs::write_commitment(&witin_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
             v_transcript.read_challenge().elements,
             v_transcript.read_challenge().elements,

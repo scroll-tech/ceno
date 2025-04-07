@@ -141,6 +141,7 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pi_evals: Vec<E>,
     opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E>)>,
     table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E>)>,
+    witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub fixed_witin_opening_proof: PCS::Proof,
 }
 
@@ -150,6 +151,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         pi_evals: Vec<E>,
         opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E>)>,
         table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E>)>,
+        witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         fixed_witin_opening_proof: PCS::Proof,
     ) -> Self {
         Self {
@@ -157,6 +159,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
             pi_evals,
             opcode_proofs,
             table_proofs,
+            witin_commit,
             fixed_witin_opening_proof,
         }
     }
@@ -210,32 +213,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         // also provide by-circuit stats
         let mut by_circuitname_stats = HashMap::new();
         // opcode circuit mpcs size
-        let mpcs_opcode_commitment = self
-            .opcode_proofs
-            .iter()
-            .map(|(circuit_name, (_, proof))| {
-                let size = bincode::serialized_size(&proof.wits_commit);
-                size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
-                })
-            })
-            .collect::<Result<Vec<u64>, _>>()
-            .expect("serialization error")
-            .iter()
-            .sum::<u64>();
-        let mpcs_opcode_opening = self
-            .opcode_proofs
-            .iter()
-            .map(|(circuit_name, (_, proof))| {
-                let size = bincode::serialized_size(&proof.wits_opening_proof);
-                size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
-                })
-            })
-            .collect::<Result<Vec<u64>, _>>()
-            .expect("serialization error")
-            .iter()
-            .sum::<u64>();
+        let mpcs_opcode_commitment =
+            bincode::serialized_size(&self.witin_commit).expect("serialization error");
+        let mpcs_opcode_opening =
+            bincode::serialized_size(&self.fixed_witin_opening_proof).expect("serialization error");
         // opcode circuit for tower proof size
         let tower_proof_opcode = self
             .opcode_proofs
@@ -256,46 +237,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .iter()
             .map(|(circuit_name, (_, proof))| {
                 let size = bincode::serialized_size(&proof.main_sel_sumcheck_proofs);
-                size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
-                })
-            })
-            .collect::<Result<Vec<u64>, _>>()
-            .expect("serialization error")
-            .iter()
-            .sum::<u64>();
-        // table circuit mpcs size
-        let mpcs_table_commitment = self
-            .table_proofs
-            .iter()
-            .map(|(circuit_name, (_, proof))| {
-                let size = bincode::serialized_size(&proof.wits_commit);
-                size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
-                })
-            })
-            .collect::<Result<Vec<u64>, _>>()
-            .expect("serialization error")
-            .iter()
-            .sum::<u64>();
-        let mpcs_table_opening = self
-            .table_proofs
-            .iter()
-            .map(|(circuit_name, (_, proof))| {
-                let size = bincode::serialized_size(&proof.wits_opening_proof);
-                size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
-                })
-            })
-            .collect::<Result<Vec<u64>, _>>()
-            .expect("serialization error")
-            .iter()
-            .sum::<u64>();
-        let mpcs_table_fixed_opening = self
-            .table_proofs
-            .iter()
-            .map(|(circuit_name, (_, proof))| {
-                let size = bincode::serialized_size(&proof.fixed_opening_proof);
                 size.inspect(|size| {
                     *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
                 })
@@ -355,13 +296,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         write!(
             f,
             "overall_size {:.2}mb. \n\
-            opcode mpcs commitment {:?}% \n\
-            opcode mpcs opening {:?}% \n\
+            mpcs commitment {:?}% \n\
+            mpcs opening {:?}% \n\
             opcode tower proof {:?}% \n\
             opcode main sumcheck proof {:?}% \n\
-            table mpcs commitment {:?}% \n\
-            table mpcs opening {:?}% \n\
-            table mpcs fixed opening {:?}% \n\
             table tower proof {:?}% \n\
             table same r sumcheck proof {:?}% \n\n\
             by circuit_name break down: \n\
@@ -372,9 +310,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             (mpcs_opcode_opening * 100).div(overall_size),
             (tower_proof_opcode * 100).div(overall_size),
             (main_sumcheck_opcode * 100).div(overall_size),
-            (mpcs_table_commitment * 100).div(overall_size),
-            (mpcs_table_opening * 100).div(overall_size),
-            (mpcs_table_fixed_opening * 100).div(overall_size),
             (tower_proof_table * 100).div(overall_size),
             (same_r_sumcheck_table * 100).div(overall_size),
             by_circuitname_stats,
