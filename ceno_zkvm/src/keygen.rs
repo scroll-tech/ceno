@@ -20,6 +20,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             // fixed_traces is optional
             // verifier will check it existent if cs.num_fixed > 0
             if cs.num_fixed > 0 {
+                fixed_trace_index.push(Some(fixed_traces.len()));
                 fixed_traces.push(
                     vm_fixed_traces
                         .circuit_fixed_traces
@@ -27,7 +28,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
                         .flatten()
                         .ok_or(ZKVMError::FixedTraceNotFound(c_name.clone()))?,
                 );
-                fixed_trace_index.push(Some(fixed_trace_index.len()))
             } else {
                 fixed_trace_index.push(None)
             };

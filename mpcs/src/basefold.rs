@@ -321,10 +321,9 @@ where
                     .iter()
                     .map(|index| index.map(|index| &fixed_comms.polynomials_bh_evals[index])),
                 &witin_comms.meta_info,
-                evals,
             )
             .all(
-                |(polynomials_bh_evals, fixed_polynomials_bh_evals, meta_info, evals)| {
+                |(polynomials_bh_evals, fixed_polynomials_bh_evals, meta_info)| {
                     let (num_var, num_polys) = meta_info;
                     // check num_vars & num_poly match
                     polynomials_bh_evals
@@ -335,6 +334,36 @@ where
                 },
             )
         );
+
+        if cfg!(feature = "sanity-check") {
+            // check poly evaluation on point equal eval
+            let point_poly_pair = witin_comms
+                .polynomials_bh_evals
+                .iter()
+                .zip_eq(&witin_fixed_mapping)
+                .zip_eq(points)
+                .flat_map(|((witin_polys, fixed_poly_option), point)| {
+                    let fixed_iter = fixed_poly_option
+                        .and_then(|idx| fixed_comms.polynomials_bh_evals.get(idx))
+                        .into_iter()
+                        .flatten()
+                        .cloned();
+                    let flatten_polys = witin_polys
+                        .iter()
+                        .cloned()
+                        .chain(fixed_iter)
+                        .collect::<Vec<ArcMultilinearExtension<E>>>();
+                    let points = vec![point.clone(); flatten_polys.len()];
+                    izip!(points, flatten_polys)
+                })
+                .collect::<Vec<(Point<E>, ArcMultilinearExtension<E>)>>();
+            assert!(
+                point_poly_pair
+                    .into_iter()
+                    .zip_eq(evals.iter().flatten())
+                    .all(|((point, poly), eval)| poly.evaluate(&point) == *eval)
+            );
+        }
 
         let (min_num_vars, max_num_vars) = (
             *witin_comms
@@ -351,14 +380,6 @@ where
                 .unwrap(),
         );
         assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
-
-        if cfg!(feature = "sanity-check") {
-            assert!(izip!(&witin_comms.polynomials_bh_evals, points, evals).all(
-                |(polys, point, evals)| {
-                    izip!(polys, evals).all(|(poly, eval)| poly.evaluate(point) == *eval)
-                }
-            ));
-        }
 
         // prover prove that
         // sum_i coeffs[i] poly_evals[i]
@@ -583,7 +604,12 @@ where
     fn get_arc_mle_witness_from_commitment(
         commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
-        commitment.polynomials_bh_evals[0].clone()
+        commitment
+            .polynomials_bh_evals
+            .iter()
+            .flatten()
+            .cloned()
+            .collect_vec()
     }
 
     fn get_arc_mle_witness_from_commitment_v2(
