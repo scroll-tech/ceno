@@ -17,7 +17,7 @@ use tracing::instrument;
 use witness::{RowMajorMatrix, expand_from_coeff as expand_from_coeff_inner};
 
 pub use self::{
-    ntt_impl::{intt, intt_batch, ntt, ntt_batch},
+    ntt_impl::{intt, intt_batch, intt_batch_rmm, ntt, ntt_batch},
     transpose::{transpose, transpose_bench_allocate, transpose_rmm, transpose_test},
     wavelet::wavelet_transform,
 };

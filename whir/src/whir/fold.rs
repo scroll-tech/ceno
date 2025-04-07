@@ -1,7 +1,13 @@
-use crate::{ntt::intt_batch, parameters::FoldType};
+use crate::{
+    ntt::{intt_batch, intt_batch_rmm},
+    parameters::FoldType,
+};
 
 use ff_ext::ExtensionField;
-use p3::field::{Field, TwoAdicField};
+use p3::{
+    field::{Field, TwoAdicField},
+    matrix::Matrix,
+};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -142,6 +148,62 @@ pub fn restructure_evaluations_mut<F: TwoAdicField>(
                     let mut scale = size_inv;
                     for v in answers.iter_mut() {
                         *v *= scale;
+                        scale *= *offset;
+                    }
+                });
+        }
+    }
+}
+
+pub fn restructure_evaluations_mut_rmm<F: TwoAdicField + Ord>(
+    stacked_evaluations: &mut witness::RowMajorMatrix<F>,
+    fold_type: FoldType,
+    domain_gen_inv: F,
+    folding_factor: usize,
+) {
+    let folding_size = 1_u64 << folding_factor;
+    let num_polys = stacked_evaluations.width();
+    assert_eq!(stacked_evaluations.height() % (folding_size as usize), 0);
+    match fold_type {
+        FoldType::Naive => {}
+        FoldType::ProverHelps => {
+            // TODO: This partially undoes the NTT transform from tne encoding.
+            // Maybe there is a way to not do the full transform in the first place.
+
+            // Batch inverse NTTs
+            intt_batch_rmm(stacked_evaluations, folding_size as usize);
+
+            // Apply coset and size correction.
+            // Stacked evaluation at i is f(B_l) where B_l = w^i * <w^n/k>
+            let size_inv = F::from_u64(folding_size).inverse();
+            #[cfg(not(feature = "parallel"))]
+            {
+                let mut coset_offset_inv = F::ONE;
+                for answers in
+                    stacked_evaluations.chunks_exact_mut(folding_size as usize * num_polys)
+                {
+                    let mut scale = size_inv;
+                    for v in answers.chunks_mut(num_polys) {
+                        v.iter_mut().for_each(|v| *v *= scale);
+                        scale *= coset_offset_inv;
+                    }
+                    coset_offset_inv *= domain_gen_inv;
+                }
+            }
+            #[cfg(feature = "parallel")]
+            stacked_evaluations
+                .values
+                .par_chunks_exact_mut(folding_size as usize * num_polys)
+                .enumerate()
+                .for_each_with(F::ZERO, |offset, (i, answers)| {
+                    if *offset == F::ZERO {
+                        *offset = domain_gen_inv.exp_u64(i as u64);
+                    } else {
+                        *offset *= domain_gen_inv;
+                    }
+                    let mut scale = size_inv;
+                    for v in answers.chunks_mut(num_polys) {
+                        v.iter_mut().for_each(|v| *v *= scale);
                         scale *= *offset;
                     }
                 });

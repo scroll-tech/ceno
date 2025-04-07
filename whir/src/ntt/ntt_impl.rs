@@ -8,7 +8,13 @@ use super::{
     utils::{lcm, sqrt_factor, workload_size},
 };
 use ff_ext::ExtensionField;
-use p3::field::{Field, TwoAdicField};
+use p3::{
+    field::{Field, TwoAdicField},
+    matrix::{
+        Matrix,
+        dense::{DenseMatrix, RowMajorMatrix},
+    },
+};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -64,6 +70,10 @@ pub fn intt_batch<F: TwoAdicField>(values: &mut [F], size: usize) {
     NttEngine::<F>::new_from_cache().intt_batch(values, size);
 }
 
+pub fn intt_batch_rmm<F: TwoAdicField + Ord>(values: &mut RowMajorMatrix<F>, size: usize) {
+    NttEngine::<F>::new_from_cache().intt_batch_rmm(values, size);
+}
+
 impl<F: TwoAdicField> NttEngine<F> {
     /// Get or create a cached engine for the field `F`.
     pub fn new_from_cache() -> Arc<Self> {
@@ -98,7 +108,7 @@ impl<F: TwoAdicField> NttEngine<F> {
 }
 
 /// Creates a new NttEngine. `omega_order` must be a primitive root of unity of even order `omega`.
-impl<F: Field> NttEngine<F> {
+impl<F: TwoAdicField> NttEngine<F> {
     pub fn new(order: usize, omega_order: F) -> Self {
         assert!(order.trailing_zeros() > 0, "Order must be a multiple of 2.");
         // TODO: Assert that omega factors into 2s and 3s.
@@ -149,6 +159,12 @@ impl<F: Field> NttEngine<F> {
         self.ntt_dispatch(values, &roots, size);
     }
 
+    pub fn ntt_batch_rmm(&self, values: &mut RowMajorMatrix<F>, size: usize) {
+        assert!(values.height() % size == 0);
+        let roots = self.roots_table(size);
+        self.ntt_dispatch_rmm(values, &roots, size);
+    }
+
     /// Inverse NTT. Does not aply 1/n scaling factor.
     pub fn intt(&self, values: &mut [F]) {
         values[1..].reverse();
@@ -170,6 +186,46 @@ impl<F: Field> NttEngine<F> {
         });
 
         self.ntt_batch(values, size);
+    }
+
+    /// Inverse batch NTT. Does not aply 1/n scaling factor.
+    pub fn intt_batch_rmm(&self, values: &mut RowMajorMatrix<F>, size: usize)
+    where
+        F: Ord,
+    {
+        assert!(values.height() % size == 0);
+
+        #[cfg(not(feature = "parallel"))]
+        values.row_chunks_exact_mut(size).for_each(|values| {
+            for i in 1..=(size - 1) / 2 {
+                values
+                    .row_pair_mut(i, size - i)
+                    .into_iter()
+                    .for_each(|(a, b)| {
+                        let tmp = *a;
+                        *a = *b;
+                        *b = tmp;
+                    });
+            }
+        });
+
+        #[cfg(feature = "parallel")]
+        values
+            .par_row_chunks_exact_mut(size)
+            .for_each(|mut values| {
+                for i in 1..=(size - 1) / 2 {
+                    values
+                        .row_pair_mut(i, size - i)
+                        .into_par_iter()
+                        .for_each(|(a, b)| {
+                            let tmp = *a;
+                            *a = *b;
+                            *b = tmp;
+                        });
+                }
+            });
+
+        self.ntt_batch_rmm(values, size);
     }
 
     pub fn root(&self, order: usize) -> F {
@@ -411,5 +467,19 @@ impl<F: Field> NttEngine<F> {
             }
             size => self.ntt_recurse(values, roots, size),
         }
+    }
+
+    fn ntt_dispatch_rmm(&self, values: &mut RowMajorMatrix<F>, roots: &[F], size: usize) {
+        debug_assert_eq!(values.height() % size, 0);
+        debug_assert_eq!(roots.len() % size, 0);
+        values.par_row_chunks_exact_mut(size).for_each(|values| {
+            let copied = DenseMatrix::new(values.values.to_vec(), values.width);
+            let mut transposed = copied.to_row_major_matrix().transpose();
+            transposed.rows_mut().for_each(|row| {
+                self.ntt_dispatch(row, roots, size);
+            });
+            let copied = transposed.transpose();
+            values.values.copy_from_slice(&copied.values);
+        });
     }
 }
