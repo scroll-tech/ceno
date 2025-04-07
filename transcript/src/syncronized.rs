@@ -95,4 +95,8 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
     fn sample_vec(&mut self, _n: usize) -> Vec<E> {
         unimplemented!()
     }
+
+    fn sample_bits(&mut self, _bits: usize) -> usize {
+        unimplemented!()
+    }
 }
