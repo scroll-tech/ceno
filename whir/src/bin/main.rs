@@ -5,7 +5,7 @@ use p3::field::PrimeCharacteristicRing;
 use transcript::BasicTranscript;
 use whir::{
     cmdline_utils::{AvailableFields, AvailableMerkle, WhirType},
-    crypto::{Poseidon2ExtMerkleMmcs, poseidon2_ext_merkle_tree},
+    crypto::{Poseidon2MerkleMmcs, poseidon2_merkle_tree},
     parameters::*,
     whir::Statement,
 };
@@ -65,18 +65,18 @@ fn main() {
         args.pow_bits = Some(default_max_pow(args.num_variables, args.rate));
     }
 
-    let hash_params = poseidon2_ext_merkle_tree();
+    let hash_params = poseidon2_merkle_tree();
     run_whir(args, hash_params);
 }
 
-fn run_whir(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
+fn run_whir(args: Args, hash_params: Poseidon2MerkleMmcs<E>) {
     match args.protocol_type {
         WhirType::PCS => run_whir_pcs(args, hash_params),
         WhirType::LDT => run_whir_as_ldt(args, hash_params),
     }
 }
 
-fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
+fn run_whir_as_ldt(args: Args, hash_params: Poseidon2MerkleMmcs<E>) {
     use whir::whir::{
         committer::Committer, parameters::WhirConfig, prover::Prover, verifier::Verifier,
     };
@@ -165,7 +165,7 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
     dbg!(whir_verifier_time.elapsed() / reps as u32);
 }
 
-fn run_whir_pcs(args: Args, hash_params: Poseidon2ExtMerkleMmcs<E>) {
+fn run_whir_pcs(args: Args, hash_params: Poseidon2MerkleMmcs<E>) {
     use whir::whir::{
         Statement, committer::Committer, parameters::WhirConfig, prover::Prover, verifier::Verifier,
     };
