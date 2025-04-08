@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Digest, MerklePathExt, verify_multi_proof, write_digest_to_transcript},
+    crypto::{DigestExt, MerklePathExt, verify_multi_proof, write_digest_to_transcript},
     utils::{evaluate_as_multilinear_coeffs, evaluate_as_univariate},
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -37,7 +37,7 @@ pub struct Verifier<E: ExtensionField> {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct WhirCommitmentInTranscript<E: ExtensionField> {
-    pub(crate) root: Digest<E>,
+    pub(crate) root: DigestExt<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
@@ -72,7 +72,7 @@ pub(crate) struct ParsedRound<E> {
 
 impl<E: ExtensionField> Verifier<E>
 where
-    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
 {
     pub fn new(params: WhirConfig<E>) -> Self {
         Verifier {

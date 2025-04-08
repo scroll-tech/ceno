@@ -2,7 +2,7 @@ use std::iter;
 
 use crate::{
     crypto::{
-        Digest, MerklePathExt, MerkleTreeExt, verify_multi_proof, write_digest_to_transcript,
+        DigestExt, MerklePathExt, MerkleTreeExt, verify_multi_proof, write_digest_to_transcript,
     },
     error::Error,
     sumcheck::proof::SumcheckPolynomial,
@@ -27,7 +27,7 @@ use transcript::Transcript;
 
 impl<E: ExtensionField> Verifier<E>
 where
-    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
 {

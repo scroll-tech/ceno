@@ -1,7 +1,7 @@
 use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
     crypto::{
-        Digest, MerklePathExt, MerkleTreeExt, MultiPath, generate_multi_proof,
+        DigestExt, MerklePathExt, MerkleTreeExt, MultiPathExt, generate_multi_proof,
         write_digest_to_transcript,
     },
     domain::Domain,
@@ -24,7 +24,7 @@ pub struct Prover<E: ExtensionField>(pub WhirConfig<E>);
 
 impl<E: ExtensionField> Prover<E>
 where
-    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
 {
@@ -169,7 +169,7 @@ where
         transcript: &mut T,
         sumcheck_poly_evals: &mut Vec<Vec<E>>,
         ood_answers: &mut Vec<Vec<E>>,
-        merkle_roots: &mut Vec<Digest<E>>,
+        merkle_roots: &mut Vec<DigestExt<E>>,
         mut round_state: RoundState<E>,
     ) -> Result<WhirProof<E>, Error> {
         // Fold the coefficients
@@ -439,5 +439,5 @@ pub(crate) struct RoundState<'a, E: ExtensionField> {
     pub(crate) folding_randomness: Vec<E>,
     pub(crate) evaluations: DenseMultilinearExtension<E>,
     pub(crate) prev_merkle: Option<&'a MerkleTreeExt<E>>,
-    pub(crate) merkle_proofs: Vec<MultiPath<E>>,
+    pub(crate) merkle_proofs: Vec<MultiPathExt<E>>,
 }

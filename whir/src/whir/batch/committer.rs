@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Digest, MerkleTreeExt, write_digest_to_transcript},
+    crypto::{DigestExt, MerkleTreeExt, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff_rmm,
     utils::{self, evaluate_as_multilinear_evals, interpolate_over_boolean_hypercube_rmm},
@@ -23,7 +23,7 @@ pub struct Witnesses<E: ExtensionField> {
     pub(crate) polys: Vec<Vec<E>>,
     #[debug(skip)]
     pub(crate) merkle_tree: MerkleTreeExt<E>,
-    pub(crate) root: Digest<E>,
+    pub(crate) root: DigestExt<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
@@ -33,7 +33,7 @@ impl<E: ExtensionField> Witnesses<E> {
         &self.merkle_tree
     }
 
-    pub fn root(&self) -> Digest<E> {
+    pub fn root(&self) -> DigestExt<E> {
         self.root.clone()
     }
 
@@ -52,7 +52,7 @@ impl<E: ExtensionField> Witnesses<E> {
 
 impl<E: ExtensionField> Committer<E>
 where
-    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
 {
     pub fn batch_commit(
         &self,

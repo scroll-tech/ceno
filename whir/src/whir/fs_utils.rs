@@ -1,4 +1,4 @@
-use crate::{crypto::Digest, error::Error, utils::dedup};
+use crate::{crypto::DigestExt, error::Error, utils::dedup};
 use ff_ext::{ExtensionField, SmallField};
 use transcript::Transcript;
 
@@ -18,9 +18,9 @@ pub fn get_challenge_stir_queries<E: ExtensionField, T: Transcript<E>>(
 }
 
 pub trait MmcsCommitmentWriter<E: ExtensionField> {
-    fn add_digest(&mut self, digest: Digest<E>) -> Result<(), Error>;
+    fn add_digest(&mut self, digest: DigestExt<E>) -> Result<(), Error>;
 }
 
 pub trait MmcsCommitmentReader<E: ExtensionField> {
-    fn read_digest(&mut self) -> Result<Digest<E>, Error>;
+    fn read_digest(&mut self) -> Result<DigestExt<E>, Error>;
 }

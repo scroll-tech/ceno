@@ -1,6 +1,6 @@
 use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
-    crypto::{Digest, write_digest_to_transcript},
+    crypto::{DigestExt, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff,
     utils::{self, interpolate_over_boolean_hypercube},
@@ -23,7 +23,7 @@ pub struct Committer<E: ExtensionField>(pub(crate) WhirConfig<E>);
 
 impl<E: ExtensionField> Committer<E>
 where
-    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
 {
     pub fn new(config: WhirConfig<E>) -> Self {
         Self(config)

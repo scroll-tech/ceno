@@ -1,4 +1,4 @@
-use crate::crypto::{Digest, MultiPath};
+use crate::crypto::{DigestExt, MultiPathExt};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -27,9 +27,9 @@ where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub merkle_answers: Vec<MultiPath<E>>,
+    pub merkle_answers: Vec<MultiPathExt<E>>,
     pub(crate) sumcheck_poly_evals: Vec<Vec<E>>,
-    pub(crate) merkle_roots: Vec<Digest<E>>,
+    pub(crate) merkle_roots: Vec<DigestExt<E>>,
     pub(crate) ood_answers: Vec<Vec<E>>,
     pub(crate) final_poly: Vec<E>,
     pub(crate) folded_evals: Vec<E>,

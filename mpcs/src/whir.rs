@@ -11,7 +11,7 @@ use spec::WhirSpec;
 use structure::WhirCommitment;
 pub use structure::{Whir, WhirDefault};
 use whir_external::{
-    crypto::{Digest, MerklePathExt, MerkleTreeExt},
+    crypto::{DigestExt, MerklePathExt, MerkleTreeExt},
     parameters::MultivariateParameters,
     whir::{
         Statement, WhirProof, batch::Witnesses, committer::Committer, parameters::WhirConfig,
@@ -23,7 +23,7 @@ impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whi
 where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
-    Digest<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
     <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
