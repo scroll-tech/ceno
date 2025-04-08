@@ -71,10 +71,6 @@ where
         witness: &Witnesses<E>,
     ) -> Result<WhirProof<E>, Error>
     where
-        MerklePathBase<E>: Send + Sync,
-        MerkleTreeBase<E>: Send + Sync,
-        MerklePathExt<E>: Send + Sync,
-        MerkleTreeExt<E>: Send + Sync,
         <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
             Send + Sync,
         <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
