@@ -128,7 +128,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
         // retrieve mle from commitment
         let mut witness_mles = PCS::get_arc_mle_witness_from_commitment(&witin_commit_with_witness);
-        println!("witness_mles len {} ", witness_mles.len());
         let witin_commit = PCS::get_pure_commitment(&witin_commit_with_witness);
         exit_span!(commit_to_traces_span);
 
@@ -236,7 +235,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // batch opening pcs
         let pcs_opening = entered_span!("pcs_opening");
-        println!("witin_fixed_mapping {:?}", witin_fixed_mapping);
         let mpcs_opening_proof = PCS::batch_open(
             &self.pk.pp,
             self.pk
