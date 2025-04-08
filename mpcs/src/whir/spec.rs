@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use serde::Serialize;
 use whir::{
-    crypto::poseidon2_ext_merkle_tree,
+    crypto::poseidon2_merkle_tree,
     parameters::{FoldType, FoldingFactor, SoundnessType, WhirParameters},
 };
 
@@ -27,7 +27,7 @@ impl<E: ExtensionField> WhirSpec<E> for WhirDefaultSpec {
             pow_bits: 0,
             fold_optimisation: FoldType::ProverHelps,
             // Merkle tree parameters
-            hash_params: poseidon2_ext_merkle_tree(),
+            hash_params: poseidon2_merkle_tree(),
         }
     }
 }

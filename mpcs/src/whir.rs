@@ -11,7 +11,7 @@ use spec::WhirSpec;
 use structure::WhirCommitment;
 pub use structure::{Whir, WhirDefault};
 use whir_external::{
-    crypto::{DigestExt, MerklePathExt, MerkleTreeExt},
+    crypto::{DigestExt, MerklePathBase, MerklePathExt, MerkleTreeBase, MerkleTreeExt},
     parameters::MultivariateParameters,
     whir::{
         Statement, WhirProof, batch::Witnesses, committer::Committer, parameters::WhirConfig,
@@ -26,6 +26,8 @@ where
     DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
+    MerklePathBase<E>: Send + Sync,
+    MerkleTreeBase<E>: Send + Sync,
     <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
         Send + Sync,
     <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
