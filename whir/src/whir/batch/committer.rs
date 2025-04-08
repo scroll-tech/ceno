@@ -11,7 +11,10 @@ use crate::{
 };
 use derive_more::Debug;
 use ff_ext::ExtensionField;
-use p3::util::log2_strict_usize;
+use p3::{
+    matrix::{Matrix, dense::RowMajorMatrix},
+    util::log2_strict_usize,
+};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
 
@@ -58,6 +61,7 @@ where
         &self,
         mut rmm: witness::RowMajorMatrix<E::BaseField>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
+        let num_polys = rmm.width();
         let mut transcript = BasicTranscript::<E>::new(b"commitment");
         let timer = entered_span!("Batch Commit");
         let prepare_timer = entered_span!("Prepare");
@@ -86,7 +90,11 @@ where
 
         let merkle_build_timer = entered_span!("Build Merkle Tree");
 
-        let (root, merkle_tree) = self.0.hash_params.commit_matrix_base(rmm.into_inner());
+        let fold_size = 1 << self.0.folding_factor.at_round(0);
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix_base(RowMajorMatrix::new(
+            rmm.into_inner().values,
+            fold_size * num_polys,
+        ));
         exit_span!(merkle_build_timer);
 
         write_digest_to_transcript(&root, &mut transcript);
