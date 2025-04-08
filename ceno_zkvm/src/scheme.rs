@@ -217,6 +217,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             bincode::serialized_size(&self.witin_commit).expect("serialization error");
         let mpcs_opcode_opening =
             bincode::serialized_size(&self.fixed_witin_opening_proof).expect("serialization error");
+
         // opcode circuit for tower proof size
         let tower_proof_opcode = self
             .opcode_proofs

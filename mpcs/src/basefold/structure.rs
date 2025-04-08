@@ -63,7 +63,7 @@ where
 {
     pub(crate) commit: Digest<E>,
     pub(crate) codeword: MerkleTree<E::BaseField>,
-    pub(crate) small_commitmentwithdata: Vec<(Digest<E>, MerkleTree<E::BaseField>)>,
+    pub(crate) trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
     // poly groups w.r.t circuit index
     pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
 
@@ -81,9 +81,9 @@ where
         BasefoldCommitment::new(
             self.commit.clone(),
             self.meta_info.clone(),
-            self.small_commitmentwithdata
+            self.trivial_proofdata
                 .iter()
-                .map(|cm| cm.0.clone())
+                .map(|(circuit_index, (digest, _))| (*circuit_index, digest.clone()))
                 .collect_vec(),
         )
     }
@@ -120,7 +120,8 @@ where
 {
     pub(super) commit: Digest<E>,
     pub(crate) meta_info: Vec<(usize, usize)>,
-    pub(crate) smaller_commits: Vec<Digest<E>>,
+    // (circuit_index, commitment)
+    pub(crate) trivial_commits: Vec<(usize, Digest<E>)>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
@@ -130,12 +131,12 @@ where
     pub fn new(
         commit: Digest<E>,
         meta_info: Vec<(usize, usize)>,
-        smaller_commits: Vec<Digest<E>>,
+        trivial_commits: Vec<(usize, Digest<E>)>,
     ) -> Self {
         Self {
             commit,
             meta_info,
-            smaller_commits,
+            trivial_commits,
         }
     }
 
@@ -254,27 +255,28 @@ where
     pub(crate) final_message: Vec<Vec<E>>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
-    pub(crate) trivial_proof: Option<DenseMatrix<E::BaseField>>,
+    // circuit_index -> vec![witness, fixed], where fixed is optional
+    pub(crate) trivial_proof: Option<Vec<(usize, Vec<DenseMatrix<E::BaseField>>)>>,
 }
 
 impl<E: ExtensionField> BasefoldProof<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn trivial(evals: DenseMatrix<E::BaseField>) -> Self {
-        Self {
-            sumcheck_messages: vec![],
-            commits: vec![],
-            final_message: vec![],
-            query_opening_proof: Default::default(),
-            sumcheck_proof: None,
-            trivial_proof: Some(evals),
-        }
-    }
+    // pub fn trivial(evals: DenseMatrix<E::BaseField>) -> Self {
+    //     Self {
+    //         sumcheck_messages: vec![],
+    //         commits: vec![],
+    //         final_message: vec![],
+    //         query_opening_proof: Default::default(),
+    //         sumcheck_proof: None,
+    //         trivial_proof: Some(evals),
+    //     }
+    // }
 
-    pub fn is_trivial(&self) -> bool {
-        self.trivial_proof.is_some()
-    }
+    // pub fn is_trivial(&self) -> bool {
+    //     self.trivial_proof.is_some()
+    // }
 }
 
 #[derive(Clone, Serialize, Deserialize)]

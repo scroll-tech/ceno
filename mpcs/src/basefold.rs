@@ -9,7 +9,6 @@ use crate::{
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
     },
 };
-use ark_std::{end_timer, start_timer};
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::eq_eval};
@@ -229,17 +228,17 @@ where
         let mmcs = poseidon2_merkle_tree::<E>();
 
         let span = entered_span!("to_mles", profiling_3 = true);
-        let (polys, rmm_to_batch_commit, small_commitmentwithdata, circuit_codeword_index): (
+        let (polys, rmm_to_batch_commit, trivial_proofdata, circuit_codeword_index): (
             BTreeMap<usize, Vec<ArcMultilinearExtension<E>>>,
             Vec<_>,
             _,
             _,
         ) = rmms.into_iter().fold(
-            (BTreeMap::new(), vec![], vec![], BTreeMap::new()),
+            (BTreeMap::new(), vec![], BTreeMap::new(), BTreeMap::new()),
             |(
                 mut polys,
                 mut rmm_to_batch_commit,
-                mut small_commitmentwithdata,
+                mut trivial_proofdata,
                 mut circuit_codeword_index,
             ),
              (index, rmm)| {
@@ -252,8 +251,7 @@ where
                 // for smaller polys, we commit it separately as prover will send it as a whole without blowing factor
                 if rmm.num_vars() <= Spec::get_basecode_msg_size_log() {
                     let rmm = rmm.into_default_padded_p3_rmm();
-                    small_commitmentwithdata.push(mmcs.commit_matrix(rmm));
-                    // TODO probably need to keep `circuit_index`` againt `small_commitmentwithdata` index
+                    trivial_proofdata.insert(index, mmcs.commit_matrix(rmm));
                 } else {
                     rmm_to_batch_commit.push(rmm);
                     circuit_codeword_index.insert(index, rmm_to_batch_commit.len() - 1);
@@ -261,7 +259,7 @@ where
                 (
                     polys,
                     rmm_to_batch_commit,
-                    small_commitmentwithdata,
+                    trivial_proofdata,
                     circuit_codeword_index,
                 )
             },
@@ -279,15 +277,15 @@ where
         let (comm, codeword) = mmcs.commit(evals_codewords);
         exit_span!(span);
         let meta_info = polys
-            .iter()
-            .map(|(_, polys)| (polys[0].num_vars(), polys.len()))
+            .values()
+            .map(|polys| (polys[0].num_vars(), polys.len()))
             .collect_vec();
         Ok(Self::CommitmentWithWitness {
             commit: comm,
             codeword,
             polys,
             meta_info,
-            small_commitmentwithdata,
+            trivial_proofdata,
             circuit_codeword_index,
         })
     }
@@ -384,20 +382,16 @@ where
             .max()
             .unwrap();
 
-        // assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
+        // identify trivial/non trivial based on size
+        let (trivial_witin_polys_and_meta, witin_polys_and_meta) =
+            izip!(points, &witin_comms.polys)
+                .map(|(point, (circuit_index, polys))| (point, (*circuit_index, polys)))
+                .partition(|(_, (_, polys))| {
+                    polys[0].num_vars() <= Spec::get_basecode_msg_size_log()
+                });
 
-        let (_small_witin_polys_and_meta, witin_polys_and_meta): (
-            _,
-            Vec<(
-                &Point<E>,
-                (usize, &Vec<ArcMultilinearExtension<'static, E>>),
-            )>,
-        ) = izip!(points, &witin_comms.polys)
-            .map(|(point, (circuit_index, polys))| (point, (circuit_index.clone(), polys)))
-            .partition(|(_, (_, polys))| polys[0].num_vars() <= Spec::get_basecode_msg_size_log());
-
-        // prover prove that
-        // sum_i coeffs[i] poly_evals[i]
+        // Basefold IOP commit phase
+        let commit_phase_span = entered_span!("Basefold::open::commit_phase");
         let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
             fixed_comms,
@@ -407,8 +401,43 @@ where
             max_num_vars,
             max_num_vars - Spec::get_basecode_msg_size_log(),
         );
+        exit_span!(commit_phase_span);
 
-        let query_timer = start_timer!(|| "Basefold::open::query_phase");
+        // for smaller poly, we pass their merkle tree leafs directly
+        let commit_trivial_span = entered_span!("Basefold::open::commit_trivial");
+        let trivial_proof = if !trivial_witin_polys_and_meta.is_empty() {
+            let mmcs = poseidon2_merkle_tree::<E>();
+            Some(
+                trivial_witin_polys_and_meta
+                    .iter()
+                    .map(|(_, (circuit_index, _))| {
+                        (
+                            *circuit_index,
+                            mmcs.get_matrices(&witin_comms.trivial_proofdata[circuit_index].1)
+                                .into_iter()
+                                .take(1)
+                                .chain(
+                                    // fixed proof is optional
+                                    fixed_comms
+                                        .trivial_proofdata
+                                        .get(circuit_index)
+                                        .iter()
+                                        .flat_map(|(_, proof_data)| {
+                                            mmcs.get_matrices(proof_data).into_iter().take(1)
+                                        }),
+                                )
+                                .cloned()
+                                .collect_vec(),
+                        )
+                    })
+                    .collect_vec(),
+            )
+        } else {
+            None
+        };
+        exit_span!(commit_trivial_span);
+
+        let query_span = entered_span!("Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
         let query_opening_proof = batch_query_phase(
@@ -418,16 +447,16 @@ where
             &trees,
             Spec::get_number_queries(),
         );
-        end_timer!(query_timer);
+        exit_span!(query_span);
 
-        end_timer!(span);
+        exit_span!(span);
         Ok(Self::Proof {
             sumcheck_messages: commit_phase_proof.sumcheck_messages,
             commits: commit_phase_proof.commits,
             final_message: commit_phase_proof.final_message,
             query_opening_proof,
             sumcheck_proof: None,
-            trivial_proof: None,
+            trivial_proof,
         })
     }
 
