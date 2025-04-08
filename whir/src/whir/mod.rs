@@ -1,4 +1,4 @@
-use crate::crypto::{DigestExt, MultiPathExt};
+use crate::crypto::{Digest, MultiPath};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -27,9 +27,9 @@ where
     E: Serialize + DeserializeOwned,
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub merkle_answers: Vec<MultiPathExt<E>>,
+    pub merkle_answers: Vec<MultiPath<E>>,
     pub(crate) sumcheck_poly_evals: Vec<Vec<E>>,
-    pub(crate) merkle_roots: Vec<DigestExt<E>>,
+    pub(crate) merkle_roots: Vec<Digest<E>>,
     pub(crate) ood_answers: Vec<Vec<E>>,
     pub(crate) final_poly: Vec<E>,
     pub(crate) folded_evals: Vec<E>,
@@ -45,7 +45,7 @@ mod tests {
     use witness::RowMajorMatrix;
 
     use crate::{
-        crypto::poseidon2_ext_merkle_tree,
+        crypto::poseidon2_merkle_tree,
         parameters::{
             FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters,
         },
@@ -71,7 +71,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = ChaCha8Rng::from_seed([0; 32]);
-        let hash_params = poseidon2_ext_merkle_tree();
+        let hash_params = poseidon2_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
@@ -138,7 +138,7 @@ mod tests {
         fold_type: FoldType,
     ) {
         let mut rng = ChaCha8Rng::from_seed([0; 32]);
-        let hash_params = poseidon2_ext_merkle_tree();
+        let hash_params = poseidon2_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 
@@ -216,7 +216,7 @@ mod tests {
         let num_coeffs = 1 << num_variables;
 
         let mut rng = ChaCha8Rng::from_seed([0; 32]);
-        let hash_params = poseidon2_ext_merkle_tree();
+        let hash_params = poseidon2_merkle_tree();
 
         let mv_params = MultivariateParameters::<E>::new(num_variables);
 

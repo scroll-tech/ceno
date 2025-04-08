@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{DigestExt, MerklePathExt, verify_multi_proof, write_digest_to_transcript},
+    crypto::{Digest, DigestExt, MerklePathExt, verify_multi_proof, write_digest_to_transcript},
     utils::{evaluate_as_multilinear_coeffs, evaluate_as_univariate},
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -37,7 +37,7 @@ pub struct Verifier<E: ExtensionField> {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct WhirCommitmentInTranscript<E: ExtensionField> {
-    pub(crate) root: DigestExt<E>,
+    pub(crate) root: Digest<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
@@ -210,13 +210,13 @@ where
             exit_span!(internal_timer);
 
             let internal_timer = entered_span!("Verify multi proof");
+            let fold_size = 1 << self.params.folding_factor.at_round(r);
             if !verify_multi_proof(
                 &self.params.hash_params,
                 &prev_root,
                 &stir_challenges_indexes,
                 merkle_proof_with_answers,
-                merkle_proof_with_answers[0].0[0].len(),
-                p3::util::log2_strict_usize(domain_size / merkle_proof_with_answers[0].0[0].len()),
+                p3::util::log2_strict_usize(domain_size / fold_size),
             )
             .is_ok()
             {
@@ -258,8 +258,9 @@ where
                 stir_challenges_indexes,
                 stir_challenges_points,
                 stir_challenges_answers: merkle_proof_with_answers
+                    .answers_ext()
                     .iter()
-                    .map(|(answers, _)| answers[0].clone())
+                    .map(|answers| answers[0].clone())
                     .collect(),
                 combination_randomness,
                 sumcheck_rounds,
@@ -293,13 +294,13 @@ where
 
         let final_merkle_proof = &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
         let internal_timer = entered_span!("Final merkle proof verify");
+        let fold_size = 1 << self.params.folding_factor.at_round(self.params.n_rounds());
         verify_multi_proof(
             &self.params.hash_params,
             &prev_root,
             &final_randomness_indexes,
             final_merkle_proof,
-            final_merkle_proof[0].0[0].len(),
-            p3::util::log2_strict_usize(domain_size / final_merkle_proof[0].0[0].len()),
+            p3::util::log2_strict_usize(domain_size / fold_size),
         )
         .map_err(|e| Error::InvalidProof(format!("Final Merkle proof failed: {:?}", e)))?;
         exit_span!(internal_timer);
@@ -330,8 +331,9 @@ where
             final_randomness_indexes,
             final_randomness_points,
             final_randomness_answers: final_merkle_proof
+                .answers_ext()
                 .iter()
-                .map(|(answers, _)| answers[0].clone())
+                .map(|answers| answers[0].clone())
                 .collect(),
             final_sumcheck_rounds,
             final_sumcheck_randomness,

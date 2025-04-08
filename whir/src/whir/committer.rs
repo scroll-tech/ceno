@@ -11,13 +11,12 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::matrix::dense::RowMajorMatrix;
+use p3::{
+    field::{Field, PrimeCharacteristicRing},
+    matrix::dense::RowMajorMatrix,
+};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
-
-use p3::commit::Mmcs;
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 
 pub struct Committer<E: ExtensionField>(pub(crate) WhirConfig<E>);
 
@@ -36,12 +35,12 @@ where
         let timer = entered_span!("Single Commit");
         let mut transcript = BasicTranscript::new(b"commitment");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
-        let mut evaluations = match polynomial.evaluations() {
+        let mut evaluations: Vec<E::BaseField> = match polynomial.evaluations() {
             #[cfg(feature = "parallel")]
-            FieldType::Base(evals) => evals.par_iter().map(|x| E::from_base(x)).collect(),
+            FieldType::Base(evals) => evals.clone(),
             #[cfg(not(feature = "parallel"))]
             FieldType::Base(evals) => evals.iter().map(|x| E::from_base(x)).collect(),
-            FieldType::Ext(evals) => evals.clone(),
+            FieldType::Ext(_) => panic!("Not supporting committing to ext polys"),
             _ => panic!("Unsupported field type"),
         };
 
@@ -52,12 +51,12 @@ where
         // hypercube, and extending zero to the coefficients.
         if evaluations.len() < (1 << self.0.folding_factor.at_round(0)) {
             let original_size = evaluations.len();
-            evaluations.resize(1 << self.0.folding_factor.at_round(0), E::ZERO);
+            evaluations.resize(1 << self.0.folding_factor.at_round(0), E::BaseField::ZERO);
             for i in original_size..evaluations.len() {
                 evaluations[i] = evaluations[i - original_size];
             }
             coeffs.extend(itertools::repeat_n(
-                E::ZERO,
+                E::BaseField::ZERO,
                 (1 << self.0.folding_factor.at_round(0)) - original_size,
             ));
         }
@@ -70,7 +69,7 @@ where
         let folded_evals = restructure_evaluations(
             folded_evals,
             self.0.fold_optimisation,
-            self.0.starting_domain.backing_domain_group_gen().inverse(),
+            self.0.starting_domain.base_domain_group_gen().inverse(),
             self.0.folding_factor.at_round(0),
         );
 
@@ -80,7 +79,7 @@ where
         let (root, merkle_tree) = self
             .0
             .hash_params
-            .commit_matrix(RowMajorMatrix::new(folded_evals, fold_size));
+            .commit_matrix_base(RowMajorMatrix::new(folded_evals, fold_size));
         exit_span!(merkle_build_timer);
         write_digest_to_transcript(&root, &mut transcript);
 

@@ -3,7 +3,7 @@ use std::{fmt::Display, marker::PhantomData, str::FromStr};
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::Poseidon2ExtMerkleMmcs;
+use crate::crypto::Poseidon2MerkleMmcs;
 
 pub fn default_max_pow(num_variables: usize, log_inv_rate: usize) -> usize {
     num_variables + log_inv_rate - 3
@@ -185,7 +185,7 @@ pub struct WhirParameters<E: ExtensionField> {
 
     pub fold_optimisation: FoldType,
     // Merkle tree parameters
-    pub hash_params: Poseidon2ExtMerkleMmcs<E>,
+    pub hash_params: Poseidon2MerkleMmcs<E>,
 }
 
 impl<E: ExtensionField> Display for WhirParameters<E> {

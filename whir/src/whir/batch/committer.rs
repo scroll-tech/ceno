@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{DigestExt, MerkleTreeExt, write_digest_to_transcript},
+    crypto::{Digest, DigestExt, MerkleTree, write_digest_to_transcript},
     error::Error,
     ntt::expand_from_coeff_rmm,
     utils::{self, evaluate_as_multilinear_evals, interpolate_over_boolean_hypercube_rmm},
@@ -11,7 +11,7 @@ use crate::{
 };
 use derive_more::Debug;
 use ff_ext::ExtensionField;
-use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix, util::log2_strict_usize};
+use p3::util::log2_strict_usize;
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::{BasicTranscript, Transcript};
 
@@ -20,20 +20,20 @@ use rayon::prelude::*;
 
 #[derive(Debug)]
 pub struct Witnesses<E: ExtensionField> {
-    pub(crate) polys: Vec<Vec<E>>,
+    pub(crate) polys: Vec<Vec<E::BaseField>>,
     #[debug(skip)]
-    pub(crate) merkle_tree: MerkleTreeExt<E>,
-    pub(crate) root: DigestExt<E>,
+    pub(crate) merkle_tree: MerkleTree<E>,
+    pub(crate) root: Digest<E>,
     pub(crate) ood_points: Vec<E>,
     pub(crate) ood_answers: Vec<E>,
 }
 
 impl<E: ExtensionField> Witnesses<E> {
-    pub fn merkle_tree(&self) -> &MerkleTreeExt<E> {
+    pub fn merkle_tree(&self) -> &MerkleTree<E> {
         &self.merkle_tree
     }
 
-    pub fn root(&self) -> DigestExt<E> {
+    pub fn root(&self) -> Digest<E> {
         self.root.clone()
     }
 
@@ -61,15 +61,15 @@ where
         let mut transcript = BasicTranscript::<E>::new(b"commitment");
         let timer = entered_span!("Batch Commit");
         let prepare_timer = entered_span!("Prepare");
-        let polys = rmm.to_cols_ext();
-        let num_polys = polys.len();
+        let polys: Vec<Vec<E::BaseField>> = rmm.to_cols_base::<E>();
         exit_span!(prepare_timer);
         let expansion = self.0.starting_domain.size() / polys[0].len();
         let interpolate_timer = entered_span!("Interpolate over hypercube rmm");
         interpolate_over_boolean_hypercube_rmm(&mut rmm);
         exit_span!(interpolate_timer);
         let expand_timer = entered_span!("Batch Expand");
-        let mut rmm = expand_from_coeff_rmm(rmm, expansion);
+        let mut rmm: witness::RowMajorMatrix<E::BaseField> =
+            expand_from_coeff_rmm::<E::BaseField>(rmm, expansion);
         exit_span!(expand_timer);
         let stack_timer = entered_span!("Stack evaluations");
         utils::stack_evaluations_mut_rmm(&mut rmm, self.0.folding_factor.at_round(0));
@@ -83,22 +83,10 @@ where
             self.0.folding_factor.at_round(0),
         );
         exit_span!(restructure_timer);
-        let to_ext_timer = entered_span!("Transform rmm to extension field");
-        let rmm = rmm
-            .values
-            .par_iter()
-            .map(|x| E::from_base(x))
-            .collect::<Vec<_>>();
-        exit_span!(to_ext_timer);
-
-        // Group folds together as a leaf.
-        let fold_size = 1 << self.0.folding_factor.at_round(0);
 
         let merkle_build_timer = entered_span!("Build Merkle Tree");
 
-        let rmm = RowMajorMatrix::new(rmm, num_polys * fold_size);
-
-        let (root, merkle_tree) = self.0.hash_params.commit_matrix(rmm);
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix_base(rmm.into_inner());
         exit_span!(merkle_build_timer);
 
         write_digest_to_transcript(&root, &mut transcript);

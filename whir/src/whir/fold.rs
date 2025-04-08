@@ -3,7 +3,6 @@ use crate::{
     parameters::FoldType,
 };
 
-use ff_ext::ExtensionField;
 use p3::{
     field::{Field, TwoAdicField},
     matrix::Matrix,
@@ -49,7 +48,7 @@ pub fn compute_fold<F: Field>(
     answers[0]
 }
 
-pub fn restructure_evaluations<F: ExtensionField>(
+pub fn restructure_evaluations<F: TwoAdicField>(
     mut stacked_evaluations: Vec<F>,
     fold_type: FoldType,
     domain_gen_inv: F,

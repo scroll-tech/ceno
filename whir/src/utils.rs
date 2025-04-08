@@ -210,15 +210,17 @@ pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
     });
 }
 
-pub fn evaluate_as_multilinear_evals<E: ExtensionField>(evals: &[E], point: &[E]) -> E {
+pub fn evaluate_as_multilinear_evals<E: ExtensionField>(evals: &[E::BaseField], point: &[E]) -> E {
     if evals.len() == 1 {
         // It's a constant function, so just return the constant value.
-        return evals[0];
+        return E::from_base(&evals[0]);
     }
     assert_eq!(evals.len(), 1 << point.len());
     let mut fold_result = evals
         .par_chunks_exact(2)
-        .map(|chunk| (E::ONE - point[0]) * chunk[0] + chunk[1] * point[0])
+        .map(|chunk| {
+            (E::ONE - point[0]) * E::from_base(&chunk[0]) + E::from_base(&chunk[1]) * point[0]
+        })
         .collect::<Vec<_>>();
     let mut index = 1;
     while fold_result.len() > 1 {

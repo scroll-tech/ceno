@@ -165,6 +165,10 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         };
         self.is_padded = true;
     }
+
+    pub fn into_inner(self) -> p3::matrix::dense::RowMajorMatrix<T> {
+        self.inner
+    }
 }
 
 impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
@@ -184,6 +188,23 @@ impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
                     .copied()
                     .collect::<Vec<_>>()
                     .into_mle()
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn to_cols_base<E: ff_ext::ExtensionField<BaseField = F>>(&self) -> Vec<Vec<F>> {
+        debug_assert!(self.is_padded);
+        let n_column = self.inner.width;
+        (0..n_column)
+            .into_par_iter()
+            .map(|i| {
+                self.inner
+                    .values
+                    .iter()
+                    .skip(i)
+                    .step_by(n_column)
+                    .copied()
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>()
     }

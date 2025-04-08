@@ -6,7 +6,7 @@ use std::{f64::consts::LOG2_10, fmt::Display};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::Poseidon2ExtMerkleMmcs,
+    crypto::Poseidon2MerkleMmcs,
     domain::Domain,
     parameters::{FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters},
 };
@@ -42,7 +42,7 @@ pub struct WhirConfig<E: ExtensionField> {
 
     // Merkle tree parameters
     #[debug(skip)]
-    pub(crate) hash_params: Poseidon2ExtMerkleMmcs<E>,
+    pub(crate) hash_params: Poseidon2MerkleMmcs<E>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

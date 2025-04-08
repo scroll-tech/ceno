@@ -1,8 +1,8 @@
 use super::{Statement, WhirProof, batch::Witnesses, parameters::WhirConfig};
 use crate::{
     crypto::{
-        DigestExt, MerklePathExt, MerkleTreeExt, MultiPathExt, generate_multi_proof,
-        write_digest_to_transcript,
+        Digest, DigestExt, MerklePathBase, MerklePathExt, MerkleTree, MerkleTreeBase,
+        MerkleTreeExt, MultiPath, generate_multi_proof, write_digest_to_transcript,
     },
     domain::Domain,
     error::Error,
@@ -14,7 +14,8 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
-use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
+use p3::matrix::dense::RowMajorMatrix;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
@@ -25,6 +26,8 @@ pub struct Prover<E: ExtensionField>(pub WhirConfig<E>);
 impl<E: ExtensionField> Prover<E>
 where
     DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
+    MerklePathBase<E>: Send + Sync,
+    MerkleTreeBase<E>: Send + Sync,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
 {
@@ -109,7 +112,10 @@ where
                 expand_randomness(combination_randomness_gen, initial_claims.len());
 
             sumcheck_prover = Some(SumcheckProverNotSkipping::new(
-                witness.polys[0].clone(),
+                witness.polys[0]
+                    .par_iter()
+                    .map(|x| E::from_base(x))
+                    .collect(),
                 &initial_claims,
                 &combination_randomness,
                 &initial_answers,
@@ -143,7 +149,10 @@ where
             folding_randomness,
             evaluations: DenseMultilinearExtension::from_evaluations_ext_vec(
                 self.0.mv_parameters.num_variables,
-                witness.polys[0].clone(),
+                witness.polys[0]
+                    .par_iter()
+                    .map(|x| E::from_base(x))
+                    .collect(),
             ),
             prev_merkle: Some(&witness.merkle_tree),
             merkle_proofs: vec![],
@@ -169,7 +178,7 @@ where
         transcript: &mut T,
         sumcheck_poly_evals: &mut Vec<Vec<E>>,
         ood_answers: &mut Vec<Vec<E>>,
-        merkle_roots: &mut Vec<DigestExt<E>>,
+        merkle_roots: &mut Vec<Digest<E>>,
         mut round_state: RoundState<E>,
     ) -> Result<WhirProof<E>, Error> {
         // Fold the coefficients
@@ -260,7 +269,7 @@ where
             self.0.folding_factor.at_round(round_state.round + 1),
         );
 
-        let (root, merkle_tree) = self.0.hash_params.commit_matrix(RowMajorMatrix::new(
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix_ext(RowMajorMatrix::new(
             folded_evals.clone(),
             1 << self.0.folding_factor.at_round(round_state.round + 1),
         ));
@@ -313,8 +322,9 @@ where
             &stir_challenges_indexes,
         );
         let answers: Vec<_> = merkle_proof_with_leaves
+            .answers_ext()
             .iter()
-            .map(|(answers, _)| answers[0].clone())
+            .map(|answers| answers[0].clone())
             .collect();
         // Evaluate answers in the folding randomness.
         let mut stir_evaluations = ood_answers_round.clone();
@@ -438,6 +448,6 @@ pub(crate) struct RoundState<'a, E: ExtensionField> {
     pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<E>>,
     pub(crate) folding_randomness: Vec<E>,
     pub(crate) evaluations: DenseMultilinearExtension<E>,
-    pub(crate) prev_merkle: Option<&'a MerkleTreeExt<E>>,
-    pub(crate) merkle_proofs: Vec<MultiPathExt<E>>,
+    pub(crate) prev_merkle: Option<&'a MerkleTree<E>>,
+    pub(crate) merkle_proofs: Vec<MultiPath<E>>,
 }

@@ -56,7 +56,7 @@ pub fn ntt<F: ExtensionField>(values: &mut [F]) {
 }
 
 /// Compute the many NTTs of size `size` using a cached engine.
-pub fn ntt_batch<F: ExtensionField>(values: &mut [F], size: usize) {
+pub fn ntt_batch<F: TwoAdicField>(values: &mut [F], size: usize) {
     NttEngine::<F>::new_from_cache().ntt_batch(values, size);
 }
 

@@ -1,7 +1,8 @@
 use super::committer::Witnesses;
 use crate::{
     crypto::{
-        DigestExt, MerklePathExt, MerkleTreeExt, generate_multi_proof, write_digest_to_transcript,
+        Digest, DigestExt, MerklePathBase, MerklePathExt, MerkleTree, MerkleTreeBase,
+        MerkleTreeExt, generate_multi_proof, write_digest_to_transcript,
     },
     error::Error,
     ntt::expand_from_coeff,
@@ -31,7 +32,7 @@ use rayon::prelude::*;
 struct RoundStateBatch<'a, E: ExtensionField> {
     round_state: RoundState<'a, E>,
     batching_randomness: Vec<E>,
-    prev_merkle: &'a MerkleTreeExt<E>,
+    prev_merkle: &'a MerkleTree<E>,
 }
 
 impl<E: ExtensionField> Prover<E>
@@ -68,7 +69,10 @@ where
         witness: &Witnesses<E>,
     ) -> Result<WhirProof<E>, Error>
     where
+        MerklePathBase<E>: Send + Sync,
+        MerkleTreeBase<E>: Send + Sync,
         MerklePathExt<E>: Send + Sync,
+        MerkleTreeExt<E>: Send + Sync,
         <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
             Send + Sync,
         <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
@@ -143,7 +147,7 @@ where
                     .polys
                     .iter()
                     .zip(&random_coeff)
-                    .map(|(eval, coeff)| eval[i] * *coeff)
+                    .map(|(eval, coeff)| E::from_base(&eval[i]) * *coeff)
                     .sum()
             })
             .collect::<Vec<_>>();
@@ -214,7 +218,7 @@ where
         transcript: &mut T,
         sumcheck_poly_evals: &mut Vec<Vec<E>>,
         ood_answers: &mut Vec<Vec<E>>,
-        merkle_roots: &mut Vec<DigestExt<E>>,
+        merkle_roots: &mut Vec<Digest<E>>,
         round_state: RoundStateBatch<E>,
         num_polys: usize,
     ) -> Result<WhirProof<E>, Error> {
@@ -300,7 +304,7 @@ where
             new_domain.backing_domain_group_gen().inverse(),
             self.0.folding_factor.at_round(round_state.round + 1),
         );
-        let (root, merkle_tree) = self.0.hash_params.commit_matrix(RowMajorMatrix::new(
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix_ext(RowMajorMatrix::new(
             folded_evals.clone(),
             1 << self.0.folding_factor.at_round(round_state.round + 1),
         ));
@@ -350,8 +354,9 @@ where
         let merkle_proof_with_leaves =
             generate_multi_proof(&self.0.hash_params, &prev_merkle, &stir_challenges_indexes);
         let batched_answers = merkle_proof_with_leaves
+            .answers_ext()
             .par_iter()
-            .map(|(answer, _)| {
+            .map(|answer| {
                 let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
                 let mut res = vec![E::ZERO; fold_size];
                 for i in 0..fold_size {
@@ -465,6 +470,8 @@ where
     DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
+    MerklePathBase<E>: Send + Sync,
+    MerkleTreeBase<E>: Send + Sync,
 {
     /// each poly on a different point, same size
     pub fn same_size_batch_prove<T: Transcript<E>>(
@@ -475,7 +482,6 @@ where
         witness: &Witnesses<E>,
     ) -> Result<WhirProof<E>, Error>
     where
-        MerklePathExt<E>: Send + Sync,
         <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Commitment:
             Send + Sync,
         <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
@@ -511,7 +517,11 @@ where
 
         let sumcheck_timer = entered_span!("unifying sumcheck");
         let mut sumcheck_prover = SumcheckProverNotSkippingBatched::new(
-            witness.polys.clone(),
+            witness
+                .polys
+                .par_iter()
+                .map(|poly| poly.par_iter().map(|x| E::from_base(x)).collect())
+                .collect(),
             initial_eval_claims,
             &poly_comb_randomness,
             eval_per_poly,

@@ -540,25 +540,23 @@ where
                 })
                 .collect();
 
+            let fold_size = 1 << self.params.folding_factor.at_round(r);
             let internal_timer = entered_span!("Merkle proof verification");
             verify_multi_proof(
                 &self.params.hash_params,
                 &prev_root,
                 &stir_challenges_indexes,
                 merkle_proof_with_answers,
-                merkle_proof_with_answers[0].0[0].len(),
-                p3::util::log2_strict_usize(
-                    domain_size * if r == 0 { num_polys } else { 1 }
-                        / merkle_proof_with_answers[0].0[0].len(),
-                ),
+                p3::util::log2_strict_usize(domain_size / fold_size),
             )
             .map_err(|e| Error::InvalidProof(format!("Merkle proof failed: {:?}", e)))?;
             exit_span!(internal_timer);
 
             let answers: Vec<_> = if r == 0 {
                 merkle_proof_with_answers
+                    .answers_ext()
                     .par_iter()
-                    .map(|(raw_answer, _)| {
+                    .map(|raw_answer| {
                         if !batched_randomness.is_empty() {
                             let fold_size = 1 << self.params.folding_factor.at_round(r);
                             let mut res = vec![E::ZERO; fold_size];
@@ -576,8 +574,9 @@ where
                     .collect()
             } else {
                 merkle_proof_with_answers
+                    .answers_ext()
                     .par_iter()
-                    .map(|(raw_answer, _)| raw_answer[0].clone())
+                    .map(|raw_answer| raw_answer[0].clone())
                     .collect()
             };
 
@@ -653,28 +652,21 @@ where
 
         let final_merkle_proof = &whir_proof.merkle_answers[whir_proof.merkle_answers.len() - 1];
 
+        let fold_size = 1 << self.params.folding_factor.at_round(self.params.n_rounds());
         verify_multi_proof(
             &self.params.hash_params,
             &prev_root,
             &final_randomness_indexes,
             final_merkle_proof,
-            final_merkle_proof[0].0[0].len(),
-            p3::util::log2_strict_usize(
-                domain_size
-                    * if self.params.n_rounds() == 0 {
-                        num_polys
-                    } else {
-                        1
-                    }
-                    / final_merkle_proof[0].0[0].len(),
-            ),
+            p3::util::log2_strict_usize(domain_size / fold_size),
         )
         .map_err(|e| Error::InvalidProof(format!("Final Merkle proof failed: {:?}", e)))?;
 
         let final_randomness_answers: Vec<_> = if self.params.n_rounds() == 0 {
             final_merkle_proof
+                .answers_ext()
                 .par_iter()
-                .map(|(raw_answer, _)| {
+                .map(|raw_answer| {
                     if !batched_randomness.is_empty() {
                         let fold_size = 1 << self.params.folding_factor.at_round(0);
                         let mut res = vec![E::ZERO; fold_size];
@@ -691,8 +683,9 @@ where
                 .collect()
         } else {
             final_merkle_proof
+                .answers_ext()
                 .par_iter()
-                .map(|(raw_answer, _)| raw_answer[0].clone())
+                .map(|raw_answer| raw_answer[0].clone())
                 .collect()
         };
 
