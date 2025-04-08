@@ -190,6 +190,7 @@ pub fn resize_num_vars<E: ExtensionField>(
     poly.num_vars = num_vars;
 }
 
+// TODO remove this function once mpcs development stable
 pub fn add_polynomial_with_coeff<E: ExtensionField>(
     lhs: &mut DenseMultilinearExtension<E>,
     rhs: &DenseMultilinearExtension<E>,
@@ -208,11 +209,11 @@ pub fn add_polynomial_with_coeff<E: ExtensionField>(
             if rhs.num_vars < lhs.num_vars {
                 match &mut lhs.evaluations {
                     FieldType::Ext(ref mut lhs) => {
-                        let rhs_num_var = rhs.num_vars;
+                        let mask = (1 << rhs.num_vars) - 1;
                         op_mle!(rhs, |rhs| {
-                            lhs.par_iter_mut().enumerate().for_each(|(index, lhs)| {
-                                *lhs += *coeff * rhs[index & ((1 << rhs_num_var) - 1)]
-                            });
+                            lhs.par_iter_mut()
+                                .enumerate()
+                                .for_each(|(index, lhs)| *lhs += *coeff * rhs[index & mask]);
                         });
                     }
                     FieldType::Base(ref mut lhs_evals) => {
@@ -236,8 +237,8 @@ pub fn add_polynomial_with_coeff<E: ExtensionField>(
                     FieldType::Ext(ref mut lhs) => {
                         op_mle!(rhs, |rhs| {
                             lhs.par_iter_mut()
-                                .enumerate()
-                                .for_each(|(index, lhs)| *lhs += *coeff * rhs[index]);
+                                .zip(rhs.par_iter())
+                                .for_each(|(lhs, rhs)| *lhs += *coeff * *rhs);
                         });
                     }
                     FieldType::Base(ref mut lhs_evals) => {
