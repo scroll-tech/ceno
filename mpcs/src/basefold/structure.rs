@@ -1,7 +1,7 @@
 use crate::util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree};
 use core::fmt::Debug;
 use ff_ext::{ExtensionField, PoseidonField};
-use itertools::izip;
+use itertools::{Itertools, izip};
 use p3::{
     commit::Mmcs,
     matrix::{Matrix, dense::DenseMatrix},
@@ -11,7 +11,7 @@ use sumcheck::structs::IOPProverMessage;
 
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
-use std::marker::PhantomData;
+use std::{collections::BTreeMap, marker::PhantomData};
 
 pub type Digest<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment;
 pub type MerkleTree<F> = <<F as PoseidonField>::MMCS as Mmcs<F>>::ProverData<DenseMatrix<F>>;
@@ -61,11 +61,16 @@ pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) pi_d_digest: Digest<E>,
+    pub(crate) commit: Digest<E>,
     pub(crate) codeword: MerkleTree<E::BaseField>,
-    pub(crate) polynomials_bh_evals: Vec<Vec<ArcMultilinearExtension<'static, E>>>,
+    pub(crate) small_commitmentwithdata: Vec<(Digest<E>, MerkleTree<E::BaseField>)>,
+    // poly groups w.r.t circuit index
+    pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
+
     // format Vec<(num_var, num_polys)>
     pub(crate) meta_info: Vec<(usize, usize)>,
+    // keep codeword index w.r.t circuit index
+    pub circuit_codeword_index: BTreeMap<usize, usize>,
 }
 
 impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
@@ -73,7 +78,14 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
-        BasefoldCommitment::new(self.pi_d_digest.clone(), self.meta_info.clone())
+        BasefoldCommitment::new(
+            self.commit.clone(),
+            self.meta_info.clone(),
+            self.small_commitmentwithdata
+                .iter()
+                .map(|cm| cm.0.clone())
+                .collect_vec(),
+        )
     }
 
     // pub fn poly_size(&self) -> usize {
@@ -106,23 +118,29 @@ pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) pi_d_digest: Digest<E>,
+    pub(super) commit: Digest<E>,
     pub(crate) meta_info: Vec<(usize, usize)>,
+    pub(crate) smaller_commits: Vec<Digest<E>>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn new(pi_d_digest: Digest<E>, meta_info: Vec<(usize, usize)>) -> Self {
+    pub fn new(
+        commit: Digest<E>,
+        meta_info: Vec<(usize, usize)>,
+        smaller_commits: Vec<Digest<E>>,
+    ) -> Self {
         Self {
-            pi_d_digest,
+            commit,
             meta_info,
+            smaller_commits,
         }
     }
 
     pub fn pi_d_digest(&self) -> Digest<E> {
-        self.pi_d_digest.clone()
+        self.commit.clone()
     }
 
     // pub fn num_vars(&self) -> Option<usize> {
@@ -137,13 +155,11 @@ where
     fn eq(&self, other: &Self) -> bool {
         izip!(self.get_codewords(), other.get_codewords())
             .all(|(codeword_a, codeword_b)| codeword_a.eq(codeword_b))
-            && izip!(&self.polynomials_bh_evals, &other.polynomials_bh_evals).all(
-                |(bh_evals_a, bh_evals_b)| {
-                    izip!(bh_evals_a, bh_evals_b).all(|(bh_evals_a, bh_evals_b)| {
-                        bh_evals_a.evaluations() == bh_evals_b.evaluations()
-                    })
-                },
-            )
+            && izip!(self.polys.values(), other.polys.values()).all(|(bh_evals_a, bh_evals_b)| {
+                izip!(bh_evals_a, bh_evals_b).all(|(bh_evals_a, bh_evals_b)| {
+                    bh_evals_a.evaluations() == bh_evals_b.evaluations()
+                })
+            })
     }
 }
 

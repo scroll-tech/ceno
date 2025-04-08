@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{
     error::ZKVMError,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey},
@@ -13,23 +15,18 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         mut vm_fixed_traces: ZKVMFixedTraces<E>,
     ) -> Result<ZKVMProvingKey<E, PCS>, ZKVMError> {
         let mut vm_pk = ZKVMProvingKey::new(pp.clone(), vp);
-        let mut fixed_traces = Vec::with_capacity(self.circuit_css.len());
-        let mut fixed_trace_index = Vec::with_capacity(self.circuit_css.len());
+        let mut fixed_traces = BTreeMap::new();
 
-        for (c_name, cs) in self.circuit_css {
+        for (circuit_index, (c_name, cs)) in self.circuit_css.into_iter().enumerate() {
             // fixed_traces is optional
             // verifier will check it existent if cs.num_fixed > 0
             if cs.num_fixed > 0 {
-                fixed_trace_index.push(Some(fixed_traces.len()));
-                fixed_traces.push(
-                    vm_fixed_traces
-                        .circuit_fixed_traces
-                        .remove(&c_name)
-                        .flatten()
-                        .ok_or(ZKVMError::FixedTraceNotFound(c_name.clone()))?,
-                );
-            } else {
-                fixed_trace_index.push(None)
+                let fixed_trace_rmm = vm_fixed_traces
+                    .circuit_fixed_traces
+                    .remove(&c_name)
+                    .flatten()
+                    .ok_or(ZKVMError::FixedTraceNotFound(c_name.clone()))?;
+                fixed_traces.insert(circuit_index, fixed_trace_rmm);
             };
 
             let circuit_pk = cs.key_gen();
@@ -40,7 +37,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
 
         vm_pk.initial_global_state_expr = self.initial_global_state_expr;
         vm_pk.finalize_global_state_expr = self.finalize_global_state_expr;
-        vm_pk.fixed_trace_index = fixed_trace_index;
 
         Ok(vm_pk)
     }

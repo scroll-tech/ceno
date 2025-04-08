@@ -2,7 +2,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use super::{
     encoding::EncodingScheme,
-    structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTreeExt},
+    structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTree, MerkleTreeExt},
 };
 use crate::{
     Point,
@@ -48,13 +48,14 @@ use super::structure::BasefoldCommitmentWithWitness;
 #[allow(clippy::too_many_arguments)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    point: &[Point<E>],
-
     fixed_comms: &BasefoldCommitmentWithWitness<E>,
-    witin_comms: &BasefoldCommitmentWithWitness<E>,
-    witin_fixed_mapping: &[Option<usize>],
+    witin_commitment_with_witness: &MerkleTree<E::BaseField>,
+    witin_polys_and_meta: Vec<(
+        &Point<E>,
+        (usize, &Vec<ArcMultilinearExtension<'static, E>>),
+    )>,
     transcript: &mut impl Transcript<E>,
-    (_, max_num_vars): (usize, usize),
+    max_num_vars: usize,
     num_rounds: usize,
 ) -> (Vec<MerkleTreeExt<E>>, BasefoldCommitPhaseProof<E>)
 where
@@ -75,13 +76,12 @@ where
     // here generate the concat fixed_polys along with witin_polys
     // such that we take `fixed_polys` respective index from `witin_index_mapping`
     // here we need `witin_index_mapping` because not all witin mapping with respective fixed_polys
-    let witin_concat_with_fixed_polys: Vec<Vec<ArcMultilinearExtension<E>>> = witin_comms
-        .polynomials_bh_evals
+    let witin_concat_with_fixed_polys: Vec<Vec<ArcMultilinearExtension<E>>> = witin_polys_and_meta
         .iter()
-        .zip_eq(witin_fixed_mapping)
-        .map(|(witin_polys, fixed_poly_option)| {
-            let fixed_iter = fixed_poly_option
-                .and_then(|idx| fixed_comms.polynomials_bh_evals.get(idx))
+        .map(|(_, (circuit_index, witin_polys))| {
+            let fixed_iter = fixed_comms
+                .polys
+                .get(circuit_index)
                 .into_iter()
                 .flatten()
                 .cloned();
@@ -102,31 +102,30 @@ where
     // prepare
     // - codeword oracle => for FRI
     // - evals => for sumcheck
-    let witins_codeword_oracle = mmcs.get_matrices(&witin_comms.codeword);
-    let fixed_codeword_oracle = mmcs.get_matrices(&fixed_comms.codeword);
+    let witins_codeword = mmcs.get_matrices(witin_commitment_with_witness);
+    let fixed_codeword = mmcs.get_matrices(&fixed_comms.codeword);
 
     let batch_oracle = entered_span!("batch_oracle");
-    let initial_rlc_oracle = witins_codeword_oracle
+    let initial_rlc_oracle = witins_codeword
         .iter()
-        .zip_eq(witin_fixed_mapping)
         .zip_eq(&batch_coeffs_splitted)
-        .zip_eq(
-            witin_comms
-                .polynomials_bh_evals
-                .iter()
-                .map(|group| group.len()),
-        )
+        .zip_eq(&witin_polys_and_meta)
         .map(
-            |(((witin_polys, fixed_poly_option), batch_coeffs), num_polys)| {
+            |((witin_codewords, batch_coeffs), (_, (circuit_index, group)))| {
+                let num_polys = group.len();
                 // batch_coeffs concat witin follow by fixed, where fixed is optional
                 let witin_and_fixed_codeword: Vec<&&DenseMatrix<E::BaseField, Vec<E::BaseField>>> =
-                    std::iter::once(witin_polys)
-                        .chain(fixed_poly_option.and_then(|idx| fixed_codeword_oracle.get(idx)))
+                    std::iter::once(witin_codewords)
+                        .chain(
+                            fixed_comms
+                                .circuit_codeword_index
+                                .get(circuit_index)
+                                .and_then(|idx| fixed_codeword.get(*idx)),
+                        )
                         .collect_vec();
                 // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
                 let size = witin_and_fixed_codeword[0].height() * 2;
                 (0..size)
-                    .into_par_iter()
                     .map(|j| {
                         witin_and_fixed_codeword
                             .iter()
@@ -149,7 +148,11 @@ where
             },
         )
         .collect_vec();
-    assert_eq!(point.len(), initial_rlc_oracle.len());
+    assert!(
+        [witin_polys_and_meta.len(), initial_rlc_oracle.len(),]
+            .iter()
+            .all_equal()
+    );
     let mut running_oracle = initial_rlc_oracle.iter().map(Cow::Borrowed).collect_vec();
     exit_span!(batch_oracle);
 
@@ -182,15 +185,14 @@ where
             running_evals
         })
         .collect::<Vec<_>>();
-    assert_eq!(point.len(), initial_rlc_bh_evals.len());
     exit_span!(batched_bh_evals);
     exit_span!(prepare_span);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_span = entered_span!("Basefold::build eq");
-    let eq: Vec<ArcMultilinearExtension<E>> = point
+    let eq: Vec<ArcMultilinearExtension<E>> = witin_polys_and_meta
         .par_iter()
-        .map(|point| build_eq_x_r_vec(point).into_mle().into())
+        .map(|(point, _)| build_eq_x_r_vec(point).into_mle().into())
         .collect::<Vec<_>>();
     exit_span!(build_eq_span);
 

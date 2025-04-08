@@ -88,10 +88,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // commit to main traces
         let mut wits_instances = BTreeMap::new();
-        let mut wits_rmms = Vec::with_capacity(self.pk.circuit_pks.len());
+        let mut wits_rmms = BTreeMap::new();
         let mut structural_wits = BTreeMap::new();
 
         let commit_to_traces_span = entered_span!("commit_to_traces", profiling_1 = true);
+        let circuit_name_index_map = self
+            .pk
+            .circuit_pks
+            .keys()
+            .enumerate()
+            .map(|(i, k)| (k, i))
+            .collect::<HashMap<&String, usize>>();
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, mut rmm) in witnesses.into_iter_sorted() {
             let witness_rmm = rmm.remove(0);
@@ -108,7 +115,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }
 
             let structural_witness = structural_witness_rmm.to_mles();
-            wits_rmms.push(witness_rmm);
+            wits_rmms.insert(circuit_name_index_map[&circuit_name], witness_rmm);
             structural_wits.insert(
                 circuit_name,
                 (
@@ -145,18 +152,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         tracing::debug!("challenges in prover: {:?}", challenges);
 
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
-        let (points, evaluations,witin_fixed_mapping) = self
+        let (points, evaluations) = self
             .pk
             .circuit_pks
             .iter() // Sorted by key.
             .enumerate()
-            .try_fold((vec![], vec![], vec![]), |(mut points, mut evaluations, mut witin_fixed_mapping), (index, (circuit_name, pk))| {
+            .try_fold((vec![], vec![]), |(mut points, mut evaluations), (index, (circuit_name, pk))| {
                 let num_instances = *wits_instances
                 .get(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
             if num_instances == 0 {
                 // do nothing without point and evaluation insertion
-                return Ok::<(Vec<_>, Vec<Vec<_>>, Vec<Option<usize>>), ZKVMError>((points,evaluations,witin_fixed_mapping));
+                return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points,evaluations));
             }
             transcript.append_field_element(&E::BaseField::from_u64(index as u64));
             // TODO: add an enum for circuit type either in constraint_system or vk
@@ -191,9 +198,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 points.push(point);
                 evaluations.push(opcode_proof.wits_in_evals.clone());
-                // there is no fixed commitment in opcode circuit
-                assert_eq!(self.pk.fixed_trace_index[index], None);
-                witin_fixed_mapping.push(None);
                 opcode_proofs
                     .insert(circuit_name.clone(), (index, opcode_proof));
             } else {
@@ -216,8 +220,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 if cs.num_fixed > 0 {
                     evaluations.push(table_proof.fixed_in_evals.clone());
                 }
-                witin_fixed_mapping.push(self.pk.fixed_trace_index[index]);
-
                 tracing::info!(
                     "generated proof for table {} with num_instances={}, structural_num_instances={}",
                     circuit_name,
@@ -230,7 +232,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     pi_evals[idx]= eval;
                 }
             };
-            Ok((points,evaluations,witin_fixed_mapping))
+            Ok((points,evaluations))
             })?;
 
         // batch opening pcs
@@ -242,7 +244,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .as_ref()
                 .expect("must have fixed commitment witness"),
             &witin_commit_with_witness,
-            witin_fixed_mapping,
             &points,
             &evaluations,
             &mut transcript,

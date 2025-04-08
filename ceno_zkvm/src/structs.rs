@@ -359,9 +359,6 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
-    // fixed commit w.r.t circuit index
-    pub fixed_trace_index: Vec<Option<usize>>,
-    // fixed commit with witness
     pub fixed_commit_wd: Option<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
 
@@ -380,17 +377,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             finalize_global_state_expr: Expression::ZERO,
             fixed_commit_wd: None,
             fixed_commit: None,
-            fixed_trace_index: vec![],
         }
     }
 
     pub(crate) fn commit_fixed(
         &mut self,
-        fixed_traces: Vec<RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        fixed_traces: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<(), ZKVMError> {
-        // transpose from row-major to column-major
         let fixed_commit_wd =
-            PCS::batch_commit(&self.pp, fixed_traces).map_err(|err| ZKVMError::PCSError(err))?;
+            PCS::batch_commit(&self.pp, fixed_traces).map_err(ZKVMError::PCSError)?;
         let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
         self.fixed_commit_wd = Some(fixed_commit_wd);
         self.fixed_commit = Some(fixed_commit);

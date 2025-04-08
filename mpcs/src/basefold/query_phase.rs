@@ -32,7 +32,6 @@ pub fn batch_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
     fixed_comms: &BasefoldCommitmentWithWitness<E>,
     witin_comms: &BasefoldCommitmentWithWitness<E>,
-    witin_fixed_mapping: &[Option<usize>],
     trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
 ) -> QueryOpeningProofs<E>

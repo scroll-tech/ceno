@@ -3,6 +3,8 @@ mod spec;
 mod structure;
 mod utils;
 
+use std::collections::BTreeMap;
+
 use crate::Point;
 
 use super::PolynomialCommitmentScheme;
@@ -111,10 +113,10 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: Vec<witness::RowMajorMatrix<E::BaseField>>,
+        rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        assert_eq!(polys.len(), 2);
-        let polys = polys[0].to_mles();
+        assert_eq!(rmms.len(), 2);
+        let polys = rmms[&0].to_mles();
         let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;
 
@@ -125,8 +127,6 @@ where
         _pp: &Self::ProverParam,
         _fixed_comms: &Self::CommitmentWithWitness,
         _witin_comms: &Self::CommitmentWithWitness,
-        // witin mapping to fixed index
-        _witin_fixed_mapping: Vec<Option<usize>>,
         _points: &[Point<E>],
         _evals: &[Vec<E>],
         _transcript: &mut impl Transcript<E>,
@@ -187,12 +187,6 @@ where
     fn get_arc_mle_witness_from_commitment(
         _commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
-        unimplemented!()
-    }
-
-    fn get_arc_mle_witness_from_commitment_v2(
-        commitment: &Self::CommitmentWithWitness,
-    ) -> Vec<Vec<ArcMultilinearExtension<'static, E>>> {
         unimplemented!()
     }
 }

@@ -149,23 +149,23 @@ where
         // directly return bit reverse format, matching with codeword index
         let t_inv_halves_prover = (0..max_message_size_log + Spec::get_rate_log())
             .map(|i| {
-                // if i < Spec::get_basecode_msg_size_log() {
-                //     vec![]
-                // } else {
-                let t_i = E::BaseField::two_adic_generator(i + 1)
-                    .powers()
-                    .take(1 << i)
-                    .collect_vec();
-                p3::matrix::dense::RowMajorMatrix::new(
-                    batch_multiplicative_inverse(
-                        &t_i.iter().map(E::BaseField::double).collect_vec(),
-                    ),
-                    1,
-                )
-                .bit_reverse_rows()
-                .to_row_major_matrix()
-                .values
-                //}
+                if i < Spec::get_basecode_msg_size_log() {
+                    vec![]
+                } else {
+                    let t_i = E::BaseField::two_adic_generator(i + 1)
+                        .powers()
+                        .take(1 << i)
+                        .collect_vec();
+                    p3::matrix::dense::RowMajorMatrix::new(
+                        batch_multiplicative_inverse(
+                            &t_i.iter().map(E::BaseField::double).collect_vec(),
+                        ),
+                        1,
+                    )
+                    .bit_reverse_rows()
+                    .to_row_major_matrix()
+                    .values
+                }
             })
             .collect_vec();
 

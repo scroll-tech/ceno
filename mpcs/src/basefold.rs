@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{
     Error, Evaluation, Point, PolynomialCommitmentScheme,
     util::{
@@ -15,7 +17,7 @@ use p3::{commit::Mmcs, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{
     batch_query_phase, simple_batch_prover_query_phase, simple_batch_verifier_query_phase,
 };
-use structure::BasefoldProof;
+use structure::{BasefoldProof, MerkleTree};
 pub use structure::{BasefoldSpec, Digest};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
@@ -216,48 +218,77 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        rmm: Vec<witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>>,
+        rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
-        // assumptions
-        // 1. there must be at least one polynomial
-        // 2. all polynomials must exist in the same field type
-        //    (TODO: eliminate this assumption by supporting commiting
-        //     and opening mixed-type polys)
-        // 3. all polynomials must have the same number of variables
-
-        if rmm.is_empty() {
+        if rmms.is_empty() {
             return Err(Error::InvalidPcsParam(
                 "cannot batch commit to zero polynomials".to_string(),
             ));
         }
 
+        let mmcs = poseidon2_merkle_tree::<E>();
+
         let span = entered_span!("to_mles", profiling_3 = true);
-        let polys: Vec<Vec<ArcMultilinearExtension<E>>> = rmm
-            .iter()
-            .map(|rmm| rmm.to_mles().into_iter().map(|p| p.into()).collect_vec())
-            .collect_vec();
+        let (polys, rmm_to_batch_commit, small_commitmentwithdata, circuit_codeword_index): (
+            BTreeMap<usize, Vec<ArcMultilinearExtension<E>>>,
+            Vec<_>,
+            _,
+            _,
+        ) = rmms.into_iter().fold(
+            (BTreeMap::new(), vec![], vec![], BTreeMap::new()),
+            |(
+                mut polys,
+                mut rmm_to_batch_commit,
+                mut small_commitmentwithdata,
+                mut circuit_codeword_index,
+            ),
+             (index, rmm)| {
+                // attach column-based poly
+                polys.insert(
+                    index,
+                    rmm.to_mles().into_iter().map(|p| p.into()).collect_vec(),
+                );
+
+                // for smaller polys, we commit it separately as prover will send it as a whole without blowing factor
+                if rmm.num_vars() <= Spec::get_basecode_msg_size_log() {
+                    let rmm = rmm.into_default_padded_p3_rmm();
+                    small_commitmentwithdata.push(mmcs.commit_matrix(rmm));
+                    // TODO probably need to keep `circuit_index`` againt `small_commitmentwithdata` index
+                } else {
+                    rmm_to_batch_commit.push(rmm);
+                    circuit_codeword_index.insert(index, rmm_to_batch_commit.len() - 1);
+                }
+                (
+                    polys,
+                    rmm_to_batch_commit,
+                    small_commitmentwithdata,
+                    circuit_codeword_index,
+                )
+            },
+        );
         exit_span!(span);
 
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
-        let evals_codewords = rmm
+        let evals_codewords = rmm_to_batch_commit
             .into_iter()
             .map(|rmm| Spec::EncodingScheme::encode(&pp.encoding_params, rmm))
             .collect::<Result<Vec<DenseMatrix<E::BaseField>>, _>>()?;
         exit_span!(span);
 
         let span = entered_span!("build mt", profiling_3 = true);
-        let mmcs = poseidon2_merkle_tree::<E>();
         let (comm, codeword) = mmcs.commit(evals_codewords);
         exit_span!(span);
         let meta_info = polys
             .iter()
-            .map(|polys| (polys[0].num_vars(), polys.len()))
+            .map(|(_, polys)| (polys[0].num_vars(), polys.len()))
             .collect_vec();
         Ok(Self::CommitmentWithWitness {
-            pi_d_digest: comm,
+            commit: comm,
             codeword,
-            polynomials_bh_evals: polys,
+            polys,
             meta_info,
+            small_commitmentwithdata,
+            circuit_codeword_index,
         })
     }
 
@@ -292,8 +323,6 @@ where
         pp: &Self::ProverParam,
         fixed_comms: &Self::CommitmentWithWitness,
         witin_comms: &Self::CommitmentWithWitness,
-        // not all witins got respective fixed
-        witin_fixed_mapping: Vec<Option<usize>>,
         // for points and evals: witness & fixed are assumed to be line up consecutively
         points: &[Point<E>],
         // TODO this is only for debug purpose
@@ -304,47 +333,30 @@ where
 
         // sanity check
         // number of point match with commitment length, assuming each commitment are opening under same point
-        assert!(
-            [
-                points.len(),
-                witin_comms.polynomials_bh_evals.len(),
-                witin_fixed_mapping.len()
-            ]
-            .iter()
-            .all_equal()
-        );
+        assert!([points.len(), witin_comms.polys.len(),].iter().all_equal());
 
-        assert!(
-            izip!(
-                &witin_comms.polynomials_bh_evals,
-                witin_fixed_mapping
+        assert!(izip!(&witin_comms.polys, &witin_comms.meta_info,).all(
+            |((circuit_index, polys), meta_info)| {
+                let (num_var, num_polys) = meta_info;
+                // check num_vars & num_poly match
+                polys
                     .iter()
-                    .map(|index| index.map(|index| &fixed_comms.polynomials_bh_evals[index])),
-                &witin_comms.meta_info,
-            )
-            .all(
-                |(polynomials_bh_evals, fixed_polynomials_bh_evals, meta_info)| {
-                    let (num_var, num_polys) = meta_info;
-                    // check num_vars & num_poly match
-                    polynomials_bh_evals
-                        .iter()
-                        .chain(fixed_polynomials_bh_evals.into_iter().flatten())
-                        .all(|p| p.num_vars() == *num_var)
-                        && polynomials_bh_evals.len() == *num_polys
-                },
-            )
-        );
+                    .chain(fixed_comms.polys.get(circuit_index).into_iter().flatten())
+                    .all(|p| p.num_vars() == *num_var)
+                    && polys.len() == *num_polys
+            },
+        ));
 
         if cfg!(feature = "sanity-check") {
             // check poly evaluation on point equal eval
             let point_poly_pair = witin_comms
-                .polynomials_bh_evals
+                .polys
                 .iter()
-                .zip_eq(&witin_fixed_mapping)
                 .zip_eq(points)
-                .flat_map(|((witin_polys, fixed_poly_option), point)| {
-                    let fixed_iter = fixed_poly_option
-                        .and_then(|idx| fixed_comms.polynomials_bh_evals.get(idx))
+                .flat_map(|((circuit_index, witin_polys), point)| {
+                    let fixed_iter = fixed_comms
+                        .polys
+                        .get(circuit_index)
                         .into_iter()
                         .flatten()
                         .cloned();
@@ -365,34 +377,35 @@ where
             );
         }
 
-        let (min_num_vars, max_num_vars) = (
-            *witin_comms
-                .meta_info
-                .iter()
-                .map(|(num_var, _)| num_var)
-                .min()
-                .unwrap(),
-            *witin_comms
-                .meta_info
-                .iter()
-                .map(|(num_var, _)| num_var)
-                .max()
-                .unwrap(),
-        );
+        let max_num_vars = *witin_comms
+            .meta_info
+            .iter()
+            .map(|(num_var, _)| num_var)
+            .max()
+            .unwrap();
+
         // assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
+
+        let (_small_witin_polys_and_meta, witin_polys_and_meta): (
+            _,
+            Vec<(
+                &Point<E>,
+                (usize, &Vec<ArcMultilinearExtension<'static, E>>),
+            )>,
+        ) = izip!(points, &witin_comms.polys)
+            .map(|(point, (circuit_index, polys))| (point, (circuit_index.clone(), polys)))
+            .partition(|(_, (_, polys))| polys[0].num_vars() <= Spec::get_basecode_msg_size_log());
 
         // prover prove that
         // sum_i coeffs[i] poly_evals[i]
         let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
-            points,
             fixed_comms,
-            witin_comms,
-            &witin_fixed_mapping,
+            &witin_comms.codeword,
+            witin_polys_and_meta,
             transcript,
-            (min_num_vars, max_num_vars),
-            // max_num_vars - Spec::get_basecode_msg_size_log(),
             max_num_vars,
+            max_num_vars - Spec::get_basecode_msg_size_log(),
         );
 
         let query_timer = start_timer!(|| "Basefold::open::query_phase");
@@ -402,7 +415,6 @@ where
             transcript,
             fixed_comms,
             witin_comms,
-            &witin_fixed_mapping,
             &trees,
             Spec::get_number_queries(),
         );
@@ -606,17 +618,12 @@ where
         commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
         commitment
-            .polynomials_bh_evals
-            .iter()
+            .polys
+            .values()
+            .into_iter()
             .flatten()
             .cloned()
             .collect_vec()
-    }
-
-    fn get_arc_mle_witness_from_commitment_v2(
-        commitment: &Self::CommitmentWithWitness,
-    ) -> Vec<Vec<ArcMultilinearExtension<'static, E>>> {
-        commitment.polynomials_bh_evals.clone()
     }
 }
 
