@@ -126,6 +126,7 @@ where
                 // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
                 let size = witin_and_fixed_codeword[0].height() * 2;
                 (0..size)
+                    .into_par_iter()
                     .map(|j| {
                         witin_and_fixed_codeword
                             .iter()
