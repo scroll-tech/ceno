@@ -40,6 +40,8 @@ where
     DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
     MerklePathExt<E>: Send + Sync,
     MerkleTreeExt<E>: Send + Sync,
+    MerklePathBase<E>: Send + Sync,
+    MerkleTreeBase<E>: Send + Sync,
 {
     fn validate_witnesses(&self, witness: &Witnesses<E>) -> bool {
         assert_eq!(
