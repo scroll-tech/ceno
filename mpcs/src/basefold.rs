@@ -379,7 +379,7 @@ where
                 .max()
                 .unwrap(),
         );
-        assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
+        // assert!(min_num_vars >= Spec::get_basecode_msg_size_log());
 
         // prover prove that
         // sum_i coeffs[i] poly_evals[i]
@@ -391,7 +391,8 @@ where
             &witin_fixed_mapping,
             transcript,
             (min_num_vars, max_num_vars),
-            max_num_vars - Spec::get_basecode_msg_size_log(),
+            // max_num_vars - Spec::get_basecode_msg_size_log(),
+            max_num_vars,
         );
 
         let query_timer = start_timer!(|| "Basefold::open::query_phase");

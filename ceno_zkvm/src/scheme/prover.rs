@@ -217,7 +217,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 if cs.num_fixed > 0 {
                     evaluations.push(table_proof.fixed_in_evals.clone());
                 }
-                witin_fixed_mapping.push(self.pk.fixed_trace_index[index].clone());
+                witin_fixed_mapping.push(self.pk.fixed_trace_index[index]);
 
                 tracing::info!(
                     "generated proof for table {} with num_instances={}, structural_num_instances={}",

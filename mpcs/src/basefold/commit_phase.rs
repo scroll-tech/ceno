@@ -9,7 +9,7 @@ use crate::{
     util::{
         hash::write_digest_to_transcript,
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
-        split_slice,
+        split_by_sizes,
     },
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -17,7 +17,10 @@ use itertools::{Itertools, izip};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::{Field, PrimeCharacteristicRing, dot_product},
-    matrix::{Matrix, dense::RowMajorMatrix},
+    matrix::{
+        Matrix,
+        dense::{DenseMatrix, RowMajorMatrix},
+    },
     util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -51,7 +54,7 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     witin_comms: &BasefoldCommitmentWithWitness<E>,
     witin_fixed_mapping: &[Option<usize>],
     transcript: &mut impl Transcript<E>,
-    (min_num_vars, max_num_vars): (usize, usize),
+    (_, max_num_vars): (usize, usize),
     num_rounds: usize,
 ) -> (Vec<MerkleTreeExt<E>>, BasefoldCommitPhaseProof<E>)
 where
@@ -94,7 +97,7 @@ where
     let batch_coeffs =
         &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
     // split batch coeffs to match with batch group for easier handling
-    let batch_coeffs_splitted = split_slice(batch_coeffs, &batch_group_size);
+    let batch_coeffs_splitted = split_by_sizes(batch_coeffs, &batch_group_size);
 
     // prepare
     // - codeword oracle => for FRI
@@ -107,33 +110,44 @@ where
         .iter()
         .zip_eq(witin_fixed_mapping)
         .zip_eq(&batch_coeffs_splitted)
-        .map(|((witin_polys, fixed_poly_option), batch_coeffs)| {
-            // batch_coeffs concat witin follow by fix, thus we need to retrieve each respective index
-            let (_, mut rlc_vector) = std::iter::once(witin_polys)
-                .chain(fixed_poly_option.and_then(|idx| fixed_codeword_oracle.get(idx)))
-                .fold((0, vec![]), |(start_index, mut aggregated), rmm| {
-                    let batch_coeffs = &batch_coeffs[start_index..start_index + rmm.width];
-                    aggregated.push(
-                        rmm.values
-                            .par_chunks(rmm.width)
-                            .map(|row| {
-                                dot_product(batch_coeffs.iter().copied(), row.iter().copied())
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                    (start_index + rmm.width, aggregated)
-                });
-            assert!(!rlc_vector.is_empty() && rlc_vector.len() <= 2);
-            // merge witin & fixed together, since both have been rlc and same length
-            if rlc_vector.len() == 1 {
-                rlc_vector.remove(0)
-            } else {
-                (0..rlc_vector[0].len())
+        .zip_eq(
+            witin_comms
+                .polynomials_bh_evals
+                .iter()
+                .map(|group| group.len()),
+        )
+        .map(
+            |(((witin_polys, fixed_poly_option), batch_coeffs), num_polys)| {
+                // batch_coeffs concat witin follow by fixed, where fixed is optional
+                let witin_and_fixed_codeword: Vec<&&DenseMatrix<E::BaseField, Vec<E::BaseField>>> =
+                    std::iter::once(witin_polys)
+                        .chain(fixed_poly_option.and_then(|idx| fixed_codeword_oracle.get(idx)))
+                        .collect_vec();
+                // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
+                let size = witin_and_fixed_codeword[0].height() * 2;
+                (0..size)
                     .into_par_iter()
-                    .map(|j| rlc_vector.iter().map(|row| row[j]).sum())
+                    .map(|j| {
+                        witin_and_fixed_codeword
+                            .iter()
+                            .scan(0, |start_index, rmm| {
+                                let batch_coeffs = batch_coeffs
+                                    [*start_index..*start_index + num_polys]
+                                    .iter()
+                                    .copied();
+                                *start_index += num_polys;
+                                Some(dot_product(
+                                    batch_coeffs,
+                                    rmm.values[j * num_polys..(j + 1) * num_polys]
+                                        .iter()
+                                        .copied(),
+                                ))
+                            })
+                            .sum::<E>()
+                    })
                     .collect::<Vec<_>>()
-            }
-        })
+            },
+        )
         .collect_vec();
     assert_eq!(point.len(), initial_rlc_oracle.len());
     let mut running_oracle = initial_rlc_oracle.iter().map(Cow::Borrowed).collect_vec();
@@ -181,7 +195,7 @@ where
     exit_span!(build_eq_span);
 
     // FIXME: make num_thread dominated by thread
-    let num_threads = optimal_sumcheck_threads(min_num_vars);
+    let num_threads = optimal_sumcheck_threads(max_num_vars);
     let log2_num_threads = log2_strict_usize(num_threads);
 
     // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix

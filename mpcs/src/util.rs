@@ -266,33 +266,49 @@ pub fn ext_try_into_base<E: ExtensionField>(x: &E) -> Result<E::BaseField, Error
     }
 }
 
-/// splits a slice into multiple sub-slices at given indices.
+/// splits a vector into multiple slices, where each slice length
+/// is specified by the corresponding element in the `sizes` slice.
 ///
 /// # arguments
-/// * `slice` - the slice to split.
-/// * `indices` - positions where the slice should be split.
 ///
-/// # returns
-/// * a `Vec<&[T]>` containing the sub-slices.
+/// * `input` - the input vector to be split.
+/// * `sizes` - a slice of sizes indicating how to split the input vector.
 ///
-/// # notes
-/// * indices should be in non-decreasing order.
-/// * the last segment extends to the slice end.
+/// # panics
+///
+/// panics if the sum of `sizes` does not equal the length of `input`.
 ///
 /// # example
+///
 /// ```
-/// let data = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-/// let parts = split_slice(&data, &[2, 5, 7]);
-/// assert_eq!(parts, vec![&[1, 2], &[3, 4, 5], &[6, 7], &[8, 9]]);
+/// let input = vec![10, 20, 30, 40, 50, 60];
+/// let sizes = vec![2, 3, 1];
+/// let result = split_by_sizes(input, &sizes);
+///
+/// assert_eq!(result.len(), 3);
+/// assert_eq!(result[0], &[10, 20]);
+/// assert_eq!(result[1], &[30, 40, 50]);
+/// assert_eq!(result[2], &[60]);
 /// ```
-pub fn split_slice<'a, T>(slice: &'a [T], indices: &[usize]) -> Vec<&'a [T]> {
-    indices
+pub fn split_by_sizes<'a, T>(input: &'a [T], sizes: &[usize]) -> Vec<&'a [T]> {
+    let total_size: usize = sizes.iter().sum();
+
+    if total_size != input.len() {
+        panic!(
+            "total size of chunks ({}) doesn't match input length ({})",
+            total_size,
+            input.len()
+        );
+    }
+
+    // `scan` keeps track of the current start index and produces each slice
+    sizes
         .iter()
-        .chain(std::iter::once(&slice.len())) // append slice.len() as the final boundary
-        .scan(0, |start, &end| {
-            let segment = &slice[*start..end.min(slice.len())]; // slice safely within bounds
-            *start = end.min(slice.len()); // update `start` for the next iteration
-            Some(segment) // yield the segment
+        .scan(0, |start, &size| {
+            let end = *start + size;
+            let slice = &input[*start..end];
+            *start = end;
+            Some(slice)
         })
         .collect()
 }

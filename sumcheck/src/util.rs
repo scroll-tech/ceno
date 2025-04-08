@@ -287,10 +287,15 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
                 let blow_factor = 1 << (merged_num_vars - poly.num_vars());
                 DenseMultilinearExtension::from_evaluations_ext_vec(
                     merged_num_vars,
-                    poly.get_base_field_vec()
-                        .iter()
-                        .flat_map(|e| std::iter::repeat(E::from(*e)).take(blow_factor))
-                        .collect_vec(),
+                    op_mle!(
+                        poly,
+                        |poly| {
+                            poly.iter()
+                                .flat_map(|e| std::iter::repeat(*e).take(blow_factor))
+                                .collect_vec()
+                        },
+                        |base_poly| base_poly.iter().map(|e| E::from(*e)).collect_vec()
+                    ),
                 )
             }
         };
