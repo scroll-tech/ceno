@@ -7,8 +7,7 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 use criterion::*;
-
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
@@ -57,6 +56,7 @@ fn is_prime_1(c: &mut Criterion) {
                             program.clone(),
                             platform.clone(),
                             hints.clone(),
+                            vec![],
                             max_steps,
                             Checkpoint::PrepE2EProving,
                         );
