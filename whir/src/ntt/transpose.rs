@@ -53,15 +53,19 @@ pub fn transpose_rmm<F: Sized + Copy + Send + Sync>(
 ) {
     debug_assert_eq!(matrix.height(), rows * cols);
     let skip = matrix.width();
-    let mut scratch = Vec::with_capacity(matrix.height() * matrix.width());
+    let mut scratch: Vec<F> = Vec::with_capacity(matrix.height() * matrix.width());
     #[allow(clippy::uninit_vec)]
     unsafe {
         scratch.set_len(matrix.height() * matrix.width());
     }
+    let copy_timer = entered_span!("Copy to scratch");
     scratch.copy_from_slice(&matrix.values);
+    exit_span!(copy_timer);
     let src = MatrixMutSkip::from_mut_slice(scratch.as_mut_slice(), rows, cols, skip, 0);
     let dst = MatrixMutSkip::from_mut_slice(matrix.values.as_mut_slice(), cols, rows, skip, 0);
+    let copy_timer = entered_span!("Transpose copy");
     transpose_copy_batch(src, dst);
+    exit_span!(copy_timer);
 }
 
 pub fn transpose_bench_allocate<F: Sized + Copy + Send>(
