@@ -222,7 +222,7 @@ fn verify(proof_file: &str, vk_file: &str) {
     let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
     assert!(
         verifier
-            .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
+            .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt(&vk))
             .is_ok()
     );
     println!("e2e proof stat: {}", zkvm_proof);
