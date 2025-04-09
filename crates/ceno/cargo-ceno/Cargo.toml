@@ -1,10 +1,10 @@
 [package]
-name = "cargo-ceno"
 categories.workspace = true
+description = "cargo-ceno cli tools"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-readme.workspace = true
+name = "cargo-ceno"
 repository.workspace = true
 version.workspace = true
 
