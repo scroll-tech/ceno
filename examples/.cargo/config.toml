@@ -26,4 +26,4 @@ rustflags = [
   "-C",
   "passes=lower-atomic",
 ]
-target = "../ceno_rt/riscv32im-ceno-zkvm-elf.json"
+target = "../crates/ceno/rt/riscv32im-ceno-zkvm-elf.json"

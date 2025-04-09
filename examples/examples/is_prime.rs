@@ -1,6 +1,5 @@
 extern crate ceno_rt;
-use ceno_rt::println;
-use core::fmt::Write;
+
 use rkyv::Archived;
 
 fn is_prime(n: u32) -> bool {
@@ -15,7 +14,7 @@ fn is_prime(n: u32) -> bool {
         i += 1;
     }
 
-    return true;
+    true
 }
 
 fn main() {
