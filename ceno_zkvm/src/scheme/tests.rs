@@ -169,6 +169,7 @@ fn test_rw_lk_expression_combination() {
                 &vk.vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
+                num_instances,
                 &[],
                 &mut v_transcript,
                 NUM_FANIN,

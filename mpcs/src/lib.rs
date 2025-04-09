@@ -75,13 +75,22 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
+    num_instances: &[(usize, usize)],
     fixed_comms: &Pcs::CommitmentWithWitness,
     witin_comms: &Pcs::CommitmentWithWitness,
     points: &[Point<E>],
     evals: &[Vec<E>],
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
-    Pcs::batch_open(pp, fixed_comms, witin_comms, points, evals, transcript)
+    Pcs::batch_open(
+        pp,
+        num_instances,
+        fixed_comms,
+        witin_comms,
+        points,
+        evals,
+        transcript,
+    )
 }
 
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -97,16 +106,27 @@ pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     vp: &Pcs::VerifierParam,
-    comms: &[Pcs::Commitment],
-    points: &[Vec<E>],
-    evals: &[Evaluation<E>],
+    num_instances: &[(usize, usize)],
+    points: &[Point<E>],
+    fixed_comms: &Pcs::Commitment,
+    witin_comms: &Pcs::Commitment,
+    evals: &[Vec<E>],
     proof: &Pcs::Proof,
     transcript: &mut impl Transcript<E>,
 ) -> Result<(), Error>
 where
     Pcs::Commitment: 'a,
 {
-    Pcs::batch_verify(vp, comms, points, evals, proof, transcript)
+    Pcs::batch_verify(
+        vp,
+        num_instances,
+        points,
+        fixed_comms,
+        witin_comms,
+        evals,
+        proof,
+        transcript,
+    )
 }
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
@@ -173,6 +193,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_open(
         pp: &Self::ProverParam,
+        num_instances: &[(usize, usize)],
         fixed_comms: &Self::CommitmentWithWitness,
         witin_comms: &Self::CommitmentWithWitness,
         points: &[Point<E>],
@@ -204,10 +225,11 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_verify(
         vp: &Self::VerifierParam,
+        num_instances: &[(usize, usize)],
         points: &[Point<E>],
         fixed_comms: &Self::Commitment,
         witin_comms: &Self::Commitment,
-        evals: &[Evaluation<E>],
+        evals: &[Vec<E>],
         proof: &Self::Proof,
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;

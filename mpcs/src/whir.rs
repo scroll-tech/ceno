@@ -125,6 +125,7 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
+        _num_instances: &[(usize, usize)],
         _fixed_comms: &Self::CommitmentWithWitness,
         _witin_comms: &Self::CommitmentWithWitness,
         _points: &[Point<E>],
@@ -157,10 +158,11 @@ where
 
     fn batch_verify(
         _vp: &Self::VerifierParam,
+        _num_instances: &[(usize, usize)],
         _points: &[Point<E>],
         _fixed_comms: &Self::Commitment,
         _witin_comms: &Self::Commitment,
-        _evals: &[Evaluation<E>],
+        _evals: &[Vec<E>],
         _proof: &Self::Proof,
         _transcript: &mut impl Transcript<E>,
     ) -> Result<(), crate::Error> {

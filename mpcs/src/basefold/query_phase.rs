@@ -38,6 +38,8 @@ where
         log2_witin_max_codeword_size,
     );
 
+    println!("prover top 5 queries {:?}", queries[0..5].to_vec());
+
     queries
         .iter()
         .map(|idx| {

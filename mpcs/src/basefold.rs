@@ -15,12 +15,12 @@ use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
-use witness::RowMajorMatrix;
+use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use itertools::{Itertools, izip};
 use serde::{Serialize, de::DeserializeOwned};
 
-use multilinear_extensions::mle::FieldType;
+use multilinear_extensions::{mle::FieldType, util::ceil_log2};
 
 use rayon::{
     iter::IntoParallelIterator,
@@ -305,6 +305,7 @@ where
     /// Open a batch of polynomial commitments at several points.
     fn batch_open(
         pp: &Self::ProverParam,
+        num_instances: &[(usize, usize)],
         fixed_comms: &Self::CommitmentWithWitness,
         witin_comms: &Self::CommitmentWithWitness,
         points: &[Point<E>],
@@ -317,10 +318,8 @@ where
         // sanity check
         // number of point match with commitment length, assuming each commitment are opening under same point
         assert!([points.len(), witin_comms.polys.len(),].iter().all_equal());
-
         assert!(izip!(&witin_comms.polys, &witin_comms.meta_info,).all(
-            |((circuit_index, polys), meta_info)| {
-                let (num_var, num_polys) = meta_info;
+            |((circuit_index, polys), (num_var, num_polys))| {
                 // check num_vars & num_poly match
                 polys
                     .iter()
@@ -328,6 +327,12 @@ where
                     .all(|p| p.num_vars() == *num_var)
                     && polys.len() == *num_polys
             },
+        ));
+        assert_eq!(num_instances.len(), witin_comms.polys.len());
+        assert!(izip!(num_instances, &witin_comms.meta_info).all(
+            |((_, num_instance), (num_var, _))| {
+                next_pow2_instance_padding(*num_instance).ilog2() as usize == *num_var
+            }
         ));
 
         if cfg!(feature = "sanity-check") {
@@ -473,17 +478,109 @@ where
     }
 
     fn batch_verify(
-        _vp: &Self::VerifierParam,
-        _points: &[Point<E>],
-        _fixed_comms: &Self::Commitment,
-        _witin_comms: &Self::Commitment,
-        _evals: &[Evaluation<E>],
-        _proof: &Self::Proof,
-        _transcript: &mut impl Transcript<E>,
+        vp: &Self::VerifierParam,
+        num_instances: &[(usize, usize)],
+        points: &[Point<E>],
+        fixed_comms: &Self::Commitment,
+        witin_comms: &Self::Commitment,
+        evals: &[Vec<E>],
+        proof: &Self::Proof,
+        transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
-        // extract num_vars from verifier rt
+        let mmcs = poseidon2_merkle_tree::<E>();
 
-        unimplemented!()
+        let num_vars = num_instances
+            .iter()
+            .map(|(index, num_instance)| {
+                (
+                    *index,
+                    next_pow2_instance_padding(*num_instance).ilog2() as usize,
+                )
+            })
+            .collect_vec();
+        let (trivial_num_vars, num_vars): (Vec<(usize, usize)>, Vec<_>) = num_vars
+            .iter()
+            .partition(|(_, num_var)| *num_var <= Spec::get_basecode_msg_size_log());
+
+        if !trivial_num_vars.is_empty() {
+            let trivial_fixed_commit =
+                BTreeMap::from_iter(fixed_comms.trivial_commits.iter().cloned());
+            let trivial_witin_commit =
+                BTreeMap::from_iter(witin_comms.trivial_commits.iter().cloned());
+            assert!(proof.trivial_proof.is_some());
+            assert!(
+                trivial_num_vars
+                    .iter()
+                    .zip_eq(proof.trivial_proof.as_ref().unwrap())
+                    .zip_eq(&witin_comms.trivial_commits)
+                    .all(
+                        |(((circuit_index1, _), (circuit_index2, _)), (circuit_index3, _))| [
+                            circuit_index1,
+                            circuit_index2,
+                            circuit_index3
+                        ]
+                        .iter()
+                        .all_equal()
+                    )
+            );
+
+            // 1. check mmcs verify opening
+            trivial_num_vars
+                .iter()
+                .zip_eq(proof.trivial_proof.as_ref().unwrap())
+                .try_for_each(|((circuit_index, _), (_, proof))| {
+                    // if commitment with respective circuit size exist,
+                    if let Some(witin_commit) = trivial_witin_commit.get(circuit_index) {
+                        let (commit, _) = mmcs.commit_matrix(proof[0].clone());
+                        if commit != *witin_commit {
+                            Err(Error::MerkleRootMismatch)?;
+                        }
+                    }
+                    if let Some(fixed_commit) = trivial_fixed_commit.get(circuit_index) {
+                        let (commit, _) = mmcs.commit_matrix(proof[1].clone());
+                        if commit != *fixed_commit {
+                            Err(Error::MerkleRootMismatch)?;
+                        }
+                    }
+                    Ok(())
+                })?;
+
+            // TODO 2. check evaluation equality
+        }
+
+        // verify commit_phase
+
+        let batch_coeffs =
+            &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
+
+        let max_num_var = *num_vars.iter().map(|(_, n)| n).max().unwrap();
+        let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
+
+        let mut fold_challenges: Vec<E> = Vec::with_capacity(max_num_var);
+        let commits = &proof.commits;
+        let sumcheck_messages = &proof.sumcheck_messages;
+        for i in 0..num_rounds {
+            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
+            fold_challenges.push(
+                transcript
+                    .sample_and_append_challenge(b"commit round")
+                    .elements,
+            );
+            if i < num_rounds - 1 {
+                write_digest_to_transcript(&commits[i], transcript);
+            }
+        }
+        let final_message = &proof.final_message;
+        transcript.append_field_element_exts_iter(proof.final_message.iter().flatten());
+
+        let queries: Vec<_> = transcript.sample_bits_and_append_vec(
+            b"query indices",
+            Spec::get_number_queries(),
+            max_num_var + Spec::get_rate_log(),
+        );
+        println!("verifier top 5 queries {:?}", queries[0..5].to_vec());
+
+        Ok(())
     }
 
     fn simple_batch_verify(
