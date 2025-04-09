@@ -19,5 +19,5 @@ fn main() {
     let mut scratch = input.to_vec();
     sort(&mut scratch);
     // Print any output you feel like, eg the first element of the sorted vector:
-    println!("{}", scratch[0]);
+    // println!("{}", scratch[0]);
 }

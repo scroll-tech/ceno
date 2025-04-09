@@ -1,0 +1,24 @@
+[package]
+version = "0.1.0"
+name = "is_prime-script"
+edition = "2021"
+default-run = "is_prime"
+
+[[bin]]
+name = "is_prime"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "evm"
+path = "src/bin/evm.rs"
+
+[dependencies]
+sp1-sdk = "3.4"
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+tracing = "0.1.41"
+hex = "0.4.3"
+
+[build-dependencies]
+sp1-helper = "3.4"
