@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/ceno/*",
   "ceno_emul",
   "ceno_host",
   "ceno_rt",
@@ -14,7 +15,7 @@ members = [
   "transcript",
   "whir",
   "witness",
-  "p3", "cargo-ceno", "ceno_sdk",
+  "p3",
 ]
 resolver = "2"
 

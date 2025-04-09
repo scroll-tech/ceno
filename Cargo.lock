@@ -526,6 +526,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ceno-sdk"
+version = "0.1.0"
+
+[[package]]
 name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
@@ -566,10 +570,6 @@ dependencies = [
  "getrandom 0.2.15",
  "rkyv",
 ]
-
-[[package]]
-name = "ceno_sdk"
-version = "0.1.0"
 
 [[package]]
 name = "ceno_zkvm"
