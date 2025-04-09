@@ -5,7 +5,11 @@ use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::FieldType, op_mle, util::largest_even_below, virtual_poly::VirtualPolynomial,
+    mle::FieldType,
+    op_mle,
+    util::largest_even_below,
+    virtual_poly::VirtualPolynomial,
+    virtual_polys::{PolyMeta, VirtualPolynomials},
 };
 use rayon::{
     Scope,
@@ -20,7 +24,7 @@ use crate::{
     structs::{IOPProof, IOPProverMessage, IOPProverState},
     util::{
         AdditiveArray, AdditiveVec, barycentric_weights, ceil_log2, extrapolate,
-        merge_sumcheck_polys, serial_extrapolate,
+        merge_sumcheck_polys, merge_sumcheck_prover_state, serial_extrapolate,
     },
 };
 use p3::field::PrimeCharacteristicRing;
@@ -30,12 +34,14 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
     /// This is experiment features. It's preferable that we move parallel level up more to
     /// "bould_poly" so it can be more isolation
-    #[tracing::instrument(skip_all, name = "sumcheck::prove_batch_polys", level = "trace")]
-    pub fn prove_batch_polys(
-        max_thread_id: usize,
-        mut polys: Vec<VirtualPolynomial<'a, E>>,
+    #[tracing::instrument(skip_all, name = "sumcheck::prove", level = "trace")]
+    pub fn prove(
+        virtual_poly: VirtualPolynomials<'a, E>,
         transcript: &mut impl Transcript<E>,
     ) -> (IOPProof<E>, IOPProverState<'a, E>) {
+        let max_thread_id = virtual_poly.num_threads;
+        let (polys, poly_meta) = virtual_poly.get_batched_polys();
+
         assert!(!polys.is_empty());
         assert_eq!(polys.len(), max_thread_id);
         assert!(max_thread_id.is_power_of_two());
@@ -52,28 +58,120 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             polys[0].aux_info.max_degree,
         );
 
-        // return empty proof when target polymonial is constant
-        if num_variables == 0 {
-            return (IOPProof::default(), IOPProverState {
-                poly: polys[0].clone(),
-                ..Default::default()
-            });
-        }
-        let start = start_timer!(|| "sum check prove");
-
-        transcript.append_message(&(num_variables + log2_max_thread_id).to_le_bytes());
-        transcript.append_message(&max_degree.to_le_bytes());
-        let thread_based_transcript = TranscriptSyncronized::new(max_thread_id);
-        let (tx_prover_state, rx_prover_state) = bounded(max_thread_id);
-
         // extrapolation_aux only need to init once
-        let extrapolation_aux = (1..max_degree)
+        let extrapolation_aux: Vec<(Vec<E>, Vec<E>)> = (1..max_degree)
             .map(|degree| {
                 let points = (0..1 + degree as u64).map(E::from_u64).collect::<Vec<_>>();
                 let weights = barycentric_weights(&points);
                 (points, weights)
             })
             .collect::<Vec<_>>();
+
+        transcript.append_message(&(num_variables + log2_max_thread_id).to_le_bytes());
+        transcript.append_message(&max_degree.to_le_bytes());
+        let (phase1_point, mut prover_state, mut prover_msgs) = if num_variables > 0 {
+            let (mut prover_states, prover_msgs) = Self::phase1_sumcheck(
+                max_thread_id,
+                num_variables,
+                extrapolation_aux.clone(),
+                poly_meta,
+                polys,
+                max_degree,
+                transcript,
+            );
+            if log2_max_thread_id == 0 {
+                let prover_state = mem::take(&mut prover_states[0]);
+                return (
+                    IOPProof {
+                        point: prover_state
+                            .challenges
+                            .iter()
+                            .map(|challenge| challenge.elements)
+                            .collect(),
+                        proofs: prover_msgs,
+                    },
+                    prover_state,
+                );
+            }
+            let point = prover_states[0]
+                .challenges
+                .iter()
+                .map(|c| c.elements)
+                .collect_vec();
+            let poly = merge_sumcheck_prover_state(prover_states);
+
+            (
+                point,
+                Self::prover_init_with_extrapolation_aux(
+                    true,
+                    poly,
+                    extrapolation_aux.clone(),
+                    None,
+                    None,
+                ),
+                prover_msgs,
+            )
+        } else {
+            (
+                vec![],
+                Self::prover_init_with_extrapolation_aux(
+                    true,
+                    merge_sumcheck_polys(polys.iter().collect_vec(), Some(poly_meta)),
+                    extrapolation_aux.clone(),
+                    None,
+                    None,
+                ),
+                vec![],
+            )
+        };
+
+        let mut challenge = None;
+        let span = entered_span!("prove_rounds_stage2");
+        for _ in 0..log2_max_thread_id {
+            let prover_msg =
+                IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
+
+            prover_msg
+                .evaluations
+                .iter()
+                .for_each(|e| transcript.append_field_element_ext(e));
+            prover_msgs.push(prover_msg);
+            challenge = Some(transcript.sample_and_append_challenge(b"Internal round"));
+        }
+        exit_span!(span);
+
+        let span = entered_span!("after_rounds_prover_state_stage2");
+        // pushing the last challenge point to the state
+        if let Some(p) = challenge {
+            prover_state.challenges.push(p);
+            // fix last challenge to collect final evaluation
+            prover_state.fix_var(p.elements);
+        };
+        exit_span!(span);
+        (
+            IOPProof {
+                point: phase1_point
+                    .into_iter()
+                    .chain(prover_state.challenges.iter().map(|c| c.elements))
+                    .collect(),
+                proofs: prover_msgs,
+            },
+            prover_state,
+        )
+    }
+
+    fn phase1_sumcheck(
+        max_thread_id: usize,
+        num_variables: usize,
+        extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
+        poly_meta: Vec<PolyMeta>,
+        mut polys: Vec<VirtualPolynomial<'a, E>>,
+        max_degree: usize,
+        transcript: &mut impl Transcript<E>,
+    ) -> (Vec<IOPProverState<'a, E>>, Vec<IOPProverMessage<E>>) {
+        let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
+        let thread_based_transcript = TranscriptSyncronized::new(max_thread_id);
+        let (tx_prover_state, rx_prover_state) = bounded(max_thread_id);
 
         // spawn extra #(max_thread_id - 1) work threads
         let num_worker_threads = max_thread_id - 1;
@@ -83,8 +181,11 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let scoped_fn = |s: &Scope<'a>| {
             for (thread_id, poly) in polys.iter_mut().enumerate().take(num_worker_threads) {
                 let mut prover_state = Self::prover_init_with_extrapolation_aux(
+                    false,
                     mem::take(poly),
                     extrapolation_aux.clone(),
+                    Some(log2_max_thread_id),
+                    Some(poly_meta.clone()),
                 );
                 let tx_prover_state = tx_prover_state.clone();
                 let mut thread_based_transcript = thread_based_transcript.clone();
@@ -125,8 +226,11 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
             let mut prover_msgs = Vec::with_capacity(num_variables);
             let mut prover_state = Self::prover_init_with_extrapolation_aux(
+                true,
                 mem::take(&mut polys[main_thread_id]),
                 extrapolation_aux.clone(),
+                Some(log2_max_thread_id),
+                Some(poly_meta.clone()),
             );
             let tx_prover_state = tx_prover_state.clone();
             let mut thread_based_transcript = thread_based_transcript.clone();
@@ -196,8 +300,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // create local thread pool if global rayon pool size < max_thread_id
         // this usually cause by global pool size not power of 2.
-        let (mut prover_states, mut prover_msgs) = if rayon::current_num_threads() >= max_thread_id
-        {
+        if rayon::current_num_threads() >= max_thread_id {
             rayon::in_place_scope(scoped_fn)
         } else {
             panic!(
@@ -205,91 +308,45 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 rayon::current_num_threads(),
                 polys.len()
             );
-        };
-
-        if log2_max_thread_id == 0 {
-            let prover_state = mem::take(&mut prover_states[0]);
-            return (
-                IOPProof {
-                    point: prover_state
-                        .challenges
-                        .iter()
-                        .map(|challenge| challenge.elements)
-                        .collect(),
-                    proofs: prover_msgs,
-                },
-                prover_state,
-            );
         }
-
-        // second stage sumcheck
-        let poly = merge_sumcheck_polys(&prover_states);
-        let mut prover_state =
-            Self::prover_init_with_extrapolation_aux(poly, extrapolation_aux.clone());
-
-        let mut challenge = None;
-        let span = entered_span!("prove_rounds_stage2");
-        for _ in 0..log2_max_thread_id {
-            let prover_msg =
-                IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
-
-            prover_msg
-                .evaluations
-                .iter()
-                .for_each(|e| transcript.append_field_element_ext(e));
-            prover_msgs.push(prover_msg);
-            challenge = Some(transcript.sample_and_append_challenge(b"Internal round"));
-        }
-        exit_span!(span);
-
-        let span = entered_span!("after_rounds_prover_state_stage2");
-        // pushing the last challenge point to the state
-        if let Some(p) = challenge {
-            prover_state.challenges.push(p);
-            // fix last challenge to collect final evaluation
-            prover_state.fix_var(p.elements);
-        };
-        exit_span!(span);
-
-        end_timer!(start);
-        (
-            IOPProof {
-                point: [
-                    mem::take(&mut prover_states[0]).challenges,
-                    prover_state.challenges.clone(),
-                ]
-                .concat()
-                .iter()
-                .map(|challenge| challenge.elements)
-                .collect(),
-                proofs: prover_msgs,
-            },
-            prover_state,
-        )
     }
 
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub fn prover_init_with_extrapolation_aux(
+        is_main_worker: bool,
         polynomial: VirtualPolynomial<'a, E>,
         extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
+        phase2_numvar: Option<usize>,
+        poly_meta: Option<Vec<PolyMeta>>,
     ) -> Self {
         let start = start_timer!(|| "sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
         );
+        if let Some(poly_meta) = poly_meta.as_ref() {
+            assert_eq!(
+                poly_meta.len(),
+                polynomial.flattened_ml_extensions.len(),
+                "num_vars too small for concurrency"
+            );
+        }
         end_timer!(start);
 
         let max_degree = polynomial.aux_info.max_degree;
         assert!(extrapolation_aux.len() == max_degree - 1);
         let num_polys = polynomial.flattened_ml_extensions.len();
+
         Self {
+            is_main_worker,
             max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
             extrapolation_aux,
+            poly_meta: poly_meta.unwrap_or_else(|| vec![PolyMeta::Normal; num_polys]),
+            phase2_numvar,
             poly_index_fixvar_in_place: vec![false; num_polys],
         }
     }
@@ -348,26 +405,28 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let span = entered_span!("products_sum");
         let AdditiveVec(products_sum) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-            |mut products_sum, (coefficient, products)| {
+            |mut products_sum, (coefficient, prod)| {
                 let span = entered_span!("sum");
                 let f = &self.poly.flattened_ml_extensions;
-                let mut sum: Vec<E> = match products.len() {
-                    1 => sumcheck_code_gen!(1, false, |i| &f[products[i]]).to_vec(),
-                    2 => sumcheck_code_gen!(2, false, |i| &f[products[i]]).to_vec(),
-                    3 => sumcheck_code_gen!(3, false, |i| &f[products[i]]).to_vec(),
-                    4 => sumcheck_code_gen!(4, false, |i| &f[products[i]]).to_vec(),
-                    5 => sumcheck_code_gen!(5, false, |i| &f[products[i]]).to_vec(),
-                    _ => unimplemented!("do not support degree {} > 5", products.len()),
+                let f_type = &self.poly_meta;
+                let get_poly_meta = || f_type[prod[0]];
+                let mut sum: Vec<E> = match prod.len() {
+                    1 => sumcheck_code_gen!(1, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
+                    2 => sumcheck_code_gen!(2, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
+                    3 => sumcheck_code_gen!(3, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
+                    4 => sumcheck_code_gen!(4, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
+                    5 => sumcheck_code_gen!(5, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
+                    _ => unimplemented!("do not support degree {} > 5", prod.len()),
                 };
                 exit_span!(span);
 
                 sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                 let span = entered_span!("extrapolation");
-                let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
+                let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
                     .map(|i| {
-                        let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                        let at = E::from_u64((products.len() + 1 + i) as u64);
+                        let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
+                        let at = E::from_u64((prod.len() + 1 + i) as u64);
                         serial_extrapolate(points, weights, &sum, &at)
                     })
                     .collect::<Vec<_>>();
@@ -416,19 +475,22 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         self.poly_index_fixvar_in_place
             .iter_mut()
             .zip_eq(self.poly.flattened_ml_extensions.iter_mut())
-            .for_each(|(can_fixvar_in_place, poly)| {
-                debug_assert!(poly.num_vars() <= expected_numvars_at_round);
+            .zip_eq(&self.poly_meta)
+            .for_each(|((can_fixvar_in_place, poly), poly_type)| {
                 debug_assert!(poly.num_vars() > 0);
                 if *can_fixvar_in_place {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
+                        debug_assert!(f.num_vars() <= expected_numvars_at_round);
                         if f.num_vars() > 0 {
                             f.fix_variables_in_place(&[r])
                         }
                     };
                 } else if poly.num_vars() > 0 {
-                    if expected_numvars_at_round == poly.num_vars() {
+                    if expected_numvars_at_round == poly.num_vars()
+                        && matches!(poly_type, PolyMeta::Normal)
+                    {
                         *poly = Arc::new(poly.fix_variables(&[r]));
                         *can_fixvar_in_place = true;
                     }
@@ -520,7 +582,9 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         let max_degree = polynomial.aux_info.max_degree;
         let num_polys = polynomial.flattened_ml_extensions.len();
+        let poly_meta = vec![PolyMeta::Normal; num_polys];
         let prover_state = Self {
+            is_main_worker: true,
             max_num_variables: polynomial.aux_info.max_num_variables,
             challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
             round: 0,
@@ -532,6 +596,8 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     (points, weights)
                 })
                 .collect(),
+            poly_meta,
+            phase2_numvar: None,
             poly_index_fixvar_in_place: vec![false; num_polys],
         };
 
@@ -593,27 +659,34 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .par_iter()
             .fold_with(
                 AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-                |mut products_sum, (coefficient, products)| {
+                |mut products_sum, (coefficient, prod)| {
                     let span = entered_span!("sum");
 
                     let f = &self.poly.flattened_ml_extensions;
-                    let mut sum: Vec<E> = match products.len() {
-                        1 => sumcheck_code_gen!(1, true, |i| &f[products[i]]).to_vec(),
-                        2 => sumcheck_code_gen!(2, true, |i| &f[products[i]]).to_vec(),
-                        3 => sumcheck_code_gen!(3, true, |i| &f[products[i]]).to_vec(),
-                        4 => sumcheck_code_gen!(4, true, |i| &f[products[i]]).to_vec(),
-                        5 => sumcheck_code_gen!(5, true, |i| &f[products[i]]).to_vec(),
-                        _ => unimplemented!("do not support degree {} > 5", products.len()),
+                    let f_type = &self.poly_meta;
+                    let get_poly_meta = || f_type[prod[0]];
+                    let mut sum: Vec<E> = match prod.len() {
+                        1 => sumcheck_code_gen!(1, true, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        2 => sumcheck_code_gen!(2, true, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        3 => sumcheck_code_gen!(3, true, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        4 => sumcheck_code_gen!(4, true, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        5 => sumcheck_code_gen!(5, true, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        _ => unimplemented!("do not support degree {} > 5", prod.len()),
                     };
                     exit_span!(span);
                     sum.iter_mut().for_each(|sum| *sum *= *coefficient);
 
                     let span = entered_span!("extrapolation");
-                    let extrapolation = (0..self.poly.aux_info.max_degree - products.len())
+                    let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
                         .into_par_iter()
                         .map(|i| {
-                            let (points, weights) = &self.extrapolation_aux[products.len() - 1];
-                            let at = E::from_u64((products.len() + 1 + i) as u64);
+                            let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
+                            let at = E::from_u64((prod.len() + 1 + i) as u64);
                             extrapolate(points, weights, &sum, &at)
                         })
                         .collect::<Vec<_>>();

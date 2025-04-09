@@ -572,11 +572,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
 
         tracing::debug!("main sel sumcheck start");
-        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
-            num_threads,
-            virtual_polys.get_batched_polys(),
-            transcript,
-        );
+        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(virtual_polys, transcript);
         tracing::debug!("main sel sumcheck end");
 
         let main_sel_evals = state.get_mle_final_evaluations();
@@ -1015,11 +1011,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
                 }
 
-                let (same_r_sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
-                    num_threads,
-                    virtual_polys.get_batched_polys(),
-                    transcript,
-                );
+                let (same_r_sumcheck_proofs, state) =
+                    IOPProverState::prove(virtual_polys, transcript);
                 let evals = state.get_mle_final_evaluations();
                 let mut evals_iter = evals.into_iter();
                 let rw_in_evals = cs
@@ -1271,9 +1264,8 @@ impl TowerProver {
                 // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
                 // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
                 // This is likely a bug in the tracing-flame crate.
-                let (sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
-                    num_threads,
-                    virtual_polys.get_batched_polys(),
+                let (sumcheck_proofs, state) = IOPProverState::prove(
+                    virtual_polys,
                     transcript,
                 );
                 exit_span!(wrap_batch_span);
