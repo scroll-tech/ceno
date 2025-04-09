@@ -30,9 +30,6 @@ mod tests;
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    // TODO support >1 opcodes
-    pub num_instances: usize,
-
     // product constraints
     pub record_r_out_evals: Vec<E>,
     pub record_w_out_evals: Vec<E>,
@@ -144,6 +141,8 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub raw_pi: Vec<Vec<E::BaseField>>,
     // the evaluation of raw_pi.
     pub pi_evals: Vec<E>,
+    // circuit size -> instance mapping
+    pub num_instances: Vec<(usize, usize)>,
     opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
     table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E, PCS>)>,
 }
