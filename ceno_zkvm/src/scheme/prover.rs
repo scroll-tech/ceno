@@ -64,13 +64,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         pi: PublicValues<u32>,
         mut transcript: impl Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
-        let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
         let mut vm_proof = ZKVMProof::empty(pi);
 
+        let span = entered_span!("commit_to_pi", profiling_1 = true);
         // including raw public input to transcript
         for v in vm_proof.raw_pi.iter().flatten() {
             transcript.append_field_element(v);
         }
+        exit_span!(span);
 
         let pi: Vec<ArcMultilinearExtension<E>> = vm_proof
             .raw_pi
@@ -82,6 +83,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect();
 
         // commit to fixed commitment
+        let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
         for pk in self.pk.circuit_pks.values() {
             if let Some(fixed_commit) = &pk.vk.fixed_commit {
                 PCS::write_commitment(fixed_commit, &mut transcript)
@@ -91,9 +93,47 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
 
         // commit to main traces
+        let circuit_name_index_mapping = self
+            .pk
+            .circuit_pks
+            .keys()
+            .enumerate()
+            .map(|(k, v)| (v, k))
+            .collect::<BTreeMap<_, _>>();
         let mut commitments = BTreeMap::new();
         let mut wits = BTreeMap::new();
         let mut structural_wits = BTreeMap::new();
+
+        let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
+        for (index, (circuit_name, _)) in self.pk.circuit_pks.iter().enumerate() {
+            if let Some(num_instance) = witnesses
+                .get_opcode_witness(circuit_name)
+                .or_else(|| {
+                    witnesses
+                        .get_table_witness(circuit_name)
+                        .map(|rmms| &rmms[0])
+                })
+                .map(|rmm| rmm.num_instances())
+                .and_then(|num_instance| {
+                    if num_instance > 0 {
+                        Some(num_instance)
+                    } else {
+                        None
+                    }
+                })
+            {
+                num_instances.push((index, num_instance));
+            }
+        }
+
+        // verifier need this information from prover to achieve non-uniform design.
+        vm_proof.num_instances = num_instances;
+
+        // write (circuit_size, num_var) to transcript
+        for (circuit_size, num_var) in &vm_proof.num_instances {
+            transcript.append_message(&circuit_size.to_le_bytes());
+            transcript.append_message(&num_var.to_le_bytes());
+        }
 
         let commit_to_traces_span = entered_span!("commit_to_traces", profiling_1 = true);
         // commit to opcode circuits first and then commit to table circuits, sorted by name
@@ -120,7 +160,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                         PCS::batch_commit_and_write(&self.pk.pp, witness_rmm, &mut transcript)
                             .map_err(ZKVMError::PCSError)?;
                     let witness = PCS::get_arc_mle_witness_from_commitment(&commit);
-                    commitments.insert(circuit_name.clone(), commit);
+                    commitments.insert(circuit_name_index_mapping[&circuit_name], commit);
                     (witness, structural_witness)
                 }
             };
@@ -155,7 +195,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 continue;
             }
             transcript.append_field_element(&E::BaseField::from_u64(index as u64));
-            let wits_commit = commitments.remove(circuit_name).unwrap();
+            let wits_commit = commitments.remove(&index).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
             let is_opcode_circuit = cs.lk_table_expressions.is_empty()
@@ -187,9 +227,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     circuit_name,
                     num_instances
                 );
-                vm_proof
-                    .opcode_proofs
-                    .insert(circuit_name.clone(), (index, opcode_proof));
+                vm_proof.opcode_proofs.insert(index, opcode_proof);
             } else {
                 let (structural_witness, structural_num_instances) = structural_wits
                     .remove(circuit_name)
@@ -211,9 +249,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     num_instances,
                     structural_num_instances
                 );
-                vm_proof
-                    .table_proofs
-                    .insert(circuit_name.clone(), (index, table_proof));
+                vm_proof.table_proofs.insert(index, table_proof);
                 for (idx, eval) in pi_in_evals {
                     vm_proof.update_pi_eval(idx, eval);
                 }
@@ -652,7 +688,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
         Ok(ZKVMOpcodeProof {
-            num_instances,
             record_r_out_evals,
             record_w_out_evals,
             lk_p1_out_eval,
@@ -919,15 +954,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             })
             .collect_vec();
 
-        // (non uniform) collect dynamic address hints as witness for verifier
-        let rw_hints_num_vars = structural_witnesses
-            .iter()
-            .map(|mle| mle.num_vars())
-            .collect_vec();
-        for var in rw_hints_num_vars.iter() {
-            transcript.append_message(&var.to_le_bytes());
-        }
-
         let (rt_tower, tower_proof) = TowerProver::create_proof(
             // pattern [r1, w1, r2, w2, ...] same pair are chain together
             r_wit_layers
@@ -1130,7 +1156,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 tower_proof,
                 fixed_in_evals,
                 fixed_opening_proof,
-                rw_hints_num_vars,
                 wits_in_evals,
                 wits_commit,
                 wits_opening_proof,

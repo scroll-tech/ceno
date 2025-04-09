@@ -12,7 +12,7 @@ use sumcheck::structs::IOPProverMessage;
 
 use crate::{
     instructions::{Instruction, riscv::ecall::HaltInstruction},
-    structs::TowerProofs,
+    structs::{TowerProofs, ZKVMVerifyingKey},
 };
 
 pub mod constants;
@@ -69,9 +69,6 @@ pub struct ZKVMTableProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub lk_in_evals: Vec<E>,
 
     pub tower_proof: TowerProofs<E>,
-
-    // num_vars hint for rw dynamic address to work
-    pub rw_hints_num_vars: Vec<usize>,
 
     pub fixed_in_evals: Vec<E>,
     pub fixed_opening_proof: Option<PCS::Proof>,
@@ -143,8 +140,8 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pi_evals: Vec<E>,
     // circuit size -> instance mapping
     pub num_instances: Vec<(usize, usize)>,
-    opcode_proofs: BTreeMap<String, (usize, ZKVMOpcodeProof<E, PCS>)>,
-    table_proofs: BTreeMap<String, (usize, ZKVMTableProof<E, PCS>)>,
+    opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E, PCS>>,
+    table_proofs: BTreeMap<usize, ZKVMTableProof<E, PCS>>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
@@ -166,6 +163,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         Self {
             raw_pi,
             pi_evals,
+            num_instances: vec![],
             opcode_proofs: BTreeMap::new(),
             table_proofs: BTreeMap::new(),
         }
@@ -179,11 +177,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         self.opcode_proofs.len() + self.table_proofs.len()
     }
 
-    pub fn has_halt(&self) -> bool {
+    pub fn has_halt(&self, vk: &ZKVMVerifyingKey<E, PCS>) -> bool {
         let halt_instance_count = self
-            .opcode_proofs
-            .get(&HaltInstruction::<E>::name())
-            .map(|(_, p)| p.num_instances)
+            .num_instances
+            .iter()
+            .find_map(|(circuit_index, num_instances)| {
+                (*circuit_index
+                    == vk
+                        .circuit_vks
+                        .keys()
+                        .position(|circuit_name| *circuit_name == HaltInstruction::<E>::name())
+                        .expect("halt circuit not exist"))
+                .then_some(*num_instances)
+            })
             .unwrap_or(0);
         if halt_instance_count > 0 {
             assert_eq!(
@@ -207,10 +213,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let mpcs_opcode_commitment = self
             .opcode_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.wits_commit);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -220,10 +226,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let mpcs_opcode_opening = self
             .opcode_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.wits_opening_proof);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -234,10 +240,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let tower_proof_opcode = self
             .opcode_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.tower_proof);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -248,10 +254,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let main_sumcheck_opcode = self
             .opcode_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.main_sel_sumcheck_proofs);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -262,10 +268,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let mpcs_table_commitment = self
             .table_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.wits_commit);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -275,10 +281,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let mpcs_table_opening = self
             .table_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.wits_opening_proof);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -288,10 +294,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let mpcs_table_fixed_opening = self
             .table_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.fixed_opening_proof);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -302,10 +308,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let tower_proof_table = self
             .table_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.tower_proof);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
@@ -316,10 +322,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let same_r_sumcheck_table = self
             .table_proofs
             .iter()
-            .map(|(circuit_name, (_, proof))| {
+            .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.same_r_sumcheck_proofs);
                 size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_name).or_insert(0) += size;
+                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
             })
             .collect::<Result<Vec<u64>, _>>()
