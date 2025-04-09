@@ -44,7 +44,7 @@ jobs:
           path: |
             target/
             examples/target/
-            ceno_rt/target/
+            ceno-rt/target/
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
@@ -52,4 +52,4 @@ jobs:
         env:
           RUST_LOG: debug
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+        run: cargo run --package ceno-zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci

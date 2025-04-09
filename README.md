@@ -26,7 +26,7 @@ A variety of [examples](https://github.com/scroll-tech/ceno/tree/master/examples
 To run an example in e2e, use the following command:
 
 ```sh
-cargo run --release --package ceno_zkvm --bin e2e -- \
+cargo run --release --package ceno-zkvm --bin e2e -- \
     --profiling=1 \
     --platform=ceno \
     --hints=<hint value> \
@@ -39,7 +39,7 @@ The example will be automatically compiled before execution
 For instance, with [fibonacci](https://github.com/scroll-tech/ceno/blob/master/examples/examples/fibonacci.rs)
 
 ```sh
-cargo run --release --package ceno_zkvm --bin e2e -- --profiling=1 --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+cargo run --release --package ceno-zkvm --bin e2e -- --profiling=1 --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 ```
 
 
