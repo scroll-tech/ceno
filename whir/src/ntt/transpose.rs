@@ -59,11 +59,9 @@ pub fn transpose_rmm<F: Sized + Copy + Send + Sync>(
         scratch.set_len(matrix.height() * matrix.width());
     }
     scratch.copy_from_slice(&matrix.values);
-    for i in 0..matrix.width() {
-        let src = MatrixMutSkip::from_mut_slice(scratch.as_mut_slice(), rows, cols, skip, i);
-        let dst = MatrixMutSkip::from_mut_slice(matrix.values.as_mut_slice(), cols, rows, skip, i);
-        transpose_copy_skip(src, dst);
-    }
+    let src = MatrixMutSkip::from_mut_slice(scratch.as_mut_slice(), rows, cols, skip, 0);
+    let dst = MatrixMutSkip::from_mut_slice(matrix.values.as_mut_slice(), cols, rows, skip, 0);
+    transpose_copy_batch(src, dst);
 }
 
 pub fn transpose_bench_allocate<F: Sized + Copy + Send>(
@@ -166,9 +164,9 @@ fn transpose_copy<F: Sized + Copy + Send>(src: MatrixMut<F>, dst: MatrixMut<F>) 
     transpose_copy_parallel(src, dst);
 }
 
-fn transpose_copy_skip<F: Sized + Copy + Send>(src: MatrixMutSkip<F>, dst: MatrixMutSkip<F>) {
+fn transpose_copy_batch<F: Sized + Copy + Send>(src: MatrixMutSkip<F>, dst: MatrixMutSkip<F>) {
     #[cfg(feature = "parallel")]
-    transpose_copy_parallel_skip(src, dst);
+    transpose_copy_parallel_batch(src, dst);
 }
 
 /// Sets `dst` to the transpose of `src`. This will panic if the sizes of `src` and `dst` are not compatible.
@@ -203,7 +201,7 @@ fn transpose_copy_parallel<F: Sized + Copy + Send>(
 }
 
 #[cfg(feature = "parallel")]
-fn transpose_copy_parallel_skip<'a, F: Sized + Copy + Send>(
+fn transpose_copy_parallel_batch<'a, F: Sized + Copy + Send>(
     src: MatrixMutSkip<'a, F>,
     mut dst: MatrixMutSkip<'a, F>,
 ) {
@@ -220,13 +218,13 @@ fn transpose_copy_parallel_skip<'a, F: Sized + Copy + Send>(
             (src.split_horizontal(n), dst.split_vertical(n))
         };
         join(
-            || transpose_copy_parallel_skip(a, x),
-            || transpose_copy_parallel_skip(b, y),
+            || transpose_copy_parallel_batch(a, x),
+            || transpose_copy_parallel_batch(b, y),
         );
     } else {
         for i in 0..src.rows() {
             for j in 0..src.cols() {
-                dst.copy_from_another_matrix(&src, j, i, i, j);
+                dst.copy_from_another_matrix_batch(&src, j, i, i, j);
             }
         }
     }

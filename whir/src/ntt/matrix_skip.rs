@@ -151,7 +151,7 @@ impl<'a, T> MatrixMutSkip<'a, T> {
         self.data.add((row * self.row_stride + col) * self.skip)
     }
 
-    pub fn copy_from_another_matrix(
+    pub fn copy_from_another_matrix_batch(
         &mut self,
         other: &Self,
         dst_row: usize,
@@ -159,10 +159,11 @@ impl<'a, T> MatrixMutSkip<'a, T> {
         src_row: usize,
         src_col: usize,
     ) {
+        assert_eq!(self.skip, other.skip);
         unsafe {
             let dst_ptr = self.ptr_at_mut(dst_row, dst_col);
             let src_ptr = other.ptr_at(src_row, src_col);
-            dst_ptr.copy_from(src_ptr, 1);
+            dst_ptr.copy_from(src_ptr, self.skip);
         }
     }
 }
