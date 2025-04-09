@@ -203,9 +203,9 @@ fn transpose_copy_parallel<F: Sized + Copy + Send>(
 }
 
 #[cfg(feature = "parallel")]
-fn transpose_copy_parallel_skip<F: Sized + Copy + Send>(
-    src: MatrixMutSkip<'_, F>,
-    mut dst: MatrixMutSkip<'_, F>,
+fn transpose_copy_parallel_skip<'a, F: Sized + Copy + Send>(
+    src: MatrixMutSkip<'a, F>,
+    mut dst: MatrixMutSkip<'a, F>,
 ) {
     assert_eq!(src.rows(), dst.cols());
     assert_eq!(src.cols(), dst.rows());
@@ -226,7 +226,7 @@ fn transpose_copy_parallel_skip<F: Sized + Copy + Send>(
     } else {
         for i in 0..src.rows() {
             for j in 0..src.cols() {
-                dst[(j, i)] = src[(i, j)];
+                dst.copy_from_another_matrix(&src, j, i, i, j);
             }
         }
     }
