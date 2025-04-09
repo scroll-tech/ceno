@@ -4,7 +4,7 @@ description = "Macros for the Ceno project"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "sumcheck_macro"
+name = "sumcheck-macro"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
@@ -21,6 +21,6 @@ rand.workspace = true
 syn = { version = "2.0", features = ["full"] }
 
 [dev-dependencies]
-ff_ext = { path = "../ff_ext" }
-multilinear_extensions = { path = "../multilinear_extensions" }
+ff-ext.workspace = true
+multilinear-extensions.workspace = true
 sumcheck.workspace = true

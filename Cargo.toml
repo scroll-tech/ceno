@@ -1,21 +1,8 @@
 [workspace]
 members = [
   "crates/ceno/*",
-  "ceno_emul",
-  "ceno_host",
-  "ceno_rt",
-  "ceno_zkvm",
-  "examples-builder",
+  "crates/crypto/*",
   "examples",
-  "mpcs",
-  "multilinear_extensions",
-  "sumcheck_macro",
-  "poseidon",
-  "sumcheck",
-  "transcript",
-  "whir",
-  "witness",
-  "p3",
 ]
 resolver = "2"
 
@@ -38,7 +25,6 @@ itertools = "0.13"
 num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
-p3 = { path = "p3" }
 p3-baby-bear = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-challenger = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-commit = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
@@ -54,7 +40,6 @@ p3-poseidon2 = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9"
 p3-symmetric = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 p3-util = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
 paste = "1"
-poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
 proptest = "1"
@@ -70,7 +55,6 @@ serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"
 substrate-bn = { version = "0.6.0" }
-sumcheck = { path = "sumcheck" }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing = { version = "0.1", features = [
   "attributes",
@@ -78,6 +62,25 @@ tracing = { version = "0.1", features = [
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uint = "0.8"
+
+ceno-emul = { path = "./crates/ceno/emul" }
+ceno-examples = { path = "./crates/ceno/examples-builder" }
+ceno-host = { path = "./crates/ceno/host" }
+ceno-rt = { path = "./crates/ceno/rt" }
+ceno-sdk = { path = "./crates/ceno/sdk" }
+ceno-zkvm = { path = "./crates/ceno/zkvm" }
+
+ff-ext = { path = "./crates/crypto/ff-ext" }
+mpcs = { path = "./crates/crypto/mpcs" }
+multilinear-extensions = { path = "./crates/crypto/multilinear-extensions" }
+p3 = { path = "./crates/crypto/p3" }
+poseidon = { path = "./crates/crypto/poseidon" }
+sumcheck = { path = "./crates/crypto/sumcheck" }
+sumcheck-macro = { path = "./crates/crypto/sumcheck-macro" }
+transcript = { path = "./crates/crypto/transcript" }
+whir = { path = "./crates/crypto/whir" }
+witness = { path = "./crates/crypto/witness" }
+
 
 [profile.dev]
 lto = "thin"

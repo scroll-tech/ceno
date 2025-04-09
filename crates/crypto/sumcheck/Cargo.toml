@@ -11,7 +11,7 @@ version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff-ext.workspace = true
 itertools.workspace = true
 p3.workspace = true
 rayon.workspace = true
@@ -19,9 +19,9 @@ serde.workspace = true
 tracing.workspace = true
 
 crossbeam-channel.workspace = true
-multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
-sumcheck_macro = { path = "../sumcheck_macro" }
-transcript = { path = "../transcript" }
+multilinear-extensions = { workspace = true, features = ["parallel"] }
+sumcheck-macro.workspace = true
+transcript.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

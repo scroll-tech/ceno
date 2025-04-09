@@ -519,22 +519,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno-examples"
-version = "0.1.0"
-dependencies = [
- "glob",
-]
-
-[[package]]
-name = "ceno-sdk"
-version = "0.1.0"
-
-[[package]]
-name = "ceno_emul"
+name = "ceno-emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ceno_rt",
+ "ceno-rt",
  "elf",
  "itertools 0.13.0",
  "num-bigint",
@@ -550,12 +539,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno_host"
+name = "ceno-examples"
+version = "0.1.0"
+dependencies = [
+ "glob",
+]
+
+[[package]]
+name = "ceno-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ceno-emul",
  "ceno-examples",
- "ceno_emul",
  "itertools 0.13.0",
  "rand",
  "rkyv",
@@ -564,7 +560,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno_rt"
+name = "ceno-rt"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.2.15",
@@ -572,24 +568,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno_zkvm"
+name = "ceno-sdk"
+version = "0.1.0"
+
+[[package]]
+name = "ceno-zkvm"
 version = "0.1.0"
 dependencies = [
  "ark-std",
  "base64",
  "bincode",
+ "ceno-emul",
  "ceno-examples",
- "ceno_emul",
- "ceno_host",
+ "ceno-host",
  "cfg-if",
  "clap",
  "criterion",
- "ff_ext",
+ "ff-ext",
  "generic_static",
  "glob",
  "itertools 0.13.0",
  "mpcs",
- "multilinear_extensions",
+ "multilinear-extensions",
  "num-traits",
  "p3",
  "parse-size",
@@ -1028,7 +1028,7 @@ dependencies = [
 name = "examples"
 version = "0.1.0"
 dependencies = [
- "ceno_rt",
+ "ceno-rt",
  "rand",
  "rkyv",
  "substrate-bn",
@@ -1052,7 +1052,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ff_ext"
+name = "ff-ext"
 version = "0.1.0"
 dependencies = [
  "p3",
@@ -1492,10 +1492,10 @@ dependencies = [
  "bitvec",
  "criterion",
  "ctr",
- "ff_ext",
+ "ff-ext",
  "generic-array",
  "itertools 0.13.0",
- "multilinear_extensions",
+ "multilinear-extensions",
  "num-bigint",
  "num-integer",
  "p3",
@@ -1513,12 +1513,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "multilinear_extensions"
+name = "multilinear-extensions"
 version = "0.1.0"
 dependencies = [
  "ark-std",
  "env_logger",
- "ff_ext",
+ "ff-ext",
  "itertools 0.13.0",
  "log",
  "p3",
@@ -2039,7 +2039,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "criterion",
- "ff_ext",
+ "ff-ext",
  "p3",
  "rand",
  "serde",
@@ -2629,25 +2629,25 @@ dependencies = [
  "ark-std",
  "criterion",
  "crossbeam-channel",
- "ff_ext",
+ "ff-ext",
  "itertools 0.13.0",
- "multilinear_extensions",
+ "multilinear-extensions",
  "p3",
  "poseidon",
  "rayon",
  "serde",
- "sumcheck_macro",
+ "sumcheck-macro",
  "tracing",
  "transcript",
 ]
 
 [[package]]
-name = "sumcheck_macro"
+name = "sumcheck-macro"
 version = "0.1.0"
 dependencies = [
- "ff_ext",
+ "ff-ext",
  "itertools 0.13.0",
- "multilinear_extensions",
+ "multilinear-extensions",
  "p3",
  "proc-macro2",
  "quote",
@@ -2919,7 +2919,7 @@ name = "transcript"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "ff_ext",
+ "ff-ext",
  "itertools 0.13.0",
  "p3",
  "poseidon",
@@ -3259,8 +3259,8 @@ dependencies = [
 name = "witness"
 version = "0.1.0"
 dependencies = [
- "ff_ext",
- "multilinear_extensions",
+ "ff-ext",
+ "multilinear-extensions",
  "p3",
  "rand",
  "rayon",

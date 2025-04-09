@@ -4,14 +4,14 @@ description = "Multilinear extensions for the Ceno project"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "multilinear_extensions"
+name = "multilinear-extensions"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
 ark-std.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff-ext.workspace = true
 itertools.workspace = true
 p3.workspace = true
 rayon.workspace = true

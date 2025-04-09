@@ -4,19 +4,19 @@ description = "Support for the host port of a Ceno application"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "ceno_host"
+name = "ceno-host"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-ceno_emul = { path = "../ceno_emul" }
+ceno-emul.workspace = true
 itertools.workspace = true
 rkyv.workspace = true
 substrate-bn.workspace = true
 tiny-keccak.workspace = true
 
 [dev-dependencies]
-ceno-examples = { path = "../examples-builder" }
+ceno-examples.workspace = true
 rand.workspace = true

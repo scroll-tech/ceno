@@ -1,15 +1,18 @@
 [package]
 categories.workspace = true
-description = "Extra functionality for the ff ((finite fields) crate"
+description = "Transcript generation for Ceno"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "ff_ext"
+name = "transcript"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
+crossbeam-channel.workspace = true
+ff-ext.workspace = true
+itertools.workspace = true
 p3.workspace = true
-rand_core.workspace = true
+poseidon.workspace = true
 serde.workspace = true

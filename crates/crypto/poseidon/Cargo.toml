@@ -1,18 +1,21 @@
 [package]
 categories.workspace = true
-description = "Transcript generation for Ceno"
+description = "Poseidon hash function"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "transcript"
+name = "poseidon"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
-crossbeam-channel.workspace = true
-ff_ext = { path = "../ff_ext" }
-itertools.workspace = true
+criterion.workspace = true
+ff-ext.workspace = true
 p3.workspace = true
-poseidon.workspace = true
 serde.workspace = true
+unroll = "0.1"
+
+[dev-dependencies]
+ark-std.workspace = true
+rand.workspace = true

@@ -1,21 +1,20 @@
 [package]
 categories.workspace = true
-description = "Poseidon hash function"
+description = "Witness for Ceno"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
-name = "poseidon"
+name = "witness"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
-criterion.workspace = true
-ff_ext = { path = "../ff_ext" }
-p3.workspace = true
-serde.workspace = true
-unroll = "0.1"
+multilinear-extensions.workspace = true
 
-[dev-dependencies]
-ark-std.workspace = true
+ff-ext.workspace = true
+p3.workspace = true
+rayon.workspace = true
+serde.workspace = true
+
 rand.workspace = true
