@@ -5,7 +5,7 @@ mod utils;
 
 use std::collections::BTreeMap;
 
-use crate::Point;
+use crate::{Evaluation, Point};
 
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
@@ -157,11 +157,12 @@ where
 
     fn batch_verify(
         _vp: &Self::VerifierParam,
-        _comms: &[Self::Commitment],
-        _points: &[Vec<E>],
-        _evals: &[crate::Evaluation<E>],
+        _points: &[Point<E>],
+        _fixed_comms: &Self::Commitment,
+        _witin_comms: &Self::Commitment,
+        _evals: &[Evaluation<E>],
         _proof: &Self::Proof,
-        _transcript: &mut impl transcript::Transcript<E>,
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
     }

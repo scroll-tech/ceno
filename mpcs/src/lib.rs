@@ -204,8 +204,9 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_verify(
         vp: &Self::VerifierParam,
-        comms: &[Self::Commitment],
-        points: &[Vec<E>],
+        points: &[Point<E>],
+        fixed_comms: &Self::Commitment,
+        witin_comms: &Self::Commitment,
         evals: &[Evaluation<E>],
         proof: &Self::Proof,
         transcript: &mut impl Transcript<E>,

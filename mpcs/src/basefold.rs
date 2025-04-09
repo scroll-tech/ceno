@@ -307,7 +307,6 @@ where
         pp: &Self::ProverParam,
         fixed_comms: &Self::CommitmentWithWitness,
         witin_comms: &Self::CommitmentWithWitness,
-        // for points and evals: witness & fixed are assumed to be line up consecutively
         points: &[Point<E>],
         // TODO this is only for debug purpose
         evals: &[Vec<E>],
@@ -475,12 +474,15 @@ where
 
     fn batch_verify(
         _vp: &Self::VerifierParam,
-        _comms: &[Self::Commitment],
-        _points: &[Vec<E>],
+        _points: &[Point<E>],
+        _fixed_comms: &Self::Commitment,
+        _witin_comms: &Self::Commitment,
         _evals: &[Evaluation<E>],
         _proof: &Self::Proof,
         _transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
+        // extract num_vars from verifier rt
+
         unimplemented!()
     }
 

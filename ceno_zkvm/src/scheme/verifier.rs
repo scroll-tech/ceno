@@ -102,6 +102,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             })?;
 
         // write fixed commitment to transcript
+        // TODO check soundness if there is no fixed_commit but got fixed proof?
         if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
