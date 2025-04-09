@@ -1,5 +1,11 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
+use gkr_iop::{
+    ProtocolBuilder, ProtocolWitnessGenerator,
+    gkr::{GKRCircuitWitness, layer::LayerWitness},
+    precompiles::KeccakLayout,
+};
+use itertools::Itertools;
 use multilinear_extensions::util::max_usable_threads;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -58,6 +64,82 @@ pub trait Instruction<E: ExtensionField> {
                     .zip(steps)
                     .map(|(instance, step)| {
                         Self::assign_instance(config, instance, &mut lk_multiplicity, step)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Result<(), ZKVMError>>()?;
+
+        raw_witin.padding_by_strategy();
+        Ok((raw_witin, lk_multiplicity))
+    }
+}
+
+pub trait GKRIOPInstruction<E: ExtensionField>
+where
+    Self: Instruction<E>,
+{
+    type Layout: ProtocolWitnessGenerator<E> + ProtocolBuilder;
+    fn assign_instance_with_gkr_iop(
+        config: &Self::InstructionConfig,
+        instance: &mut [E::BaseField],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+        lookups: Vec<E::BaseField>,
+    ) -> Result<(), ZKVMError>;
+
+    fn phase1_witness_from_steps(
+        layout: &Self::Layout,
+        steps: Vec<StepRecord>,
+    ) -> Vec<Vec<E::BaseField>>;
+
+    fn assign_instances_with_gkr_iop(
+        config: &Self::InstructionConfig,
+        num_witin: usize,
+        steps: Vec<StepRecord>,
+        gkr_layout: &mut Self::Layout,
+    ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
+        let nthreads = max_usable_threads();
+        let num_instance_per_batch = if steps.len() > 256 {
+            steps.len().div_ceil(nthreads)
+        } else {
+            steps.len()
+        }
+        .max(1);
+        let lk_multiplicity = LkMultiplicity::default();
+        let mut raw_witin =
+            RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
+        let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
+
+        let gkr_witness = gkr_layout.gkr_witness(
+            &Self::phase1_witness_from_steps(gkr_layout, steps.clone()),
+            &vec![],
+        );
+
+        let lookups = gkr_witness
+            .layers
+            .last()
+            .unwrap()
+            .bases
+            .iter()
+            .map(|instance| instance.into_iter().skip(100).collect_vec())
+            .collect_vec();
+
+        raw_witin_iter
+            .zip(steps.par_chunks(num_instance_per_batch))
+            .flat_map(|(instances, steps)| {
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                instances
+                    .chunks_mut(num_witin)
+                    .zip(steps)
+                    .map(|(instance, step)| {
+                        let lookups = vec![];
+                        Self::assign_instance_with_gkr_iop(
+                            config,
+                            instance,
+                            &mut lk_multiplicity,
+                            step,
+                            lookups,
+                        )
                     })
                     .collect::<Vec<_>>()
             })

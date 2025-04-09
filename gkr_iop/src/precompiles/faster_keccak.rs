@@ -316,6 +316,10 @@ pub const RANGE_LOOKUPS_PER_ROUND: usize = 290;
 pub const LOOKUPS_PER_ROUND: usize =
     AND_LOOKUPS_PER_ROUND + XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
 
+pub const AND_LOOKUPS: usize = ROUNDS * AND_LOOKUPS_PER_ROUND;
+pub const XOR_LOOKUPS: usize = ROUNDS * XOR_LOOKUPS_PER_ROUND;
+pub const RANGE_LOOKUPS: usize = ROUNDS * RANGE_LOOKUPS_PER_ROUND;
+
 macro_rules! allocate_and_split {
         ($chip:expr, $total:expr, $( $size:expr ),* ) => {{
             let (witnesses, _) = $chip.allocate_wits_in_layer::<$total, 0>();
@@ -739,7 +743,8 @@ use p3_field::Field;
 impl<F: Field> From<RowMajorMatrix<F>> for KeccakTrace {
     fn from(rmm: RowMajorMatrix<F>) -> Self {
         // clarify rmm encoding for large_ecall_dummy to obtain input
-        unimplemented!();
+        //unimplemented!();
+        KeccakTrace { instances: vec![] }
     }
 }
 
