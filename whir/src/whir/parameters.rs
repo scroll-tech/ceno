@@ -1,24 +1,19 @@
 use core::{fmt, panic};
 use derive_more::Debug;
-use std::{f64::consts::LOG2_10, fmt::Display, marker::PhantomData};
+use ff_ext::ExtensionField;
+use std::{f64::consts::LOG2_10, fmt::Display};
 
-use ark_crypto_primitives::merkle_tree::{Config, LeafParam, TwoToOneParam};
-use ark_ff::FftField;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::fields::FieldWithSize,
+    crypto::Poseidon2MerkleMmcs,
     domain::Domain,
     parameters::{FoldType, FoldingFactor, MultivariateParameters, SoundnessType, WhirParameters},
 };
 
 #[derive(Clone, Debug)]
-pub struct WhirConfig<F, MerkleConfig, PowStrategy>
-where
-    F: FftField,
-    MerkleConfig: Config,
-{
-    pub(crate) mv_parameters: MultivariateParameters<F>,
+pub struct WhirConfig<E: ExtensionField> {
+    pub(crate) mv_parameters: MultivariateParameters<E>,
     pub(crate) soundness_type: SoundnessType,
     pub(crate) security_level: usize,
     pub(crate) max_pow_bits: usize,
@@ -31,7 +26,7 @@ where
     //    polynomial evaluation statement. In that case, the initial statement
     //    is set to true.
     pub(crate) initial_statement: bool,
-    pub(crate) starting_domain: Domain<F>,
+    pub(crate) starting_domain: Domain<E>,
     pub(crate) starting_log_inv_rate: usize,
     pub(crate) starting_folding_pow_bits: f64,
 
@@ -45,14 +40,9 @@ where
     pub(crate) final_sumcheck_rounds: usize,
     pub(crate) final_folding_pow_bits: f64,
 
-    // PoW parameters
-    pub(crate) pow_strategy: PhantomData<PowStrategy>,
-
     // Merkle tree parameters
     #[debug(skip)]
-    pub(crate) leaf_hash_params: LeafParam<MerkleConfig>,
-    #[debug(skip)]
-    pub(crate) two_to_one_params: TwoToOneParam<MerkleConfig>,
+    pub(crate) hash_params: Poseidon2MerkleMmcs<E>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,14 +54,10 @@ pub(crate) struct RoundConfig {
     pub(crate) log_inv_rate: usize,
 }
 
-impl<F, MerkleConfig, PowStrategy> WhirConfig<F, MerkleConfig, PowStrategy>
-where
-    F: FftField + FieldWithSize,
-    MerkleConfig: Config,
-{
+impl<E: ExtensionField> WhirConfig<E> {
     pub fn new(
-        mut mv_parameters: MultivariateParameters<F>,
-        whir_parameters: WhirParameters<MerkleConfig, PowStrategy>,
+        mut mv_parameters: MultivariateParameters<E>,
+        whir_parameters: WhirParameters<E>,
     ) -> Self {
         // Pad the number of variables to folding factor
         if mv_parameters.num_variables < whir_parameters.folding_factor.at_round(0) {
@@ -95,7 +81,7 @@ where
             .folding_factor
             .compute_number_of_rounds(mv_parameters.num_variables);
 
-        let field_size_bits = F::field_size_in_bits();
+        let field_size_bits = E::bits();
 
         let committment_ood_samples = if whir_parameters.initial_statement {
             Self::ood_samples(
@@ -229,11 +215,9 @@ where
             final_pow_bits,
             final_sumcheck_rounds,
             final_folding_pow_bits,
-            pow_strategy: PhantomData,
             fold_optimisation: whir_parameters.fold_optimisation,
             final_log_inv_rate: log_inv_rate,
-            leaf_hash_params: whir_parameters.leaf_hash_params,
-            two_to_one_params: whir_parameters.two_to_one_params,
+            hash_params: whir_parameters.hash_params,
         }
     }
 
@@ -442,11 +426,7 @@ where
     }
 }
 
-impl<F, MerkleConfig, PowStrategy> Display for WhirConfig<F, MerkleConfig, PowStrategy>
-where
-    F: FftField,
-    MerkleConfig: Config,
-{
+impl<E: ExtensionField> Display for WhirConfig<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt::Display::fmt(&self.mv_parameters, f)?;
         writeln!(f, ", folding factor: {:?}", self.folding_factor)?;
@@ -478,7 +458,7 @@ where
         writeln!(f, "Round by round soundness analysis:")?;
         writeln!(f, "------------------------------------")?;
 
-        let field_size_bits = F::field_size_in_bits();
+        let field_size_bits = E::bits();
         let log_eta = Self::log_eta(self.soundness_type, self.starting_log_inv_rate);
         let mut num_variables = self.mv_parameters.num_variables;
 

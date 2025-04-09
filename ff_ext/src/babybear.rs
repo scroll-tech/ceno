@@ -1,4 +1,5 @@
 pub mod impl_babybear {
+
     use crate::array_try_from_uniform_bytes;
     use p3::{
         self,
@@ -179,20 +180,6 @@ pub mod impl_babybear {
         const NONRESIDUE: Self::BaseField = <BabyBear as BinomiallyExtendable<4>>::W;
 
         type BaseField = BabyBear;
-
-        fn from_bases(bases: &[BabyBear]) -> Self {
-            debug_assert_eq!(bases.len(), 2);
-            Self::from_basis_coefficients_slice(bases)
-        }
-
-        fn as_bases(&self) -> &[BabyBear] {
-            self.as_basis_coefficients_slice()
-        }
-
-        /// Convert limbs into self
-        fn from_limbs(limbs: &[Self::BaseField]) -> Self {
-            Self::from_bases(&limbs[0..4])
-        }
 
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
             self.as_basis_coefficients_slice()

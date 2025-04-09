@@ -36,27 +36,11 @@ pub fn pcs_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::commit(pp, rmm)
 }
 
-pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
-    pp: &Pcs::ProverParam,
-    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
-    transcript: &mut impl Transcript<E>,
-) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::commit_and_write(pp, rmm, transcript)
-}
-
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::batch_commit(pp, rmm)
-}
-
-pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
-    pp: &Pcs::ProverParam,
-    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
-    transcript: &mut impl Transcript<E>,
-) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit_and_write(pp, rmm, transcript)
 }
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -137,6 +121,10 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         Ok(comm)
     }
 
+    /// Write the commitment to the transcript. This method is only used
+    /// by the verifier to align the transcript with the prover.
+    /// The committer should have already written the
+    /// commitment to the transcript.
     fn write_commitment(
         comm: &Self::Commitment,
         transcript: &mut impl Transcript<E>,
@@ -259,7 +247,7 @@ pub enum Error {
     PolynomialTooLarge(usize),
     PolynomialSizesNotEqual,
     MerkleRootMismatch,
-    WhirError(whir::Error),
+    WhirError(whir_external::error::Error),
 }
 
 mod basefold;
@@ -267,6 +255,7 @@ pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
     BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
 };
+extern crate whir as whir_external;
 mod whir;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
@@ -392,13 +381,13 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
+        let mut rng = rand::thread_rng();
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
-                let rmm =
-                    RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
+                let rmm = RowMajorMatrix::<E::BaseField>::rand(&mut rng, 1 << num_vars, batch_size);
                 let polys = rmm.to_mles();
                 let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
@@ -423,7 +412,6 @@ pub mod test_util {
             {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
-
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_exts(&evals);
 

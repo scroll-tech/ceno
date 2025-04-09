@@ -1,6 +1,7 @@
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use p3::{
-    field::{Field, PrimeCharacteristicRing},
+    dft::{Radix2DitParallel, TwoAdicSubgroupDft},
+    field::{Field, PrimeCharacteristicRing, TwoAdicField},
     matrix::Matrix,
 };
 use rand::{Rng, distributions::Standard, prelude::Distribution};
@@ -164,6 +165,10 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         };
         self.is_padded = true;
     }
+
+    pub fn into_inner(self) -> p3::matrix::dense::RowMajorMatrix<T> {
+        self.inner
+    }
 }
 
 impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
@@ -183,6 +188,41 @@ impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
                     .copied()
                     .collect::<Vec<_>>()
                     .into_mle()
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn to_cols_base<E: ff_ext::ExtensionField<BaseField = F>>(&self) -> Vec<Vec<F>> {
+        debug_assert!(self.is_padded);
+        let n_column = self.inner.width;
+        (0..n_column)
+            .into_par_iter()
+            .map(|i| {
+                self.inner
+                    .values
+                    .iter()
+                    .skip(i)
+                    .step_by(n_column)
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn to_cols_ext<E: ff_ext::ExtensionField<BaseField = F>>(&self) -> Vec<Vec<E>> {
+        debug_assert!(self.is_padded);
+        let n_column = self.inner.width;
+        (0..n_column)
+            .into_par_iter()
+            .map(|i| {
+                self.inner
+                    .values
+                    .iter()
+                    .skip(i)
+                    .step_by(n_column)
+                    .copied()
+                    .map(|v| E::from_base(&v))
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>()
     }
@@ -213,4 +253,19 @@ impl<F: Sync + Send + Copy + PrimeCharacteristicRing> Index<usize> for RowMajorM
         let num_col = self.n_col();
         &self.inner.values[num_col * idx..][..num_col]
     }
+}
+
+pub fn expand_from_coeff<F: Ord + TwoAdicField>(
+    mut coeffs: RowMajorMatrix<F>,
+    expansion: usize,
+) -> RowMajorMatrix<F> {
+    let expanded_size = coeffs.height() * expansion;
+    coeffs.pad_to_height(expanded_size, F::ZERO);
+    coeffs.num_rows = expanded_size;
+    let dft = Radix2DitParallel::<F>::default();
+    let m = coeffs.into_default_padded_p3_rmm().to_row_major_matrix();
+    RowMajorMatrix::new_by_inner_matrix(
+        dft.dft_batch(m).to_row_major_matrix(),
+        InstancePaddingStrategy::Default,
+    )
 }
