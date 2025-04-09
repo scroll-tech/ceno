@@ -14,7 +14,7 @@ members = [
   "transcript",
   "whir",
   "witness",
-  "p3",
+  "p3", "cargo-ceno", "ceno_sdk",
 ]
 resolver = "2"
 

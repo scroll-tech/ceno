@@ -500,6 +500,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
+name = "cargo-ceno"
+version = "0.1.0"
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -562,6 +566,10 @@ dependencies = [
  "getrandom 0.2.15",
  "rkyv",
 ]
+
+[[package]]
+name = "ceno_sdk"
+version = "0.1.0"
 
 [[package]]
 name = "ceno_zkvm"
