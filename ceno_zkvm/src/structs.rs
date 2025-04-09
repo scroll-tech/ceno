@@ -9,7 +9,7 @@ use crate::{
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain};
+use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
@@ -350,14 +350,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn into_iter_sorted(
         self,
     ) -> impl Iterator<Item = (String, Vec<RowMajorMatrix<E::BaseField>>)> {
-        chain(
-            self.witnesses_opcodes
-                .into_iter()
-                .map(|(name, witnesses)| (name, vec![witnesses])),
-            self.witnesses_tables
-                .into_iter()
-                .map(|(name, witnesses)| (name, witnesses.to_vec())),
-        )
+        self.witnesses_opcodes
+            .into_iter()
+            .map(|(name, witness)| (name, vec![witness]))
+            .chain(
+                self.witnesses_tables
+                    .into_iter()
+                    .map(|(name, witnesses)| (name, witnesses.into())),
+            )
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
     }
 }
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {

@@ -19,7 +19,7 @@ use sumcheck::{
     structs::{IOPProverMessage, IOPProverState},
     util::optimal_sumcheck_threads,
 };
-use transcript::{ForkableTranscript, Transcript};
+use transcript::Transcript;
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
@@ -62,7 +62,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         &self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues<u32>,
-        mut transcript: impl ForkableTranscript<E>,
+        mut transcript: impl Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
         let mut vm_proof = ZKVMProof::empty(pi);
@@ -147,19 +147,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         tracing::debug!("challenges in prover: {:?}", challenges);
 
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
-        let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
-        for ((circuit_name, pk), (i, transcript)) in self
-            .pk
-            .circuit_pks
-            .iter() // Sorted by key.
-            .zip_eq(transcripts.iter_mut().enumerate())
-        {
+        for (index, (circuit_name, pk)) in self.pk.circuit_pks.iter().enumerate() {
             let (witness, num_instances) = wits
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
             if witness.is_empty() {
                 continue;
             }
+            transcript.append_field_element(&E::BaseField::from_u64(index as u64));
             let wits_commit = commitments.remove(circuit_name).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
@@ -184,7 +179,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     wits_commit,
                     &pi,
                     num_instances,
-                    transcript,
+                    &mut transcript,
                     &challenges,
                 )?;
                 tracing::info!(
@@ -194,7 +189,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .opcode_proofs
-                    .insert(circuit_name.clone(), (i, opcode_proof));
+                    .insert(circuit_name.clone(), (index, opcode_proof));
             } else {
                 let (structural_witness, structural_num_instances) = structural_wits
                     .remove(circuit_name)
@@ -207,7 +202,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     wits_commit,
                     structural_witness,
                     &pi,
-                    transcript,
+                    &mut transcript,
                     &challenges,
                 )?;
                 tracing::info!(
@@ -218,7 +213,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .table_proofs
-                    .insert(circuit_name.clone(), (i, table_proof));
+                    .insert(circuit_name.clone(), (index, table_proof));
                 for (idx, eval) in pi_in_evals {
                     vm_proof.update_pi_eval(idx, eval);
                 }
