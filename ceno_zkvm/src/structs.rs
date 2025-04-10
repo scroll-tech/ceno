@@ -406,6 +406,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
+            circuit_num_polys: self
+                .circuit_pks
+                .iter()
+                .map(|(_, pk)| (pk.vk.get_cs().num_witin as usize, pk.vk.get_cs().num_fixed))
+                .collect_vec(),
         }
     }
 }
@@ -420,4 +425,6 @@ pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,
+    // circuit index -> (witin num_polys, fixed_num_polys)
+    pub circuit_num_polys: Vec<(usize, usize)>,
 }

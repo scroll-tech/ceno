@@ -164,6 +164,7 @@ where
         _witin_comms: &Self::Commitment,
         _evals: &[Vec<E>],
         _proof: &Self::Proof,
+        _circuit_num_polys: &[(usize, usize)],
         _transcript: &mut impl Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()

@@ -103,7 +103,11 @@ where
     pub fn max_codeword_size(&self) -> usize {
         let mmcs = poseidon2_merkle_tree::<E>();
         // size = height * 2 because we concat pi[left]/pi[right] under same row index
-        mmcs.get_matrices(&self.codeword)[0].height() * 2
+        mmcs.get_matrices(&self.codeword)
+            .iter()
+            .map(|m| m.height() * 2)
+            .max()
+            .unwrap()
     }
 
     pub fn get_codewords(&self) -> Vec<&DenseMatrix<E::BaseField>> {
@@ -291,4 +295,12 @@ where
     pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<Vec<E>>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct CircuitIndexMeta {
+    pub witin_num_vars: usize,
+    pub witin_num_polys: usize,
+    pub fixed_num_vars: usize,
+    pub fixed_num_polys: usize,
 }

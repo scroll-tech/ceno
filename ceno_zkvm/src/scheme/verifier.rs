@@ -277,6 +277,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &vm_proof.witin_commit,
             &evaluations,
             &vm_proof.fixed_witin_opening_proof,
+            &self.vk.circuit_num_polys,
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;

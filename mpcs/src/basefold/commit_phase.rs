@@ -290,10 +290,12 @@ where
     }
 
     let final_message = prover_states[0].get_mle_final_evaluations();
-    // skip first half which is eq evaluations
+    // skip even index which is eq evaluations
     let final_message = final_message
         .into_iter()
-        .map(|mut msg| msg.split_off(msg.len() / 2))
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, m)| m)
         .collect_vec();
 
     if cfg!(feature = "sanity-check") {

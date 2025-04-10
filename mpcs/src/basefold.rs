@@ -10,8 +10,8 @@ use crate::{
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use p3::{commit::Mmcs, matrix::dense::DenseMatrix, util::log2_strict_usize};
-use query_phase::batch_query_phase;
-use structure::BasefoldProof;
+use query_phase::{batch_query_phase, batch_verifier_query_phase};
+use structure::{BasefoldProof, CircuitIndexMeta};
 pub use structure::{BasefoldSpec, Digest};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
@@ -485,11 +485,14 @@ where
         witin_comms: &Self::Commitment,
         evals: &[Vec<E>],
         proof: &Self::Proof,
+        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         let mmcs = poseidon2_merkle_tree::<E>();
 
-        let num_vars = num_instances
+        assert_eq!(num_instances.len(), points.len());
+
+        let circuit_num_vars = num_instances
             .iter()
             .map(|(index, num_instance)| {
                 (
@@ -498,18 +501,62 @@ where
                 )
             })
             .collect_vec();
-        let (trivial_num_vars, num_vars): (Vec<(usize, usize)>, Vec<_>) = num_vars
-            .iter()
-            .partition(|(_, num_var)| *num_var <= Spec::get_basecode_msg_size_log());
 
-        if !trivial_num_vars.is_empty() {
+        assert!(
+            izip!(&circuit_num_vars, points)
+                .all(|((_, circuit_num_var), point)| point.len() == *circuit_num_var)
+        );
+
+        // preprocess data into respective group, in particularly, trivials vs non-trivials
+        let mut circuit_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
+        let mut circuit_trivial_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
+        let mut evals_iter = evals.iter().cloned();
+        let (trivial_evals, evals) = izip!(&circuit_num_vars, points).fold(
+            (vec![], vec![]),
+            |(mut trivial_evals, mut evals), ((circuit_index, num_var), point)| {
+                let (expected_witins_num_poly, expected_fixed_num_poly) =
+                    &circuit_num_polys[*circuit_index];
+                let mut circuit_meta = CircuitIndexMeta {
+                    witin_num_vars: *num_var,
+                    witin_num_polys: *expected_witins_num_poly,
+                    ..Default::default()
+                };
+                // NOTE: for evals, we concat witin with fixed to make process easier
+                if *num_var <= Spec::get_basecode_msg_size_log() {
+                    trivial_evals.push(evals_iter.next().unwrap());
+                    if *expected_fixed_num_poly > 0 {
+                        circuit_meta.fixed_num_vars = *num_var;
+                        circuit_meta.fixed_num_polys = *expected_fixed_num_poly;
+                        trivial_evals
+                            .last_mut()
+                            .unwrap()
+                            .extend(evals_iter.next().unwrap())
+                    }
+                    circuit_trivial_meta_map.insert(*circuit_index, circuit_meta);
+                } else {
+                    evals.push(evals_iter.next().unwrap());
+                    if *expected_fixed_num_poly > 0 {
+                        circuit_meta.fixed_num_vars = *num_var;
+                        circuit_meta.fixed_num_polys = *expected_fixed_num_poly;
+                        evals.last_mut().unwrap().extend(evals_iter.next().unwrap());
+                    }
+                    circuit_meta_map.insert(*circuit_index, circuit_meta);
+                }
+
+                (trivial_evals, evals)
+            },
+        );
+        assert!(evals_iter.next().is_none());
+
+        // check trivial proofs
+        if !circuit_trivial_meta_map.is_empty() {
             let trivial_fixed_commit =
                 BTreeMap::from_iter(fixed_comms.trivial_commits.iter().cloned());
             let trivial_witin_commit =
                 BTreeMap::from_iter(witin_comms.trivial_commits.iter().cloned());
             assert!(proof.trivial_proof.is_some());
             assert!(
-                trivial_num_vars
+                circuit_trivial_meta_map
                     .iter()
                     .zip_eq(proof.trivial_proof.as_ref().unwrap())
                     .zip_eq(&witin_comms.trivial_commits)
@@ -525,35 +572,62 @@ where
             );
 
             // 1. check mmcs verify opening
-            trivial_num_vars
+            circuit_trivial_meta_map
                 .iter()
                 .zip_eq(proof.trivial_proof.as_ref().unwrap())
-                .try_for_each(|((circuit_index, _), (_, proof))| {
-                    // if commitment with respective circuit size exist,
-                    if let Some(witin_commit) = trivial_witin_commit.get(circuit_index) {
+                .try_for_each(
+                    |(
+                        (
+                            circuit_index,
+                            CircuitIndexMeta {
+                                fixed_num_polys, ..
+                            },
+                        ),
+                        (_, proof),
+                    )| {
+                        let witin_commit = trivial_witin_commit
+                            .get(circuit_index)
+                            .expect("proof must exist");
                         let (commit, _) = mmcs.commit_matrix(proof[0].clone());
                         if commit != *witin_commit {
                             Err(Error::MerkleRootMismatch)?;
                         }
-                    }
-                    if let Some(fixed_commit) = trivial_fixed_commit.get(circuit_index) {
-                        let (commit, _) = mmcs.commit_matrix(proof[1].clone());
-                        if commit != *fixed_commit {
-                            Err(Error::MerkleRootMismatch)?;
+                        if *fixed_num_polys > 0 {
+                            let fixed_commit = trivial_fixed_commit
+                                .get(circuit_index)
+                                .expect("proof must exist");
+                            let (commit, _) = mmcs.commit_matrix(proof[1].clone());
+                            if commit != *fixed_commit {
+                                Err(Error::MerkleRootMismatch)?;
+                            }
                         }
-                    }
-                    Ok(())
-                })?;
+                        Ok(())
+                    },
+                )?;
 
             // TODO 2. check evaluation equality
         }
 
-        // verify commit_phase
+        if !circuit_meta_map.is_empty() {
+            assert!(
+                !proof.final_message.is_empty()
+                    && proof
+                        .final_message
+                        .iter()
+                        .map(|final_message| { final_message.len() })
+                        .chain(std::iter::once(1 << Spec::get_basecode_msg_size_log()))
+                        .all_equal(),
+                "final message size should be equal to 1 << Spec::get_basecode_msg_size_log()"
+            );
+        }
 
+        // verify commit_phase
+        let batch_group_size = evals.iter().map(|evals| evals.len()).collect_vec();
+        let total_num_polys = batch_group_size.iter().sum();
         let batch_coeffs =
             &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
 
-        let max_num_var = *num_vars.iter().map(|(_, n)| n).max().unwrap();
+        let max_num_var = *circuit_num_vars.iter().map(|(_, n)| n).max().unwrap();
         let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
 
         let mut fold_challenges: Vec<E> = Vec::with_capacity(max_num_var);
@@ -578,7 +652,17 @@ where
             Spec::get_number_queries(),
             max_num_var + Spec::get_rate_log(),
         );
-        println!("verifier top 5 queries {:?}", queries[0..5].to_vec());
+
+        batch_verifier_query_phase::<E, Spec>(
+            &queries,
+            &vp.encoding_params,
+            final_message,
+            batch_coeffs,
+            &proof.query_opening_proof,
+            &fixed_comms,
+            &witin_comms,
+            &circuit_meta_map,
+        );
 
         Ok(())
     }

@@ -112,6 +112,7 @@ pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
     witin_comms: &Pcs::Commitment,
     evals: &[Vec<E>],
     proof: &Pcs::Proof,
+    circuit_num_polys: &[(usize, usize)],
     transcript: &mut impl Transcript<E>,
 ) -> Result<(), Error>
 where
@@ -125,6 +126,7 @@ where
         witin_comms,
         evals,
         proof,
+        circuit_num_polys,
         transcript,
     )
 }
@@ -231,6 +233,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         witin_comms: &Self::Commitment,
         evals: &[Vec<E>],
         proof: &Self::Proof,
+        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 

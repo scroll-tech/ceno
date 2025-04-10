@@ -1,11 +1,18 @@
-use crate::{basefold::structure::MerkleTreeExt, util::merkle_tree::poseidon2_merkle_tree};
+use std::{collections::BTreeMap, slice};
+
+use crate::{
+    basefold::structure::{CircuitIndexMeta, MerkleTreeExt},
+    util::merkle_tree::poseidon2_merkle_tree,
+};
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
+    matrix::{Dimensions, dense::RowMajorMatrix},
     util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
 use crate::basefold::structure::QueryOpeningProofs;
@@ -37,8 +44,6 @@ where
         num_verifier_queries,
         log2_witin_max_codeword_size,
     );
-
-    println!("prover top 5 queries {:?}", queries[0..5].to_vec());
 
     queries
         .iter()
@@ -89,6 +94,101 @@ where
             (witin_base_opening, fixed_base_opening, opening_ext)
         })
         .collect_vec()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    indices: &[usize],
+    vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
+    final_message: &[Vec<E>],
+    _batch_coeffs: &[E],
+    queries: &QueryOpeningProofs<E>,
+    fixed_comm: &BasefoldCommitment<E>,
+    witin_comm: &BasefoldCommitment<E>,
+    circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
+) where
+    E::BaseField: Serialize + DeserializeOwned,
+{
+    let encode_span = entered_span!("encode_final_codeword");
+    let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
+        vp,
+        RowMajorMatrix::new(
+            (0..final_message[0].len())
+                .map(|j| final_message.iter().map(|row| row[j]).sum())
+                .collect_vec(),
+            1,
+        ),
+    );
+    exit_span!(encode_span);
+
+    let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
+    let mmcs = poseidon2_merkle_tree::<E>();
+    let check_queries_span = entered_span!("check_queries");
+    izip!(indices, queries).for_each(
+        |(
+            idx,
+            (
+                (witin_commit_leafs, witin_commit_proof),
+                (fixed_commit_leafs, fixed_commit_proof),
+                opening_ext,
+            ),
+        )| {
+            // verify base oracle query proof
+            // refer to prover documentation for the reason of right shift by 1
+            let idx = idx >> 1;
+            let (witin_dimentions, fixed_dimentions): (Vec<_>, Vec<_>) = circuit_meta_map
+                .values()
+                .map(
+                    |CircuitIndexMeta {
+                         witin_num_vars,
+                         witin_num_polys,
+                         fixed_num_vars,
+                         fixed_num_polys,
+                     }| {
+                        (
+                            Dimensions {
+                                // width size is double num_polys due to leaf + right leafs are concat
+                                width: witin_num_polys * 2,
+                                height: 1
+                                    << (witin_num_vars
+                                        + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(
+                                        ) - 1),
+                            },
+                            if *fixed_num_vars > 0 {
+                                Some(Dimensions {
+                                    // width size is double num_polys due to leaf + right leafs are concat
+                                    width: fixed_num_polys * 2,
+                                    height: 1 << (fixed_num_vars
+                                        + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(
+                                        ) - 1),
+                                })
+                            } else {
+                                None
+                            },
+                        )
+                    },
+                )
+                .unzip();
+            mmcs.verify_batch(
+                &witin_comm.commit,
+                &witin_dimentions,
+                idx,
+                witin_commit_leafs,
+                witin_commit_proof,
+            )
+            .expect("verify witin commit batch failed");
+            let fixed_dimentions = fixed_dimentions.into_iter().filter_map(|x| x).collect_vec();
+            mmcs.verify_batch(
+                &fixed_comm.commit,
+                &fixed_dimentions,
+                idx,
+                fixed_commit_leafs,
+                fixed_commit_proof,
+            )
+            .expect("verify fixed commit batch failed");
+        },
+    );
+    exit_span!(check_queries_span);
 }
 
 #[allow(clippy::too_many_arguments)]
