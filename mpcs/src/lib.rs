@@ -80,6 +80,7 @@ pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     witin_comms: &Pcs::CommitmentWithWitness,
     points: &[Point<E>],
     evals: &[Vec<E>],
+    circuit_num_polys: &[(usize, usize)],
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
     Pcs::batch_open(
@@ -89,6 +90,7 @@ pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
         witin_comms,
         points,
         evals,
+        circuit_num_polys,
         transcript,
     )
 }
@@ -200,6 +202,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         witin_comms: &Self::CommitmentWithWitness,
         points: &[Point<E>],
         evals: &[Vec<E>],
+        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 

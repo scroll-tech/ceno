@@ -58,6 +58,7 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     transcript: &mut impl Transcript<E>,
     max_num_vars: usize,
     num_rounds: usize,
+    circuit_num_polys: &[(usize, usize)],
 ) -> (Vec<MerkleTreeExt<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -112,26 +113,32 @@ where
         .zip_eq(&batch_coeffs_splitted)
         .zip_eq(&witin_polys_and_meta)
         .map(
-            |((witin_codewords, batch_coeffs), (_, (circuit_index, group)))| {
-                let num_polys = group.len();
+            |((witin_codewords, batch_coeffs), (_, (circuit_index, _)))| {
+                let (expected_witins_num_poly, expected_fixed_num_poly) =
+                    circuit_num_polys[*circuit_index];
                 // batch_coeffs concat witin follow by fixed, where fixed is optional
-                let witin_and_fixed_codeword: Vec<&&DenseMatrix<E::BaseField, Vec<E::BaseField>>> =
-                    std::iter::once(witin_codewords)
-                        .chain(
-                            fixed_comms
-                                .circuit_codeword_index
-                                .get(circuit_index)
-                                .and_then(|idx| fixed_codeword.get(*idx)),
-                        )
-                        .collect_vec();
+                let witin_fixed_concated_codeword: Vec<(
+                    &&DenseMatrix<E::BaseField, Vec<E::BaseField>>,
+                    usize,
+                )> = std::iter::once((witin_codewords, expected_witins_num_poly))
+                    .chain(
+                        fixed_comms
+                            .circuit_codeword_index
+                            .get(circuit_index)
+                            .and_then(|idx| {
+                                fixed_codeword
+                                    .get(*idx)
+                                    .map(|rmm| (rmm, expected_fixed_num_poly))
+                            }),
+                    )
+                    .collect_vec();
                 // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
-                let size = witin_and_fixed_codeword[0].height() * 2;
+                let size = witin_fixed_concated_codeword[0].0.height() * 2;
                 (0..size)
-                    .into_par_iter()
                     .map(|j| {
-                        witin_and_fixed_codeword
+                        witin_fixed_concated_codeword
                             .iter()
-                            .scan(0, |start_index, rmm| {
+                            .scan(0, |start_index, (rmm, num_polys)| {
                                 let batch_coeffs = batch_coeffs
                                     [*start_index..*start_index + num_polys]
                                     .iter()
@@ -339,8 +346,7 @@ pub(crate) fn basefold_one_round_by_interpolation_weights<
     let inv_2 = E::BaseField::from_u64(2).inverse();
 
     debug_assert_eq!(folding_coeffs.len(), 1 << level);
-
-    let next_level_target_len = target_len << 1;
+    let next_level_target_len = target_len >> 1;
     let res = values
         .iter_mut()
         .filter_map(|value| {

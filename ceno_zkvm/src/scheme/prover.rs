@@ -268,6 +268,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             })?;
 
         // batch opening pcs
+        // generate static info from prover key for expected num variable
+        let circuit_num_polys = self
+            .pk
+            .circuit_pks
+            .iter()
+            .map(|(_, pk)| (pk.get_cs().num_witin as usize, pk.get_cs().num_fixed))
+            .collect_vec();
         let pcs_opening = entered_span!("pcs_opening");
         let mpcs_opening_proof = PCS::batch_open(
             &self.pk.pp,
@@ -279,6 +286,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             &witin_commit_with_witness,
             &points,
             &evaluations,
+            &circuit_num_polys,
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;

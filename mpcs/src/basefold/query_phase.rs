@@ -108,6 +108,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     fixed_comm: &BasefoldCommitment<E>,
     witin_comm: &BasefoldCommitment<E>,
     circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
+    commits: &[Digest<E>],
+    fold_challenges: &[E],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -128,12 +130,15 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let check_queries_span = entered_span!("check_queries");
 
     // an vector with same length as circuit_meta_map, which is sorted by num_var from largest to low
-    // vector keep index information, so we can fetch respective index in constant time
+    // vector keep circuit information, so we can fetch respective circuit in constant time
     let folding_sorted_order = circuit_meta_map
-        .values()
-        .enumerate()
-        .sorted_by_key(|(index, CircuitIndexMeta { witin_num_vars, .. })| Reverse(witin_num_vars))
-        .map(|(index, CircuitIndexMeta { witin_num_vars, .. })| (witin_num_vars, index))
+        .iter()
+        .sorted_by_key(|(circuit_index, CircuitIndexMeta { witin_num_vars, .. })| {
+            Reverse(witin_num_vars)
+        })
+        .map(|(circuit_index, CircuitIndexMeta { witin_num_vars, .. })| {
+            (witin_num_vars, circuit_index)
+        })
         .collect_vec();
     izip!(indices, queries).for_each(
         |(
@@ -146,8 +151,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         )| {
             // verify base oracle query proof
             // refer to prover documentation for the reason of right shift by 1
-            let idx = idx >> 1;
-            let (witin_dimentions, fixed_dimentions) = get_base_oracle_dimentions::<E, Spec>(circuit_meta_map);
+            let mut idx = idx >> 1;
+
+            let (witin_dimentions, fixed_dimentions) =
+                get_base_oracle_dimentions::<E, Spec>(circuit_meta_map);
             // verify witness
             mmcs.verify_batch(
                 &witin_comm.commit,
@@ -170,50 +177,162 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let mut witin_commit_leafs_iter = witin_commit_leafs.iter();
             let mut fixed_commit_leafs_iter = fixed_commit_leafs.iter();
             let mut batch_coeffs_iter = batch_coeffs.iter();
-            let base_oracle_lo_hi = circuit_meta_map.values().map(
-                |CircuitIndexMeta {
-                     witin_num_vars,
-                     witin_num_polys,
-                     fixed_num_vars,
-                     fixed_num_polys,
-                 }| {
-                    witin_commit_leafs_iter
-                        .next()
-                        .into_iter()
-                        .chain(
-                            (*fixed_num_vars > 0)
-                                .then(|| fixed_commit_leafs_iter.next().unwrap())
-                                .into_iter(),
-                        )
-                        .map(|leafs| {
-                            let batch_coeffs: Vec<E> = batch_coeffs_iter
-                                .by_ref()
-                                .take(*witin_num_vars)
-                                .copied()
-                                .collect_vec();
-                            let (left, right): (&[E::BaseField], &[E::BaseField]) = leafs.split_at(leafs.len() / 2);
-                            let (left, right): (E, E) = (
-                                dot_product(batch_coeffs.iter().copied(), left.iter().copied()),
-                                dot_product(batch_coeffs.iter().copied(), right.iter().copied()),
-                            );
 
-                            // get coeff
-                            // `idx` need to scale down idx because they will be join in folding in later round
-                            let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
-                                vp,
-                            witin_num_vars + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() - 1,
-                            )[idx >> (max_num_var - witin_num_vars)];
-
-                            ((left + right).halve(), (left - right) * coeff)
-                        })
-                        // fold witin/fixed lo, hi together because they share the same num_vars
-                        .reduce(|(lo_wit, hi_wit), (lo_fixed, hi_fixed)| (lo_wit + lo_fixed, hi_wit + hi_fixed)).expect("unreachable")
-                },
-            ).collect_vec();
+            // circuit_index -> (lo, hi)
+            // TODO use pure vector for it instead of BTreeMap
+            let base_oracle_lo_hi = circuit_meta_map
+                .iter()
+                .map(
+                    |(
+                        circuit_index,
+                        CircuitIndexMeta {
+                            witin_num_vars,
+                            witin_num_polys,
+                            fixed_num_vars,
+                            fixed_num_polys,
+                        },
+                    )| {
+                        let (lo, hi) = witin_commit_leafs_iter
+                            .next()
+                            .into_iter()
+                            .map(|leafs| (leafs, *witin_num_polys))
+                            .chain(
+                                (*fixed_num_vars > 0)
+                                    .then(|| {
+                                        (fixed_commit_leafs_iter.next().unwrap(), *fixed_num_polys)
+                                    })
+                                    .into_iter(),
+                            )
+                            .map(|(leafs, num_polys)| {
+                                let batch_coeffs = batch_coeffs_iter
+                                    .by_ref()
+                                    .take(num_polys)
+                                    .copied()
+                                    .collect_vec();
+                                let (lo, hi): (&[E::BaseField], &[E::BaseField]) =
+                                    leafs.split_at(leafs.len() / 2);
+                                (
+                                    dot_product::<E, _, _>(
+                                        batch_coeffs.iter().copied(),
+                                        lo.iter().copied(),
+                                    ),
+                                    dot_product::<E, _, _>(
+                                        batch_coeffs.iter().copied(),
+                                        hi.iter().copied(),
+                                    ),
+                                )
+                            })
+                            // fold witin/fixed lo, hi together because they share the same num_vars
+                            .reduce(|(lo_wit, hi_wit), (lo_fixed, hi_fixed)| {
+                                (lo_wit + lo_fixed, hi_wit + hi_fixed)
+                            })
+                            .expect("unreachable");
+                        (*circuit_index, (lo, hi))
+                    },
+                )
+                .collect::<BTreeMap<_, _>>();
             debug_assert_eq!(folding_sorted_order.len(), base_oracle_lo_hi.len());
             debug_assert!(witin_commit_leafs_iter.next().is_none());
             debug_assert!(fixed_commit_leafs_iter.next().is_none());
             debug_assert!(batch_coeffs_iter.next().is_none());
+
+            // fold and query
+            let mut cur_num_var = max_num_var;
+            let rounds = cur_num_var
+                - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log()
+                - 1;
+            let n_d_next = 1
+                << (cur_num_var + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() - 1);
+            debug_assert_eq!(rounds, fold_challenges.len() - 1);
+            debug_assert_eq!(rounds, commits.len(),);
+            debug_assert_eq!(rounds, opening_ext.len(),);
+
+            // first folding challenge
+            let r = fold_challenges.first().unwrap();
+
+            let mut folding_sorted_order_iter = folding_sorted_order.iter();
+            // take first batch which num_vars match max_num_var to initial fold value
+            let mut folded = folding_sorted_order_iter
+                .by_ref()
+                .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
+                .map(|(num_vars, circuit_index)| {
+                    let (lo, hi) = &base_oracle_lo_hi[circuit_index];
+
+                    let coeff =
+                        <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+                            vp,
+                            cur_num_var
+                                + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
+                                - 1,
+                        )[idx];
+                    let (lo, hi) = ((*lo + *hi).halve(), (*lo - *hi) * coeff);
+                    lo + (hi - lo) * *r
+                })
+                .sum::<E>();
+
+            let mut n_d_i = n_d_next;
+            for ((pi_comm, r), (leaf, proof)) in commits
+                .iter()
+                .zip_eq(fold_challenges.iter().skip(1))
+                .zip_eq(opening_ext)
+            {
+                cur_num_var -= 1;
+
+                let is_interpolate_to_right_index = (idx & 1) == 1;
+                let new_involved_oracles = folding_sorted_order_iter
+                    .by_ref()
+                    .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
+                    .map(|(_, circuit_index)| {
+                        let (lo, hi) = &base_oracle_lo_hi[circuit_index];
+                        if is_interpolate_to_right_index {
+                            *hi
+                        } else {
+                            *lo
+                        }
+                    })
+                    .sum::<E>();
+
+                let mut leafs = vec![*leaf; 2];
+                leafs[is_interpolate_to_right_index as usize] = folded + new_involved_oracles;
+                idx >>= 1;
+                mmcs_ext
+                    .verify_batch(
+                        pi_comm,
+                        &[Dimensions {
+                            width: 2,
+                            // width is 2, thus height divide by 2 via right shift
+                            height: n_d_i >> 1,
+                        }],
+                        idx,
+                        slice::from_ref(&leafs),
+                        proof,
+                    )
+                    .expect("verify failed");
+                let coeff =
+                    <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+                        vp,
+                        log2_strict_usize(n_d_i) - 1,
+                    )[idx];
+                debug_assert_eq!(
+                    <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+                        vp,
+                        log2_strict_usize(n_d_i) - 1,
+                    )
+                    .len(),
+                    n_d_i >> 1
+                );
+                let (left, right) = (leafs[0], leafs[1]);
+                let (lo, hi) = ((left + right).halve(), (left - right) * coeff);
+                folded = lo + (hi - lo) * *r;
+                n_d_i >>= 1;
+            }
+            debug_assert!(folding_sorted_order_iter.next().is_none());
+            // assert!(
+            //     final_codeword.values[idx] == folded,
+            //     "final_codeword.values[idx] value {:?} != folded {:?}",
+            //     final_codeword.values[idx],
+            //     folded
+            // );
         },
     );
     exit_span!(check_queries_span);

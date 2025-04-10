@@ -130,6 +130,7 @@ where
         _witin_comms: &Self::CommitmentWithWitness,
         _points: &[Point<E>],
         _evals: &[Vec<E>],
+        _circuit_num_polys: &[(usize, usize)],
         _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()

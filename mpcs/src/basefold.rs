@@ -311,6 +311,7 @@ where
         points: &[Point<E>],
         // TODO this is only for debug purpose
         evals: &[Vec<E>],
+        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         let span = entered_span!("Basefold::batch_open");
@@ -390,6 +391,7 @@ where
             transcript,
             max_num_vars,
             max_num_vars - Spec::get_basecode_msg_size_log(),
+            circuit_num_polys,
         );
         exit_span!(commit_phase_span);
 
@@ -622,7 +624,10 @@ where
         }
 
         // verify commit_phase
-        let batch_group_size = evals.iter().map(|evals| evals.len()).collect_vec();
+        let batch_group_size = circuit_meta_map
+            .iter()
+            .map(|(_, circuit_meta)| circuit_meta.witin_num_polys + circuit_meta.fixed_num_polys)
+            .collect_vec();
         let total_num_polys = batch_group_size.iter().sum();
         let batch_coeffs =
             &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
@@ -663,6 +668,8 @@ where
             &fixed_comms,
             &witin_comms,
             &circuit_meta_map,
+            &proof.commits,
+            &fold_challenges,
         );
 
         Ok(())
