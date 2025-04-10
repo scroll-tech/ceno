@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, slice};
+use std::{cmp::Reverse, collections::BTreeMap, slice};
 
 use crate::{
     basefold::structure::{CircuitIndexMeta, MerkleTreeExt},
@@ -8,6 +8,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
+    field::dot_product,
     matrix::{Dimensions, dense::RowMajorMatrix},
     util::log2_strict_usize,
 };
@@ -98,10 +99,11 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    max_num_var: usize,
     indices: &[usize],
     vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     final_message: &[Vec<E>],
-    _batch_coeffs: &[E],
+    batch_coeffs: &[E],
     queries: &QueryOpeningProofs<E>,
     fixed_comm: &BasefoldCommitment<E>,
     witin_comm: &BasefoldCommitment<E>,
@@ -124,6 +126,15 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
     let mmcs = poseidon2_merkle_tree::<E>();
     let check_queries_span = entered_span!("check_queries");
+
+    // an vector with same length as circuit_meta_map, which is sorted by num_var from largest to low
+    // vector keep index information, so we can fetch respective index in constant time
+    let folding_sorted_order = circuit_meta_map
+        .values()
+        .enumerate()
+        .sorted_by_key(|(index, CircuitIndexMeta { witin_num_vars, .. })| Reverse(witin_num_vars))
+        .map(|(index, CircuitIndexMeta { witin_num_vars, .. })| (witin_num_vars, index))
+        .collect_vec();
     izip!(indices, queries).for_each(
         |(
             idx,
@@ -136,39 +147,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             // verify base oracle query proof
             // refer to prover documentation for the reason of right shift by 1
             let idx = idx >> 1;
-            let (witin_dimentions, fixed_dimentions): (Vec<_>, Vec<_>) = circuit_meta_map
-                .values()
-                .map(
-                    |CircuitIndexMeta {
-                         witin_num_vars,
-                         witin_num_polys,
-                         fixed_num_vars,
-                         fixed_num_polys,
-                     }| {
-                        (
-                            Dimensions {
-                                // width size is double num_polys due to leaf + right leafs are concat
-                                width: witin_num_polys * 2,
-                                height: 1
-                                    << (witin_num_vars
-                                        + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(
-                                        ) - 1),
-                            },
-                            if *fixed_num_vars > 0 {
-                                Some(Dimensions {
-                                    // width size is double num_polys due to leaf + right leafs are concat
-                                    width: fixed_num_polys * 2,
-                                    height: 1 << (fixed_num_vars
-                                        + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(
-                                        ) - 1),
-                                })
-                            } else {
-                                None
-                            },
-                        )
-                    },
-                )
-                .unzip();
+            let (witin_dimentions, fixed_dimentions) = get_base_oracle_dimentions::<E, Spec>(circuit_meta_map);
+            // verify witness
             mmcs.verify_batch(
                 &witin_comm.commit,
                 &witin_dimentions,
@@ -177,7 +157,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 witin_commit_proof,
             )
             .expect("verify witin commit batch failed");
-            let fixed_dimentions = fixed_dimentions.into_iter().filter_map(|x| x).collect_vec();
+            // verify fixed
             mmcs.verify_batch(
                 &fixed_comm.commit,
                 &fixed_dimentions,
@@ -186,6 +166,54 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 fixed_commit_proof,
             )
             .expect("verify fixed commit batch failed");
+
+            let mut witin_commit_leafs_iter = witin_commit_leafs.iter();
+            let mut fixed_commit_leafs_iter = fixed_commit_leafs.iter();
+            let mut batch_coeffs_iter = batch_coeffs.iter();
+            let base_oracle_lo_hi = circuit_meta_map.values().map(
+                |CircuitIndexMeta {
+                     witin_num_vars,
+                     witin_num_polys,
+                     fixed_num_vars,
+                     fixed_num_polys,
+                 }| {
+                    witin_commit_leafs_iter
+                        .next()
+                        .into_iter()
+                        .chain(
+                            (*fixed_num_vars > 0)
+                                .then(|| fixed_commit_leafs_iter.next().unwrap())
+                                .into_iter(),
+                        )
+                        .map(|leafs| {
+                            let batch_coeffs: Vec<E> = batch_coeffs_iter
+                                .by_ref()
+                                .take(*witin_num_vars)
+                                .copied()
+                                .collect_vec();
+                            let (left, right): (&[E::BaseField], &[E::BaseField]) = leafs.split_at(leafs.len() / 2);
+                            let (left, right): (E, E) = (
+                                dot_product(batch_coeffs.iter().copied(), left.iter().copied()),
+                                dot_product(batch_coeffs.iter().copied(), right.iter().copied()),
+                            );
+
+                            // get coeff
+                            // `idx` need to scale down idx because they will be join in folding in later round
+                            let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+                                vp,
+                            witin_num_vars + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() - 1,
+                            )[idx >> (max_num_var - witin_num_vars)];
+
+                            ((left + right).halve(), (left - right) * coeff)
+                        })
+                        // fold witin/fixed lo, hi together because they share the same num_vars
+                        .reduce(|(lo_wit, hi_wit), (lo_fixed, hi_fixed)| (lo_wit + lo_fixed, hi_wit + hi_fixed)).expect("unreachable")
+                },
+            ).collect_vec();
+            debug_assert_eq!(folding_sorted_order.len(), base_oracle_lo_hi.len());
+            debug_assert!(witin_commit_leafs_iter.next().is_none());
+            debug_assert!(fixed_commit_leafs_iter.next().is_none());
+            debug_assert!(batch_coeffs_iter.next().is_none());
         },
     );
     exit_span!(check_queries_span);
@@ -334,4 +362,45 @@ pub fn simple_batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E
     // );
 
     // end_timer!(timer);
+}
+
+fn get_base_oracle_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
+) -> (Vec<Dimensions>, Vec<Dimensions>) {
+    let (wit_dim, fixed_dim): (Vec<_>, Vec<_>) = circuit_meta_map
+        .values()
+        .map(
+            |CircuitIndexMeta {
+                 witin_num_vars,
+                 witin_num_polys,
+                 fixed_num_vars,
+                 fixed_num_polys,
+             }| {
+                (
+                    Dimensions {
+                        // width size is double num_polys due to leaf + right leafs are concat
+                        width: witin_num_polys * 2,
+                        height: 1
+                            << (witin_num_vars
+                                + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
+                                - 1),
+                    },
+                    if *fixed_num_vars > 0 {
+                        Some(Dimensions {
+                            // width size is double num_polys due to leaf + right leafs are concat
+                            width: fixed_num_polys * 2,
+                            height: 1
+                                << (fixed_num_vars
+                                    + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
+                                    - 1),
+                        })
+                    } else {
+                        None
+                    },
+                )
+            },
+        )
+        .unzip();
+    let fixed_dim = fixed_dim.into_iter().filter_map(|x| x).collect_vec();
+    (wit_dim, fixed_dim)
 }

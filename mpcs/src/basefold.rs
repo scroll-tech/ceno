@@ -654,6 +654,7 @@ where
         );
 
         batch_verifier_query_phase::<E, Spec>(
+            max_num_var,
             &queries,
             &vp.encoding_params,
             final_message,

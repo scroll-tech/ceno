@@ -50,8 +50,9 @@ mod tests {
 
     #[test]
     fn test_evaluation_after_conversion() {
-        let poly: DenseMultilinearExtension<E> =
-            DenseMultilinearExtension::from_evaluations_vec(3, vec![
+        let poly: DenseMultilinearExtension<E> = DenseMultilinearExtension::from_evaluations_vec(
+            3,
+            vec![
                 Goldilocks::from_u16(1),
                 Goldilocks::from_u16(2),
                 Goldilocks::from_u16(3),
@@ -60,7 +61,8 @@ mod tests {
                 Goldilocks::from_u16(2),
                 Goldilocks::from_u16(3),
                 Goldilocks::from_u16(4),
-            ]);
+            ],
+        );
         let mut coeffs = poly.clone();
         interpolate_field_type_over_boolean_hypercube(&mut coeffs.evaluations);
 
