@@ -524,7 +524,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
     pub fn assign_opcode_circuit(
         &self,
-        cs: &ZKVMConstraintSystem<E>,
+        cs: &mut ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
         steps: GroupedSteps,
     ) -> Result<(), ZKVMError> {
@@ -562,7 +562,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             }
         }
 
-        witness.assign_keccakf_circuit(&cs, &self.keccak_config, keccak_steps)?;
+        witness.assign_keccakf_circuit(cs, &self.keccak_config, keccak_steps)?;
 
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
             cs,

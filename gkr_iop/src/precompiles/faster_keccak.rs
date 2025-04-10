@@ -314,7 +314,7 @@ pub const AND_LOOKUPS_PER_ROUND: usize = 200;
 pub const XOR_LOOKUPS_PER_ROUND: usize = 608;
 pub const RANGE_LOOKUPS_PER_ROUND: usize = 290;
 pub const LOOKUPS_PER_ROUND: usize =
-    AND_LOOKUPS_PER_ROUND + XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
+    3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
 
 pub const AND_LOOKUPS: usize = ROUNDS * AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = ROUNDS * XOR_LOOKUPS_PER_ROUND;
@@ -656,8 +656,11 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                 let beta = Constant::Base(0);
 
                 // Send all lookups to the final output layer
-                for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups).enumerate() {
-                    expressions.push(lookup.compress(alpha.clone(), beta.clone()));
+                for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups)
+                    .flatten()
+                    .enumerate()
+                {
+                    expressions.push(lookup.clone());
                     expr_names.push(format!("{i}th: {:?}", lookup));
                     evals.push(lookup_outputs[lookup_index].clone());
                     lookup_index += 1;
@@ -682,6 +685,8 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                     .unwrap()
             },
         );
+
+        assert!(lookup_index == LOOKUPS_PER_ROUND * ROUNDS);
 
         let (state8, _) = chip.allocate_wits_in_layer::<200, 0>();
 
@@ -790,12 +795,16 @@ where
 
             let mut add_and = |a: u64, b: u64, round: usize| {
                 let c = a & b;
-                and_lookups[round].push((c << 16) + (b << 8) + a);
+                assert!(a < (1 << 8));
+                assert!(b < (1 << 8));
+                and_lookups[round].extend(vec![a, b, c]);
             };
 
             let mut add_xor = |a: u64, b: u64, round: usize| {
                 let c = a ^ b;
-                xor_lookups[round].push((c << 16) + (b << 8) + a);
+                assert!(a < (1 << 8));
+                assert!(b < (1 << 8));
+                xor_lookups[round].extend(vec![a, b, c]);
             };
 
             let mut add_range = |value: u64, size: usize, round: usize| {
@@ -803,6 +812,7 @@ where
                 range_lookups[round].push(value);
                 if size < 16 {
                     range_lookups[round].push(value << (16 - size));
+                    assert!(value << (16 - size) < (1 << 16));
                 }
             };
 

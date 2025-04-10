@@ -129,6 +129,19 @@ pub enum CenoLookup {
     U16(Expression),
 }
 
+impl IntoIterator for CenoLookup {
+    type Item = Expression;
+    type IntoIter = std::vec::IntoIter<Expression>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            CenoLookup::And(a, b, c) => vec![a, b, c].into_iter(),
+            CenoLookup::Xor(a, b, c) => vec![a, b, c].into_iter(),
+            CenoLookup::U16(a) => vec![a].into_iter(),
+        }
+    }
+}
+
 impl CenoLookup {
     // combine lookup arguments with challenges
     pub fn compress(&self, alpha: Constant, beta: Constant) -> Expression {

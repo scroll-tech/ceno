@@ -84,12 +84,12 @@ where
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-        lookups: Vec<E::BaseField>,
+        lookups: &[E::BaseField],
     ) -> Result<(), ZKVMError>;
 
     fn phase1_witness_from_steps(
         layout: &Self::Layout,
-        steps: Vec<StepRecord>,
+        steps: &[StepRecord],
     ) -> Vec<Vec<E::BaseField>>;
 
     fn assign_instances_with_gkr_iop(
@@ -111,34 +111,51 @@ where
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
         let gkr_witness = gkr_layout.gkr_witness(
-            &Self::phase1_witness_from_steps(gkr_layout, steps.clone()),
+            &Self::phase1_witness_from_steps(gkr_layout, &steps),
             &vec![],
         );
 
-        let lookups = gkr_witness
-            .layers
-            .last()
-            .unwrap()
-            .bases
-            .iter()
-            .map(|instance| instance.into_iter().skip(100).collect_vec())
-            .collect_vec();
+        let lookups = {
+            let mut lookups = vec![vec![]; steps.len()];
+            for witness in gkr_witness
+                .layers
+                .last()
+                .unwrap()
+                .bases
+                .iter()
+                .skip(100)
+                .cloned()
+            {
+                for i in 0..witness.len() {
+                    lookups[i].push(witness[i]);
+                }
+            }
+            lookups
+        };
+
+        // dbg!(&lookups);
 
         raw_witin_iter
-            .zip(steps.par_chunks(num_instance_per_batch))
+            .zip(
+                steps
+                    .iter()
+                    .enumerate()
+                    .collect_vec()
+                    .par_chunks(num_instance_per_batch),
+            )
             .flat_map(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances
                     .chunks_mut(num_witin)
                     .zip(steps)
-                    .map(|(instance, step)| {
-                        let lookups = vec![];
+                    .map(|(instance, (i, step))| {
+                        // dbg!(i, step);
                         Self::assign_instance_with_gkr_iop(
                             config,
                             instance,
                             &mut lk_multiplicity,
                             step,
-                            lookups,
+                            &lookups[*i],
                         )
                     })
                     .collect::<Vec<_>>()

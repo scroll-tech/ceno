@@ -79,34 +79,36 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             .collect::<Result<Vec<_>, _>>()?;
 
         // Temporarily set this to < 24 to avoid cb.num_witin overflow
-        let active_rounds = 12;
+        let active_rounds = 0;
 
         let mut lookups = Vec::with_capacity(
             active_rounds
                 * (3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND),
         );
 
-        dbg!(lookups.capacity());
+        if S::HAS_LOOKUPS {
+            dbg!(lookups.capacity());
 
-        for round in 0..active_rounds {
-            for i in 0..AND_LOOKUPS_PER_ROUND {
-                let a = cb.create_witin(|| format!("and_lookup_{round}_{i}_a"));
-                let b = cb.create_witin(|| format!("and_lookup_{round}_{i}_b"));
-                let c = cb.create_witin(|| format!("and_lookup_{round}_{i}_c"));
-                cb.lookup_and_byte(a.into(), b.into(), c.into())?;
-                lookups.extend(vec![a, b, c]);
-            }
-            for i in 0..XOR_LOOKUPS_PER_ROUND {
-                let a = cb.create_witin(|| format!("xor_lookup_{round}_{i}_a"));
-                let b = cb.create_witin(|| format!("xor_lookup_{round}_{i}_b"));
-                let c = cb.create_witin(|| format!("xor_lookup_{round}_{i}_c"));
-                cb.lookup_xor_byte(a.into(), b.into(), c.into())?;
-                lookups.extend(vec![a, b, c]);
-            }
-            for i in 0..RANGE_LOOKUPS_PER_ROUND {
-                let wit = cb.create_witin(|| format!("range_lookup_{round}_{i}"));
-                cb.assert_ux::<_, _, 16>(|| "nada", wit.into())?;
-                lookups.push(wit);
+            for round in 0..active_rounds {
+                for i in 0..AND_LOOKUPS_PER_ROUND {
+                    let a = cb.create_witin(|| format!("and_lookup_{round}_{i}_a"));
+                    let b = cb.create_witin(|| format!("and_lookup_{round}_{i}_b"));
+                    let c = cb.create_witin(|| format!("and_lookup_{round}_{i}_c"));
+                    cb.lookup_and_byte(a.into(), b.into(), c.into())?;
+                    lookups.extend(vec![a, b, c]);
+                }
+                for i in 0..XOR_LOOKUPS_PER_ROUND {
+                    let a = cb.create_witin(|| format!("xor_lookup_{round}_{i}_a"));
+                    let b = cb.create_witin(|| format!("xor_lookup_{round}_{i}_b"));
+                    let c = cb.create_witin(|| format!("xor_lookup_{round}_{i}_c"));
+                    cb.lookup_xor_byte(a.into(), b.into(), c.into())?;
+                    lookups.extend(vec![a, b, c]);
+                }
+                for i in 0..RANGE_LOOKUPS_PER_ROUND {
+                    let wit = cb.create_witin(|| format!("range_lookup_{round}_{i}"));
+                    cb.assert_ux::<_, _, 16>(|| "nada", wit.into())?;
+                    lookups.push(wit);
+                }
             }
         }
 
@@ -157,7 +159,7 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
 
     fn phase1_witness_from_steps(
         layout: &Self::Layout,
-        steps: Vec<StepRecord>,
+        steps: &[StepRecord],
     ) -> Vec<Vec<<E as ExtensionField>::BaseField>> {
         let instances = steps
             .iter()
@@ -181,32 +183,46 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
-        lookups: Vec<E::BaseField>,
+        lookups: &[E::BaseField],
     ) -> Result<(), ZKVMError> {
         Self::assign_instance(config, instance, lk_multiplicity, step)?;
 
-        let active_rounds = 12;
+        let active_rounds = 0;
         let mut wit_iter = lookups.iter().map(|f| f.to_canonical_u64());
         let mut var_iter = config.lookups.iter();
+
+        dbg!(wit_iter.clone().count());
+        dbg!(var_iter.clone().count());
 
         let mut pop_arg = || -> u64 {
             let wit = wit_iter.next().unwrap();
             let var = var_iter.next().unwrap();
-            set_val!(instance, var, wit);
+            // set_val!(instance, var, wit);
+            set_val!(instance, var, 0);
             wit
         };
 
-        for round in 0..active_rounds {
-            for i in 0..AND_LOOKUPS_PER_ROUND {
-                lk_multiplicity.lookup_and_byte(pop_arg(), pop_arg());
+        for _round in 0..active_rounds {
+            for _i in 0..AND_LOOKUPS_PER_ROUND {
+                // lk_multiplicity.lookup_and_byte(pop_arg(), pop_arg());
+                lk_multiplicity.lookup_and_byte(0, 0);
+                pop_arg();
+                pop_arg();
+                pop_arg();
             }
-            for i in 0..XOR_LOOKUPS_PER_ROUND {
-                lk_multiplicity.lookup_xor_byte(pop_arg(), pop_arg());
+            for _i in 0..XOR_LOOKUPS_PER_ROUND {
+                lk_multiplicity.lookup_xor_byte(0, 0);
+                pop_arg();
+                pop_arg();
+                pop_arg();
             }
-            for i in 0..RANGE_LOOKUPS_PER_ROUND {
-                lk_multiplicity.assert_ux::<16>(pop_arg());
+            for _i in 0..RANGE_LOOKUPS_PER_ROUND {
+                lk_multiplicity.assert_ux::<16>(0);
+                pop_arg();
             }
         }
+
+        assert!(var_iter.next().is_none());
 
         Ok(())
     }

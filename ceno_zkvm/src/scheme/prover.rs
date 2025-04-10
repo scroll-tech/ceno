@@ -181,7 +181,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 && cs.w_table_expressions.is_empty();
 
             if *circuit_name == <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::name() {
-                unimplemented!("keccak impl wip");
+                // unimplemented!("keccak impl wip");
+                ()
             } else if is_opcode_circuit {
                 tracing::debug!(
                     "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
@@ -278,10 +279,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let log2_num_instances = ceil_log2(next_pow2_instances);
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
-        if let Some(gkr_iop_pk) = gkr_iop_pk {
-            let mut gkr_iop_pk = gkr_iop_pk.clone();
-            unimplemented!("cannot fully handle GKRIOP component yet")
-        }
+        // if let Some(gkr_iop_pk) = gkr_iop_pk {
+        //     let mut gkr_iop_pk = gkr_iop_pk.clone();
+        //     unimplemented!("cannot fully handle GKRIOP component yet")
+        // }
 
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);

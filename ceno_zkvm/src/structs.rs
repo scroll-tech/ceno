@@ -2,7 +2,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     expression::Expression,
-    instructions::{Instruction, riscv::dummy::LargeEcallDummy},
+    instructions::{GKRIOPInstruction, Instruction, riscv::dummy::LargeEcallDummy},
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
@@ -365,7 +365,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     pub fn assign_keccakf_circuit(
         &mut self,
-        css: &ZKVMConstraintSystem<E>,
+        // TODO: do without mutability requirement
+        css: &mut ZKVMConstraintSystem<E>,
         config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
@@ -373,17 +374,19 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = css
             .get_cs(&LargeEcallDummy::<E, KeccakSpec>::name())
             .unwrap();
-        let (witness, logup_multiplicity) = LargeEcallDummy::<E, KeccakSpec>::assign_instances(
-            config,
-            cs.num_witin as usize,
-            records,
-        )?;
+        let (witness, logup_multiplicity) =
+            LargeEcallDummy::<E, KeccakSpec>::assign_instances_with_gkr_iop(
+                config,
+                cs.num_witin as usize,
+                records,
+                &mut css.keccak_gkr_iop.layout,
+            )?;
 
-        // Intercept row-major matrix, convert into KeccakTrace and obtain phase1_wit
-        self.keccak_phase1wit = css
-            .keccak_gkr_iop
-            .layout
-            .phase1_witness(KeccakTrace::from(witness.clone()));
+        // // Intercept row-major matrix, convert into KeccakTrace and obtain phase1_wit
+        // self.keccak_phase1wit = css
+        //     .keccak_gkr_iop
+        //     .layout
+        //     .phase1_witness(KeccakTrace::from(witness.clone()));
 
         assert!(
             self.witnesses_opcodes

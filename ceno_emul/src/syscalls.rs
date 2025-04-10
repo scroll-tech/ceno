@@ -20,6 +20,8 @@ pub trait SyscallSpec {
     const REG_OPS_COUNT: usize;
     const MEM_OPS_COUNT: usize;
     const CODE: u32;
+
+    const HAS_LOOKUPS: bool = false;
 }
 
 /// Trace the inputs and effects of a syscall.
