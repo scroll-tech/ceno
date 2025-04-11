@@ -162,7 +162,7 @@ where
         }
     }
 
-    pub fn pi_d_digest(&self) -> Digest<E> {
+    pub fn commit(&self) -> Digest<E> {
         self.commit.clone()
     }
 

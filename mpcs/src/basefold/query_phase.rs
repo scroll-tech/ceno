@@ -129,14 +129,15 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
     let mmcs = poseidon2_merkle_tree::<E>();
     let check_queries_span = entered_span!("check_queries");
+    // can't use witin_comm.log2_max_codeword_size since it's untrusted
+    let log2_witin_max_codeword_size =
+        max_num_var + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log();
 
     // an vector with same length as circuit_meta_map, which is sorted by num_var from largest to low
     // vector keep circuit information, so we can fetch respective circuit in constant time
     let folding_sorted_order = circuit_meta_map
         .iter()
-        .sorted_by_key(|(_, CircuitIndexMeta { witin_num_vars, .. })| {
-            Reverse(witin_num_vars)
-        })
+        .sorted_by_key(|(_, CircuitIndexMeta { witin_num_vars, .. })| Reverse(witin_num_vars))
         .map(|(circuit_index, CircuitIndexMeta { witin_num_vars, .. })| {
             (witin_num_vars, circuit_index)
         })
@@ -170,7 +171,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 &fixed_comm.commit,
                 &fixed_dimentions,
                 {
-                    let idx_shift = witin_comm.log2_max_codeword_size as i32
+                    let idx_shift = log2_witin_max_codeword_size as i32
                         - fixed_comm.log2_max_codeword_size as i32;
                     if idx_shift > 0 {
                         idx >> idx_shift
@@ -205,12 +206,9 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                             .next()
                             .into_iter()
                             .map(|leafs| (leafs, *witin_num_polys))
-                            .chain(
-                                (*fixed_num_vars > 0)
-                                    .then(|| {
-                                        (fixed_commit_leafs_iter.next().unwrap(), *fixed_num_polys)
-                                    }),
-                            )
+                            .chain((*fixed_num_vars > 0).then(|| {
+                                (fixed_commit_leafs_iter.next().unwrap(), *fixed_num_polys)
+                            }))
                             .map(|(leafs, num_polys)| {
                                 let batch_coeffs = batch_coeffs_iter
                                     .by_ref()
