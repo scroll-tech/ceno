@@ -3,7 +3,6 @@ use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
-use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
     ROMType,
@@ -13,7 +12,6 @@ use crate::{
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
 };
 use p3::field::PrimeCharacteristicRing;
-use witness::RowMajorMatrix;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]

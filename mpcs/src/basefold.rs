@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    Error, Evaluation, Point, PolynomialCommitmentScheme,
+    Error, Point, PolynomialCommitmentScheme,
     util::{
         hash::write_digest_to_transcript,
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
@@ -20,7 +20,7 @@ use witness::{RowMajorMatrix, next_pow2_instance_padding};
 use itertools::{Itertools, izip};
 use serde::{Serialize, de::DeserializeOwned};
 
-use multilinear_extensions::{mle::FieldType, util::ceil_log2};
+use multilinear_extensions::mle::FieldType;
 
 use rayon::{
     iter::IntoParallelIterator,
@@ -262,15 +262,10 @@ where
         let span = entered_span!("build mt", profiling_3 = true);
         let (comm, codeword) = mmcs.commit(evals_codewords);
         exit_span!(span);
-        let meta_info = polys
-            .values()
-            .map(|polys| (polys[0].num_vars(), polys.len()))
-            .collect_vec();
         Ok(BasefoldCommitmentWithWitness::new(
             comm,
             codeword,
             polys,
-            meta_info,
             trivial_proofdata,
             circuit_codeword_index,
         ))
@@ -319,22 +314,25 @@ where
         // sanity check
         // number of point match with commitment length, assuming each commitment are opening under same point
         assert!([points.len(), witin_comms.polys.len(),].iter().all_equal());
-        assert!(izip!(&witin_comms.polys, &witin_comms.meta_info,).all(
-            |((circuit_index, polys), (num_var, num_polys))| {
+        assert!(izip!(&witin_comms.polys, num_instances).all(
+            |((circuit_index, witin_polys), (_, num_instance))| {
                 // check num_vars & num_poly match
-                polys
+                let (expected_witin_num_polys, expected_fixed_num_polys) =
+                    circuit_num_polys[*circuit_index];
+                let num_var = next_pow2_instance_padding(*num_instance).ilog2() as usize;
+                witin_polys
                     .iter()
                     .chain(fixed_comms.polys.get(circuit_index).into_iter().flatten())
-                    .all(|p| p.num_vars() == *num_var)
-                    && polys.len() == *num_polys
+                    .all(|p| p.num_vars() == num_var)
+                    && witin_polys.len() == expected_witin_num_polys
+                    && fixed_comms
+                        .polys
+                        .get(circuit_index)
+                        .map(|fixed_polys| fixed_polys.len() == expected_fixed_num_polys)
+                        .unwrap_or(true)
             },
         ));
         assert_eq!(num_instances.len(), witin_comms.polys.len());
-        assert!(izip!(num_instances, &witin_comms.meta_info).all(
-            |((_, num_instance), (num_var, _))| {
-                next_pow2_instance_padding(*num_instance).ilog2() as usize == *num_var
-            }
-        ));
 
         if cfg!(feature = "sanity-check") {
             // check poly evaluation on point equal eval
@@ -376,7 +374,7 @@ where
 
         let max_num_vars = witin_polys_and_meta
             .iter()
-            .map(|(_, (circuit_index, polys))| polys[0].num_vars())
+            .map(|(_, (_, polys))| polys[0].num_vars())
             .max()
             .unwrap();
 
@@ -512,9 +510,9 @@ where
         let mut circuit_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
         let mut circuit_trivial_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
         let mut evals_iter = evals.iter().cloned();
-        let (trivial_evals, evals) = izip!(&circuit_num_vars, points).fold(
+        let (_trivial_evals, _evals) = izip!(&circuit_num_vars, points).fold(
             (vec![], vec![]),
-            |(mut trivial_evals, mut evals), ((circuit_index, num_var), point)| {
+            |(mut trivial_evals, mut evals), ((circuit_index, num_var), _point)| {
                 let (expected_witins_num_poly, expected_fixed_num_poly) =
                     &circuit_num_polys[*circuit_index];
                 let mut circuit_meta = CircuitIndexMeta {
@@ -624,8 +622,8 @@ where
 
         // verify commit_phase
         let batch_group_size = circuit_meta_map
-            .iter()
-            .map(|(_, circuit_meta)| circuit_meta.witin_num_polys + circuit_meta.fixed_num_polys)
+            .values()
+            .map(|circuit_meta| circuit_meta.witin_num_polys + circuit_meta.fixed_num_polys)
             .collect_vec();
         let total_num_polys = batch_group_size.iter().sum();
         let batch_coeffs =
@@ -664,12 +662,12 @@ where
             final_message,
             batch_coeffs,
             &proof.query_opening_proof,
-            &fixed_comms,
-            &witin_comms,
+            fixed_comms,
+            witin_comms,
             &circuit_meta_map,
             &proof.commits,
             &fold_challenges,
-            &sumcheck_messages,
+            sumcheck_messages,
         );
 
         Ok(())

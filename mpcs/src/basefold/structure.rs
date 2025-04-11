@@ -71,9 +71,6 @@ where
     pub(crate) trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
     // poly groups w.r.t circuit index
     pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
-
-    // format Vec<(num_var, num_polys)>
-    pub(crate) meta_info: Vec<(usize, usize)>,
     // keep codeword index w.r.t circuit index
     pub circuit_codeword_index: BTreeMap<usize, usize>,
 }
@@ -86,7 +83,6 @@ where
         commit: Digest<E>,
         codeword: MerkleTree<E::BaseField>,
         polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
-        meta_info: Vec<(usize, usize)>,
         trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
         circuit_codeword_index: BTreeMap<usize, usize>,
     ) -> Self {
@@ -103,7 +99,6 @@ where
             commit,
             codeword,
             polys,
-            meta_info,
             trivial_proofdata,
             circuit_codeword_index,
             log2_max_codeword_size,
@@ -113,7 +108,6 @@ where
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
             self.commit.clone(),
-            self.meta_info.clone(),
             self.trivial_proofdata
                 .iter()
                 .map(|(circuit_index, (digest, _))| (*circuit_index, digest.clone()))
@@ -148,7 +142,6 @@ where
 {
     pub(super) commit: Digest<E>,
     pub(crate) log2_max_codeword_size: usize,
-    pub(crate) meta_info: Vec<(usize, usize)>,
     // (circuit_index, commitment)
     pub(crate) trivial_commits: Vec<(usize, Digest<E>)>,
 }
@@ -159,13 +152,11 @@ where
 {
     pub fn new(
         commit: Digest<E>,
-        meta_info: Vec<(usize, usize)>,
         trivial_commits: Vec<(usize, Digest<E>)>,
         log2_max_codeword_size: usize,
     ) -> Self {
         Self {
             commit,
-            meta_info,
             trivial_commits,
             log2_max_codeword_size,
         }

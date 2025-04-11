@@ -271,9 +271,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // generate static info from prover key for expected num variable
         let circuit_num_polys = self
             .pk
-            .circuit_pks
-            .iter()
-            .map(|(_, pk)| (pk.get_cs().num_witin as usize, pk.get_cs().num_fixed))
+            .circuit_pks.values().map(|pk| (pk.get_cs().num_witin as usize, pk.get_cs().num_fixed))
             .collect_vec();
         let pcs_opening = entered_span!("pcs_opening");
         let mpcs_opening_proof = PCS::batch_open(

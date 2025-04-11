@@ -110,7 +110,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
     commits: &[Digest<E>],
     fold_challenges: &[E],
-    sumcheck_messages: &[Vec<E>],
+    _sumcheck_messages: &[Vec<E>],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -134,7 +134,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     // vector keep circuit information, so we can fetch respective circuit in constant time
     let folding_sorted_order = circuit_meta_map
         .iter()
-        .sorted_by_key(|(circuit_index, CircuitIndexMeta { witin_num_vars, .. })| {
+        .sorted_by_key(|(_, CircuitIndexMeta { witin_num_vars, .. })| {
             Reverse(witin_num_vars)
         })
         .map(|(circuit_index, CircuitIndexMeta { witin_num_vars, .. })| {
@@ -195,10 +195,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     |(
                         circuit_index,
                         CircuitIndexMeta {
-                            witin_num_vars,
                             witin_num_polys,
                             fixed_num_vars,
                             fixed_num_polys,
+                            ..
                         },
                     )| {
                         let (lo, hi) = witin_commit_leafs_iter
@@ -209,8 +209,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                                 (*fixed_num_vars > 0)
                                     .then(|| {
                                         (fixed_commit_leafs_iter.next().unwrap(), *fixed_num_polys)
-                                    })
-                                    .into_iter(),
+                                    }),
                             )
                             .map(|(leafs, num_polys)| {
                                 let batch_coeffs = batch_coeffs_iter
@@ -264,7 +263,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let mut folded = folding_sorted_order_iter
                 .by_ref()
                 .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
-                .map(|(num_vars, circuit_index)| {
+                .map(|(_, circuit_index)| {
                     let (lo, hi) = &base_oracle_lo_hi[circuit_index];
 
                     let coeff =
@@ -406,6 +405,6 @@ fn get_base_oracle_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
             },
         )
         .unzip();
-    let fixed_dim = fixed_dim.into_iter().filter_map(|x| x).collect_vec();
+    let fixed_dim = fixed_dim.into_iter().flatten().collect_vec();
     (wit_dim, fixed_dim)
 }

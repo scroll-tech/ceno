@@ -32,7 +32,6 @@ use sumcheck::{
 use transcript::{Challenge, Transcript};
 
 use multilinear_extensions::{
-    commutative_op_mle_pair,
     mle::{DenseMultilinearExtension, IntoMLE},
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,

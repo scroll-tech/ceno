@@ -5,7 +5,7 @@ mod utils;
 
 use std::collections::BTreeMap;
 
-use crate::{Evaluation, Point};
+use crate::Point;
 
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
