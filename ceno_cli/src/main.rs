@@ -1,16 +1,15 @@
+use crate::{commands::*, utils::*};
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use crate::commands::*;
-use crate::utils::print_error;
 
 mod commands;
 mod utils;
 
-pub const CENO_VERSION: &str = env!("CENO_VERSION");
+const CENO_VERSION: &str = env!("CENO_VERSION");
 
 #[derive(Parser)]
 #[command(name = "cargo", bin_name = "cargo")]
-pub enum Cargo {
+enum Cargo {
     #[command(name = "ceno")]
     Ceno(VmCli),
 }
@@ -20,12 +19,12 @@ pub enum Cargo {
     author,
     about,
     long_about = None,
-    args_conflicts_with_subcommands = true,
     version = CENO_VERSION
 )]
-pub struct VmCli {
+struct VmCli {
+    toolchain: Option<String>,
     #[clap(subcommand)]
-    pub command: VmCliCommands,
+    command: VmCliCommands,
 }
 
 #[derive(Subcommand)]
@@ -41,10 +40,21 @@ pub enum VmCliCommands {
 
 fn main() {
     let Cargo::Ceno(args) = Cargo::parse();
+    let mut toolchain = args.toolchain;
+    if let Some(toolchain) = toolchain.as_mut() {
+        if !toolchain.starts_with("+") {
+            print_error(anyhow::anyhow!("invalid toolchain selector: {toolchain}"));
+            std::process::exit(1);
+        }
+        *toolchain = toolchain.strip_prefix("+").unwrap().to_string();
+    }
+
     let command = args.command;
     let result = match command {
         // VmCliCommands::Bench(cmd) => cmd.run(),
-        VmCliCommands::Build(cmd) => cmd.run().context("could not build ceno program due to previous error"),
+        VmCliCommands::Build(cmd) => cmd
+            .run(toolchain)
+            .context("could not build ceno program due to previous error"),
         // VmCliCommands::Run(cmd) => cmd.run(),
         // VmCliCommands::Keygen(cmd) => cmd.run(),
         // VmCliCommands::Prove(cmd) => cmd.run(),

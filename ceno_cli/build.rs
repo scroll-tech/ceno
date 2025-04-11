@@ -9,7 +9,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .commit_date(true)
         .build()?;
 
-
     Emitter::default()
         .add_instructions(&build)?
         .add_instructions(&git2)?
