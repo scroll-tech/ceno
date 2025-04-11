@@ -266,14 +266,14 @@ where
             .values()
             .map(|polys| (polys[0].num_vars(), polys.len()))
             .collect_vec();
-        Ok(Self::CommitmentWithWitness {
-            commit: comm,
+        Ok(BasefoldCommitmentWithWitness::new(
+            comm,
             codeword,
             polys,
             meta_info,
             trivial_proofdata,
             circuit_codeword_index,
-        })
+        ))
     }
 
     fn write_commitment(

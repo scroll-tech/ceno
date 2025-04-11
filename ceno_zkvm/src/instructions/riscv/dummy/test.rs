@@ -77,10 +77,8 @@ fn test_dummy_r() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
-    let (raw_witin, lkm) = AddDummy::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_r_instruction(
+    let (raw_witin, lkm) = AddDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,
@@ -88,8 +86,8 @@ fn test_dummy_r() {
             0xfffffffe,
             Change::new(0, 11_u32.wrapping_add(0xfffffffe)),
             0,
-        )],
-    )
+        ),
+    ])
     .unwrap();
 
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
@@ -111,18 +109,16 @@ fn test_dummy_b() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, 8);
-    let (raw_witin, lkm) = BeqDummy::assign_instances(
-        &config,
-        cb.cs.num_witin as usize,
-        vec![StepRecord::new_b_instruction(
+    let (raw_witin, lkm) = BeqDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![
+        StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + 8_usize),
             insn_code,
             0xbead1010,
             0xbead1010,
             0,
-        )],
-    )
+        ),
+    ])
     .unwrap();
 
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));

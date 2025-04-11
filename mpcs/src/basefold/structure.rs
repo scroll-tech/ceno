@@ -1,4 +1,7 @@
-use crate::util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree};
+use crate::{
+    basefold::log2_strict_usize,
+    util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
+};
 use core::fmt::Debug;
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Itertools, izip};
@@ -63,6 +66,8 @@ where
 {
     pub(crate) commit: Digest<E>,
     pub(crate) codeword: MerkleTree<E::BaseField>,
+
+    pub(crate) log2_max_codeword_size: usize,
     pub(crate) trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
     // poly groups w.r.t circuit index
     pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
@@ -77,6 +82,34 @@ impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    pub fn new(
+        commit: Digest<E>,
+        codeword: MerkleTree<E::BaseField>,
+        polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
+        meta_info: Vec<(usize, usize)>,
+        trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
+        circuit_codeword_index: BTreeMap<usize, usize>,
+    ) -> Self {
+        let mmcs = poseidon2_merkle_tree::<E>();
+        // size = height * 2 because we concat pi[left]/pi[right] under same row index
+        let log2_max_codeword_size = log2_strict_usize(
+            mmcs.get_matrices(&codeword)
+                .iter()
+                .map(|m| m.height() * 2)
+                .max()
+                .unwrap(),
+        );
+        Self {
+            commit,
+            codeword,
+            polys,
+            meta_info,
+            trivial_proofdata,
+            circuit_codeword_index,
+            log2_max_codeword_size,
+        }
+    }
+
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
             self.commit.clone(),
@@ -85,6 +118,7 @@ where
                 .iter()
                 .map(|(circuit_index, (digest, _))| (*circuit_index, digest.clone()))
                 .collect_vec(),
+            self.log2_max_codeword_size,
         )
     }
 
@@ -100,16 +134,6 @@ where
     //     Self::trivial_num_vars::<Spec>(self.num_vars)
     // }
 
-    pub fn max_codeword_size(&self) -> usize {
-        let mmcs = poseidon2_merkle_tree::<E>();
-        // size = height * 2 because we concat pi[left]/pi[right] under same row index
-        mmcs.get_matrices(&self.codeword)
-            .iter()
-            .map(|m| m.height() * 2)
-            .max()
-            .unwrap()
-    }
-
     pub fn get_codewords(&self) -> Vec<&DenseMatrix<E::BaseField>> {
         let mmcs = poseidon2_merkle_tree::<E>();
         mmcs.get_matrices(&self.codeword)
@@ -123,6 +147,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(super) commit: Digest<E>,
+    pub(crate) log2_max_codeword_size: usize,
     pub(crate) meta_info: Vec<(usize, usize)>,
     // (circuit_index, commitment)
     pub(crate) trivial_commits: Vec<(usize, Digest<E>)>,
@@ -136,11 +161,13 @@ where
         commit: Digest<E>,
         meta_info: Vec<(usize, usize)>,
         trivial_commits: Vec<(usize, Digest<E>)>,
+        log2_max_codeword_size: usize,
     ) -> Self {
         Self {
             commit,
             meta_info,
             trivial_commits,
+            log2_max_codeword_size,
         }
     }
 

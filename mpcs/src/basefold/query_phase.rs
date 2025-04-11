@@ -38,12 +38,10 @@ where
     let mmcs = poseidon2_merkle_tree::<E>();
 
     // Transform the challenge queries from field elements into integers
-    let log2_witin_max_codeword_size = log2_strict_usize(witin_comms.max_codeword_size());
-    let log2_fixed_max_codeword_size = log2_strict_usize(fixed_comms.max_codeword_size());
     let queries: Vec<_> = transcript.sample_bits_and_append_vec(
         b"query indices",
         num_verifier_queries,
-        log2_witin_max_codeword_size,
+        witin_comms.log2_max_codeword_size,
     );
 
     queries
@@ -65,10 +63,12 @@ where
 
             let fixed_base_opening = {
                 // follow same rule as `witin_base_opening`
-                let idx = if log2_witin_max_codeword_size > log2_fixed_max_codeword_size {
-                    idx >> (log2_witin_max_codeword_size - log2_fixed_max_codeword_size)
+                let idx_shift = witin_comms.log2_max_codeword_size as i32
+                    - fixed_comms.log2_max_codeword_size as i32;
+                let idx = if idx_shift > 0 {
+                    idx >> idx_shift
                 } else {
-                    idx << (log2_fixed_max_codeword_size - log2_witin_max_codeword_size)
+                    idx << -idx_shift
                 };
                 let idx = idx >> 1;
                 let (values, proof) = mmcs.open_batch(idx, &fixed_comms.codeword);
@@ -168,7 +168,15 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             mmcs.verify_batch(
                 &fixed_comm.commit,
                 &fixed_dimentions,
-                idx,
+                {
+                    let idx_shift = witin_comm.log2_max_codeword_size as i32
+                        - fixed_comm.log2_max_codeword_size as i32;
+                    if idx_shift > 0 {
+                        idx >> idx_shift
+                    } else {
+                        idx << -idx_shift
+                    }
+                },
                 fixed_commit_leafs,
                 fixed_commit_proof,
             )

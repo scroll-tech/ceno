@@ -321,14 +321,11 @@ where
         let _ = (trees.pop(), commits.pop());
     }
     transcript.append_field_element_exts_iter(final_message.iter().flatten());
-    (
-        trees,
-        BasefoldCommitPhaseProof {
-            sumcheck_messages,
-            commits,
-            final_message,
-        },
-    )
+    (trees, BasefoldCommitPhaseProof {
+        sumcheck_messages,
+        commits,
+        final_message,
+    })
 }
 
 // TODO define it within codeword

@@ -16,15 +16,11 @@ pub enum SoundnessType {
 
 impl Display for SoundnessType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match &self {
-                SoundnessType::ProvableList => "ProvableList",
-                SoundnessType::ConjectureList => "ConjectureList",
-                SoundnessType::UniqueDecoding => "UniqueDecoding",
-            }
-        )
+        write!(f, "{}", match &self {
+            SoundnessType::ProvableList => "ProvableList",
+            SoundnessType::ConjectureList => "ConjectureList",
+            SoundnessType::UniqueDecoding => "UniqueDecoding",
+        })
     }
 }
 
@@ -85,14 +81,10 @@ impl FromStr for FoldType {
 
 impl Display for FoldType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                FoldType::Naive => "Naive",
-                FoldType::ProverHelps => "ProverHelps",
-            }
-        )
+        write!(f, "{}", match self {
+            FoldType::Naive => "Naive",
+            FoldType::ProverHelps => "ProverHelps",
+        })
     }
 }
 

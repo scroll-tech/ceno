@@ -523,13 +523,10 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverState {
-                    poly,
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverState {
+                poly,
+                ..Default::default()
+            });
         }
         let start = start_timer!(|| "sum check prove");
 

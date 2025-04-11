@@ -524,20 +524,19 @@ mod test {
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MULH, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                rs1 as u32,
-                rs2 as u32,
-                Change::new(0, signed_prod_high),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            MulhInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    rs1 as u32,
+                    rs2 as u32,
+                    Change::new(0, signed_prod_high),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         // verify value written to register
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
@@ -590,20 +589,19 @@ mod test {
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MULHSU, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhsuInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                rs1 as u32,
-                rs2,
-                Change::new(0, signed_unsigned_prod_high),
-                0,
-            )],
-        )
-        .unwrap();
+        let (raw_witin, lkm) =
+            MulhsuInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
+                StepRecord::new_r_instruction(
+                    3,
+                    MOCK_PC_START,
+                    insn_code,
+                    rs1 as u32,
+                    rs2,
+                    Change::new(0, signed_unsigned_prod_high),
+                    0,
+                ),
+            ])
+            .unwrap();
 
         // verify value written to register
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();

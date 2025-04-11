@@ -572,10 +572,8 @@ mod test {
         let outcome = Insn::correct(dividend, divisor);
         let insn_code = encode_rv32(Insn::INSN_KIND, 2, 3, 4, 0);
         // values assignment
-        let (raw_witin, lkm) = Insn::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            vec![StepRecord::new_r_instruction(
+        let (raw_witin, lkm) = Insn::assign_instances(&config, cb.cs.num_witin as usize, vec![
+            StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,
@@ -583,8 +581,8 @@ mod test {
                 Insn::as_u32(divisor),
                 Change::new(0, Insn::as_u32(outcome)),
                 0,
-            )],
-        )
+            ),
+        ])
         .unwrap();
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(Insn::as_u32(exp_outcome))
