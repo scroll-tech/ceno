@@ -1,4 +1,5 @@
 use ff_ext::{ExtensionField, FieldChallengerExt};
+use p3::challenger::CanSampleBits;
 use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
@@ -52,6 +53,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
 
     fn sample_vec(&mut self, n: usize) -> Vec<E> {
         self.challenger.sample_ext_vec(n)
+    }
+
+    fn sample_bits(&mut self, bits: usize) -> usize {
+        self.challenger.sample_bits(bits)
     }
 }
 

@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use super::{EncodingProverParameters, EncodingScheme};
-use crate::{Error, basefold::PolyEvalsCodeword};
+use crate::Error;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use p3::{
@@ -100,7 +100,7 @@ where
 
     type VerifierParameters = RSCodeVerifierParameters<E>;
 
-    type EncodedData = PolyEvalsCodeword<E>;
+    type EncodedData = DenseMatrix<E::BaseField>;
 
     fn setup(_max_message_size_log: usize) -> Self::PublicParameters {
         RSCodeParameters {
@@ -184,18 +184,14 @@ where
         ))
     }
 
-    fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData {
+    fn encode(
+        pp: &Self::ProverParameters,
+        rmm: RowMajorMatrix<E::BaseField>,
+    ) -> Result<Self::EncodedData, Error> {
         let num_vars = rmm.num_vars();
         let num_polys = rmm.width();
         if num_vars > pp.get_max_message_size_log() {
-            return PolyEvalsCodeword::TooBig(num_vars);
-        }
-
-        // In this case, the polynomial is so small that the opening is trivial.
-        // So we just build the Merkle tree over the polynomial evaluations.
-        // No codeword is needed.
-        if num_vars <= Spec::get_basecode_msg_size_log() {
-            return PolyEvalsCodeword::TooSmall(Box::new(rmm.into_default_padded_p3_rmm()));
+            return Err(Error::PolynomialTooLarge(num_vars));
         }
 
         // here 2 resize happend. first is padding to next pow2 height, second is extend to 2^get_rate_log times size
@@ -218,8 +214,7 @@ where
         // to make 2 consecutive position to be open together, we trickily "concat" 2 consecutive leafs
         // so both can be open under same row index
         let codeword = DenseMatrix::new(codeword, num_polys * 2);
-
-        PolyEvalsCodeword::Normal(Box::new(codeword))
+        Ok(codeword)
     }
 
     fn encode_small(
@@ -296,9 +291,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use ff_ext::GoldilocksExt2;
     use itertools::izip;
-    use p3::{goldilocks::Goldilocks, util::log2_strict_usize};
+    use p3::goldilocks::Goldilocks;
 
     use rand::rngs::OsRng;
 
@@ -317,12 +314,7 @@ mod tests {
         let rmm: RowMajorMatrix<F> = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
         let pp = <Code as EncodingScheme<E>>::setup(num_vars);
         let (pp, vp) = Code::trim(pp, num_vars).unwrap();
-        let codeword = Code::encode(&pp, rmm.clone());
-        let codeword = match codeword {
-            PolyEvalsCodeword::Normal(dense_matrix) => dense_matrix,
-            PolyEvalsCodeword::TooSmall(_) => todo!(),
-            PolyEvalsCodeword::TooBig(_) => todo!(),
-        };
+        let codeword = Code::encode(&pp, rmm.clone()).expect("encode error");
         assert_eq!(
             codeword.values.len(),
             1 << (num_vars + <Code as EncodingScheme<E>>::get_rate_log())
@@ -342,8 +334,7 @@ mod tests {
         let r = E::from_u64(97);
         let folded_codeword = basefold_one_round_by_interpolation_weights::<E, BasefoldRSParams>(
             &pp,
-            log2_strict_usize(codeword_ext.values.len()) - 1,
-            &codeword_ext.values,
+            &mut [Cow::Borrowed(&codeword_ext.values)],
             r,
         );
 

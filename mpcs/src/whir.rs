@@ -3,6 +3,10 @@ mod spec;
 mod structure;
 mod utils;
 
+use std::collections::BTreeMap;
+
+use crate::Point;
+
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
@@ -12,6 +16,7 @@ pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 pub use structure::{Whir, WhirDefault};
 use structure::{WhirDigest, WhirInnerT, digest_to_bytes};
+use transcript::Transcript;
 use utils::{poly2whir, polys2whir};
 pub use whir::ceno_binding::Error;
 use whir::ceno_binding::PolynomialCommitmentScheme as WhirPCS;
@@ -108,9 +113,10 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: witness::RowMajorMatrix<E::BaseField>,
+        rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let polys = polys.to_mles();
+        assert_eq!(rmms.len(), 2);
+        let polys = rmms[&0].to_mles();
         let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;
 
@@ -119,11 +125,13 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
-        _polys: &[ArcMultilinearExtension<E>],
-        _comms: &[Self::CommitmentWithWitness],
-        _points: &[Vec<E>],
-        _evals: &[crate::Evaluation<E>],
-        _transcript: &mut impl transcript::Transcript<E>,
+        _num_instances: &[(usize, usize)],
+        _fixed_comms: &Self::CommitmentWithWitness,
+        _witin_comms: &Self::CommitmentWithWitness,
+        _points: &[Point<E>],
+        _evals: &[Vec<E>],
+        _circuit_num_polys: &[(usize, usize)],
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
@@ -151,11 +159,14 @@ where
 
     fn batch_verify(
         _vp: &Self::VerifierParam,
-        _comms: &[Self::Commitment],
-        _points: &[Vec<E>],
-        _evals: &[crate::Evaluation<E>],
+        _num_instances: &[(usize, usize)],
+        _points: &[Point<E>],
+        _fixed_comms: &Self::Commitment,
+        _witin_comms: &Self::Commitment,
+        _evals: &[Vec<E>],
         _proof: &Self::Proof,
-        _transcript: &mut impl transcript::Transcript<E>,
+        _circuit_num_polys: &[(usize, usize)],
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
     }

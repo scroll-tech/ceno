@@ -63,6 +63,13 @@ pub trait Transcript<E: ExtensionField> {
         }
     }
 
+    /// Append a iterator of extension field elements to the transcript.
+    fn append_field_element_exts_iter<'a>(&mut self, element: impl Iterator<Item = &'a E>) {
+        for e in element {
+            self.append_field_element_ext(e);
+        }
+    }
+
     /// Append a challenge to the transcript.
     fn append_challenge(&mut self, challenge: Challenge<E>) {
         self.append_field_element_ext(&challenge.elements)
@@ -83,7 +90,23 @@ pub trait Transcript<E: ExtensionField> {
         self.sample_vec(n)
     }
 
+    fn sample_bits_and_append_vec(
+        &mut self,
+        label: &'static [u8],
+        n: usize,
+        bits: usize,
+    ) -> Vec<usize> {
+        self.append_message(label);
+        self.sample_vec_bits(n, bits)
+    }
+
     fn sample_vec(&mut self, n: usize) -> Vec<E>;
+
+    fn sample_bits(&mut self, bits: usize) -> usize;
+
+    fn sample_vec_bits(&mut self, n: usize, bits: usize) -> Vec<usize> {
+        (0..n).map(|_| self.sample_bits(bits)).collect_vec()
+    }
 
     /// derive one challenge from transcript and return all pows result
     fn sample_and_append_challenge_pows(&mut self, size: usize, label: &'static [u8]) -> Vec<E> {

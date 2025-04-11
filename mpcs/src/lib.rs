@@ -1,7 +1,7 @@
 #![deny(clippy::cargo)]
 use ff_ext::ExtensionField;
 use serde::{Serialize, de::DeserializeOwned};
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -15,6 +15,9 @@ pub type CommitmentWithWitness<E, Pcs> =
 pub type Param<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Param;
 pub type ProverParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::ProverParam;
 pub type VerifierParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::VerifierParam;
+
+/// A point is a vector of num_var length
+pub type Point<F> = Vec<F>;
 
 pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     poly_size: usize,
@@ -46,17 +49,17 @@ pub fn pcs_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit(pp, rmm)
+    Pcs::batch_commit(pp, rmms)
 }
 
 pub fn pcs_batch_commit_and_write<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
-    Pcs::batch_commit_and_write(pp, rmm, transcript)
+    Pcs::batch_commit_and_write(pp, rmms, transcript)
 }
 
 pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -72,13 +75,24 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    polys: &[ArcMultilinearExtension<E>],
-    comms: &[Pcs::CommitmentWithWitness],
-    points: &[Vec<E>],
-    evals: &[Evaluation<E>],
+    num_instances: &[(usize, usize)],
+    fixed_comms: &Pcs::CommitmentWithWitness,
+    witin_comms: &Pcs::CommitmentWithWitness,
+    points: &[Point<E>],
+    evals: &[Vec<E>],
+    circuit_num_polys: &[(usize, usize)],
     transcript: &mut impl Transcript<E>,
 ) -> Result<Pcs::Proof, Error> {
-    Pcs::batch_open(pp, polys, comms, points, evals, transcript)
+    Pcs::batch_open(
+        pp,
+        num_instances,
+        fixed_comms,
+        witin_comms,
+        points,
+        evals,
+        circuit_num_polys,
+        transcript,
+    )
 }
 
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -94,16 +108,29 @@ pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     vp: &Pcs::VerifierParam,
-    comms: &[Pcs::Commitment],
-    points: &[Vec<E>],
-    evals: &[Evaluation<E>],
+    num_instances: &[(usize, usize)],
+    points: &[Point<E>],
+    fixed_comms: &Pcs::Commitment,
+    witin_comms: &Pcs::Commitment,
+    evals: &[Vec<E>],
     proof: &Pcs::Proof,
+    circuit_num_polys: &[(usize, usize)],
     transcript: &mut impl Transcript<E>,
 ) -> Result<(), Error>
 where
     Pcs::Commitment: 'a,
 {
-    Pcs::batch_verify(vp, comms, points, evals, proof, transcript)
+    Pcs::batch_verify(
+        vp,
+        num_instances,
+        points,
+        fixed_comms,
+        witin_comms,
+        evals,
+        proof,
+        circuit_num_polys,
+        transcript,
+    )
 }
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
@@ -146,15 +173,15 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        polys: RowMajorMatrix<E::BaseField>,
+        rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        rmm: RowMajorMatrix<<E as ExtensionField>::BaseField>,
+        rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
-        let comm = Self::batch_commit(pp, rmm)?;
+        let comm = Self::batch_commit(pp, rmms)?;
         Self::write_commitment(&Self::get_pure_commitment(&comm), transcript)?;
         Ok(comm)
     }
@@ -170,10 +197,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_open(
         pp: &Self::ProverParam,
-        polys: &[ArcMultilinearExtension<E>],
-        comms: &[Self::CommitmentWithWitness],
-        points: &[Vec<E>],
-        evals: &[Evaluation<E>],
+        num_instances: &[(usize, usize)],
+        fixed_comms: &Self::CommitmentWithWitness,
+        witin_comms: &Self::CommitmentWithWitness,
+        points: &[Point<E>],
+        evals: &[Vec<E>],
+        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
@@ -201,10 +230,13 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_verify(
         vp: &Self::VerifierParam,
-        comms: &[Self::Commitment],
-        points: &[Vec<E>],
-        evals: &[Evaluation<E>],
+        num_instances: &[(usize, usize)],
+        points: &[Point<E>],
+        fixed_comms: &Self::Commitment,
+        witin_comms: &Self::Commitment,
+        evals: &[Vec<E>],
         proof: &Self::Proof,
+        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 
@@ -392,6 +424,8 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
+        use std::collections::BTreeMap;
+
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
@@ -400,7 +434,9 @@ pub mod test_util {
                 let rmm =
                     RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
                 let polys = rmm.to_mles();
-                let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
+                let comm =
+                    Pcs::batch_commit_and_write(&pp, BTreeMap::from([(0, rmm)]), &mut transcript)
+                        .unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);

@@ -58,6 +58,10 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
     fn sample_vec(&mut self, n: usize) -> Vec<E> {
         self.inner.sample_vec(n)
     }
+
+    fn sample_bits(&mut self, bits: usize) -> usize {
+        self.inner.sample_bits(bits)
+    }
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E> {}
