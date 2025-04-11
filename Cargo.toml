@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "ceno_cli",
   "ceno_emul",
   "ceno_host",
   "ceno_rt",

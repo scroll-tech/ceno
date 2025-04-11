@@ -1,0 +1,21 @@
+[package]
+categories.workspace = true
+description = "cargo-ceno cli tools"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "cargo-ceno"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true, features = ["std", "backtrace"] }
+console = "0.15"
+clap = { version = "4", features = ["derive"] }
+tempfile = "3.19"
+
+ceno_zkvm = { path = "../ceno_zkvm" }
+
+[build-dependencies]
+vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_set"] }

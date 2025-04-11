@@ -67,6 +67,9 @@ struct Args {
     #[arg(long, conflicts_with = "hints_file", value_parser, num_args = 1.., value_delimiter = ',')]
     hints: Option<Vec<Word>>,
 
+    #[arg(long, default_value = "100")]
+    n: u32,
+
     /// Stack size in bytes.
     #[arg(long, default_value = "2M", value_parser = parse_size)]
     stack_size: u32,
@@ -146,7 +149,8 @@ fn main() {
         .max(16);
 
     tracing::info!("Loading ELF file: {}", &args.elf);
-    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    // let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let elf_bytes = ceno_examples::is_prime;
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = setup_platform(
         args.platform,
