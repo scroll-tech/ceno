@@ -536,21 +536,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
 
-        tracing::debug!(
-            "[opcode {}] verify opening proof for {} polys",
-            name,
-            proof.wits_in_evals.len(),
-        );
-        // PCS::simple_batch_verify(
-        //     vp,
-        //     &proof.wits_commit,
-        //     &input_opening_point,
-        //     &proof.wits_in_evals,
-        //     &proof.wits_opening_proof,
-        //     transcript,
-        // )
-        // .map_err(ZKVMError::PCSError)?;
-
         Ok(input_opening_point)
     }
 
@@ -834,45 +819,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 "[table {name}] verified public inputs on index {idx} with point {input_opening_point:?}",
             );
         }
-
-        // // do optional check of fixed_commitment openings by vk
-        // if circuit_vk.fixed_commit.is_some() {
-        //     let Some(fixed_opening_proof) = &proof.fixed_opening_proof else {
-        //         return Err(ZKVMError::VerifyError(
-        //             "fixed openning proof shoudn't be none".into(),
-        //         ));
-        //     };
-        //     PCS::simple_batch_verify(
-        //         vp,
-        //         circuit_vk.fixed_commit.as_ref().unwrap(),
-        //         &input_opening_point,
-        //         &proof.fixed_in_evals,
-        //         fixed_opening_proof,
-        //         transcript,
-        //     )
-        //     .map_err(ZKVMError::PCSError)?;
-        // }
-
-        // tracing::debug!(
-        //     "[table {}] verified opening proof for {} fixed polys",
-        //     name,
-        //     proof.fixed_in_evals.len(),
-        // );
-
-        // PCS::simple_batch_verify(
-        //     vp,
-        //     &proof.wits_commit,
-        //     &input_opening_point,
-        //     &proof.wits_in_evals,
-        //     &proof.wits_opening_proof,
-        //     transcript,
-        // )
-        // .map_err(ZKVMError::PCSError)?;
-        // tracing::debug!(
-        //     "[table {}] verified opening proof for {} polys",
-        //     name,
-        //     proof.wits_in_evals.len(),
-        // );
 
         Ok(input_opening_point)
     }

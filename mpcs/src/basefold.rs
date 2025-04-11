@@ -669,6 +669,7 @@ where
             &circuit_meta_map,
             &proof.commits,
             &fold_challenges,
+            &sumcheck_messages,
         );
 
         Ok(())
@@ -683,81 +684,6 @@ where
         _transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         unimplemented!()
-        // let timer = start_timer!(|| "Basefold::simple batch verify");
-        // let batch_size = evals.len();
-        // if let Some(num_polys) = comm.num_polys {
-        //     assert_eq!(num_polys, batch_size);
-        // }
-
-        // if proof.is_trivial() {
-        //     let trivial_proof = proof.trivial_proof.as_ref().unwrap();
-        //     let mmcs = poseidon2_merkle_tree::<E>();
-        //     let (root, _) = mmcs.commit_matrix(trivial_proof.clone());
-        //     if comm.pi_d_digest() == root {
-        //         return Ok(());
-        //     } else {
-        //         return Err(Error::MerkleRootMismatch);
-        //     }
-        // }
-
-        // let num_vars = point.len();
-        // if let Some(comm_num_vars) = comm.num_vars() {
-        //     assert_eq!(num_vars, comm_num_vars);
-        //     assert!(num_vars >= Spec::get_basecode_msg_size_log());
-        // }
-        // let num_rounds = num_vars - Spec::get_basecode_msg_size_log();
-
-        // // evals.len() is the batch size, i.e., how many polynomials are being opened together
-        // let batch_coeffs =
-        //     transcript.sample_and_append_challenge_pows(evals.len(), b"batch coeffs");
-
-        // let mut fold_challenges: Vec<E> = Vec::with_capacity(num_vars);
-        // let commits = &proof.commits;
-        // let sumcheck_messages = &proof.sumcheck_messages;
-        // for i in 0..num_rounds {
-        //     transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
-        //     fold_challenges.push(
-        //         transcript
-        //             .sample_and_append_challenge(b"commit round")
-        //             .elements,
-        //     );
-        //     if i < num_rounds - 1 {
-        //         write_digest_to_transcript(&commits[i], transcript);
-        //     }
-        // }
-        // let final_message = &proof.final_message[0];
-        // transcript.append_field_element_exts(final_message.as_slice());
-
-        // let queries: Vec<_> = transcript.sample_bits_and_append_vec(
-        //     b"query indices",
-        //     Spec::get_number_queries(),
-        //     num_vars + Spec::get_rate_log(),
-        // );
-
-        // // coeff is the eq polynomial evaluated at the first challenge.len() variables
-        // let coeff = eq_eval(&point[..fold_challenges.len()], &fold_challenges);
-        // // Compute eq as the partially evaluated eq polynomial
-        // let mut eq = build_eq_x_r_vec(&point[fold_challenges.len()..]);
-        // eq.par_iter_mut().for_each(|e| *e *= coeff);
-
-        // simple_batch_verifier_query_phase::<E, Spec>(
-        //     queries.as_slice(),
-        //     &vp.encoding_params,
-        //     &proof.query_opening_proof,
-        //     sumcheck_messages,
-        //     &fold_challenges,
-        //     &batch_coeffs,
-        //     num_rounds,
-        //     num_vars,
-        //     final_message,
-        //     commits,
-        //     comm,
-        //     eq.as_slice(),
-        //     evals,
-        // );
-        // end_timer!(timer);
-
-        // Ok(())
     }
 
     fn get_arc_mle_witness_from_commitment(
