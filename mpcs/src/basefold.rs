@@ -366,20 +366,19 @@ where
             );
         }
 
-        let max_num_vars = *witin_comms
-            .meta_info
-            .iter()
-            .map(|(num_var, _)| num_var)
-            .max()
-            .unwrap();
-
         // identify trivial/non trivial based on size
-        let (trivial_witin_polys_and_meta, witin_polys_and_meta) =
+        let (trivial_witin_polys_and_meta, witin_polys_and_meta): (Vec<_>, _) =
             izip!(points, &witin_comms.polys)
                 .map(|(point, (circuit_index, polys))| (point, (*circuit_index, polys)))
                 .partition(|(_, (_, polys))| {
                     polys[0].num_vars() <= Spec::get_basecode_msg_size_log()
                 });
+
+        let max_num_vars = witin_polys_and_meta
+            .iter()
+            .map(|(_, (circuit_index, polys))| polys[0].num_vars())
+            .max()
+            .unwrap();
 
         // Basefold IOP commit phase
         let commit_phase_span = entered_span!("Basefold::open::commit_phase");

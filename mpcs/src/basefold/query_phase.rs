@@ -327,12 +327,12 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 n_d_i >>= 1;
             }
             debug_assert!(folding_sorted_order_iter.next().is_none());
-            // assert!(
-            //     final_codeword.values[idx] == folded,
-            //     "final_codeword.values[idx] value {:?} != folded {:?}",
-            //     final_codeword.values[idx],
-            //     folded
-            // );
+            assert!(
+                final_codeword.values[idx] == folded,
+                "final_codeword.values[idx] value {:?} != folded {:?}",
+                final_codeword.values[idx],
+                folded
+            );
         },
     );
     exit_span!(check_queries_span);

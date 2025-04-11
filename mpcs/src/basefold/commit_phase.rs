@@ -135,6 +135,7 @@ where
                 // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
                 let size = witin_fixed_concated_codeword[0].0.height() * 2;
                 (0..size)
+                    .into_par_iter()
                     .map(|j| {
                         witin_fixed_concated_codeword
                             .iter()
@@ -170,27 +171,25 @@ where
         .par_iter()
         .zip_eq(batch_coeffs_splitted.par_iter())
         .map(|(witin_fixed_mle, batch_coeffs)| {
+            assert_eq!(witin_fixed_mle.len(), batch_coeffs.len());
             let num_vars = witin_fixed_mle[0].num_vars();
-            let Some((running_evals, _)): Option<(ArcMultilinearExtension<E>, E)> = izip!(
-                witin_fixed_mle.iter().cloned(),
-                batch_coeffs.iter().copied()
-            )
-            .reduce(|(poly_a, coeff_a), (poly_b, coeff_b)| {
-                let next_poly = commutative_op_mle_pair!(|poly_a, poly_b| {
-                    // TODO we can save a bit cost if first batch_coeffs is E::ONE so we can skip the first base * ext operation
-                    Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
-                        num_vars,
-                        poly_a
-                            .par_iter()
-                            .zip(poly_b.par_iter())
-                            .map(|(a, b)| coeff_a * *a + coeff_b * *b)
-                            .collect(),
-                    ))
-                });
-                (next_poly, E::ONE)
-            }) else {
-                unimplemented!()
-            };
+            let mle_base_vec = witin_fixed_mle
+                .iter()
+                .map(|mle| mle.get_base_field_vec())
+                .collect_vec();
+            let running_evals: ArcMultilinearExtension<_> =
+                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    num_vars,
+                    (0..witin_fixed_mle[0].evaluations().len())
+                        .into_par_iter()
+                        .map(|j| {
+                            dot_product(
+                                batch_coeffs.iter().copied(),
+                                mle_base_vec.iter().map(|mle| mle[j]),
+                            )
+                        })
+                        .collect::<Vec<E>>(),
+                ));
             running_evals
         })
         .collect::<Vec<_>>();
@@ -306,11 +305,13 @@ where
         .collect_vec();
 
     if cfg!(feature = "sanity-check") {
-        assert_eq!(final_message.len(), 1, "batching different num var");
-        // If the prover is honest, in the last round, the running oracle
-        // on the prover side should be exactly the encoding of the folded polynomial.
+        assert!(final_message.iter().map(|m| m.len()).all_equal());
+        let final_message_agg: Vec<E> = (0..final_message[0].len())
+            .map(|j| final_message.iter().map(|row| row[j]).sum())
+            .collect_vec();
+        // last round running oracle should be exactly the encoding of the folded polynomial.
         let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode_slow_ext(
-            p3::matrix::dense::DenseMatrix::new(final_message[0].clone(), 1),
+            p3::matrix::dense::DenseMatrix::new(final_message_agg, 1),
         );
         assert_eq!(
             basecode.values,
