@@ -10,6 +10,7 @@ use crate::Point;
 use super::PolynomialCommitmentScheme;
 use ff_ext::ExtensionField;
 use field_wrapper::ExtensionFieldWrapper as FieldWrapper;
+use itertools::Itertools;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use serde::{Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
@@ -115,7 +116,8 @@ where
         pp: &Self::ProverParam,
         rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        let polys = rmms[&0].to_mles();
+        // TODO implement batch commit logi
+        let polys = rmms.values().take(1).collect_vec()[0].to_mles();
         let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;
 

@@ -384,11 +384,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         &mut self,
         fixed_traces: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<(), ZKVMError> {
-        let fixed_commit_wd =
-            PCS::batch_commit(&self.pp, fixed_traces).map_err(ZKVMError::PCSError)?;
-        let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
-        self.fixed_commit_wd = Some(fixed_commit_wd);
-        self.fixed_commit = Some(fixed_commit);
+        if !fixed_traces.is_empty() {
+            let fixed_commit_wd =
+                PCS::batch_commit(&self.pp, fixed_traces).map_err(ZKVMError::PCSError)?;
+            let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
+            self.fixed_commit_wd = Some(fixed_commit_wd);
+            self.fixed_commit = Some(fixed_commit);
+        } else {
+            self.fixed_commit_wd = None;
+            self.fixed_commit = None;
+        }
         Ok(())
     }
 }

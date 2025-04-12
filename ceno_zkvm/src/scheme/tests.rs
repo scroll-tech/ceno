@@ -134,8 +134,6 @@ fn test_rw_lk_expression_combination() {
         )
         .unwrap();
         let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
-        // write commitment into transcript and derive challenges from it
-        Pcs::write_commitment(&witin_commit, &mut transcript).unwrap();
 
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
         let prover_challenges = [

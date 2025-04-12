@@ -354,14 +354,13 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         // we need to scale up with scalar for witin_num_vars < max_num_var
         dot_product::<E, _, _>(
             batch_coeffs.iter().copied(),
-            point_evals
-                .iter()
-                .zip_eq(circuit_meta_map.iter())
-                .flat_map(|((_, evals), (_, CircuitIndexMeta { witin_num_vars, .. }))| {
-                        evals.iter().copied().map(move |eval| {
-                            eval * E::from_u64(1 << (max_num_var - witin_num_vars) as u64)
-                        })
+            point_evals.iter().zip_eq(circuit_meta_map.iter()).flat_map(
+                |((_, evals), (_, CircuitIndexMeta { witin_num_vars, .. }))| {
+                    evals.iter().copied().map(move |eval| {
+                        eval * E::from_u64(1 << (max_num_var - witin_num_vars) as u64)
                     })
+                }
+            )
         ),
         { sumcheck_messages[0][0] + sumcheck_messages[0][1] }
     );

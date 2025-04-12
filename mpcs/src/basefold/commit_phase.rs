@@ -203,7 +203,6 @@ where
         .collect::<Vec<_>>();
     exit_span!(build_eq_span);
 
-    // FIXME: make num_thread dominated by thread
     let num_threads = optimal_sumcheck_threads(max_num_vars);
     let log2_num_threads = log2_strict_usize(num_threads);
 
@@ -228,12 +227,10 @@ where
             )
         })
         .collect::<Vec<_>>();
-
-    let mut challenge = None;
-
     let mut sumcheck_messages = Vec::with_capacity(num_rounds);
     let mut commits = Vec::with_capacity(num_rounds - 1);
 
+    let mut challenge = None;
     let sumcheck_phase1 = entered_span!("sumcheck_phase1");
     let phase1_rounds = num_rounds.min(max_num_vars - log2_num_threads);
     for i in 0..phase1_rounds {
