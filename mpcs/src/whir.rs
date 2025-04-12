@@ -127,7 +127,7 @@ where
     fn batch_open(
         _pp: &Self::ProverParam,
         _num_instances: &[(usize, usize)],
-        _fixed_comms: &Self::CommitmentWithWitness,
+        _fixed_comms: Option<&Self::CommitmentWithWitness>,
         _witin_comms: &Self::CommitmentWithWitness,
         _points: &[Point<E>],
         _evals: &[Vec<E>],
@@ -162,7 +162,7 @@ where
         _vp: &Self::VerifierParam,
         _num_instances: &[(usize, usize)],
         _points: &[Point<E>],
-        _fixed_comms: &Self::Commitment,
+        _fixed_comms: Option<&Self::Commitment>,
         _witin_comms: &Self::Commitment,
         _evals: &[Vec<E>],
         _proof: &Self::Proof,
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     #[ignore = "For benchmarking and profiling only"]
-    fn bench_whir_simple_batch_commit_open_verify_goldilocks() {
+    fn bench_whir_batch_commit_open_verify_goldilocks() {
         {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(20, 21);
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(20, 21, 64);
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn whir_simple_batch_commit_open_verify_goldilocks() {
+    fn whir_batch_commit_open_verify_goldilocks() {
         {
             // Both challenge and poly are over base field
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(10, 16, 1);

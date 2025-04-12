@@ -77,7 +77,7 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     num_instances: &[(usize, usize)],
-    fixed_comms: &Pcs::CommitmentWithWitness,
+    fixed_comms: Option<&Pcs::CommitmentWithWitness>,
     witin_comms: &Pcs::CommitmentWithWitness,
     points: &[Point<E>],
     evals: &[Vec<E>],
@@ -112,7 +112,7 @@ pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E
     vp: &Pcs::VerifierParam,
     num_instances: &[(usize, usize)],
     points: &[Point<E>],
-    fixed_comms: &Pcs::Commitment,
+    fixed_comms: Option<&Pcs::Commitment>,
     witin_comms: &Pcs::Commitment,
     evals: &[Vec<E>],
     proof: &Pcs::Proof,
@@ -201,7 +201,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
     fn batch_open(
         pp: &Self::ProverParam,
         num_instances: &[(usize, usize)],
-        fixed_comms: &Self::CommitmentWithWitness,
+        fixed_comms: Option<&Self::CommitmentWithWitness>,
         witin_comms: &Self::CommitmentWithWitness,
         points: &[Point<E>],
         evals: &[Vec<E>],
@@ -236,7 +236,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         vp: &Self::VerifierParam,
         num_instances: &[(usize, usize)],
         points: &[Point<E>],
-        fixed_comms: &Self::Commitment,
+        fixed_comms: Option<&Self::Commitment>,
         witin_comms: &Self::Commitment,
         evals: &[Vec<E>],
         proof: &Self::Proof,
@@ -470,6 +470,87 @@ pub mod test_util {
 
                 Pcs::simple_batch_verify(&vp, &comm, &point, &evals, &proof, &mut transcript)
                     .unwrap();
+
+                let v_challenge = transcript.read_challenge();
+                assert_eq!(challenge, v_challenge);
+
+                println!(
+                    "Proof size for simple batch: {} bytes",
+                    bincode::serialized_size(&proof).unwrap()
+                );
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn run_batch_commit_open_verify<E, Pcs>(
+        num_vars_start: usize,
+        num_vars_end: usize,
+        batch_size: usize,
+    ) where
+        E: ExtensionField,
+        Pcs: PolynomialCommitmentScheme<E>,
+        Standard: Distribution<E::BaseField>,
+    {
+        use std::collections::BTreeMap;
+
+        for num_vars in num_vars_start..num_vars_end {
+            let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
+            let num_instances = vec![(0, 1 << num_vars)];
+            let circuit_num_polys = vec![(batch_size, 0)];
+
+            let (comm, evals, proof, challenge) = {
+                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let rmm =
+                    RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
+
+                let polys = rmm.to_mles();
+
+                let comm =
+                    Pcs::batch_commit_and_write(&pp, BTreeMap::from([(0, rmm)]), &mut transcript)
+                        .unwrap();
+                let point = get_point_from_challenge(num_vars, &mut transcript);
+                let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
+                transcript.append_field_element_exts(&evals);
+
+                let proof = Pcs::batch_open(
+                    &pp,
+                    &num_instances,
+                    None,
+                    &comm,
+                    &[point.clone()],
+                    &[evals.clone()],
+                    &circuit_num_polys,
+                    &mut transcript,
+                )
+                .unwrap();
+                (
+                    Pcs::get_pure_commitment(&comm),
+                    evals,
+                    proof,
+                    transcript.read_challenge(),
+                )
+            };
+            // Batch verify
+            {
+                let mut transcript = BasicTranscript::new(b"BaseFold");
+                Pcs::write_commitment(&comm, &mut transcript).unwrap();
+
+                let point = get_point_from_challenge(num_vars, &mut transcript);
+                transcript.append_field_element_exts(&evals);
+
+                Pcs::batch_verify(
+                    &vp,
+                    &num_instances,
+                    &[point.clone()],
+                    None,
+                    &comm,
+                    &[evals.clone()],
+                    &proof,
+                    &circuit_num_polys,
+                    &mut transcript,
+                )
+                .unwrap();
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);

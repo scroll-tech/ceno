@@ -31,7 +31,7 @@ use super::{
 
 pub fn batch_query_phase<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
-    fixed_comms: &BasefoldCommitmentWithWitness<E>,
+    fixed_comms: Option<&BasefoldCommitmentWithWitness<E>>,
     witin_comms: &BasefoldCommitmentWithWitness<E>,
     trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
@@ -66,7 +66,7 @@ where
                 (values, proof)
             };
 
-            let fixed_base_opening = {
+            let fixed_base_opening = if let Some(fixed_comms) = fixed_comms {
                 // follow same rule as `witin_base_opening`
                 let idx_shift = witin_comms.log2_max_codeword_size as i32
                     - fixed_comms.log2_max_codeword_size as i32;
@@ -77,7 +77,9 @@ where
                 };
                 let idx = idx >> 1;
                 let (values, proof) = mmcs.open_batch(idx, &fixed_comms.codeword);
-                (values, proof)
+                Some((values, proof))
+            } else {
+                None
             };
 
             // this is equivalent with "idx = idx % n_{d-1}" operation in non row bit reverse format
@@ -110,7 +112,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     final_message: &[Vec<E>],
     batch_coeffs: &[E],
     queries: &QueryOpeningProofs<E>,
-    fixed_comm: &BasefoldCommitment<E>,
+    fixed_comm: Option<&BasefoldCommitment<E>>,
     witin_comm: &BasefoldCommitment<E>,
     circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
     commits: &[Digest<E>],
@@ -149,14 +151,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         })
         .collect_vec();
     izip!(indices, queries).for_each(
-        |(
-            idx,
-            (
-                (witin_commit_leafs, witin_commit_proof),
-                (fixed_commit_leafs, fixed_commit_proof),
-                opening_ext,
-            ),
-        )| {
+        |(idx, ((witin_commit_leafs, witin_commit_proof), fixed_commit_option, opening_ext))| {
             // verify base oracle query proof
             // refer to prover documentation for the reason of right shift by 1
             let mut idx = idx >> 1;
@@ -173,22 +168,30 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             )
             .expect("verify witin commit batch failed");
             // verify fixed
-            mmcs.verify_batch(
-                &fixed_comm.commit,
-                &fixed_dimentions,
-                {
-                    let idx_shift = log2_witin_max_codeword_size as i32
-                        - fixed_comm.log2_max_codeword_size as i32;
-                    if idx_shift > 0 {
-                        idx >> idx_shift
-                    } else {
-                        idx << -idx_shift
-                    }
-                },
-                fixed_commit_leafs,
-                fixed_commit_proof,
-            )
-            .expect("verify fixed commit batch failed");
+
+            let fixed_commit_leafs = if let Some(fixed_comm) = fixed_comm {
+                let (fixed_commit_leafs, fixed_commit_proof) =
+                    &fixed_commit_option.as_ref().unwrap();
+                mmcs.verify_batch(
+                    &fixed_comm.commit,
+                    &fixed_dimentions,
+                    {
+                        let idx_shift = log2_witin_max_codeword_size as i32
+                            - fixed_comm.log2_max_codeword_size as i32;
+                        if idx_shift > 0 {
+                            idx >> idx_shift
+                        } else {
+                            idx << -idx_shift
+                        }
+                    },
+                    fixed_commit_leafs,
+                    fixed_commit_proof,
+                )
+                .expect("verify fixed commit batch failed");
+                fixed_commit_leafs
+            } else {
+                &vec![]
+            };
 
             let mut witin_commit_leafs_iter = witin_commit_leafs.iter();
             let mut fixed_commit_leafs_iter = fixed_commit_leafs.iter();

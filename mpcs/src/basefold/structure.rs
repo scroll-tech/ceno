@@ -247,11 +247,13 @@ pub type QueryOpeningProofs<E> = Vec<(
             <E as ExtensionField>::BaseField,
         >>::Proof,
     >,
-    MKProofNTo1<
-        <E as ExtensionField>::BaseField,
-        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
+    Option<
+        MKProofNTo1<
             <E as ExtensionField>::BaseField,
-        >>::Proof,
+            <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
+                <E as ExtensionField>::BaseField,
+            >>::Proof,
+        >,
     >,
     Vec<
         MKProof2To1<

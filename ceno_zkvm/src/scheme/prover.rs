@@ -279,10 +279,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mpcs_opening_proof = PCS::batch_open(
             &self.pk.pp,
             &num_instances,
-            self.pk
-                .fixed_commit_wd
-                .as_ref()
-                .expect("must have fixed commitment witness"),
+            self.pk.fixed_commit_wd.as_ref(),
             &witin_commit_with_witness,
             &points,
             &evaluations,

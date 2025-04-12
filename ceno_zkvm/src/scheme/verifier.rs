@@ -270,10 +270,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &self.vk.vp,
             &vm_proof.num_instances,
             &rt_points,
-            self.vk
-                .fixed_commit
-                .as_ref()
-                .expect("assume there alwasy fixed commitment"),
+            self.vk.fixed_commit.as_ref(),
             &vm_proof.witin_commit,
             &evaluations,
             &vm_proof.fixed_witin_opening_proof,

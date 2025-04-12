@@ -48,7 +48,7 @@ use super::structure::BasefoldCommitmentWithWitness;
 #[allow(clippy::type_complexity)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    fixed_comms: &BasefoldCommitmentWithWitness<E>,
+    fixed_comms: Option<&BasefoldCommitmentWithWitness<E>>,
     witin_commitment_with_witness: &MerkleTree<E::BaseField>,
     witin_polys_and_meta: Vec<(
         &Point<E>,
@@ -70,19 +70,12 @@ where
     let mmcs = poseidon2_merkle_tree::<E>();
     let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(max_num_vars);
 
-    // TODO filter too small witness (and fixed, both with same size)
-    // giving witin_polys: Vec<Vec<ArcMle>>
-    //        witin_index_mapping: Vec<Option<usize>>
-    //        fixed_polys: Vec<Vec<ArcMle>>
-    // here generate the concat fixed_polys along with witin_polys
-    // such that we take `fixed_polys` respective index from `witin_index_mapping`
-    // here we need `witin_index_mapping` because not all witin mapping with respective fixed_polys
+    // concat witin mle with fixed mle under same circuit index
     let witin_concat_with_fixed_polys: Vec<Vec<ArcMultilinearExtension<E>>> = witin_polys_and_meta
         .iter()
         .map(|(_, (circuit_index, witin_polys))| {
             let fixed_iter = fixed_comms
-                .polys
-                .get(circuit_index)
+                .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
                 .into_iter()
                 .flatten()
                 .cloned();
@@ -104,7 +97,9 @@ where
     // - codeword oracle => for FRI
     // - evals => for sumcheck
     let witins_codeword = mmcs.get_matrices(witin_commitment_with_witness);
-    let fixed_codeword = mmcs.get_matrices(&fixed_comms.codeword);
+    let fixed_codeword = fixed_comms
+        .map(|fixed_comms| mmcs.get_matrices(&fixed_comms.codeword))
+        .unwrap_or_default();
 
     let batch_oracle = entered_span!("batch_oracle");
     let initial_rlc_oracle = witins_codeword
@@ -122,8 +117,9 @@ where
                 )> = std::iter::once((witin_codewords, expected_witins_num_poly))
                     .chain(
                         fixed_comms
-                            .circuit_codeword_index
-                            .get(circuit_index)
+                            .and_then(|fixed_comms| {
+                                fixed_comms.circuit_codeword_index.get(circuit_index)
+                            })
                             .and_then(|idx| {
                                 fixed_codeword
                                     .get(*idx)

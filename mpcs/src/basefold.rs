@@ -255,6 +255,10 @@ where
         );
         exit_span!(span);
 
+        if rmm_to_batch_commit.is_empty() {
+            todo!("support all are trivial commitment")
+        }
+
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
         let evals_codewords = rmm_to_batch_commit
             .into_iter()
@@ -311,7 +315,7 @@ where
     fn batch_open(
         pp: &Self::ProverParam,
         num_instances: &[(usize, usize)],
-        fixed_comms: &Self::CommitmentWithWitness,
+        fixed_comms: Option<&Self::CommitmentWithWitness>,
         witin_comms: &Self::CommitmentWithWitness,
         points: &[Point<E>],
         // TODO this is only for debug purpose
@@ -332,12 +336,16 @@ where
                 let num_var = next_pow2_instance_padding(*num_instance).ilog2() as usize;
                 witin_polys
                     .iter()
-                    .chain(fixed_comms.polys.get(circuit_index).into_iter().flatten())
+                    .chain(
+                        fixed_comms
+                            .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
+                            .into_iter()
+                            .flatten(),
+                    )
                     .all(|p| p.num_vars() == num_var)
                     && witin_polys.len() == expected_witin_num_polys
                     && fixed_comms
-                        .polys
-                        .get(circuit_index)
+                        .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
                         .map(|fixed_polys| fixed_polys.len() == expected_fixed_num_polys)
                         .unwrap_or(true)
             },
@@ -352,8 +360,7 @@ where
                 .zip_eq(points)
                 .flat_map(|((circuit_index, witin_polys), point)| {
                     let fixed_iter = fixed_comms
-                        .polys
-                        .get(circuit_index)
+                        .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
                         .into_iter()
                         .flatten()
                         .cloned();
@@ -418,8 +425,9 @@ where
                                 .chain(
                                     // fixed proof is optional
                                     fixed_comms
-                                        .trivial_proofdata
-                                        .get(circuit_index)
+                                        .and_then(|fixed_comms| {
+                                            fixed_comms.trivial_proofdata.get(circuit_index)
+                                        })
                                         .iter()
                                         .flat_map(|(_, proof_data)| {
                                             mmcs.get_matrices(proof_data).into_iter().take(1)
@@ -490,7 +498,7 @@ where
         vp: &Self::VerifierParam,
         num_instances: &[(usize, usize)],
         points: &[Point<E>],
-        fixed_comms: &Self::Commitment,
+        fixed_comms: Option<&Self::Commitment>,
         witin_comms: &Self::Commitment,
         evals: &[Vec<E>],
         proof: &Self::Proof,
@@ -566,8 +574,10 @@ where
 
         // check trivial proofs
         if !circuit_trivial_meta_map.is_empty() {
-            let trivial_fixed_commit =
-                BTreeMap::from_iter(fixed_comms.trivial_commits.iter().cloned());
+            let trivial_fixed_commit = fixed_comms
+                .as_ref()
+                .map(|fc| BTreeMap::from_iter(fc.trivial_commits.iter().cloned()))
+                .unwrap_or_default();
             let trivial_witin_commit =
                 BTreeMap::from_iter(witin_comms.trivial_commits.iter().cloned());
             assert!(proof.trivial_proof.is_some());
@@ -740,7 +750,7 @@ mod test {
 
     use crate::{
         basefold::Basefold,
-        test_util::{run_commit_open_verify, run_simple_batch_commit_open_verify},
+        test_util::{run_batch_commit_open_verify, run_commit_open_verify},
     };
 
     use super::BasefoldRSParams;
@@ -748,20 +758,19 @@ mod test {
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
     #[test]
-    fn simple_batch_commit_open_verify_goldilocks() {
+    fn batch_commit_open_verify_goldilocks() {
         // Both challenge and poly are over base field
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
-        // Test trivial proof with small num vars
-        run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(4, 6, 4);
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
+        run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
+        // TODO support all trivial proof
     }
 
     #[test]
     #[ignore = "For benchmarking and profiling only"]
-    fn bench_basefold_simple_batch_commit_open_verify_goldilocks() {
+    fn bench_basefold_batch_commit_open_verify_goldilocks() {
         {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21);
-            run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21, 64);
+            run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21, 64);
         }
     }
 }
