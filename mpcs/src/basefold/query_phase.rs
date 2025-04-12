@@ -1,11 +1,13 @@
 use std::{cmp::Reverse, collections::BTreeMap, slice};
 
 use crate::{
+    Point,
     basefold::structure::{CircuitIndexMeta, MerkleTreeExt},
     util::merkle_tree::poseidon2_merkle_tree,
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
+use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::dot_product,
@@ -13,7 +15,10 @@ use p3::{
     util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
-use sumcheck::macros::{entered_span, exit_span};
+use sumcheck::{
+    macros::{entered_span, exit_span},
+    util::interpolate_uni_poly,
+};
 use transcript::Transcript;
 
 use crate::basefold::structure::QueryOpeningProofs;
@@ -110,7 +115,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
     commits: &[Digest<E>],
     fold_challenges: &[E],
-    _sumcheck_messages: &[Vec<E>],
+    sumcheck_messages: &[Vec<E>],
+    point_evals: &[(Point<E>, Vec<E>)],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -133,7 +139,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let log2_witin_max_codeword_size =
         max_num_var + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log();
 
-    // an vector with same length as circuit_meta_map, which is sorted by num_var from largest to low
+    // an vector with same length as circuit_meta_map, which is sorted by num_var in descending order
     // vector keep circuit information, so we can fetch respective circuit in constant time
     let folding_sorted_order = circuit_meta_map
         .iter()
@@ -343,27 +349,56 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     );
     exit_span!(check_queries_span);
 
-    // TODO check consistency
     // 1. check initial claim match with first round sumcheck value
-    // assert_eq!(
-    //     dot_product::<E, _, _>(batch_coeffs.iter().copied(), evals.iter().copied()),
-    //     { sumcheck_messages[0][0] + sumcheck_messages[0][1] }
-    // );
-    // // 2. check every round of sumcheck match with prev claims
-    // for i in 0..fold_challenges.len() - 1 {
-    //     assert_eq!(
-    //         interpolate_uni_poly(&sum_check_messages[i], fold_challenges[i]),
-    //         { sum_check_messages[i + 1][0] + sum_check_messages[i + 1][1] }
-    //     );
-    // }
-    // // 3. check final evaluation are correct
-    // assert_eq!(
-    //     interpolate_uni_poly(
-    //         &sum_check_messages[fold_challenges.len() - 1],
-    //         fold_challenges[fold_challenges.len() - 1]
-    //     ),
-    //     inner_product(final_message, partial_eq)
-    // );
+    assert_eq!(
+        // we need to scale up with scalar for witin_num_vars < max_num_var
+        dot_product::<E, _, _>(
+            batch_coeffs.iter().copied(),
+            point_evals
+                .iter()
+                .zip_eq(circuit_meta_map.iter())
+                .map(
+                    |((_, evals), (_, CircuitIndexMeta { witin_num_vars, .. }))| {
+                        evals.iter().copied().map(move |eval| {
+                            eval * E::from_u64(1 << (max_num_var - witin_num_vars) as u64)
+                        })
+                    }
+                )
+                .flatten()
+        ),
+        { sumcheck_messages[0][0] + sumcheck_messages[0][1] }
+    );
+    // 2. check every round of sumcheck match with prev claims
+    for i in 0..fold_challenges.len() - 1 {
+        assert_eq!(
+            interpolate_uni_poly(&sumcheck_messages[i], fold_challenges[i]),
+            { sumcheck_messages[i + 1][0] + sumcheck_messages[i + 1][1] }
+        );
+    }
+    // 3. check final evaluation are correct
+    assert_eq!(
+        interpolate_uni_poly(
+            &sumcheck_messages[fold_challenges.len() - 1],
+            fold_challenges[fold_challenges.len() - 1]
+        ),
+        izip!(final_message, point_evals.iter().map(|(point, _)| point))
+            .map(|(final_message, point)| {
+                // coeff is the eq polynomial evaluated at the first challenge.len() variables
+                let num_vars_evaluated = point.len()
+                    - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log();
+                let coeff = eq_eval(
+                    &point[..num_vars_evaluated],
+                    &fold_challenges[fold_challenges.len() - num_vars_evaluated..],
+                );
+                // Compute eq as the partially evaluated eq polynomial
+                let eq = build_eq_x_r_vec(&point[num_vars_evaluated..]);
+                dot_product(
+                    final_message.iter().copied(),
+                    eq.into_iter().map(|e| e * coeff),
+                )
+            })
+            .sum()
+    );
 }
 
 fn get_base_oracle_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(

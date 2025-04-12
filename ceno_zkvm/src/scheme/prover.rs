@@ -188,7 +188,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let (points, evaluations) = self
             .pk
             .circuit_pks
-            .iter() // Sorted by key.
+            .iter()
             .enumerate()
             .try_fold((vec![], vec![]), |(mut points, mut evaluations), (index, (circuit_name, pk))| {
                 let num_instances = *wits_instances
@@ -271,7 +271,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // generate static info from prover key for expected num variable
         let circuit_num_polys = self
             .pk
-            .circuit_pks.values().map(|pk| (pk.get_cs().num_witin as usize, pk.get_cs().num_fixed))
+            .circuit_pks
+            .values()
+            .map(|pk| (pk.get_cs().num_witin as usize, pk.get_cs().num_fixed))
             .collect_vec();
         let pcs_opening = entered_span!("pcs_opening");
         let mpcs_opening_proof = PCS::batch_open(

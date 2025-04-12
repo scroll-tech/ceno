@@ -407,7 +407,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
             circuit_num_polys: self
-                .circuit_pks.values().map(|pk| (pk.vk.get_cs().num_witin as usize, pk.vk.get_cs().num_fixed))
+                .circuit_pks
+                .values()
+                .map(|pk| (pk.vk.get_cs().num_witin as usize, pk.vk.get_cs().num_fixed))
                 .collect_vec(),
         }
     }

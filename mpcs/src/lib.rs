@@ -291,6 +291,7 @@ pub enum Error {
     PolynomialTooLarge(usize),
     PolynomialSizesNotEqual,
     MerkleRootMismatch,
+    PointEvalMismatch(String),
     WhirError(whir::Error),
 }
 

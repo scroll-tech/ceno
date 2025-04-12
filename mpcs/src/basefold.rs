@@ -18,12 +18,12 @@ use structure::{BasefoldProof, CircuitIndexMeta};
 pub use structure::{BasefoldSpec, Digest};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
-use witness::{RowMajorMatrix, next_pow2_instance_padding};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
 
 use itertools::{Itertools, izip};
 use serde::{Serialize, de::DeserializeOwned};
 
-use multilinear_extensions::mle::FieldType;
+use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 
 use rayon::{
     iter::IntoParallelIterator,
@@ -520,9 +520,9 @@ where
         let mut circuit_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
         let mut circuit_trivial_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
         let mut evals_iter = evals.iter().cloned();
-        let (_trivial_evals, _evals) = izip!(&circuit_num_vars, points).fold(
+        let (trivial_point_evals, point_evals) = izip!(&circuit_num_vars, points).fold(
             (vec![], vec![]),
-            |(mut trivial_evals, mut evals), ((circuit_index, num_var), _point)| {
+            |(mut trivial_point_evals, mut point_evals), ((circuit_index, num_var), point)| {
                 let (expected_witins_num_poly, expected_fixed_num_poly) =
                     &circuit_num_polys[*circuit_index];
                 let mut circuit_meta = CircuitIndexMeta {
@@ -532,27 +532,34 @@ where
                 };
                 // NOTE: for evals, we concat witin with fixed to make process easier
                 if *num_var <= Spec::get_basecode_msg_size_log() {
-                    trivial_evals.push(evals_iter.next().unwrap());
+                    trivial_point_evals.push((
+                        point.clone(),
+                        evals_iter.next().unwrap()[0..*expected_witins_num_poly].to_vec(),
+                    ));
                     if *expected_fixed_num_poly > 0 {
                         circuit_meta.fixed_num_vars = *num_var;
                         circuit_meta.fixed_num_polys = *expected_fixed_num_poly;
-                        trivial_evals
-                            .last_mut()
-                            .unwrap()
-                            .extend(evals_iter.next().unwrap())
+                        trivial_point_evals.last_mut().unwrap().1.extend(
+                            evals_iter.next().unwrap()[0..*expected_fixed_num_poly].to_vec(),
+                        )
                     }
                     circuit_trivial_meta_map.insert(*circuit_index, circuit_meta);
                 } else {
-                    evals.push(evals_iter.next().unwrap());
+                    point_evals.push((
+                        point.clone(),
+                        evals_iter.next().unwrap()[0..*expected_witins_num_poly].to_vec(),
+                    ));
                     if *expected_fixed_num_poly > 0 {
                         circuit_meta.fixed_num_vars = *num_var;
                         circuit_meta.fixed_num_polys = *expected_fixed_num_poly;
-                        evals.last_mut().unwrap().extend(evals_iter.next().unwrap());
+                        point_evals.last_mut().unwrap().1.extend(
+                            evals_iter.next().unwrap()[0..*expected_fixed_num_poly].to_vec(),
+                        );
                     }
                     circuit_meta_map.insert(*circuit_index, circuit_meta);
                 }
 
-                (trivial_evals, evals)
+                (trivial_point_evals, point_evals)
             },
         );
         assert!(evals_iter.next().is_none());
@@ -581,40 +588,65 @@ where
             );
 
             // 1. check mmcs verify opening
+            // 2. check mle.evaluate(point) == evals
             circuit_trivial_meta_map
                 .iter()
                 .zip_eq(proof.trivial_proof.as_ref().unwrap())
+                .zip_eq(&trivial_point_evals)
                 .try_for_each(
                     |(
                         (
-                            circuit_index,
-                            CircuitIndexMeta {
-                                fixed_num_polys, ..
-                            },
+                            (
+                                circuit_index,
+                                CircuitIndexMeta {
+                                    fixed_num_polys, ..
+                                },
+                            ),
+                            (_, proof),
                         ),
-                        (_, proof),
+                        (point, witin_fixed_evals),
                     )| {
                         let witin_commit = trivial_witin_commit
                             .get(circuit_index)
                             .expect("proof must exist");
-                        let (commit, _) = mmcs.commit_matrix(proof[0].clone());
+                        let witin_rmm = proof[0].clone();
+                        let (commit, _) = mmcs.commit_matrix(witin_rmm.clone());
                         if commit != *witin_commit {
                             Err(Error::MerkleRootMismatch)?;
                         }
+                        let mut mles = RowMajorMatrix::new_by_inner_matrix(
+                            witin_rmm,
+                            InstancePaddingStrategy::Default,
+                        )
+                        .to_mles();
+
                         if *fixed_num_polys > 0 {
+                            let fixed_rmm = proof[1].clone();
                             let fixed_commit = trivial_fixed_commit
                                 .get(circuit_index)
                                 .expect("proof must exist");
-                            let (commit, _) = mmcs.commit_matrix(proof[1].clone());
+                            let (commit, _) = mmcs.commit_matrix(fixed_rmm.clone());
                             if commit != *fixed_commit {
                                 Err(Error::MerkleRootMismatch)?;
                             }
+                            mles.extend(
+                                RowMajorMatrix::new_by_inner_matrix(
+                                    fixed_rmm,
+                                    InstancePaddingStrategy::Default,
+                                )
+                                .to_mles(),
+                            );
                         }
-                        Ok(())
+
+                        mles.iter()
+                            .zip_eq(witin_fixed_evals)
+                            .all(|(mle, eval)| mle.evaluate(point) == *eval)
+                            .then(|| ())
+                            .ok_or_else(|| {
+                                Error::PointEvalMismatch("trivial point eval mismatch".to_string())
+                            })
                     },
                 )?;
-
-            // TODO 2. check evaluation equality
         }
 
         if !circuit_meta_map.is_empty() {
@@ -678,6 +710,7 @@ where
             &proof.commits,
             &fold_challenges,
             sumcheck_messages,
+            &point_evals,
         );
 
         Ok(())
