@@ -115,7 +115,6 @@ where
         pp: &Self::ProverParam,
         rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
-        assert_eq!(rmms.len(), 2);
         let polys = rmms[&0].to_mles();
         let witness = WhirInnerT::<E, Spec>::batch_commit(pp, &polys2whir(&polys))
             .map_err(crate::Error::WhirError)?;

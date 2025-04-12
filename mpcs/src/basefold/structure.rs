@@ -263,6 +263,8 @@ pub type QueryOpeningProofs<E> = Vec<(
     >,
 )>;
 
+pub type TrivialProof<E> = Vec<(usize, Vec<DenseMatrix<<E as ExtensionField>::BaseField>>)>;
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
@@ -278,7 +280,7 @@ where
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // circuit_index -> vec![witness, fixed], where fixed is optional
-    pub(crate) trivial_proof: Option<Vec<(usize, Vec<DenseMatrix<E::BaseField>>)>>,
+    pub(crate) trivial_proof: Option<TrivialProof<E>>,
 }
 
 impl<E: ExtensionField> BasefoldProof<E>

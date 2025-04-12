@@ -312,7 +312,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     #[allow(clippy::too_many_arguments)]
     pub fn verify_opcode_proof(
         &self,
-        name: &str,
+        _name: &str,
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMOpcodeProof<E>,
         num_instances: usize,

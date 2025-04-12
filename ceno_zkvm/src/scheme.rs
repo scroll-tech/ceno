@@ -162,7 +162,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         }
     }
 
-    pub fn pi_evals(raw_pi: &Vec<Vec<E::BaseField>>) -> Vec<E> {
+    pub fn pi_evals(raw_pi: &[Vec<E::BaseField>]) -> Vec<E> {
         raw_pi
             .iter()
             .map(|pv| {

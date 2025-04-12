@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{collections::BTreeMap, marker::PhantomData};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -127,8 +127,12 @@ fn test_rw_lk_expression_combination() {
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
         // commit to main traces
-        let commit_with_witness =
-            Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm], &mut transcript).unwrap();
+        let commit_with_witness = Pcs::batch_commit_and_write(
+            &prover.pk.pp,
+            vec![(0, rmm)].into_iter().collect::<BTreeMap<_, _>>(),
+            &mut transcript,
+        )
+        .unwrap();
         let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&witin_commit, &mut transcript).unwrap();
@@ -166,7 +170,6 @@ fn test_rw_lk_expression_combination() {
         let _rt_input = verifier
             .verify_opcode_proof(
                 name.as_str(),
-                &vk.vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
                 num_instances,

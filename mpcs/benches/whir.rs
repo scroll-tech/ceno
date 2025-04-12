@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use criterion::*;
 use ff_ext::GoldilocksExt2;
@@ -113,9 +113,14 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
                         for _ in 0..iters {
-                            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+                            let rmms = vec![(
+                                0,
+                                RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
+                            )]
+                            .into_iter()
+                            .collect::<BTreeMap<_, _>>();
                             let instant = std::time::Instant::now();
-                            Pcs::batch_commit(&pp, rmm).unwrap();
+                            Pcs::batch_commit(&pp, rmms).unwrap();
                             let elapsed = instant.elapsed();
                             time += elapsed;
                         }
@@ -123,9 +128,14 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
                     })
                 },
             );
-            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
-            let polys = rmm.to_mles();
-            let comm = Pcs::batch_commit(&pp, rmm).unwrap();
+            let rmms = vec![(
+                0,
+                RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
+            )]
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+            let polys = rmms[&0].to_mles();
+            let comm = Pcs::batch_commit(&pp, rmms).unwrap();
             let point = get_point_from_challenge(num_vars, &mut transcript);
             let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
             transcript.append_field_element_exts(&evals);

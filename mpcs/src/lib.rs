@@ -73,6 +73,7 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::open(pp, poly, comm, point, eval, transcript)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
     num_instances: &[(usize, usize)],
@@ -106,6 +107,7 @@ pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::verify(vp, comm, point, eval, proof, transcript)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     vp: &Pcs::VerifierParam,
     num_instances: &[(usize, usize)],
@@ -195,6 +197,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
+    #[allow(clippy::too_many_arguments)]
     fn batch_open(
         pp: &Self::ProverParam,
         num_instances: &[(usize, usize)],
@@ -228,6 +231,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 
+    #[allow(clippy::too_many_arguments)]
     fn batch_verify(
         vp: &Self::VerifierParam,
         num_instances: &[(usize, usize)],

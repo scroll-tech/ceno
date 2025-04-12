@@ -8,6 +8,7 @@ use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme,
     test_util::{get_point_from_challenge, setup_pcs},
 };
+use std::collections::BTreeMap;
 
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
 use rand::rngs::OsRng;
@@ -111,9 +112,14 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
-            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
-            let polys = rmm.to_mles();
-            let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
+            let rmms = vec![(
+                0,
+                RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
+            )]
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+            let polys = rmms[&0].to_mles();
+            let comm = Pcs::batch_commit_and_write(&pp, rmms, &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
@@ -121,9 +127,14 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
                         for _ in 0..iters {
-                            let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
+                            let rmms = vec![(
+                                0,
+                                RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
+                            )]
+                            .into_iter()
+                            .collect::<BTreeMap<_, _>>();
                             let instant = std::time::Instant::now();
-                            Pcs::batch_commit(&pp, rmm).unwrap();
+                            Pcs::batch_commit(&pp, rmms).unwrap();
                             let elapsed = instant.elapsed();
                             time += elapsed;
                         }

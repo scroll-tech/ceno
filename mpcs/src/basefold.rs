@@ -641,7 +641,7 @@ where
                         mles.iter()
                             .zip_eq(witin_fixed_evals)
                             .all(|(mle, eval)| mle.evaluate(point) == *eval)
-                            .then(|| ())
+                            .then_some(())
                             .ok_or_else(|| {
                                 Error::PointEvalMismatch("trivial point eval mismatch".to_string())
                             })

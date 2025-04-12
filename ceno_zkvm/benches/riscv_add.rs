@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use ceno_zkvm::{
     self,
@@ -73,14 +73,18 @@ fn bench_add(c: &mut Criterion) {
                     for _ in 0..iters {
                         // generate mock witness
                         let num_instances = 1 << instance_num_vars;
-                        let rmm =
-                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin as usize);
+                        let rmms = vec![(
+                            0,
+                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin as usize),
+                        )]
+                        .into_iter()
+                        .collect::<BTreeMap<_, _>>();
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;
                         let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
-                            Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript)
+                            Pcs::batch_commit_and_write(&prover.pk.pp, rmms, &mut transcript)
                                 .unwrap();
                         let polys = Pcs::get_arc_mle_witness_from_commitment(&commit);
                         let challenges = [
@@ -91,10 +95,8 @@ fn bench_add(c: &mut Criterion) {
                         let _ = prover
                             .create_opcode_proof(
                                 "ADD",
-                                &prover.pk.pp,
                                 circuit_pk,
                                 polys,
-                                commit,
                                 &[],
                                 num_instances,
                                 &mut transcript,

@@ -357,14 +357,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             point_evals
                 .iter()
                 .zip_eq(circuit_meta_map.iter())
-                .map(
-                    |((_, evals), (_, CircuitIndexMeta { witin_num_vars, .. }))| {
+                .flat_map(|((_, evals), (_, CircuitIndexMeta { witin_num_vars, .. }))| {
                         evals.iter().copied().map(move |eval| {
                             eval * E::from_u64(1 << (max_num_var - witin_num_vars) as u64)
                         })
-                    }
-                )
-                .flatten()
+                    })
         ),
         { sumcheck_messages[0][0] + sumcheck_messages[0][1] }
     );
