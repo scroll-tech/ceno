@@ -117,12 +117,11 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
             let circuit_num_polys = vec![(batch_size, 0)];
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
-            let rmms = vec![(
+            let rmms = BTreeMap::from([(
                 0,
                 RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
-            )]
-            .into_iter()
-            .collect::<BTreeMap<_, _>>();
+            )]);
+
             let polys = rmms[&0].to_mles();
             let comm = Pcs::batch_commit_and_write(&pp, rmms, &mut transcript).unwrap();
 
@@ -132,12 +131,10 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
                         for _ in 0..iters {
-                            let rmms = vec![(
+                            let rmms = BTreeMap::from([(
                                 0,
                                 RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
-                            )]
-                            .into_iter()
-                            .collect::<BTreeMap<_, _>>();
+                            )]);
                             let instant = std::time::Instant::now();
                             Pcs::batch_commit(&pp, rmms).unwrap();
                             let elapsed = instant.elapsed();
