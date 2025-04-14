@@ -42,17 +42,21 @@ use std::process::{Command, Stdio};
 #[command(name = "build", about = "Compile an Ceno program")]
 pub struct BuildCmd {
     #[clap(flatten, next_help_heading = "Options")]
-    cargo_options: CargoOptions,
+    pub cargo_options: CargoOptions,
+    #[clap(flatten, next_help_heading = "Package Selection")]
+    pub package_selection: PackageSelection,
+    #[clap(flatten, next_help_heading = "Target Selection")]
+    pub target_selection: TargetSelection,
     #[clap(flatten, next_help_heading = "Feature Selection")]
-    feature_selection: FeatureSelection,
+    pub feature_selection: FeatureSelection,
     #[clap(flatten, next_help_heading = "Compilation Options")]
-    compilation_options: CompilationOptions,
+    pub compilation_options: CompilationOptions,
     #[clap(flatten, next_help_heading = "Manifest Options")]
-    manifest_options: ManifestOptions,
+    pub manifest_options: ManifestOptions,
 }
 
 impl BuildCmd {
-    pub fn run(&self, toolchain: Option<String>) -> anyhow::Result<()> {
+    pub fn run(self, toolchain: Option<String>) -> anyhow::Result<()> {
         self.cargo_options.set_global();
 
         let mut command = Command::new("cargo");
@@ -68,6 +72,8 @@ impl BuildCmd {
         command.arg("build");
 
         self.cargo_options.apply_to(&mut command);
+        self.package_selection.apply_to(&mut command);
+        self.target_selection.apply_to(&mut command);
         self.feature_selection.apply_to(&mut command);
         let _guard = self.compilation_options.apply_to(&mut command)?;
         self.manifest_options.apply_to(&mut command)?;

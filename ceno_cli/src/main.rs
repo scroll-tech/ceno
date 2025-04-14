@@ -33,7 +33,7 @@ pub enum VmCliCommands {
     Build(BuildCmd),
     // Keygen(KeygenCmd),
     // Prove(ProveCmd),
-    // Run(RunCmd),
+    Run(RunCmd),
     // Setup(EvmProvingSetupCmd),
     // Verify(VerifyCmd),
 }
@@ -55,7 +55,9 @@ fn main() {
         VmCliCommands::Build(cmd) => cmd
             .run(toolchain)
             .context("could not build ceno program due to previous error"),
-        // VmCliCommands::Run(cmd) => cmd.run(),
+        VmCliCommands::Run(cmd) => cmd
+            .run(toolchain)
+            .context("could not run ceno program due to previous error"),
         // VmCliCommands::Keygen(cmd) => cmd.run(),
         // VmCliCommands::Prove(cmd) => cmd.run(),
         // VmCliCommands::Setup(cmd) => cmd.run().await,

@@ -1,7 +1,10 @@
-use crate::utils::release_target_json;
+use crate::utils::{RUSTC_TARGET, release_target_json};
 use anyhow::Context;
-use clap::Parser;
-use std::{path::PathBuf, process::Command};
+use clap::Args;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 use tempfile::TempDir;
 
 /// Options:
@@ -11,7 +14,7 @@ use tempfile::TempDir;
 ///       --color <WHEN>             Coloring: auto, always, never
 ///       --config <KEY=VALUE|PATH>  Override a configuration value
 ///   -Z <FLAG>                      Unstable (nightly-only) flags to Cargo, see 'cargo -Z help' for details
-#[derive(Clone, Parser)]
+#[derive(Clone, Args)]
 pub struct CargoOptions {
     /// Error format
     #[arg(long)]
@@ -33,11 +36,33 @@ pub struct CargoOptions {
     pub unstable_flags: Option<Vec<String>>,
 }
 
+/// Package Selection:
+///   -p, --package [<SPEC>]  Package with the target to run
+#[derive(Clone, Args)]
+pub struct PackageSelection {
+    /// Package with the target to run
+    #[arg(short = 'p', long)]
+    pub package: Option<String>,
+}
+
+/// Target Selection:
+///       --bin [<NAME>]      Name of the bin target to run
+///       --example [<NAME>]  Name of the example target to run
+#[derive(Clone, Args)]
+pub struct TargetSelection {
+    /// Name of the bin target to run
+    #[arg(long, conflicts_with = "example")]
+    pub bin: Option<String>,
+    /// Name of the example target to run
+    #[arg(long, conflicts_with = "bin")]
+    pub example: Option<String>,
+}
+
 /// Feature Selection:
 ///   -F, --features <FEATURES>  Space or comma separated list of features to activate
 ///       --all-features         Activate all available features
 ///       --no-default-features  Do not activate the `default` feature
-#[derive(Clone, Parser)]
+#[derive(Clone, Args)]
 pub struct FeatureSelection {
     /// Space or comma separated list of features to activate
     #[arg(short = 'F', long)]
@@ -57,7 +82,7 @@ pub struct FeatureSelection {
 ///       --profile <PROFILE-NAME>  Build artifacts with the specified profile
 ///       --target [<TRIPLE>]       Build for the target triple
 ///       --target-dir <DIRECTORY>  Directory for all generated artifacts
-#[derive(Clone, Parser)]
+#[derive(Clone, Args)]
 pub struct CompilationOptions {
     /// Number of parallel jobs, defaults to # of CPUs.
     #[arg(short, long)]
@@ -86,7 +111,7 @@ pub struct CompilationOptions {
 ///       --locked                Assert that `Cargo.lock` will remain unchanged
 ///       --offline               Run without accessing the network
 ///       --frozen                Equivalent to specifying both --locked and --offline
-#[derive(Clone, Parser)]
+#[derive(Clone, Args)]
 pub struct ManifestOptions {
     /// Path to Cargo.toml
     #[arg(long)]
@@ -109,8 +134,11 @@ pub struct ManifestOptions {
 }
 
 impl CargoOptions {
+    /// Set the global options based on the command line arguments.
     pub fn set_global(&self) {
-        crate::utils::QUITE.set(self.quiet).expect("failed to set quiet flag, this is a bug");
+        crate::utils::QUITE
+            .set(self.quiet)
+            .expect("failed to set quiet flag, this is a bug");
         if let Some(color) = self.color.as_ref() {
             if color == "always" {
                 console::set_colors_enabled(true);
@@ -120,6 +148,7 @@ impl CargoOptions {
         }
     }
 
+    /// Apply the args to the cargo command.
     pub fn apply_to(&self, command: &mut Command) {
         if let Some(message_format) = self.message_format.as_ref() {
             command.arg("--message-format").arg(message_format);
@@ -146,7 +175,54 @@ impl CargoOptions {
     }
 }
 
+impl PackageSelection {
+    /// Apply the args to the cargo command.
+    pub fn apply_to(&self, command: &mut Command) {
+        if let Some(package) = self.package.as_ref() {
+            command.arg("--package").arg(package);
+        }
+    }
+}
+
+impl TargetSelection {
+    /// Check if any target is set.
+    pub fn is_set(&self) -> bool {
+        self.bin.is_some() || self.example.is_some()
+    }
+
+    /// Apply the args to the cargo command.
+    pub fn apply_to(&self, command: &mut Command) {
+        if let Some(bin) = self.bin.as_ref() {
+            command.arg("--bin").arg(bin);
+        } else if let Some(example) = self.example.as_ref() {
+            command.arg("--example").arg(example);
+        }
+    }
+
+    /// Get the target path for a target.
+    ///
+    /// # Panics
+    ///
+    /// Panics if neither `bin` nor `example` is set.
+    pub fn get_target_path(&self, compilation_options: &CompilationOptions) -> PathBuf {
+        let prefix = compilation_options
+            .target_dir
+            .as_deref()
+            .unwrap_or_else(|| Path::new("target"))
+            .join(RUSTC_TARGET)
+            .join(compilation_options.profile.as_deref().unwrap_or("debug"));
+        if let Some(bin) = self.bin.as_ref() {
+            prefix.join(bin)
+        } else if let Some(example) = self.example.as_ref() {
+            prefix.join("examples").join(example)
+        } else {
+            panic!("target need to be set");
+        }
+    }
+}
+
 impl FeatureSelection {
+    /// Apply the args to the cargo command.
     pub fn apply_to(&self, command: &mut Command) {
         if let Some(features) = self.features.as_ref() {
             command.arg("--features").arg(features.join(","));
@@ -161,6 +237,7 @@ impl FeatureSelection {
 }
 
 impl CompilationOptions {
+    /// Apply the args to the cargo command.
     pub fn apply_to(&self, command: &mut Command) -> anyhow::Result<Option<TempDir>> {
         if let Some(jobs) = self.jobs {
             command.arg("--jobs").arg(jobs.to_string());
@@ -188,6 +265,7 @@ impl CompilationOptions {
 }
 
 impl ManifestOptions {
+    /// Apply the args to the cargo command.
     pub fn apply_to(&self, command: &mut Command) -> anyhow::Result<()> {
         if let Some(manifest_path) = self.manifest_path.as_ref() {
             command.arg("--manifest-path").arg(manifest_path);

@@ -1,28 +1,15 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
-use ceno_host::CenoStdin;
+use ceno_host::{memory_from_file, CenoStdin};
 use ceno_zkvm::{
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{ZKVMProof, verifier::ZKVMVerifier},
-    structs::ZKVMVerifyingKey,
-    with_panic_hook,
+    e2e::{E, Pcs, Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 use clap::Parser;
-use ff_ext::GoldilocksExt2;
-use itertools::Itertools;
-use mpcs::{Basefold, BasefoldRSParams};
-use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
-use std::{
-    fs,
-    panic::{self, AssertUnwindSafe},
-};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-use transcript::{
-    BasicTranscript as Transcript, BasicTranscriptWithStat as TranscriptWithStat, StatisticRecorder,
-};
+use ceno_zkvm::e2e::verify;
 
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
@@ -34,8 +21,8 @@ fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// The path to the ELF file to execute.
-    elf: String,
+    // /// The path to the ELF file to execute.
+    // elf: String,
 
     /// The path to the proof file to write.
     #[arg(default_value = "proof.bin")]
@@ -81,10 +68,6 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 }
-
-type E = GoldilocksExt2;
-type B = Goldilocks;
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
 fn main() {
     let args = {
@@ -148,9 +131,9 @@ fn main() {
         .next_power_of_two()
         .max(16);
 
-    tracing::info!("Loading ELF file: {}", &args.elf);
+    // tracing::info!("Loading ELF file: {}", &args.elf);
     // let elf_bytes = fs::read(&args.elf).expect("read elf file");
-    let elf_bytes = ceno_examples::is_prime;
+    let elf_bytes = ceno_examples::ceno_rt_mini;
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = setup_platform(
         args.platform,
@@ -171,7 +154,7 @@ fn main() {
         .as_ref()
         .map(|file_path| {
             tracing::info!("Loading hints file: {:?}", file_path);
-            let hints = memory_from_file(file_path);
+            let hints = memory_from_file(file_path).expect("failed to read hints file");
             assert!(
                 hints.len() <= platform.hints.iter_addresses().len(),
                 "hints must fit in {} bytes",
@@ -210,75 +193,5 @@ fn main() {
     let vk_bytes = bincode::serialize(&vk).unwrap();
     std::fs::write(&args.vk_file, vk_bytes).unwrap();
 
-    verify(&args.proof_file, &args.vk_file);
-}
-
-fn verify(proof_file: &str, vk_file: &str) {
-    let proof_bytes = std::fs::read(proof_file).unwrap();
-    let zkvm_proof: ZKVMProof<E, Pcs> = bincode::deserialize(&proof_bytes).unwrap();
-
-    let vk_bytes = std::fs::read(vk_file).unwrap();
-    let vk: ZKVMVerifyingKey<E, Pcs> = bincode::deserialize(&vk_bytes).unwrap();
-
-    let verifier = ZKVMVerifier::new(vk.clone());
-    // print verification statistics like proof size and hash count
-    let stat_recorder = StatisticRecorder::default();
-    let transcript = TranscriptWithStat::new(&stat_recorder, b"riscv");
-    assert!(
-        verifier
-            .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())
-            .is_ok()
-    );
-    println!("e2e proof stat: {}", zkvm_proof);
-    println!(
-        "hashes count = {}",
-        stat_recorder.into_inner().field_appended_num
-    );
-
-    // FIXME: it is a bit wired, let us move it else where later.
-    soundness_test(zkvm_proof, &verifier);
-}
-
-fn soundness_test(mut zkvm_proof: ZKVMProof<E, Pcs>, verifier: &ZKVMVerifier<E, Pcs>) {
-    // do sanity check
-    let transcript = Transcript::new(b"riscv");
-    // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![B::ONE];
-    zkvm_proof.raw_pi[1] = vec![B::ONE];
-
-    // capture panic message, if have
-    let result = with_panic_hook(Box::new(|_info| ()), || {
-        panic::catch_unwind(AssertUnwindSafe(|| {
-            verifier.verify_proof(zkvm_proof, transcript)
-        }))
-    });
-    match result {
-        Ok(res) => {
-            res.expect_err("verify proof should return with error");
-        }
-        Err(err) => {
-            let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<String>() {
-                message.to_string()
-            } else if let Some(message) = err.downcast_ref::<&String>() {
-                message.to_string()
-            } else {
-                unreachable!()
-            };
-
-            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
-                println!("unknown panic {msg:?}");
-                panic::resume_unwind(err);
-            };
-        }
-    };
-}
-
-fn memory_from_file(path: &String) -> Vec<u32> {
-    let mut buf = fs::read(path).expect("could not read file");
-    buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
-    buf.chunks_exact(WORD_SIZE)
-        .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
-        .collect_vec()
+    verify(zkvm_proof, vk).expect("Verification failed");
 }

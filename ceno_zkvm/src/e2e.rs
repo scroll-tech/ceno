@@ -1,32 +1,32 @@
-use crate::{
-    instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
-    scheme::{
-        PublicValues, ZKVMProof,
-        constants::MAX_NUM_VARIABLES,
-        mock_prover::{LkMultiplicityKey, MockProver},
-        prover::ZKVMProver,
-        verifier::ZKVMVerifier,
-    },
-    state::GlobalState,
-    structs::{
-        ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
-        ZKVMWitnesses,
-    },
-    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
-};
+use crate::{instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig}, scheme::{
+    PublicValues, ZKVMProof,
+    constants::MAX_NUM_VARIABLES,
+    mock_prover::{LkMultiplicityKey, MockProver},
+    prover::ZKVMProver,
+    verifier::ZKVMVerifier,
+}, state::GlobalState, structs::{
+    ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
+    ZKVMWitnesses,
+}, tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig}, with_panic_hook};
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord,
     Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::PolynomialCommitmentScheme;
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    sync::Arc,
-};
-use transcript::BasicTranscript as Transcript;
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use std::{collections::{BTreeSet, HashMap, HashSet}, panic, sync::Arc};
+use std::panic::AssertUnwindSafe;
+use tracing::{error, info};
+use p3::field::PrimeCharacteristicRing;
+use p3::goldilocks::Goldilocks;
+use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
+use crate::error::ZKVMError;
+
+pub type E = GoldilocksExt2;
+pub type B = Goldilocks;
+pub type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,
@@ -655,4 +655,61 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
         if platform.can_read(addr) { "R" } else { "-" },
         if platform.can_write(addr) { "W" } else { "-" },
     )
+}
+
+pub fn verify(
+    zkvm_proof: ZKVMProof<E, Pcs>,
+    vk: ZKVMVerifyingKey<E, Pcs>
+) -> Result<(), ZKVMError> {
+    let verifier = ZKVMVerifier::new(vk);
+    // print verification statistics like proof size and hash count
+    let stat_recorder = StatisticRecorder::default();
+    let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+    verifier
+        .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())?;
+    info!("e2e proof stat: {}", zkvm_proof);
+    info!(
+        "hashes count = {}",
+        stat_recorder.into_inner().field_appended_num
+    );
+
+    // FIXME: it is a bit wired, let us move it else where later.
+    soundness_test(zkvm_proof, &verifier);
+    Ok(())
+}
+
+fn soundness_test(mut zkvm_proof: ZKVMProof<E, Pcs>, verifier: &ZKVMVerifier<E, Pcs>) {
+    // do sanity check
+    let transcript = Transcript::new(b"riscv");
+    // change public input maliciously should cause verifier to reject proof
+    zkvm_proof.raw_pi[0] = vec![B::ONE];
+    zkvm_proof.raw_pi[1] = vec![B::ONE];
+
+    // capture panic message, if have
+    let result = with_panic_hook(Box::new(|_info| ()), || {
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            verifier.verify_proof(zkvm_proof, transcript)
+        }))
+    });
+    match result {
+        Ok(res) => {
+            res.expect_err("verify proof should return with error");
+        }
+        Err(err) => {
+            let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
+                message.to_string()
+            } else if let Some(message) = err.downcast_ref::<String>() {
+                message.to_string()
+            } else if let Some(message) = err.downcast_ref::<&String>() {
+                message.to_string()
+            } else {
+                unreachable!()
+            };
+
+            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+                error!("unknown panic {msg:?}");
+                panic::resume_unwind(err);
+            };
+        }
+    };
 }
