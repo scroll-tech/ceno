@@ -97,7 +97,14 @@ where
         num_witin: usize,
         steps: Vec<StepRecord>,
         gkr_layout: &mut Self::Layout,
-    ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
+    ) -> Result<
+        (
+            RowMajorMatrix<E::BaseField>,
+            GKRCircuitWitness<E>,
+            LkMultiplicity,
+        ),
+        ZKVMError,
+    > {
         let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
@@ -163,6 +170,6 @@ where
             .collect::<Result<(), ZKVMError>>()?;
 
         raw_witin.padding_by_strategy();
-        Ok((raw_witin, lk_multiplicity))
+        Ok((raw_witin, gkr_witness, lk_multiplicity))
     }
 }

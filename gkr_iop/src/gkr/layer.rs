@@ -53,7 +53,7 @@ pub struct Layer {
     pub expr_names: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LayerWitness<E: ExtensionField> {
     pub bases: Vec<Vec<E::BaseField>>,
     pub exts: Vec<Vec<E>>,

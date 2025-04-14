@@ -22,7 +22,7 @@ pub struct GKRCircuit {
     pub ext_openings: Vec<(usize, EvalExpression)>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct GKRCircuitWitness<E: ExtensionField> {
     pub layers: Vec<LayerWitness<E>>,
 }
@@ -85,7 +85,7 @@ impl GKRCircuit {
         let mut challenges = challenges.to_vec();
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
-        for (layer, layer_proof) in izip!(self.layers.clone(), sumcheck_proofs) {
+        for (layer, layer_proof) in izip!(&self.layers, sumcheck_proofs) {
             layer.verify(layer_proof, &mut evaluations, &mut challenges, transcript)?;
         }
 

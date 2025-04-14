@@ -11,6 +11,7 @@ use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolWitnessGenerator,
+    gkr::GKRCircuitWitness,
     precompiles::{KeccakLayout, KeccakTrace},
 };
 use itertools::{Itertools, chain};
@@ -343,7 +344,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    keccak_phase1wit: Vec<Vec<E::BaseField>>,
+    pub keccak_gkr_wit: GKRCircuitWitness<E>,
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
@@ -374,13 +375,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = css
             .get_cs(&LargeEcallDummy::<E, KeccakSpec>::name())
             .unwrap();
-        let (witness, logup_multiplicity) =
+        let (witness, gkr_witness, logup_multiplicity) =
             LargeEcallDummy::<E, KeccakSpec>::assign_instances_with_gkr_iop(
                 config,
                 cs.num_witin as usize,
                 records,
                 &mut css.keccak_gkr_iop.layout,
             )?;
+        self.keccak_gkr_wit = gkr_witness;
 
         // // Intercept row-major matrix, convert into KeccakTrace and obtain phase1_wit
         // self.keccak_phase1wit = css

@@ -79,7 +79,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             .collect::<Result<Vec<_>, _>>()?;
 
         // Temporarily set this to < 24 to avoid cb.num_witin overflow
-        let active_rounds = 0;
+        let active_rounds = 12;
 
         let mut lookups = Vec::with_capacity(
             active_rounds
@@ -187,7 +187,7 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
     ) -> Result<(), ZKVMError> {
         Self::assign_instance(config, instance, lk_multiplicity, step)?;
 
-        let active_rounds = 0;
+        let active_rounds = 12;
         let mut wit_iter = lookups.iter().map(|f| f.to_canonical_u64());
         let mut var_iter = config.lookups.iter();
 
@@ -197,28 +197,29 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         let mut pop_arg = || -> u64 {
             let wit = wit_iter.next().unwrap();
             let var = var_iter.next().unwrap();
-            // set_val!(instance, var, wit);
-            set_val!(instance, var, 0);
+            set_val!(instance, var, wit);
+            // set_val!(instance, var, 0);
             wit
         };
 
         for _round in 0..active_rounds {
             for _i in 0..AND_LOOKUPS_PER_ROUND {
-                // lk_multiplicity.lookup_and_byte(pop_arg(), pop_arg());
-                lk_multiplicity.lookup_and_byte(0, 0);
-                pop_arg();
-                pop_arg();
+                lk_multiplicity.lookup_and_byte(pop_arg(), pop_arg());
+                // lk_multiplicity.lookup_and_byte(0, 0);
+                // pop_arg();
+                // pop_arg();
                 pop_arg();
             }
             for _i in 0..XOR_LOOKUPS_PER_ROUND {
-                lk_multiplicity.lookup_xor_byte(0, 0);
-                pop_arg();
-                pop_arg();
+                lk_multiplicity.lookup_xor_byte(pop_arg(), pop_arg());
+                // lk_multiplicity.lookup_xor_byte(0, 0);
+                // pop_arg();
+                // pop_arg();
                 pop_arg();
             }
             for _i in 0..RANGE_LOOKUPS_PER_ROUND {
-                lk_multiplicity.assert_ux::<16>(0);
-                pop_arg();
+                lk_multiplicity.assert_ux::<16>(pop_arg());
+                // pop_arg();
             }
         }
 

@@ -314,6 +314,8 @@ pub const AND_LOOKUPS_PER_ROUND: usize = 200;
 pub const XOR_LOOKUPS_PER_ROUND: usize = 608;
 pub const RANGE_LOOKUPS_PER_ROUND: usize = 290;
 pub const LOOKUPS_PER_ROUND: usize =
+    AND_LOOKUPS_PER_ROUND + XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
+pub const LOOKUP_FELTS_PER_ROUND: usize =
     3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
 
 pub const AND_LOOKUPS: usize = ROUNDS * AND_LOOKUPS_PER_ROUND;
@@ -348,14 +350,15 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
 
     fn build_gkr_phase(&mut self, chip: &mut Chip) {
         let final_outputs =
-            chip.allocate_output_evals::<{ KECCAK_OUTPUT_SIZE + KECCAK_INPUT_SIZE + LOOKUPS_PER_ROUND * ROUNDS }>();
+            chip.allocate_output_evals::<{ KECCAK_OUTPUT_SIZE + KECCAK_INPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS }>();
 
         let mut final_outputs_iter = final_outputs.iter();
 
         let [keccak_output32, keccak_input32, lookup_outputs] = [
             KECCAK_OUTPUT_SIZE,
             KECCAK_INPUT_SIZE,
-            LOOKUPS_PER_ROUND * ROUNDS,
+            //LOOKUPS_PER_ROUND
+            LOOKUP_FELTS_PER_ROUND * ROUNDS,
         ]
         .map(|many| final_outputs_iter.by_ref().take(many).collect_vec());
 
@@ -656,12 +659,18 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                 let beta = Constant::Base(0);
 
                 // Send all lookups to the final output layer
+                // for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups)
+                //     .flatten()
+                //     .enumerate()
+                // {
+                //     expressions.push(lookup.clone());
                 for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups)
                     .flatten()
                     .enumerate()
                 {
-                    expressions.push(lookup.clone());
-                    expr_names.push(format!("{i}th: {:?}", lookup));
+                    expressions.push(lookup);
+                    //expressions.push(lookup.compress(alpha.clone(), beta.clone()));
+                    expr_names.push(format!("{i}th: aha"));
                     evals.push(lookup_outputs[lookup_index].clone());
                     lookup_index += 1;
                 }
@@ -686,7 +695,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
             },
         );
 
-        assert!(lookup_index == LOOKUPS_PER_ROUND * ROUNDS);
+        assert!(lookup_index == LOOKUP_FELTS_PER_ROUND * ROUNDS);
 
         let (state8, _) = chip.allocate_wits_in_layer::<200, 0>();
 
@@ -741,16 +750,6 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
 #[derive(Clone, Default)]
 pub struct KeccakTrace {
     pub instances: Vec<[u32; KECCAK_INPUT_SIZE]>,
-}
-
-use p3_field::Field;
-
-impl<F: Field> From<RowMajorMatrix<F>> for KeccakTrace {
-    fn from(rmm: RowMajorMatrix<F>) -> Self {
-        // clarify rmm encoding for large_ecall_dummy to obtain input
-        //unimplemented!();
-        KeccakTrace { instances: vec![] }
-    }
 }
 
 impl<E> ProtocolWitnessGenerator<E> for KeccakLayout<E>
@@ -842,8 +841,9 @@ where
                 if layer_wits[curr_layer].bases.is_empty() {
                     layer_wits[curr_layer] = LayerWitness::new(nest::<E>(&felts), vec![]);
                 } else {
-                    for (i, bases) in layer_wits[curr_layer].bases.iter_mut().enumerate() {
-                        bases.push(felts[i]);
+                    assert_eq!(felts.len(), layer_wits[curr_layer].bases.len());
+                    for (i, base) in layer_wits[curr_layer].bases.iter_mut().enumerate() {
+                        base.push(felts[i]);
                     }
                 }
                 curr_layer += 1;
@@ -1065,6 +1065,8 @@ where
             );
         }
 
+        dbg!(layer_wits.len());
+
         let len = layer_wits.len() - 1;
         layer_wits[..len].reverse();
 
@@ -1075,7 +1077,6 @@ where
 pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> () {
     let params = KeccakParams {};
     let (layout, chip) = KeccakLayout::build(params);
-    let gkr_circuit = chip.gkr_circuit();
 
     let mut instances = vec![];
     for state in states {
@@ -1094,6 +1095,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
         );
     }
 
+    dbg!(instances.len());
     let phase1_witness = layout.phase1_witness(KeccakTrace { instances });
 
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
@@ -1139,6 +1141,11 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
         // }
 
         let len = final_output1.len();
+        assert_eq!(
+            len,
+            KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS
+        );
+        assert!(final_output1.len() == final_output2.len());
         let gkr_outputs = chain!(
             zip(final_output1, once(point1).cycle().take(len)),
             zip(final_output2, once(point2).cycle().take(len))
@@ -1152,6 +1159,8 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
             .collect_vec()
     };
 
+    let gkr_circuit = chip.gkr_circuit();
+    dbg!(&gkr_circuit.layers.len());
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove(gkr_witness, &out_evals, &vec![], &mut prover_transcript)
         .expect("Failed to prove phase");
