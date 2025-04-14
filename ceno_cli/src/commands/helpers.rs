@@ -14,11 +14,11 @@ pub fn run_elf<P: AsRef<Path>>(
     options.try_setup_logger();
 
     let elf_path = elf_path.as_ref();
-    print_cargo_message("Loading", format_args!("{}", elf_path.display()));
     let elf_bytes = std::fs::read(elf_path)
         .context(format!("failed to read {}", elf_path.display()))?;
     let program = Program::load_elf(&elf_bytes, u32::MAX)
         .context("failed to load elf")?;
+    print_cargo_message("Loaded", format_args!("{}", elf_path.display()));
 
     let public_io = options.read_public_io()
         .context("failed to read public io")?;

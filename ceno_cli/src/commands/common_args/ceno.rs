@@ -5,7 +5,6 @@ use ceno_zkvm::e2e::*;
 use clap::Args;
 use std::path::PathBuf;
 use anyhow::Context;
-use tracing_subscriber::util::SubscriberInitExt;
 
 /// Ceno options
 #[derive(Clone, Args)]
@@ -37,11 +36,11 @@ pub struct CenoOptions {
     heap_size: u32,
 
     /// The path to the proof file to write.
-    #[arg(long, default_value = "proof.bin")]
-    out_proof: PathBuf,
+    #[arg(long)]
+    pub out_proof: Option<PathBuf>,
     /// The path to the verification key file to write.
-    #[arg(long, default_value = "vk.bin")]
-    out_vk: PathBuf,
+    #[arg(long)]
+    pub out_vk: Option<PathBuf>,
 
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information

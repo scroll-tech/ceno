@@ -516,6 +516,7 @@ name = "cargo-ceno"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "cargo_metadata",
  "ceno_emul",
  "ceno_host",

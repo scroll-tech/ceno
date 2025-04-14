@@ -27,4 +27,6 @@ fn main() {
     if cnt_primes > 1000 * 1000 {
         panic!();
     }
+
+    ceno_rt::commit::<Archived<u32>, _>(&cnt_primes);
 }
