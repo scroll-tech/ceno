@@ -19,7 +19,7 @@ use p3::{
     field::{Field, PrimeCharacteristicRing, dot_product},
     matrix::{
         Matrix,
-        dense::{DenseMatrix, RowMajorMatrix, RowMajorMatrixView},
+        dense::{DenseMatrix, RowMajorMatrix},
     },
     util::log2_strict_usize,
 };
@@ -164,9 +164,8 @@ where
     // sorted batch codewords by height in descending order
     let mut batched_codewords = VecDeque::from(
         batched_codewords
-            .iter()
+            .into_iter()
             .sorted_by_key(|codeword| std::cmp::Reverse(codeword.height()))
-            .map(|m| m.as_view())
             .collect_vec(),
     );
     exit_span!(batch_codeword_span);
@@ -338,7 +337,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    codewords: &mut VecDeque<RowMajorMatrixView<E>>,
+    codewords: &mut VecDeque<RowMajorMatrix<E>>,
     trees: &mut Vec<MerkleTreeExt<E>>,
     commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
     mmcs_ext: &ExtensionMmcs<
@@ -389,8 +388,7 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     {
         RowMajorMatrix::new(
             running_codeword_opt
-                .as_ref()
-                .or_else(|| codewords_matched.first())
+                .or_else(|| codewords_matched.first().map(|m| m.as_view()))
                 .unwrap()
                 .values
                 .par_chunks_exact(2)
@@ -416,9 +414,8 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
                     // 1st part folded with challenge then sum
                     let cur_same_pos_sum = running_codeword_opt
-                        .as_ref()
                         .into_iter()
-                        .chain(&codewords_matched)
+                        .chain(codewords_matched.iter().map(|m| m.as_view()))
                         .map(|codeword| {
                             let (left, right) =
                                 (codeword.values[index], codeword.values[index + 1]);
@@ -463,7 +460,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     prover_states: &mut Vec<IOPProverState<'_, E>>,
     challenge: Option<Challenge<E>>,
     sumcheck_messages: &mut Vec<Vec<E>>,
-    codewords: &mut VecDeque<RowMajorMatrixView<E>>,
+    codewords: &mut VecDeque<RowMajorMatrix<E>>,
     transcript: &mut impl Transcript<E>,
     trees: &mut Vec<MerkleTreeExt<E>>,
     commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
