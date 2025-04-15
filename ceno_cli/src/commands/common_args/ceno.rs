@@ -2,7 +2,7 @@ use crate::utils::*;
 use anyhow::{Context, bail};
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-use ceno_zkvm::{e2e::*, scheme::ZKVMProof, structs::ZKVMVerifyingKey};
+use ceno_zkvm::e2e::*;
 use clap::Args;
 use std::{
     fs::File,
@@ -202,11 +202,13 @@ impl CenoOptions {
     }
 }
 
+type E2EResult = (IntermediateState<E, Pcs>, Box<dyn FnOnce()>);
+
 fn run_elf_inner<P: AsRef<Path>>(
     options: &CenoOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<(IntermediateState<E, Pcs>, Box<dyn FnOnce()>)> {
+) -> anyhow::Result<E2EResult> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;

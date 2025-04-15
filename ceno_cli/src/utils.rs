@@ -100,7 +100,7 @@ pub fn print_error(e: anyhow::Error) {
             "{}{} {}",
             style("error").red().bold(),
             style(":").white().bold(),
-            e.to_string()
+            e
         );
     }
     let bt = e.backtrace();
