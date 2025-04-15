@@ -291,15 +291,21 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
+    use std::collections::VecDeque;
 
     use ff_ext::GoldilocksExt2;
     use itertools::izip;
-    use p3::goldilocks::Goldilocks;
+    use p3::{
+        commit::{ExtensionMmcs, Mmcs},
+        goldilocks::Goldilocks,
+    };
 
     use rand::rngs::OsRng;
+    use transcript::BasicTranscript;
 
-    use crate::basefold::commit_phase::basefold_one_round_by_interpolation_weights;
+    use crate::{
+        basefold::commit_phase::basefold_fri_round, util::merkle_tree::poseidon2_merkle_tree,
+    };
 
     use super::*;
 
@@ -311,6 +317,7 @@ mod tests {
     #[test]
     pub fn test_message_codeword_linearity() {
         let num_vars = 10;
+        let mmcs_ext = ExtensionMmcs::<F, E, _>::new(poseidon2_merkle_tree::<E>());
         let rmm: RowMajorMatrix<F> = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
         let pp = <Code as EncodingScheme<E>>::setup(num_vars);
         let (pp, vp) = Code::trim(pp, num_vars).unwrap();
@@ -330,12 +337,21 @@ mod tests {
             izip!(&codeword.values, &codeword_ext.values).all(|(base, ext)| E::from(*base) == *ext)
         );
 
+        let mut codeword_ext = VecDeque::from(vec![codeword_ext]);
+        let mut transcript = BasicTranscript::new(b"test");
+
         // test basefold.encode(raw_message.fold(1-r, r)) ?= codeword.fold(1-r, r)
+        let mut prove_data = vec![];
         let r = E::from_u64(97);
-        let folded_codeword = basefold_one_round_by_interpolation_weights::<E, BasefoldRSParams>(
+        basefold_fri_round::<E, BasefoldRSParams>(
             &pp,
-            &mut [Cow::Borrowed(&codeword_ext.values)],
+            &mut codeword_ext,
+            &mut prove_data,
+            &mut vec![],
+            &mmcs_ext,
             r,
+            false,
+            &mut transcript,
         );
 
         // encoded folded raw message
@@ -349,6 +365,9 @@ mod tests {
                 1,
             ),
         );
-        assert_eq!(&folded_codeword.values, &codeword_from_folded_rmm.values);
+        assert_eq!(
+            &mmcs_ext.get_matrices(&prove_data[0])[0].values,
+            &codeword_from_folded_rmm.values
+        );
     }
 }

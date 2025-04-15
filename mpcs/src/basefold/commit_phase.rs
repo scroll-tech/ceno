@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 use super::{
     encoding::EncodingScheme,
@@ -9,7 +9,7 @@ use crate::{
     util::{
         hash::write_digest_to_transcript,
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
-        split_by_sizes,
+        pop_front_while, split_by_sizes,
     },
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -19,11 +19,12 @@ use p3::{
     field::{Field, PrimeCharacteristicRing, dot_product},
     matrix::{
         Matrix,
-        dense::{DenseMatrix, RowMajorMatrix},
+        dense::{DenseMatrix, RowMajorMatrix, RowMajorMatrixView},
     },
     util::log2_strict_usize,
 };
 use serde::{Serialize, de::DeserializeOwned};
+use std::collections::VecDeque;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverState,
@@ -38,12 +39,12 @@ use multilinear_extensions::{
 };
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
-    prelude::{IndexedParallelIterator, ParallelIterator, ParallelSlice},
+    prelude::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
 };
 
 use super::structure::BasefoldCommitmentWithWitness;
 
-// outputs (trees, sumcheck_codewords, oracles, evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
@@ -101,8 +102,9 @@ where
         .map(|fixed_comms| mmcs.get_matrices(&fixed_comms.codeword))
         .unwrap_or_default();
 
-    let batch_codeword = entered_span!("batch_codeword");
-    let initial_rlc_codeword = witins_codeword
+    let batch_codeword_span = entered_span!("batch_codeword");
+    // we random linear combination of rmm under same circuit into single codeword, as they shared same height
+    let batched_codewords: Vec<DenseMatrix<E>> = witins_codeword
         .iter()
         .zip_eq(&batch_coeffs_splitted)
         .zip_eq(&witin_polys_and_meta)
@@ -111,55 +113,63 @@ where
                 let (expected_witins_num_poly, expected_fixed_num_poly) =
                     circuit_num_polys[*circuit_index];
                 // batch_coeffs concat witin follow by fixed, where fixed is optional
-                let witin_fixed_concated_codeword: Vec<(
-                    &&DenseMatrix<E::BaseField, Vec<E::BaseField>>,
-                    usize,
-                )> = std::iter::once((witin_codewords, expected_witins_num_poly))
-                    .chain(
-                        fixed_comms
-                            .and_then(|fixed_comms| {
-                                fixed_comms.circuit_codeword_index.get(circuit_index)
-                            })
-                            .and_then(|idx| {
-                                fixed_codeword
-                                    .get(*idx)
-                                    .map(|rmm| (rmm, expected_fixed_num_poly))
-                            }),
-                    )
-                    .collect_vec();
+                let witin_fixed_concated_codeword: Vec<(_, usize)> =
+                    std::iter::once((witin_codewords, expected_witins_num_poly))
+                        .chain(
+                            fixed_comms
+                                .and_then(|fixed_comms| {
+                                    fixed_comms.circuit_codeword_index.get(circuit_index)
+                                })
+                                .and_then(|idx| {
+                                    fixed_codeword
+                                        .get(*idx)
+                                        .map(|rmm| (rmm, expected_fixed_num_poly))
+                                }),
+                        )
+                        .collect_vec();
                 // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
                 let size = witin_fixed_concated_codeword[0].0.height() * 2;
-                (0..size)
-                    .into_par_iter()
-                    .map(|j| {
-                        witin_fixed_concated_codeword
-                            .iter()
-                            .scan(0, |start_index, (rmm, num_polys)| {
-                                let batch_coeffs = batch_coeffs
-                                    [*start_index..*start_index + num_polys]
-                                    .iter()
-                                    .copied();
-                                *start_index += num_polys;
-                                Some(dot_product(
-                                    batch_coeffs,
-                                    rmm.values[j * num_polys..(j + 1) * num_polys]
+                RowMajorMatrix::new(
+                    (0..size)
+                        .into_par_iter()
+                        .map(|j| {
+                            witin_fixed_concated_codeword
+                                .iter()
+                                .scan(0, |start_index, (rmm, num_polys)| {
+                                    let batch_coeffs = batch_coeffs
+                                        [*start_index..*start_index + num_polys]
                                         .iter()
-                                        .copied(),
-                                ))
-                            })
-                            .sum::<E>()
-                    })
-                    .collect::<Vec<_>>()
+                                        .copied();
+                                    *start_index += num_polys;
+                                    Some(dot_product(
+                                        batch_coeffs,
+                                        rmm.values[j * num_polys..(j + 1) * num_polys]
+                                            .iter()
+                                            .copied(),
+                                    ))
+                                })
+                                .sum::<E>()
+                        })
+                        .collect::<Vec<_>>(),
+                    2,
+                )
             },
         )
         .collect_vec();
     assert!(
-        [witin_polys_and_meta.len(), initial_rlc_codeword.len(),]
+        [witin_polys_and_meta.len(), batched_codewords.len(),]
             .iter()
             .all_equal()
     );
-    let mut running_codeword = initial_rlc_codeword.iter().map(Cow::Borrowed).collect_vec();
-    exit_span!(batch_codeword);
+    // sorted batch codewords by height in descending order
+    let mut batched_codewords = VecDeque::from(
+        batched_codewords
+            .iter()
+            .sorted_by_key(|codeword| std::cmp::Reverse(codeword.height()))
+            .map(|m| m.as_view())
+            .collect_vec(),
+    );
+    exit_span!(batch_codeword_span);
 
     let batched_evals = entered_span!("batched_evals");
     let initial_rlc_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
@@ -229,13 +239,14 @@ where
     let mut challenge = None;
     let sumcheck_phase1 = entered_span!("sumcheck_phase1");
     let phase1_rounds = num_rounds.min(max_num_vars - log2_num_threads);
+
     for i in 0..phase1_rounds {
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
-            &mut running_codeword,
+            &mut batched_codewords,
             transcript,
             &mut trees,
             &mut commits,
@@ -243,6 +254,7 @@ where
             i == num_rounds - 1,
         );
     }
+
     exit_span!(sumcheck_phase1);
 
     if let Some(p) = challenge {
@@ -267,13 +279,14 @@ where
 
     let sumcheck_phase2 = entered_span!("sumcheck_phase2");
     let remaining_rounds = num_rounds.saturating_sub(max_num_vars - log2_num_threads);
+
     for i in 0..remaining_rounds {
         challenge = basefold_one_round::<E, Spec>(
             pp,
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
-            &mut running_codeword,
+            &mut batched_codewords,
             transcript,
             &mut trees,
             &mut commits,
@@ -281,6 +294,7 @@ where
             i == remaining_rounds - 1,
         );
     }
+
     exit_span!(sumcheck_phase2);
 
     if let Some(p) = challenge {
@@ -320,70 +334,136 @@ where
     })
 }
 
-// TODO define it within codeword
-pub(crate) fn basefold_one_round_by_interpolation_weights<
-    E: ExtensionField,
-    Spec: BasefoldSpec<E>,
->(
+/// basefold fri round to fold codewords
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    values: &mut [Cow<Vec<E>>],
+    codewords: &mut VecDeque<RowMajorMatrixView<E>>,
+    trees: &mut Vec<MerkleTreeExt<E>>,
+    commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
+    mmcs_ext: &ExtensionMmcs<
+        E::BaseField,
+        E,
+        <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
+    >,
     challenge: E,
-) -> RowMajorMatrix<E> {
-    let target_len = values.iter().map(|v| v.len()).max().unwrap();
+    is_last_round: bool,
+    transcript: &mut impl Transcript<E>,
+) where
+    E::BaseField: Serialize + DeserializeOwned,
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
+    let running_codeword_opt = trees
+        .last()
+        .and_then(|mktree| mmcs_ext.get_matrices(mktree).pop())
+        .map(|m| m.as_view());
+    let target_len = running_codeword_opt
+        .map(|running_codeword| running_codeword.values.len())
+        .unwrap_or_else(|| {
+            codewords
+                .iter()
+                .map(|v| v.values.len())
+                .max()
+                .expect("empty codeword")
+        });
+    let next_level_target_len = target_len >> 1;
     let level = log2_strict_usize(target_len) - 1;
     let folding_coeffs =
         <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level);
     let inv_2 = E::BaseField::from_u64(2).inverse();
-
     debug_assert_eq!(folding_coeffs.len(), 1 << level);
-    let next_level_target_len = target_len >> 1;
-    let res = values
-        .iter_mut()
-        .filter_map(|value| {
-            // the target codeword need to be folded
-            if value.len() == target_len {
-                // assume values in bit_reverse_format
-                // thus chunks(2) is equivalent to left, right traverse
-                *value = Cow::Owned(
-                    value
-                        .par_chunks_exact(2)
-                        .zip(folding_coeffs)
-                        .map(|(ys, coeff)| {
-                            let (left, right) = (ys[0], ys[1]);
+
+    // take codewrods match with target length then fold
+    let codewords_matched =
+        pop_front_while(codewords, |codeword| codeword.values.len() == target_len);
+    // take codewrods match next target length in preparation of being committed together
+    let codewords_next_level_matched = pop_front_while(codewords, |codeword| {
+        codeword.values.len() == next_level_target_len
+    });
+
+    // optimize for single codeword match
+    let folded_codeword = if (running_codeword_opt.is_some() as usize + codewords_matched.len())
+        == 1
+        && codewords_next_level_matched.is_empty()
+    {
+        RowMajorMatrix::new(
+            running_codeword_opt
+                .as_ref()
+                .or_else(|| codewords_matched.first())
+                .unwrap()
+                .values
+                .par_chunks_exact(2)
+                .zip(folding_coeffs)
+                .map(|(ys, coeff)| {
+                    let (left, right) = (ys[0], ys[1]);
+                    // original (left, right) = (lo + hi*x, lo - hi*x), lo, hi are codeword, but after times x it's not codeword
+                    // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
+                    let (lo, hi) = ((left + right) * inv_2, (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
+                    // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
+                    lo + (hi - lo) * challenge
+                })
+                .collect::<Vec<_>>(),
+            2,
+        )
+    } else {
+        RowMajorMatrix::new(
+            (0..target_len)
+                .into_par_iter()
+                .step_by(2)
+                .map(|index| {
+                    let coeff = &folding_coeffs[index >> 1];
+
+                    // 1st part folded with challenge then sum
+                    let cur_same_pos_sum = running_codeword_opt
+                        .as_ref()
+                        .into_iter()
+                        .chain(&codewords_matched)
+                        .map(|codeword| {
+                            let (left, right) =
+                                (codeword.values[index], codeword.values[index + 1]);
                             // original (left, right) = (lo + hi*x, lo - hi*x), lo, hi are codeword, but after times x it's not codeword
                             // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
                             let (lo, hi) = ((left + right) * inv_2, (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
                             // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
                             lo + (hi - lo) * challenge
                         })
-                        .collect::<Vec<_>>(),
-                );
-                Some(value)
-            // this is new codeword involve into commitment
-            } else if value.len() == next_level_target_len {
-                Some(value)
-            } else {
-                None
-            }
-        })
-        .collect_vec();
+                        .sum::<E>();
 
-    RowMajorMatrix::new(
-        (0..res[0].len())
-            .into_par_iter()
-            .map(|j| res.iter().map(|row| row[j]).sum())
-            .collect(),
-        2,
-    )
+                    // 2nd part: retrieve respective index then sum
+                    let next_same_pos_sum = codewords_next_level_matched
+                        .iter()
+                        .map(|codeword| codeword.values[index >> 1])
+                        .sum::<E>();
+                    cur_same_pos_sum + next_same_pos_sum
+                })
+                .collect::<Vec<_>>(),
+            2,
+        )
+    };
+
+    if cfg!(feature = "sanity-check") && is_last_round {
+        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(folded_codeword.clone());
+        commits.push(commitment);
+        trees.push(merkle_tree);
+    }
+
+    if !is_last_round {
+        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(folded_codeword);
+        write_digest_to_transcript(&commitment, transcript);
+        commits.push(commitment);
+        trees.push(merkle_tree);
+    }
 }
 
+// do sumcheck interleaving with FRI step
 #[allow(clippy::too_many_arguments)]
 fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     prover_states: &mut Vec<IOPProverState<'_, E>>,
     challenge: Option<Challenge<E>>,
     sumcheck_messages: &mut Vec<Vec<E>>,
-    running_codeword: &mut [Cow<Vec<E>>],
+    codewords: &mut VecDeque<RowMajorMatrixView<E>>,
     transcript: &mut impl Transcript<E>,
     trees: &mut Vec<MerkleTreeExt<E>>,
     commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
@@ -399,12 +479,12 @@ where
     <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
         IntoIterator<Item = E::BaseField> + PartialEq,
 {
-    let prove_round_and_update_state_span = entered_span!("prove_round_and_update_state");
+    // 1. sumcheck part
+    let sumcheck_round_span = entered_span!("basefold::sumcheck_one_round");
     let prover_msgs = prover_states
         .par_iter_mut()
         .map(|prover_state| IOPProverState::prove_round_and_update_state(prover_state, &challenge))
         .collect::<Vec<_>>();
-    exit_span!(prove_round_and_update_state_span);
 
     // for each round, we must collect #SIZE prover message
     let evaluations: AdditiveVec<E> =
@@ -414,30 +494,25 @@ where
                 acc += AdditiveVec(prover_msg.evaluations);
                 acc
             });
-
     transcript.append_field_element_exts(&evaluations.0);
     sumcheck_messages.push(evaluations.0);
+    exit_span!(sumcheck_round_span);
 
     let next_challenge = transcript.sample_and_append_challenge(b"commit round");
 
-    let new_running_codeword = basefold_one_round_by_interpolation_weights::<E, Spec>(
+    // 2. fri part
+    let fri_round_span = entered_span!("basefold::fri_one_round");
+    basefold_fri_round::<E, Spec>(
         pp,
-        running_codeword,
+        codewords,
+        trees,
+        commits,
+        mmcs_ext,
         next_challenge.elements,
+        is_last_round,
+        transcript,
     );
-
-    if cfg!(feature = "sanity-check") && is_last_round {
-        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_codeword.clone());
-        commits.push(commitment);
-        trees.push(merkle_tree);
-    }
-
-    if !is_last_round {
-        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_codeword);
-        write_digest_to_transcript(&commitment, transcript);
-        commits.push(commitment);
-        trees.push(merkle_tree);
-    }
+    exit_span!(fri_round_span);
 
     Some(next_challenge)
 }

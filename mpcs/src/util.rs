@@ -2,6 +2,8 @@ pub mod arithmetic;
 pub mod expression;
 pub mod hash;
 pub mod parallel;
+use std::collections::VecDeque;
+
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools, izip};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
@@ -311,6 +313,31 @@ pub fn split_by_sizes<'a, T>(input: &'a [T], sizes: &[usize]) -> Vec<&'a [T]> {
             Some(slice)
         })
         .collect()
+}
+
+/// removes and returns elements from the front of the deque
+/// as long as they satisfy the given predicate.
+///
+/// # arguments
+/// * `deque` - the mutable VecDeque to operate on.
+/// * `pred` - a predicate function that takes a reference to an element
+///            and returns `true` if the element should be removed.
+///
+/// # returns
+/// a `Vec<T>` containing all the elements that were removed.
+pub fn pop_front_while<T, F>(deque: &mut VecDeque<T>, mut pred: F) -> Vec<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    let mut result = Vec::new();
+    while let Some(front) = deque.front() {
+        if pred(front) {
+            result.push(deque.pop_front().unwrap());
+        } else {
+            break;
+        }
+    }
+    result
 }
 
 #[cfg(any(test, feature = "benchmark"))]
