@@ -1,6 +1,4 @@
 extern crate ceno_rt;
-use ceno_rt::println;
-use core::fmt::Write;
 use rkyv::vec::ArchivedVec;
 
 fn sort<T: Ord>(slice: &mut [T]) {

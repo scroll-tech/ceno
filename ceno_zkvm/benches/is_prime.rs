@@ -8,7 +8,7 @@ use ceno_zkvm::{
 };
 use criterion::*;
 
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
@@ -57,6 +57,7 @@ fn is_prime_1(c: &mut Criterion) {
                             program.clone(),
                             platform.clone(),
                             hints.clone(),
+                            vec![],
                             max_steps,
                             Checkpoint::PrepE2EProving,
                         );

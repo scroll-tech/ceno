@@ -43,16 +43,16 @@ fn fibonacci_prove(c: &mut Criterion) {
         let mut hints = CenoStdin::default();
         let _ = hints.write(&20);
         // estimate proof size data first
-        let (proof, vk) = run_e2e_with_checkpoint::<E, Pcs>(
+        let ((proof, vk), _) = run_e2e_with_checkpoint::<E, Pcs>(
             program.clone(),
             platform.clone(),
             (&hints).into(),
             vec![],
             max_steps,
             Checkpoint::PrepSanityCheck,
-        )
-        .0
-        .expect("PrepSanityCheck do not provide proof and verifier");
+        );
+        let proof = proof.expect("PrepSanityCheck do not provide proof");
+        let vk = vk.expect("PrepSanityCheck do not provide verifier");
 
         println!("e2e proof {}", proof);
         let stat_recorder = StatisticRecorder::default();

@@ -8,7 +8,7 @@ use ceno_zkvm::{
 };
 use criterion::*;
 
-use goldilocks::GoldilocksExt2;
+use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
@@ -45,7 +45,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
         _ = hints.write(&(0..n).map(|_| rng.gen::<u32>()).collect::<Vec<_>>());
         let hints: Vec<u32> = (&hints).into();
 
-        let mut group = c.benchmark_group(format!("quadratic_sorting"));
+        let mut group = c.benchmark_group("quadratic_sorting".to_string());
         group.sample_size(NUM_SAMPLES);
 
         // Benchmark the proving time
@@ -59,6 +59,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                             program.clone(),
                             platform.clone(),
                             hints.clone(),
+                            vec![],
                             max_steps,
                             Checkpoint::PrepE2EProving,
                         );
