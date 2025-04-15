@@ -1,11 +1,11 @@
 use crate::utils::{RUSTC_TARGET, release_target_json};
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
+use cargo_metadata::{MetadataCommand, TargetKind};
 use clap::Args;
 use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-use cargo_metadata::{MetadataCommand, TargetKind};
 use tempfile::TempDir;
 
 /// Options:
@@ -227,7 +227,7 @@ impl TargetSelection {
         package_selection: &PackageSelection,
     ) -> anyhow::Result<TargetSelection> {
         if self.is_set() {
-            return Ok(self)
+            return Ok(self);
         }
 
         let metadata = MetadataCommand::new()

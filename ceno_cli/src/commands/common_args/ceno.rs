@@ -143,7 +143,6 @@ impl CenoOptions {
         }
     }
 
-
     /// Run keygen the ceno elf file with given options
     pub fn keygen<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
@@ -158,7 +157,6 @@ impl CenoOptions {
         }
         Ok(())
     }
-
 
     /// Run the ceno elf file with given options
     pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {

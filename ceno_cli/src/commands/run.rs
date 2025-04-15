@@ -57,15 +57,11 @@ impl KeygenCmd {
         self.inner.run(toolchain, RunKind::Keygen)?;
         print_cargo_message(
             "Finished",
-            format_args!(
-                "keygen in {:.2}s",
-                start.elapsed().as_secs_f32()
-            ),
+            format_args!("keygen in {:.2}s", start.elapsed().as_secs_f32()),
         );
         Ok(())
     }
 }
-
 
 impl RunCmd {
     pub fn run(self, toolchain: Option<String>) -> anyhow::Result<()> {
@@ -73,10 +69,7 @@ impl RunCmd {
         self.inner.run(toolchain, RunKind::Run)?;
         print_cargo_message(
             "Finished",
-            format_args!(
-                "running elf in {:.2}s",
-                start.elapsed().as_secs_f32()
-            ),
+            format_args!("running elf in {:.2}s", start.elapsed().as_secs_f32()),
         );
         Ok(())
     }
@@ -103,10 +96,9 @@ impl CmdInner {
             Some(path) => path,
             None => search_cargo_manifest_path(current_dir()?)?,
         };
-        let target_selection = self.target_selection.canonicalize(
-            manifest_path,
-            &self.package_selection
-        )?;
+        let target_selection = self
+            .target_selection
+            .canonicalize(manifest_path, &self.package_selection)?;
 
         let build = BuildCmd {
             cargo_options: self.cargo_options.clone(),
