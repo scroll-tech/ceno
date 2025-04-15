@@ -43,7 +43,7 @@ use rayon::{
 
 use super::structure::BasefoldCommitmentWithWitness;
 
-// outputs (trees, sumcheck_oracles, oracles, bh_evals, eq, eval)
+// outputs (trees, sumcheck_oracles, oracles, evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
@@ -161,8 +161,8 @@ where
     let mut running_oracle = initial_rlc_oracle.iter().map(Cow::Borrowed).collect_vec();
     exit_span!(batch_oracle);
 
-    let batched_bh_evals = entered_span!("batched_bh_evals");
-    let initial_rlc_bh_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
+    let batched_evals = entered_span!("batched_evals");
+    let initial_rlc_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
         .par_iter()
         .zip_eq(batch_coeffs_splitted.par_iter())
         .map(|(witin_fixed_mle, batch_coeffs)| {
@@ -188,7 +188,7 @@ where
             running_evals
         })
         .collect::<Vec<_>>();
-    exit_span!(batched_bh_evals);
+    exit_span!(batched_evals);
     exit_span!(prepare_span);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
@@ -205,7 +205,7 @@ where
     // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
     let mut polys = VirtualPolynomials::new(num_threads, max_num_vars);
 
-    izip!(&eq, &initial_rlc_bh_evals)
+    izip!(&eq, &initial_rlc_evals)
         .for_each(|(eq, running_evals)| polys.add_mle_list(vec![&eq, &running_evals], E::ONE));
 
     let (batched_polys, poly_meta) = polys.get_batched_polys();

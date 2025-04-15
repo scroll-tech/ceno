@@ -178,10 +178,9 @@ where
     fn eq(&self, other: &Self) -> bool {
         izip!(self.get_codewords(), other.get_codewords())
             .all(|(codeword_a, codeword_b)| codeword_a.eq(codeword_b))
-            && izip!(self.polys.values(), other.polys.values()).all(|(bh_evals_a, bh_evals_b)| {
-                izip!(bh_evals_a, bh_evals_b).all(|(bh_evals_a, bh_evals_b)| {
-                    bh_evals_a.evaluations() == bh_evals_b.evaluations()
-                })
+            && izip!(self.polys.values(), other.polys.values()).all(|(evals_a, evals_b)| {
+                izip!(evals_a, evals_b)
+                    .all(|(evals_a, evals_b)| evals_a.evaluations() == evals_b.evaluations())
             })
     }
 }
