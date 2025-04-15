@@ -43,7 +43,7 @@ use rayon::{
 
 use super::structure::BasefoldCommitmentWithWitness;
 
-// outputs (trees, sumcheck_oracles, oracles, evals, eq, eval)
+// outputs (trees, sumcheck_codewords, oracles, evals, eq, eval)
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
@@ -101,8 +101,8 @@ where
         .map(|fixed_comms| mmcs.get_matrices(&fixed_comms.codeword))
         .unwrap_or_default();
 
-    let batch_oracle = entered_span!("batch_oracle");
-    let initial_rlc_oracle = witins_codeword
+    let batch_codeword = entered_span!("batch_codeword");
+    let initial_rlc_codeword = witins_codeword
         .iter()
         .zip_eq(&batch_coeffs_splitted)
         .zip_eq(&witin_polys_and_meta)
@@ -154,12 +154,12 @@ where
         )
         .collect_vec();
     assert!(
-        [witin_polys_and_meta.len(), initial_rlc_oracle.len(),]
+        [witin_polys_and_meta.len(), initial_rlc_codeword.len(),]
             .iter()
             .all_equal()
     );
-    let mut running_oracle = initial_rlc_oracle.iter().map(Cow::Borrowed).collect_vec();
-    exit_span!(batch_oracle);
+    let mut running_codeword = initial_rlc_codeword.iter().map(Cow::Borrowed).collect_vec();
+    exit_span!(batch_codeword);
 
     let batched_evals = entered_span!("batched_evals");
     let initial_rlc_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
@@ -235,7 +235,7 @@ where
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
-            &mut running_oracle,
+            &mut running_codeword,
             transcript,
             &mut trees,
             &mut commits,
@@ -273,7 +273,7 @@ where
             &mut prover_states,
             challenge,
             &mut sumcheck_messages,
-            &mut running_oracle,
+            &mut running_codeword,
             transcript,
             &mut trees,
             &mut commits,
@@ -383,7 +383,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     prover_states: &mut Vec<IOPProverState<'_, E>>,
     challenge: Option<Challenge<E>>,
     sumcheck_messages: &mut Vec<Vec<E>>,
-    running_oracle: &mut [Cow<Vec<E>>],
+    running_codeword: &mut [Cow<Vec<E>>],
     transcript: &mut impl Transcript<E>,
     trees: &mut Vec<MerkleTreeExt<E>>,
     commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
@@ -420,20 +420,20 @@ where
 
     let next_challenge = transcript.sample_and_append_challenge(b"commit round");
 
-    let new_running_oracle = basefold_one_round_by_interpolation_weights::<E, Spec>(
+    let new_running_codeword = basefold_one_round_by_interpolation_weights::<E, Spec>(
         pp,
-        running_oracle,
+        running_codeword,
         next_challenge.elements,
     );
 
     if cfg!(feature = "sanity-check") && is_last_round {
-        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_oracle.clone());
+        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_codeword.clone());
         commits.push(commitment);
         trees.push(merkle_tree);
     }
 
     if !is_last_round {
-        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_oracle);
+        let (commitment, merkle_tree) = mmcs_ext.commit_matrix(new_running_codeword);
         write_digest_to_transcript(&commitment, transcript);
         commits.push(commitment);
         trees.push(merkle_tree);

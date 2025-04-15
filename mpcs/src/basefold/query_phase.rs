@@ -157,7 +157,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let mut idx = idx >> 1;
 
             let (witin_dimentions, fixed_dimentions) =
-                get_base_oracle_dimentions::<E, Spec>(circuit_meta_map);
+                get_base_codeword_dimentions::<E, Spec>(circuit_meta_map);
             // verify witness
             mmcs.verify_batch(
                 &witin_comm.commit,
@@ -199,7 +199,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
             // circuit_index -> (lo, hi)
             // TODO use pure vector for it instead of BTreeMap
-            let base_oracle_lo_hi = circuit_meta_map
+            let base_codeword_lo_hi = circuit_meta_map
                 .iter()
                 .map(
                     |(
@@ -246,7 +246,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     },
                 )
                 .collect::<BTreeMap<_, _>>();
-            debug_assert_eq!(folding_sorted_order.len(), base_oracle_lo_hi.len());
+            debug_assert_eq!(folding_sorted_order.len(), base_codeword_lo_hi.len());
             debug_assert!(witin_commit_leafs_iter.next().is_none());
             debug_assert!(fixed_commit_leafs_iter.next().is_none());
             debug_assert!(batch_coeffs_iter.next().is_none());
@@ -271,7 +271,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 .by_ref()
                 .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
                 .map(|(_, circuit_index)| {
-                    let (lo, hi) = &base_oracle_lo_hi[circuit_index];
+                    let (lo, hi) = &base_codeword_lo_hi[circuit_index];
 
                     let coeff =
                         <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
@@ -294,11 +294,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 cur_num_var -= 1;
 
                 let is_interpolate_to_right_index = (idx & 1) == 1;
-                let new_involved_oracles = folding_sorted_order_iter
+                let new_involved_codewords = folding_sorted_order_iter
                     .by_ref()
                     .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
                     .map(|(_, circuit_index)| {
-                        let (lo, hi) = &base_oracle_lo_hi[circuit_index];
+                        let (lo, hi) = &base_codeword_lo_hi[circuit_index];
                         if is_interpolate_to_right_index {
                             *hi
                         } else {
@@ -308,7 +308,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     .sum::<E>();
 
                 let mut leafs = vec![*leaf; 2];
-                leafs[is_interpolate_to_right_index as usize] = folded + new_involved_oracles;
+                leafs[is_interpolate_to_right_index as usize] = folded + new_involved_codewords;
                 idx >>= 1;
                 mmcs_ext
                     .verify_batch(
@@ -400,7 +400,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     );
 }
 
-fn get_base_oracle_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
+fn get_base_codeword_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
     circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
 ) -> (Vec<Dimensions>, Vec<Dimensions>) {
     let (wit_dim, fixed_dim): (Vec<_>, Vec<_>) = circuit_meta_map
