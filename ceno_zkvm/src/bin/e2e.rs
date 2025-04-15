@@ -1,15 +1,12 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
-use ceno_host::{memory_from_file, CenoStdin};
-use ceno_zkvm::{
-    e2e::{E, Pcs, Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-};
+use ceno_host::{CenoStdin, memory_from_file};
+use ceno_zkvm::e2e::{Checkpoint, E, Pcs, Preset, run_e2e_with_checkpoint, setup_platform, verify};
 use clap::Parser;
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-use ceno_zkvm::e2e::verify;
 
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
@@ -23,7 +20,6 @@ fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
 struct Args {
     // /// The path to the ELF file to execute.
     // elf: String,
-
     /// The path to the proof file to write.
     #[arg(default_value = "proof.bin")]
     proof_file: String,
@@ -177,7 +173,7 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    let (state, _) = run_e2e_with_checkpoint::<E, Pcs>(
+    let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<E, Pcs>(
         program,
         platform,
         hints,
@@ -186,7 +182,8 @@ fn main() {
         Checkpoint::PrepSanityCheck,
     );
 
-    let (zkvm_proof, vk) = state.expect("PrepSanityCheck should yield state.");
+    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
+    let vk = vk.expect("PrepSanityCheck should yield vk.");
 
     let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
     std::fs::write(&args.proof_file, proof_bytes).unwrap();

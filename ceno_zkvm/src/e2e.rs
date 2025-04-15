@@ -1,13 +1,21 @@
-use crate::{instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig}, scheme::{
-    PublicValues, ZKVMProof,
-    constants::MAX_NUM_VARIABLES,
-    mock_prover::{LkMultiplicityKey, MockProver},
-    prover::ZKVMProver,
-    verifier::ZKVMVerifier,
-}, state::GlobalState, structs::{
-    ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
-    ZKVMWitnesses,
-}, tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig}, with_panic_hook};
+use crate::{
+    error::ZKVMError,
+    instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
+    scheme::{
+        PublicValues, ZKVMProof,
+        constants::MAX_NUM_VARIABLES,
+        mock_prover::{LkMultiplicityKey, MockProver},
+        prover::ZKVMProver,
+        verifier::ZKVMVerifier,
+    },
+    state::GlobalState,
+    structs::{
+        ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
+        ZKVMWitnesses,
+    },
+    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
+    with_panic_hook,
+};
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord,
     Tracer, VMState, WORD_SIZE, WordAddr,
@@ -16,13 +24,15 @@ use clap::ValueEnum;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use std::{collections::{BTreeSet, HashMap, HashSet}, panic, sync::Arc};
-use std::panic::AssertUnwindSafe;
+use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    panic,
+    panic::AssertUnwindSafe,
+    sync::Arc,
+};
 use tracing::{error, info};
-use p3::field::PrimeCharacteristicRing;
-use p3::goldilocks::Goldilocks;
 use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
-use crate::error::ZKVMError;
 
 pub type E = GoldilocksExt2;
 pub type B = Goldilocks;
@@ -485,10 +495,7 @@ pub fn run_e2e_with_checkpoint<
         .expect("keygen failed");
     let vk = pk.get_vk();
     if let Checkpoint::Keygen = checkpoint {
-        return (
-            (None, Some(vk)),
-            Box::new(|| ()),
-        );
+        return ((None, Some(vk)), Box::new(|| ()));
     }
 
     // Generate witness
@@ -666,14 +673,13 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
 
 pub fn verify(
     zkvm_proof: ZKVMProof<E, Pcs>,
-    vk: ZKVMVerifyingKey<E, Pcs>
+    vk: ZKVMVerifyingKey<E, Pcs>,
 ) -> Result<(), ZKVMError> {
     let verifier = ZKVMVerifier::new(vk);
     // print verification statistics like proof size and hash count
     let stat_recorder = StatisticRecorder::default();
     let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
-    verifier
-        .verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())?;
+    verifier.verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())?;
     info!("e2e proof stat: {}", zkvm_proof);
     info!(
         "hashes count = {}",
