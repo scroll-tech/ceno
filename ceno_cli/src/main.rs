@@ -31,11 +31,14 @@ struct VmCli {
 pub enum VmCliCommands {
     // Bench(BenchCmd),
     Build(BuildCmd),
-    // Keygen(KeygenCmd),
-    // Prove(ProveCmd),
+    Keygen(KeygenCmd),
+    Prove(ProveCmd),
     Run(RunCmd),
+    RawKeygen(RawKeygenCmd),
+    RawProve(RawProveCmd),
+    RawRun(RawRunCmd),
     // Setup(EvmProvingSetupCmd),
-    // Verify(VerifyCmd),
+    Verify(VerifyCmd),
 }
 
 fn main() {
@@ -55,13 +58,26 @@ fn main() {
         VmCliCommands::Build(cmd) => cmd
             .run(toolchain)
             .context("could not build ceno program due to previous error"),
+        VmCliCommands::Prove(cmd) => cmd
+            .run(toolchain)
+            .context("could not run and prove ceno program due to previous error"),
         VmCliCommands::Run(cmd) => cmd
             .run(toolchain)
             .context("could not run ceno program due to previous error"),
-        // VmCliCommands::Keygen(cmd) => cmd.run(),
-        // VmCliCommands::Prove(cmd) => cmd.run(),
+        VmCliCommands::Keygen(cmd) => cmd
+            .run(toolchain)
+            .context("could not run ceno program due to previous error"),
+        VmCliCommands::RawKeygen(cmd) => cmd
+            .run()
+            .context("could not generate vk for given elf due to previous error"),
+        VmCliCommands::RawProve(cmd) => cmd
+            .run()
+            .context("could not run and prove given elf due to previous error"),
+        VmCliCommands::RawRun(cmd) => cmd
+            .run()
+            .context("could not run given elf due to previous error"),
         // VmCliCommands::Setup(cmd) => cmd.run().await,
-        // VmCliCommands::Verify(cmd) => cmd.run(),
+        VmCliCommands::Verify(cmd) => cmd.run(),
     };
     if let Err(e) = result {
         print_error(e);

@@ -1,10 +1,13 @@
 use crate::utils::*;
-use ceno_emul::{Word, WORD_SIZE};
-use ceno_host::{memory_from_file, CenoStdin};
-use ceno_zkvm::e2e::*;
+use anyhow::{Context, bail};
+use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::{CenoStdin, memory_from_file};
+use ceno_zkvm::{e2e::*, scheme::ZKVMProof, structs::ZKVMVerifyingKey};
 use clap::Args;
-use std::path::PathBuf;
-use anyhow::Context;
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 /// Ceno options
 #[derive(Clone, Args)]
@@ -25,6 +28,7 @@ pub struct CenoOptions {
     #[arg(long, conflicts_with = "hints_file", value_parser, num_args = 1..)]
     hints: Option<Vec<Word>>,
 
+    /// Public constrained input.
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
@@ -53,9 +57,9 @@ impl CenoOptions {
     pub fn try_setup_logger(&self) {
         use tracing_forest::ForestLayer;
         use tracing_subscriber::{
-            fmt, Registry,
-            EnvFilter,
+            EnvFilter, Registry,
             filter::{LevelFilter, filter_fn},
+            fmt,
             layer::SubscriberExt,
             util::SubscriberInitExt,
         };
@@ -126,9 +130,7 @@ impl CenoOptions {
         if self.hints_file.is_some() {
             let file_path = self.hints_file.as_deref().unwrap();
             tracing::info!("Loading hints file: {:?}", file_path);
-            memory_from_file(file_path).context(
-                format!("failed to read {}", file_path.display())
-            )
+            memory_from_file(file_path).context(format!("failed to read {}", file_path.display()))
         } else if self.hints.is_some() {
             let hints = self.hints.as_ref().unwrap();
             let mut stdin = CenoStdin::default();
@@ -140,4 +142,114 @@ impl CenoOptions {
             Ok(vec![])
         }
     }
+
+
+    /// Run keygen the ceno elf file with given options
+    pub fn keygen<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+        self.try_setup_logger();
+        let ((_, vk), _) = run_elf_inner(self, elf_path, Checkpoint::Keygen)?;
+        let vk = vk.expect("Keygen should yield vk.");
+        if let Some(out_vk) = self.out_vk.as_ref() {
+            let path = out_vk.canonicalize()?;
+            print_cargo_message("Writing", format_args!("vk to {}", path.display()));
+            let vk_file =
+                File::create(&path).context(format!("failed to create {}", path.display()))?;
+            bincode::serialize_into(vk_file, &vk).context("failed to serialize vk")?;
+        }
+        Ok(())
+    }
+
+
+    /// Run the ceno elf file with given options
+    pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+        self.try_setup_logger();
+        let (_, runner) = run_elf_inner(self, elf_path, Checkpoint::PrepWitnessGen)?;
+        runner();
+        Ok(())
+    }
+
+    /// Run and prove the ceno elf file with given options
+    pub fn prove<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+        self.try_setup_logger();
+
+        let ((zkvm_proof, vk), _) = run_elf_inner(self, elf_path, Checkpoint::PrepSanityCheck)?;
+        let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
+        let vk = vk.expect("PrepSanityCheck should yield vk.");
+
+        let start = std::time::Instant::now();
+        if let Err(e) = verify(zkvm_proof.clone(), vk.clone()) {
+            bail!("Verification failed: {e:?}");
+        }
+        print_cargo_message(
+            "Verified",
+            format_args!("proof in {:.2}s", start.elapsed().as_secs_f32()),
+        );
+
+        if let Some(out_proof) = self.out_proof.as_ref() {
+            let path = out_proof.canonicalize()?;
+            print_cargo_message("Writing", format_args!("proof to {}", path.display()));
+            let proof_file =
+                File::create(&path).context(format!("failed to create {}", path.display()))?;
+            bincode::serialize_into(proof_file, &zkvm_proof)
+                .context("failed to serialize zkvm proof")?;
+        }
+        if let Some(out_vk) = self.out_vk.as_ref() {
+            let path = out_vk.canonicalize()?;
+            print_cargo_message("Writing", format_args!("vk to {}", path.display()));
+            let vk_file =
+                File::create(&path).context(format!("failed to create {}", path.display()))?;
+            bincode::serialize_into(vk_file, &vk).context("failed to serialize vk")?;
+        }
+        Ok(())
+    }
+}
+
+fn run_elf_inner<P: AsRef<Path>>(
+    options: &CenoOptions,
+    elf_path: P,
+    checkpoint: Checkpoint,
+) -> anyhow::Result<(IntermediateState<E, Pcs>, Box<dyn FnOnce()>)> {
+    let elf_path = elf_path.as_ref();
+    let elf_bytes =
+        std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
+    let program = Program::load_elf(&elf_bytes, u32::MAX).context("failed to load elf")?;
+    print_cargo_message("Loaded", format_args!("{}", elf_path.display()));
+
+    let public_io = options
+        .read_public_io()
+        .context("failed to read public io")?;
+    // estimate required pub io size, which is required in platform/key setup phase
+    let pub_io_size: u32 = ((public_io.len() * WORD_SIZE) as u32)
+        .next_power_of_two()
+        .max(16);
+
+    let platform = setup_platform(
+        options.platform,
+        &program,
+        options.stack_size(),
+        options.heap_size(),
+        pub_io_size,
+    );
+    tracing::info!("Running on platform {:?} {}", options.platform, platform);
+    tracing::info!(
+        "Stack: {} bytes. Heap: {} bytes.",
+        options.stack_size(),
+        options.heap_size()
+    );
+
+    let hints = options.read_hints().context("failed to read hints")?;
+    assert!(
+        hints.len() <= platform.hints.iter_addresses().len(),
+        "hints must fit in {} bytes",
+        platform.hints.len()
+    );
+
+    Ok(run_e2e_with_checkpoint::<E, Pcs>(
+        program,
+        platform,
+        hints,
+        public_io,
+        options.max_steps,
+        checkpoint,
+    ))
 }

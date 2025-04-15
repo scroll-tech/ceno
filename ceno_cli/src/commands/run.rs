@@ -2,17 +2,33 @@ use crate::{
     commands::{BuildCmd, common_args::*},
     utils::*,
 };
-use anyhow::{Context, bail};
-use cargo_metadata::{MetadataCommand, TargetKind};
-use clap::{Parser};
+use clap::Parser;
 use std::env::current_dir;
-use std::fs::File;
-use ceno_zkvm::e2e::verify;
-use crate::commands::helpers::*;
 
 #[derive(Parser)]
-#[command(name = "run", about = "Run an Ceno program")]
+#[command(name = "keygen", about = "Generate vk for a Cargo Ceno program")]
+pub struct KeygenCmd {
+    #[clap(flatten)]
+    inner: CmdInner,
+}
+
+#[derive(Parser)]
+#[command(name = "run", about = "Run a Cargo Ceno program")]
 pub struct RunCmd {
+    #[clap(flatten)]
+    inner: CmdInner,
+}
+
+#[derive(Parser)]
+#[command(name = "prove", about = "Run and Prove a Cargo Ceno program")]
+pub struct ProveCmd {
+    #[clap(flatten)]
+    inner: CmdInner,
+}
+
+#[derive(Parser)]
+#[command(name = "run", about = "Run a Cargo Ceno program")]
+struct CmdInner {
     #[clap(flatten, next_help_heading = "Ceno Options")]
     ceno_options: CenoOptions,
     #[clap(flatten, next_help_heading = "Cargo Options")]
@@ -29,76 +45,68 @@ pub struct RunCmd {
     manifest_options: ManifestOptions,
 }
 
+enum RunKind {
+    Prove,
+    Keygen,
+    Run,
+}
+
+impl KeygenCmd {
+    pub fn run(self, toolchain: Option<String>) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        self.inner.run(toolchain, RunKind::Keygen)?;
+        print_cargo_message(
+            "Finished",
+            format_args!(
+                "keygen in {:.2}s",
+                start.elapsed().as_secs_f32()
+            ),
+        );
+        Ok(())
+    }
+}
+
+
 impl RunCmd {
     pub fn run(self, toolchain: Option<String>) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        self.inner.run(toolchain, RunKind::Run)?;
+        print_cargo_message(
+            "Finished",
+            format_args!(
+                "running elf in {:.2}s",
+                start.elapsed().as_secs_f32()
+            ),
+        );
+        Ok(())
+    }
+}
+
+impl ProveCmd {
+    pub fn run(self, toolchain: Option<String>) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        self.inner.run(toolchain, RunKind::Prove)?;
+        print_cargo_message(
+            "Finished",
+            format_args!(
+                "running elf and proving in {:.2}s",
+                start.elapsed().as_secs_f32()
+            ),
+        );
+        Ok(())
+    }
+}
+
+impl CmdInner {
+    fn run(self, toolchain: Option<String>, kind: RunKind) -> anyhow::Result<()> {
         let manifest_path = match self.manifest_options.manifest_path.clone() {
             Some(path) => path,
             None => search_cargo_manifest_path(current_dir()?)?,
         };
-
-        let metadata = MetadataCommand::new()
-            .manifest_path(manifest_path)
-            .no_deps()
-            .exec()?;
-        let target_selection = if !self.target_selection.is_set() {
-            let mut packages = vec![];
-            if let Some(package) = self.package_selection.package.as_ref() {
-                packages.push(
-                    metadata
-                        .packages
-                        .iter()
-                        .find(|p| p.name == *package)
-                        .context(format!("package `{package}` not found",))?,
-                );
-            } else {
-                packages.extend(metadata.packages.iter());
-            }
-
-            let mut binary_targets = vec![];
-            for package in packages {
-                if let Some(default_run) = package.default_run.as_ref() {
-                    binary_targets.push((true, default_run));
-                    continue;
-                }
-                binary_targets.extend(package.targets.iter().filter_map(|target| {
-                    let is_bin = target
-                        .kind
-                        .iter()
-                        .any(|kind| matches!(kind, TargetKind::Bin));
-                    let is_example = target
-                        .kind
-                        .iter()
-                        .any(|kind| matches!(kind, TargetKind::Example));
-
-                    if is_example {
-                        Some((true, &target.name))
-                    } else if is_bin {
-                        Some((false, &target.name))
-                    } else {
-                        None
-                    }
-                }));
-            }
-
-            if binary_targets.len() > 1 {
-                bail!("multiple binaries found, please specify one with `--bin` or `--example`")
-            }
-
-            let (is_example, name) = binary_targets.pop().unwrap();
-            if is_example {
-                TargetSelection {
-                    bin: None,
-                    example: Some(name.to_string()),
-                }
-            } else {
-                TargetSelection {
-                    bin: Some(name.to_string()),
-                    example: None,
-                }
-            }
-        } else {
-            self.target_selection
-        };
+        let target_selection = self.target_selection.canonicalize(
+            manifest_path,
+            &self.package_selection
+        )?;
 
         let build = BuildCmd {
             cargo_options: self.cargo_options.clone(),
@@ -113,38 +121,16 @@ impl RunCmd {
         let target_elf = target_selection.get_target_path(&self.compilation_options);
         assert!(target_elf.exists());
 
-        let (zkvm_proof, vk) = run_elf(&self.ceno_options, &target_elf)?;
-
-        let start = std::time::Instant::now();
-        if let Err(e) = verify(zkvm_proof.clone(), vk.clone()) {
-            bail!("Verification failed: {e:?}");
-        }
-        print_cargo_message(
-            "Finished",
-            format_args!("in {:.2}s", start.elapsed().as_secs_f32())
-        );
-
-        if let Some(out_proof) = self.ceno_options.out_proof {
-            let path = out_proof.canonicalize()?;
-            print_cargo_message(
-                "Writing",
-                format_args!("proof to {}", path.display())
-            );
-            let proof_file = File::create(&path)
-                .context(format!("failed to create {}", path.display()))?;
-            bincode::serialize_into(proof_file, &zkvm_proof)
-                .context("failed to serialize zkvm proof")?;
-        }
-        if let Some(out_vk) = self.ceno_options.out_vk {
-            let path = out_vk.canonicalize()?;
-            print_cargo_message(
-                "Writing",
-                format_args!("vk to {}", path.display())
-            );
-            let vk_file = File::create(&path)
-                .context(format!("failed to create {}", path.display()))?;
-            bincode::serialize_into(vk_file, &vk)
-                .context("failed to serialize vk")?;
+        match kind {
+            RunKind::Keygen => {
+                self.ceno_options.keygen(target_elf)?;
+            }
+            RunKind::Run => {
+                self.ceno_options.run(target_elf)?;
+            }
+            RunKind::Prove => {
+                self.ceno_options.prove(target_elf)?;
+            }
         }
 
         Ok(())

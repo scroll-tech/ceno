@@ -1,10 +1,11 @@
 use crate::utils::{RUSTC_TARGET, release_target_json};
-use anyhow::Context;
+use anyhow::{bail, Context};
 use clap::Args;
 use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+use cargo_metadata::{MetadataCommand, TargetKind};
 use tempfile::TempDir;
 
 /// Options:
@@ -218,6 +219,77 @@ impl TargetSelection {
         } else {
             panic!("target need to be set");
         }
+    }
+
+    pub fn canonicalize<P: Into<PathBuf>>(
+        self,
+        manifest_path: P,
+        package_selection: &PackageSelection,
+    ) -> anyhow::Result<TargetSelection> {
+        if self.is_set() {
+            return Ok(self)
+        }
+
+        let metadata = MetadataCommand::new()
+            .manifest_path(manifest_path)
+            .no_deps()
+            .exec()?;
+        let mut packages = vec![];
+        if let Some(package) = package_selection.package.as_ref() {
+            packages.push(
+                metadata
+                    .packages
+                    .iter()
+                    .find(|p| p.name == *package)
+                    .context(format!("package `{package}` not found",))?,
+            );
+        } else {
+            packages.extend(metadata.packages.iter());
+        }
+
+        let mut binary_targets = vec![];
+        for package in packages {
+            if let Some(default_run) = package.default_run.as_ref() {
+                binary_targets.push((true, default_run));
+                continue;
+            }
+            binary_targets.extend(package.targets.iter().filter_map(|target| {
+                let is_bin = target
+                    .kind
+                    .iter()
+                    .any(|kind| matches!(kind, TargetKind::Bin));
+                let is_example = target
+                    .kind
+                    .iter()
+                    .any(|kind| matches!(kind, TargetKind::Example));
+
+                if is_example {
+                    Some((true, &target.name))
+                } else if is_bin {
+                    Some((false, &target.name))
+                } else {
+                    None
+                }
+            }));
+        }
+
+        if binary_targets.len() > 1 {
+            bail!("multiple binaries found, please specify one with `--bin` or `--example`")
+        }
+
+        let (is_example, name) = binary_targets.pop().unwrap();
+
+        Ok(if is_example {
+            TargetSelection {
+                bin: None,
+                example: Some(name.to_string()),
+            }
+        } else {
+            TargetSelection {
+                bin: Some(name.to_string()),
+                example: None,
+            }
+        })
     }
 }
 

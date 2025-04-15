@@ -1,6 +1,15 @@
 use anyhow::bail;
 use console::style;
-use std::{backtrace::BacktraceStatus, fmt, fs::File, io, io::Write, path::{Path, PathBuf}, process::Command, sync::OnceLock};
+use std::{
+    backtrace::BacktraceStatus,
+    fmt,
+    fs::File,
+    io,
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::OnceLock,
+};
 use tempfile::TempDir;
 
 /// Controls whether we should print the progress of the command.
