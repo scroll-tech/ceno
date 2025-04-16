@@ -29,10 +29,10 @@ use std::{
 use transcript::BasicTranscript as Transcript;
 
 pub struct FullMemState<Record> {
-    mem: Vec<Record>,
-    io: Vec<Record>,
-    reg: Vec<Record>,
-    priv_io: Vec<Record>,
+    pub mem: Vec<Record>,
+    pub io: Vec<Record>,
+    pub reg: Vec<Record>,
+    pub priv_io: Vec<Record>,
 }
 
 pub type InitMemState = FullMemState<MemInitRecord>;
