@@ -10,6 +10,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
+use p3::field::PrimeCharacteristicRing;
 use sumcheck::structs::{IOPProof, IOPVerifierState};
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
@@ -107,15 +108,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        for (name, (_, proof)) in vm_proof.opcode_proofs.iter() {
-            tracing::debug!("read {}'s commit", name);
-            PCS::write_commitment(&proof.wits_commit, &mut transcript)
-                .map_err(ZKVMError::PCSError)?;
-        }
-        for (name, (_, proof)) in vm_proof.table_proofs.iter() {
-            tracing::debug!("read {}'s commit", name);
-            PCS::write_commitment(&proof.wits_commit, &mut transcript)
-                .map_err(ZKVMError::PCSError)?;
+        for (circuit_name, _) in self.vk.circuit_vks.iter() {
+            if let Some((_, opcode_proof)) = vm_proof.opcode_proofs.get(circuit_name) {
+                tracing::debug!("read {}'s commit", circuit_name);
+                PCS::write_commitment(&opcode_proof.wits_commit, &mut transcript)
+                    .map_err(ZKVMError::PCSError)?;
+            } else if let Some((_, table_proof)) = vm_proof.table_proofs.get(circuit_name) {
+                tracing::debug!("read {}'s commit", circuit_name);
+                PCS::write_commitment(&table_proof.wits_commit, &mut transcript)
+                    .map_err(ZKVMError::PCSError)?;
+            } else {
+                // all proof are optional
+            }
         }
 
         // alpha, beta
@@ -128,94 +132,84 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
         let point_eval = PointAndEval::default();
-        let mut transcripts = transcript.fork(self.vk.circuit_vks.len());
+        for (index, (circuit_name, circuit_vk)) in self.vk.circuit_vks.iter().enumerate() {
+            if let Some((_, opcode_proof)) = vm_proof.opcode_proofs.get(circuit_name) {
+                transcript.append_field_element(&E::BaseField::from_u64(index as u64));
+                let name = circuit_name;
+                let _rand_point = self.verify_opcode_proof(
+                    name,
+                    &self.vk.vp,
+                    circuit_vk,
+                    opcode_proof,
+                    pi_evals,
+                    &mut transcript,
+                    NUM_FANIN,
+                    &point_eval,
+                    &challenges,
+                )?;
+                tracing::info!("verified proof for opcode {}", name);
 
-        for (name, (i, opcode_proof)) in vm_proof.opcode_proofs {
-            let transcript = &mut transcripts[i];
+                // getting the number of dummy padding item that we used in this opcode circuit
+                let num_lks = circuit_vk.get_cs().lk_expressions.len();
+                let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
+                let num_padded_instance = next_pow2_instance_padding(opcode_proof.num_instances)
+                    - opcode_proof.num_instances;
+                dummy_table_item_multiplicity += num_padded_lks_per_instance
+                    * opcode_proof.num_instances
+                    + num_lks.next_power_of_two() * num_padded_instance;
 
-            let circuit_vk = self
-                .vk
-                .circuit_vks
-                .get(&name)
-                .ok_or(ZKVMError::VKNotFound(name.clone()))?;
-            let _rand_point = self.verify_opcode_proof(
-                &name,
-                &self.vk.vp,
-                circuit_vk,
-                &opcode_proof,
-                pi_evals,
-                transcript,
-                NUM_FANIN,
-                &point_eval,
-                &challenges,
-            )?;
-            tracing::info!("verified proof for opcode {}", name);
+                prod_r *= opcode_proof
+                    .record_r_out_evals
+                    .iter()
+                    .copied()
+                    .product::<E>();
+                prod_w *= opcode_proof
+                    .record_w_out_evals
+                    .iter()
+                    .copied()
+                    .product::<E>();
 
-            // getting the number of dummy padding item that we used in this opcode circuit
-            let num_lks = circuit_vk.get_cs().lk_expressions.len();
-            let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
-            let num_padded_instance =
-                next_pow2_instance_padding(opcode_proof.num_instances) - opcode_proof.num_instances;
-            dummy_table_item_multiplicity += num_padded_lks_per_instance
-                * opcode_proof.num_instances
-                + num_lks.next_power_of_two() * num_padded_instance;
+                logup_sum += opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.inverse();
+                logup_sum += opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.inverse();
+            } else if let Some((_, table_proof)) = vm_proof.table_proofs.get(circuit_name) {
+                transcript.append_field_element(&E::BaseField::from_u64(index as u64));
+                let name = circuit_name;
+                let _rand_point = self.verify_table_proof(
+                    name,
+                    &self.vk.vp,
+                    circuit_vk,
+                    table_proof,
+                    &vm_proof.raw_pi,
+                    &vm_proof.pi_evals,
+                    &mut transcript,
+                    NUM_FANIN_LOGUP,
+                    &point_eval,
+                    &challenges,
+                )?;
+                tracing::info!("verified proof for table {}", name);
 
-            prod_r *= opcode_proof
-                .record_r_out_evals
-                .iter()
-                .copied()
-                .product::<E>();
-            prod_w *= opcode_proof
-                .record_w_out_evals
-                .iter()
-                .copied()
-                .product::<E>();
+                logup_sum = table_proof
+                    .lk_out_evals
+                    .iter()
+                    .fold(logup_sum, |acc, [p1, p2, q1, q2]| {
+                        acc - *p1 * q1.inverse() - *p2 * q2.inverse()
+                    });
 
-            logup_sum += opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.inverse();
-            logup_sum += opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.inverse();
-        }
-
-        for (name, (i, table_proof)) in vm_proof.table_proofs {
-            let transcript = &mut transcripts[i];
-
-            let circuit_vk = self
-                .vk
-                .circuit_vks
-                .get(&name)
-                .ok_or(ZKVMError::VKNotFound(name.clone()))?;
-            let _rand_point = self.verify_table_proof(
-                &name,
-                &self.vk.vp,
-                circuit_vk,
-                &table_proof,
-                &vm_proof.raw_pi,
-                &vm_proof.pi_evals,
-                transcript,
-                NUM_FANIN_LOGUP,
-                &point_eval,
-                &challenges,
-            )?;
-            tracing::info!("verified proof for table {}", name);
-
-            logup_sum = table_proof
-                .lk_out_evals
-                .iter()
-                .fold(logup_sum, |acc, [p1, p2, q1, q2]| {
-                    acc - *p1 * q1.inverse() - *p2 * q2.inverse()
-                });
-
-            prod_w *= table_proof
-                .w_out_evals
-                .iter()
-                .flatten()
-                .copied()
-                .product::<E>();
-            prod_r *= table_proof
-                .r_out_evals
-                .iter()
-                .flatten()
-                .copied()
-                .product::<E>();
+                prod_w *= table_proof
+                    .w_out_evals
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .product::<E>();
+                prod_r *= table_proof
+                    .r_out_evals
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .product::<E>();
+            } else {
+                // all proof are optional
+            }
         }
         logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
 
@@ -722,12 +716,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         |StructuralWitIn {
                              offset,
                              multi_factor,
+                             descending,
                              ..
                          }| {
                             eval_wellform_address_vec(
                                 *offset as u64,
                                 *multi_factor as u64,
                                 &input_opening_point,
+                                *descending,
                             )
                         },
                     )

@@ -23,4 +23,4 @@ syn = { version = "2.0", features = ["full"] }
 [dev-dependencies]
 ff_ext = { path = "../ff_ext" }
 multilinear_extensions = { path = "../multilinear_extensions" }
-sumcheck = { path = "../sumcheck" }
+sumcheck.workspace = true

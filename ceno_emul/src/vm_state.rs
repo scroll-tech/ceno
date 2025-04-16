@@ -35,12 +35,12 @@ impl VMState {
 
         let mut vm = Self {
             pc,
-            platform,
+            platform: platform.clone(),
             program: program.clone(),
             memory: HashMap::new(),
             registers: [0; VMState::REG_COUNT],
             halted: false,
-            tracer: Tracer::new(),
+            tracer: Tracer::new(Some(&platform)),
         };
 
         // init memory from program.image

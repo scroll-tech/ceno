@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub type ArcMultilinearExtension<'a, E> =
     Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a>;
+
 #[rustfmt::skip]
 /// A virtual polynomial is a sum of products of multilinear polynomials;
 /// where the multilinear polynomials are stored via their multilinear
@@ -113,21 +114,17 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
     /// `coefficient`.
-    pub fn add_mle_list(&mut self, mle_list: Vec<ArcMultilinearExtension<'a, E>>, coefficient: E) {
+    pub fn add_mle_list(
+        &mut self,
+        mle_list: Vec<ArcMultilinearExtension<'a, E>>,
+        coefficient: E,
+    ) -> &[usize] {
         let mle_list: Vec<ArcMultilinearExtension<E>> = mle_list.into_iter().collect();
         let mut indexed_product = Vec::with_capacity(mle_list.len());
 
         assert!(!mle_list.is_empty(), "input mle_list is empty");
         // sanity check: all mle in mle_list must have same num_vars()
-        assert!(
-            mle_list
-                .iter()
-                .map(|m| {
-                    assert!(m.num_vars() <= self.aux_info.max_num_variables);
-                    m.num_vars()
-                })
-                .all_equal()
-        );
+        assert!(mle_list.iter().map(|m| { m.num_vars() }).all_equal());
 
         self.aux_info.max_degree = max(self.aux_info.max_degree, mle_list.len());
 
@@ -143,6 +140,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
             }
         }
         self.products.push((coefficient, indexed_product));
+        &self.products.last().unwrap().1
     }
 
     /// in-place merge with another virtual polynomial

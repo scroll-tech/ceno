@@ -15,6 +15,7 @@ fn test_vm_trace() -> Result<()> {
     let program = Program::new(
         CENO_PLATFORM.pc_base(),
         CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.heap.start,
         program_fibonacci_20(),
         Default::default(),
     );
@@ -43,6 +44,7 @@ fn test_empty_program() -> Result<()> {
     let empty_program = Program::new(
         CENO_PLATFORM.pc_base(),
         CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.heap.start,
         vec![],
         BTreeMap::new(),
     );

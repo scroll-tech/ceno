@@ -1,6 +1,6 @@
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
-    util::interpolate_uni_poly,
+    util::{ceil_log2, interpolate_uni_poly},
 };
 use ark_std::{rand::RngCore, test_rng};
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
@@ -12,13 +12,13 @@ use multilinear_extensions::{
 use p3::field::PrimeCharacteristicRing;
 use transcript::{BasicTranscript, Transcript};
 
+// test polynomial mixed with different num_var
 #[test]
 fn test_sumcheck_with_different_degree() {
-    // test polynomial mixed with different num_var
-    let nv = vec![3, 4, 5];
-    let num_polys = nv.len();
-    for num_threads in 1..num_polys.min(max_usable_threads()) {
-        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(num_threads, &nv);
+    let log_max_thread = ceil_log2(max_usable_threads());
+    let nv = vec![1, 2, 3, 4];
+    for num_threads in 1..log_max_thread {
+        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << num_threads, &nv);
     }
 }
 
@@ -52,9 +52,7 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
                 )
             });
 
-    let batch_poly = poly.get_batched_polys();
-    let (proof, _) =
-        IOPProverState::<E>::prove_batch_polys(num_threads, batch_poly.clone(), &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove(poly, &mut transcript);
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(
         asserted_sum,

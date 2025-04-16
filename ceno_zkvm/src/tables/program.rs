@@ -205,7 +205,13 @@ mod tests {
 
         let actual_len = 3;
         let instructions = vec![encode_rv32(ADD, 1, 2, 3, 0); actual_len];
-        let program = Program::new(0x2000_0000, 0x2000_0000, instructions, Default::default());
+        let program = Program::new(
+            0x2000_0000,
+            0x2000_0000,
+            0x2000_0000,
+            instructions,
+            Default::default(),
+        );
 
         let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
 

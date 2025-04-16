@@ -33,6 +33,8 @@ pub struct FullMemState<Record> {
     io: Vec<Record>,
     reg: Vec<Record>,
     hints: Vec<Record>,
+    stack: Vec<Record>,
+    heap: Vec<Record>,
 }
 
 type InitMemState = FullMemState<MemInitRecord>;
@@ -56,6 +58,8 @@ fn emulate_program(
         io: io_init,
         reg: reg_init,
         hints: hints_init,
+        stack: _,
+        heap: _,
     } = init_mem_state;
 
     let mut vm: VMState = VMState::new(platform.clone(), program);
@@ -148,7 +152,56 @@ fn emulate_program(
         })
         .collect_vec();
 
-    debug_memory_ranges(&vm, chain!(&mem_final, &io_final, &hints_final));
+    // get stack access by min/max range
+    let stack_final = if let Some((start, end)) = vm
+        .tracer()
+        .probe_min_max_address_by_start_addr(ByteAddr::from(platform.stack.start).waddr())
+    {
+        (start..end)
+            // stack record collect in reverse order
+            .rev()
+            .map(|vma| {
+                let byte_addr = vma.baddr();
+                MemFinalRecord {
+                    addr: byte_addr.0,
+                    value: vm.peek_memory(vma),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec()
+    } else {
+        vec![]
+    };
+
+    // get heap access by min/max range
+    let heap_final = if let Some((start, end)) = vm
+        .tracer()
+        .probe_min_max_address_by_start_addr(ByteAddr::from(platform.heap.start).waddr())
+    {
+        (start..end)
+            .map(|vma| {
+                let byte_addr = vma.baddr();
+                MemFinalRecord {
+                    addr: byte_addr.0,
+                    value: vm.peek_memory(vma),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec()
+    } else {
+        vec![]
+    };
+
+    debug_memory_ranges(
+        &vm,
+        chain!(
+            &mem_final,
+            &io_final,
+            &hints_final,
+            &stack_final,
+            &heap_final
+        ),
+    );
 
     EmulationResult {
         pi,
@@ -159,6 +212,8 @@ fn emulate_program(
             io: io_final,
             mem: mem_final,
             hints: hints_final,
+            stack: stack_final,
+            heap: heap_final,
         },
     }
 }
@@ -188,12 +243,13 @@ pub fn setup_platform(
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
     let stack = preset.stack.end - stack_size..preset.stack.end;
+
     let heap = {
         // Detect heap as starting after program data.
-        let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+        let heap_start = program.sheap;
         let heap = heap_start..heap_start + heap_size;
-        // Pad the total size to the next power of two.
-        let mem_size = prog_data.len() + stack.iter_addresses().len() + heap.iter_addresses().len();
+        // pad the total size to the next power of two.
+        let mem_size = heap.iter_addresses().len();
         let pad_size = mem_size.next_power_of_two() - mem_size;
         let heap_end = heap.end as usize + pad_size * WORD_SIZE;
         assert!(
@@ -202,6 +258,8 @@ pub fn setup_platform(
         );
         heap.start..heap_end as u32
     };
+
+    // TODO check AFTER padding, all addresses no overlapping
 
     Platform {
         rom: program.base_address
@@ -214,28 +272,23 @@ pub fn setup_platform(
     }
 }
 
-fn init_mem(program: &Program, platform: &Platform) -> Vec<MemInitRecord> {
-    let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
-        addr: *addr,
-        value: *value,
-    });
-
-    let stack = platform
-        .stack
-        .iter_addresses()
-        .map(|addr| MemInitRecord { addr, value: 0 });
-
-    let heap = platform
-        .heap
-        .iter_addresses()
-        .map(|addr| MemInitRecord { addr, value: 0 });
-
-    let mem_init = chain!(program_addrs, stack, heap)
+fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
+    let program_addrs = program
+        .image
+        .iter()
+        .map(|(addr, value)| MemInitRecord {
+            addr: *addr,
+            value: *value,
+        })
         .sorted_by_key(|record| record.addr)
         .collect_vec();
 
-    assert!(mem_init.len().is_power_of_two());
-    mem_init
+    assert!(
+        program_addrs.len().is_power_of_two(),
+        "program_addrs.len {} is not pow2",
+        program_addrs.len(),
+    );
+    program_addrs
 }
 
 pub struct ConstraintSystemConfig<E: ExtensionField> {
@@ -336,6 +389,8 @@ pub fn generate_witness<E: ExtensionField>(
                 .map(|rec| rec.cycle)
                 .collect_vec(),
             &emul_result.final_mem_state.hints,
+            &emul_result.final_mem_state.stack,
+            &emul_result.final_mem_state.heap,
         )
         .unwrap();
     // assign program circuit
@@ -385,13 +440,13 @@ pub fn run_e2e_with_checkpoint<
     max_steps: usize,
     checkpoint: Checkpoint,
 ) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
-    let mem_init = init_mem(&program, &platform);
+    let static_addrs = init_static_addrs(&program);
 
     let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: program.instructions.len(),
-        static_memory_len: mem_init.len(),
+        static_memory_len: static_addrs.len(),
         pubio_len,
     };
 
@@ -407,10 +462,13 @@ pub fn run_e2e_with_checkpoint<
     );
 
     let init_full_mem = InitMemState {
-        mem: mem_init,
+        mem: static_addrs,
         reg: reg_init,
         io: io_init,
         hints: hint_init,
+        // stack/heap both init value 0 and range is dynamic
+        stack: vec![],
+        heap: vec![],
     };
 
     // Generate fixed traces

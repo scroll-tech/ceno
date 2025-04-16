@@ -17,8 +17,9 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
+    util::optimal_sumcheck_threads,
 };
-use transcript::{ForkableTranscript, Transcript};
+use transcript::Transcript;
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
@@ -34,7 +35,7 @@ use crate::{
     structs::{
         Point, ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
     },
-    utils::{add_mle_list_by_expr, get_challenge_pows, optimal_sumcheck_threads},
+    utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
@@ -61,7 +62,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         &self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues<u32>,
-        mut transcript: impl ForkableTranscript<E>,
+        mut transcript: impl Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
         let mut vm_proof = ZKVMProof::empty(pi);
@@ -146,19 +147,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         tracing::debug!("challenges in prover: {:?}", challenges);
 
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
-        let mut transcripts = transcript.fork(self.pk.circuit_pks.len());
-        for ((circuit_name, pk), (i, transcript)) in self
-            .pk
-            .circuit_pks
-            .iter() // Sorted by key.
-            .zip_eq(transcripts.iter_mut().enumerate())
-        {
+        for (index, (circuit_name, pk)) in self.pk.circuit_pks.iter().enumerate() {
             let (witness, num_instances) = wits
                 .remove(circuit_name)
                 .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
             if witness.is_empty() {
                 continue;
             }
+            transcript.append_field_element(&E::BaseField::from_u64(index as u64));
             let wits_commit = commitments.remove(circuit_name).unwrap();
             // TODO: add an enum for circuit type either in constraint_system or vk
             let cs = pk.get_cs();
@@ -183,7 +179,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     wits_commit,
                     &pi,
                     num_instances,
-                    transcript,
+                    &mut transcript,
                     &challenges,
                 )?;
                 tracing::info!(
@@ -193,7 +189,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .opcode_proofs
-                    .insert(circuit_name.to_string(), (i, opcode_proof));
+                    .insert(circuit_name.clone(), (index, opcode_proof));
             } else {
                 let (structural_witness, structural_num_instances) = structural_wits
                     .remove(circuit_name)
@@ -206,7 +202,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     wits_commit,
                     structural_witness,
                     &pi,
-                    transcript,
+                    &mut transcript,
                     &challenges,
                 )?;
                 tracing::info!(
@@ -217,7 +213,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
                 vm_proof
                     .table_proofs
-                    .insert(circuit_name.to_string(), (i, table_proof));
+                    .insert(circuit_name.clone(), (index, table_proof));
                 for (idx, eval) in pi_in_evals {
                     vm_proof.update_pi_eval(idx, eval);
                 }
@@ -576,11 +572,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
 
         tracing::debug!("main sel sumcheck start");
-        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
-            num_threads,
-            virtual_polys.get_batched_polys(),
-            transcript,
-        );
+        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(virtual_polys, transcript);
         tracing::debug!("main sel sumcheck end");
 
         let main_sel_evals = state.get_mle_final_evaluations();
@@ -1019,11 +1011,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
                 }
 
-                let (same_r_sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
-                    num_threads,
-                    virtual_polys.get_batched_polys(),
-                    transcript,
-                );
+                let (same_r_sumcheck_proofs, state) =
+                    IOPProverState::prove(virtual_polys, transcript);
                 let evals = state.get_mle_final_evaluations();
                 let mut evals_iter = evals.into_iter();
                 let rw_in_evals = cs
@@ -1275,9 +1264,8 @@ impl TowerProver {
                 // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
                 // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
                 // This is likely a bug in the tracing-flame crate.
-                let (sumcheck_proofs, state) = IOPProverState::prove_batch_polys(
-                    num_threads,
-                    virtual_polys.get_batched_polys(),
+                let (sumcheck_proofs, state) = IOPProverState::prove(
+                    virtual_polys,
                     transcript,
                 );
                 exit_span!(wrap_batch_span);
