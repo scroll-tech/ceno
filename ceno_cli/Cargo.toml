@@ -13,8 +13,8 @@ version.workspace = true
 anyhow = { workspace = true, features = ["std", "backtrace"] }
 bincode.workspace = true
 cargo_metadata = "0.19"
-console = "0.15"
 clap = { version = "4", features = ["derive"] }
+console = "0.15"
 parse-size = "1.1"
 tempfile = "3.19"
 tracing.workspace = true
