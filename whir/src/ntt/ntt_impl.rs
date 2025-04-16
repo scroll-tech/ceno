@@ -218,9 +218,7 @@ impl<F: TwoAdicField> NttEngine<F> {
                         .row_pair_mut(i, size - i)
                         .into_par_iter()
                         .for_each(|(a, b)| {
-                            let tmp = *a;
-                            *a = *b;
-                            *b = tmp;
+                            std::mem::swap(&mut (*a), &mut (*b));
                         });
                 }
             });

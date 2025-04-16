@@ -139,7 +139,7 @@ mod tests {
         // Compute the answers
         let folded_polys_1: Vec<_> = polynomials
             .iter()
-            .map(|poly| fix_variables(&poly, &folding_randomness_1))
+            .map(|poly| fix_variables(poly, &folding_randomness_1))
             .collect();
 
         let statement_answers: Vec<F> = polynomials
@@ -181,7 +181,7 @@ mod tests {
 
         let full_folding = vec![folding_randomness_11, folding_randomness_12];
 
-        let eval_coeff = vec![folded_polys_1[0][0], folded_polys_1[1][0]];
+        let eval_coeff = [folded_polys_1[0][0], folded_polys_1[1][0]];
 
         assert_eq!(
             sumcheck_poly_12.evaluate_at_point(&[folding_randomness_12]),

@@ -211,14 +211,13 @@ where
 
             let internal_timer = entered_span!("Verify multi proof");
             let fold_size = 1 << self.params.folding_factor.at_round(r);
-            if !verify_multi_proof(
+            if verify_multi_proof(
                 &self.params.hash_params,
                 &prev_root,
                 &stir_challenges_indexes,
                 merkle_proof_with_answers,
                 p3::util::log2_strict_usize(domain_size / fold_size),
-            )
-            .is_ok()
+            ).is_err()
             {
                 return Err(Error::InvalidProof("Merkle proof failed".to_string()));
             }
@@ -670,7 +669,7 @@ where
         };
 
         // Check the final sumcheck evaluation
-        let evaluation_of_v_poly = self.compute_v_poly(&parsed_commitment, statement, &parsed);
+        let evaluation_of_v_poly = self.compute_v_poly(parsed_commitment, statement, &parsed);
 
         let expected_sumcheck_poly_eval = evaluation_of_v_poly
             * DenseMultilinearExtension::from_evaluations_ext_vec(

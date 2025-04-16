@@ -465,7 +465,7 @@ mod tests {
         for index in 0..num {
             let offset_inv = root_of_unity_inv.exp_u64(index as u64);
             let span =
-                (index * folding_factor_exp) as usize..((index + 1) * folding_factor_exp) as usize;
+                (index * folding_factor_exp)..((index + 1) * folding_factor_exp);
 
             let answer_unprocessed = compute_fold(
                 &unprocessed[span.clone()],

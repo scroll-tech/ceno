@@ -64,7 +64,7 @@ where
             .commit(poly)
             .map_err(crate::Error::WhirError)?;
 
-        Ok(witness.into())
+        Ok(witness)
     }
 
     fn write_commitment(
@@ -144,7 +144,7 @@ where
             .batch_commit(rmm)
             .map_err(crate::Error::WhirError)?;
 
-        Ok(witness.into())
+        Ok(witness)
     }
 
     fn batch_open(

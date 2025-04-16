@@ -115,7 +115,7 @@ where
             transcript,
             point_per_poly,
             poly_comb_randomness,
-            &whir_proof,
+            whir_proof,
             &mut sumcheck_poly_evals_iter,
         )?;
 
@@ -192,7 +192,7 @@ where
         };
         let parsed = self.write_proof_to_transcript_batch(
             transcript,
-            &parsed_commitment,
+            parsed_commitment,
             &statement,
             whir_proof,
             random_coeff.clone(),
@@ -399,7 +399,7 @@ where
         transcript.append_field_element_exts(&folded_evals);
         let sumcheck_claim = sumcheck_rounds[num_variables - 1]
             .0
-            .evaluate_at_point(&vec![sumcheck_rounds[num_variables - 1].1]);
+            .evaluate_at_point(&[sumcheck_rounds[num_variables - 1].1]);
         let sumcheck_expected: E = folded_evals
             .iter()
             .zip(&folded_eqs)
@@ -448,14 +448,14 @@ where
 
         let mut initial_sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
-        let initial_combination_randomness;
+        
 
         assert!(self.params.initial_statement, "must be true for pcs");
         // Derive combination randomness and first sumcheck polynomial
         let combination_randomness_gen = transcript
             .sample_and_append_challenge(b"combination_randomness")
             .elements;
-        initial_combination_randomness = expand_randomness(
+        let initial_combination_randomness = expand_randomness(
             combination_randomness_gen,
             parsed_commitment.ood_points.len() + statement.points.len(),
         );
@@ -484,7 +484,7 @@ where
         // Precompute the powers of the domain generator, so that
         // we can always compute domain_gen.pow(1 << i) by domain_gen_powers[i]
         let domain_gen_powers = std::iter::successors(Some(domain_gen), |&curr| Some(curr * curr))
-            .take(log2_strict_usize(self.params.starting_domain.size()) as usize)
+            .take(log2_strict_usize(self.params.starting_domain.size()))
             .collect::<Vec<_>>();
         // Since the generator of the domain will be repeatedly squared in
         // the future, keep track of the log of the power (i.e., how many times

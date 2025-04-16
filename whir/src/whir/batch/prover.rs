@@ -240,7 +240,7 @@ where
         // Base case
         if round_state.round == self.0.n_rounds() {
             // Coefficients of the polynomial
-            transcript.append_field_element_exts(&folded_evaluations_evals);
+            transcript.append_field_element_exts(folded_evaluations_evals);
 
             // Final verifier queries and answers
             let final_challenge_indexes = get_challenge_stir_queries(
@@ -350,7 +350,7 @@ where
             .collect();
 
         let merkle_proof_with_leaves =
-            generate_multi_proof(&self.0.hash_params, &prev_merkle, &stir_challenges_indexes);
+            generate_multi_proof(&self.0.hash_params, prev_merkle, &stir_challenges_indexes);
         let batched_answers = merkle_proof_with_leaves
             .answers_ext()
             .par_iter()
@@ -382,16 +382,16 @@ where
                         // let _coset_offset = domain_gen.pow(&[*index as u64]);
                         let coset_offset_inv = domain_gen_inv.exp_u64(*index as u64);
 
-                        let res = compute_fold(
+                        
+
+                        compute_fold(
                             batched_answers,
                             &round_state.folding_randomness,
                             coset_offset_inv,
                             coset_generator_inv,
                             E::from_u64(2).inverse(),
                             self.0.folding_factor.at_round(round_state.round),
-                        );
-
-                        res
+                        )
                     },
                 ))
             }

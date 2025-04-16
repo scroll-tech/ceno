@@ -48,7 +48,7 @@ where
         // Eval points
         for (i, point) in points.iter().enumerate() {
             SumcheckSingle::eval_eq(
-                &point,
+                point,
                 &mut prover.evaluations_of_equality[i],
                 F::from_u64(1),
             );

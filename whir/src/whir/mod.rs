@@ -124,10 +124,8 @@ mod tests {
         verifier.write_commitment_to_transcript(&commitment, &mut transcript);
         verifier
             .verify(&commitment, &mut transcript, &statement, &proof)
-            .expect(&format!(
-                "Failed at number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
-                num_variables, folding_factor, num_points, soundness_type, fold_type
-            ));
+            .unwrap_or_else(|_| panic!("Failed at number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
+                num_variables, folding_factor, num_points, soundness_type, fold_type));
     }
 
     fn make_whir_batch_things_same_point(
@@ -196,11 +194,9 @@ mod tests {
                 &evals_per_point,
                 &proof,
             )
-            .expect(&format!(
-                "Failed at number of polys = {}, number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
+            .unwrap_or_else(|_| panic!("Failed at number of polys = {}, number of variables = {}, folding factor = {:?}, num points = {}, soundness type = {:?}, fold type = {:?}",
                 num_polynomials,
-                num_variables, folding_factor, num_points, soundness_type, fold_type
-            ));
+                num_variables, folding_factor, num_points, soundness_type, fold_type));
     }
 
     fn make_whir_batch_things_diff_point(
@@ -270,11 +266,9 @@ mod tests {
                 &eval_per_poly,
                 &proof,
             )
-            .expect(&format!(
-                "Failed at number of polys = {}, number of variables = {}, folding factor = {:?}, soundness type = {:?}, fold type = {:?}",
+            .unwrap_or_else(|_| panic!("Failed at number of polys = {}, number of variables = {}, folding factor = {:?}, soundness type = {:?}, fold type = {:?}",
                 num_polynomials,
-                num_variables, folding_factor, soundness_type, fold_type
-            ));
+                num_variables, folding_factor, soundness_type, fold_type));
     }
 
     #[test]

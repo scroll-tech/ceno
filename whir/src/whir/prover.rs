@@ -75,7 +75,7 @@ where
 
         assert!(self.validate_parameters());
         self.validate_statement(&statement);
-        self.validate_witness(&witness);
+        self.validate_witness(witness);
 
         let timer = entered_span!("Single Prover");
         let initial_claims: Vec<_> = witness
@@ -213,7 +213,7 @@ where
 
             let merkle_proof_with_leaves = generate_multi_proof(
                 &self.0.hash_params,
-                &round_state.prev_merkle.unwrap(),
+                round_state.prev_merkle.unwrap(),
                 &final_challenge_indexes,
             );
             round_state.merkle_proofs.push(merkle_proof_with_leaves);
@@ -318,7 +318,7 @@ where
 
         let merkle_proof_with_leaves = generate_multi_proof(
             &self.0.hash_params,
-            &round_state.prev_merkle.unwrap(),
+            round_state.prev_merkle.unwrap(),
             &stir_challenges_indexes,
         );
         let answers: Vec<_> = merkle_proof_with_leaves
