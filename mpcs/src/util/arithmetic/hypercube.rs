@@ -1,7 +1,6 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use p3::{field::Field, util::log2_strict_usize};
-use rayon::prelude::{ParallelIterator, ParallelSliceMut};
+use p3::{field::Field, maybe_rayon::prelude::*, util::log2_strict_usize};
 
 pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &mut FieldType<E>) {
     match evals {
