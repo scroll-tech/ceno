@@ -131,6 +131,20 @@ pub mod impl_goldilocks {
 
         type BaseField = Goldilocks;
 
+        fn from_bases(bases: &[Goldilocks]) -> Self {
+            debug_assert_eq!(bases.len(), 2);
+            Self::from_basis_coefficients_slice(bases)
+        }
+
+        fn as_bases(&self) -> &[Goldilocks] {
+            self.as_basis_coefficients_slice()
+        }
+
+        /// Convert limbs into self
+        fn from_limbs(limbs: &[Self::BaseField]) -> Self {
+            Self::from_bases(&limbs[0..2])
+        }
+
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
             self.as_basis_coefficients_slice()
                 .iter()
