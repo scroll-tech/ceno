@@ -9,11 +9,15 @@ mod wavelet;
 
 use self::matrix::MatrixMut;
 
-use p3::field::TwoAdicField;
+use p3::{
+    dft::{Radix2DitParallel, TwoAdicSubgroupDft},
+    field::TwoAdicField,
+    matrix::Matrix,
+};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use tracing::instrument;
-use witness::{RowMajorMatrix, expand_from_coeff as expand_from_coeff_inner};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub use self::{
     ntt_impl::{intt, intt_batch, intt_batch_rmm, ntt, ntt_batch},
@@ -65,8 +69,15 @@ pub fn expand_from_coeff<F: TwoAdicField>(coeffs: &[F], expansion: usize) -> Vec
 }
 
 pub fn expand_from_coeff_rmm<F: TwoAdicField + Ord>(
-    coeffs: RowMajorMatrix<F>,
+    mut coeffs: RowMajorMatrix<F>,
     expansion: usize,
 ) -> RowMajorMatrix<F> {
-    expand_from_coeff_inner(coeffs, expansion)
+    let expanded_size = coeffs.height() * expansion;
+    coeffs.set_num_rows_to_height(expanded_size, F::ZERO);
+    let dft = Radix2DitParallel::<F>::default();
+    let m = coeffs.into_default_padded_p3_rmm().to_row_major_matrix();
+    RowMajorMatrix::new_by_inner_matrix(
+        dft.dft_batch(m).to_row_major_matrix(),
+        InstancePaddingStrategy::Default,
+    )
 }
