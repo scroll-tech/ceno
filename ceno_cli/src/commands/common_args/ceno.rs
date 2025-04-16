@@ -2,7 +2,7 @@ use crate::utils::*;
 use anyhow::{Context, bail};
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-use ceno_zkvm::e2e::*;
+use ceno_zkvm::{e2e::*, scheme::verifier::ZKVMVerifier};
 use clap::Args;
 use std::{
     fs::File,
@@ -175,7 +175,8 @@ impl CenoOptions {
         let vk = vk.expect("PrepSanityCheck should yield vk.");
 
         let start = std::time::Instant::now();
-        if let Err(e) = verify(zkvm_proof.clone(), vk.clone()) {
+        let verifier = ZKVMVerifier::new(vk);
+        if let Err(e) = verify(&zkvm_proof, &verifier) {
             bail!("Verification failed: {e:?}");
         }
         print_cargo_message(
@@ -196,7 +197,8 @@ impl CenoOptions {
             print_cargo_message("Writing", format_args!("vk to {}", path.display()));
             let vk_file =
                 File::create(&path).context(format!("failed to create {}", path.display()))?;
-            bincode::serialize_into(vk_file, &vk).context("failed to serialize vk")?;
+            bincode::serialize_into(vk_file, &verifier.into_inner())
+                .context("failed to serialize vk")?;
         }
         Ok(())
     }

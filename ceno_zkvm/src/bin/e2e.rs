@@ -1,12 +1,19 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-use ceno_zkvm::e2e::{Checkpoint, E, Pcs, Preset, run_e2e_with_checkpoint, setup_platform, verify};
+use ceno_zkvm::{
+    e2e::{B, Checkpoint, E, Pcs, Preset, run_e2e_with_checkpoint, setup_platform, verify},
+    scheme::{ZKVMProof, verifier::ZKVMVerifier},
+    with_panic_hook,
+};
 use clap::Parser;
-use tracing::level_filters::LevelFilter;
+use p3::field::PrimeCharacteristicRing;
+use std::{panic, panic::AssertUnwindSafe};
+use tracing::{error, level_filters::LevelFilter};
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
+use transcript::BasicTranscript as Transcript;
 
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
@@ -190,5 +197,44 @@ fn main() {
     let vk_bytes = bincode::serialize(&vk).unwrap();
     std::fs::write(&args.vk_file, vk_bytes).unwrap();
 
-    verify(zkvm_proof, vk).expect("Verification failed");
+    let verifier = ZKVMVerifier::new(vk);
+    verify(&zkvm_proof, &verifier).expect("Verification failed");
+    // FIXME: it is a bit wired, let us move it else where later.
+    soundness_test(zkvm_proof, &verifier);
+}
+
+fn soundness_test(mut zkvm_proof: ZKVMProof<E, Pcs>, verifier: &ZKVMVerifier<E, Pcs>) {
+    // do sanity check
+    let transcript = Transcript::new(b"riscv");
+    // change public input maliciously should cause verifier to reject proof
+    zkvm_proof.raw_pi[0] = vec![B::ONE];
+    zkvm_proof.raw_pi[1] = vec![B::ONE];
+
+    // capture panic message, if have
+    let result = with_panic_hook(Box::new(|_info| ()), || {
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            verifier.verify_proof(zkvm_proof, transcript)
+        }))
+    });
+    match result {
+        Ok(res) => {
+            res.expect_err("verify proof should return with error");
+        }
+        Err(err) => {
+            let msg: String = if let Some(message) = err.downcast_ref::<&str>() {
+                message.to_string()
+            } else if let Some(message) = err.downcast_ref::<String>() {
+                message.to_string()
+            } else if let Some(message) = err.downcast_ref::<&String>() {
+                message.to_string()
+            } else {
+                unreachable!()
+            };
+
+            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+                error!("unknown panic {msg:?}");
+                panic::resume_unwind(err);
+            };
+        }
+    };
 }

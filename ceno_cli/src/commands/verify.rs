@@ -2,7 +2,7 @@ use crate::utils::print_cargo_message;
 use anyhow::{Context, bail};
 use ceno_zkvm::{
     e2e::{E, Pcs, verify},
-    scheme::ZKVMProof,
+    scheme::{ZKVMProof, verifier::ZKVMVerifier},
     structs::ZKVMVerifyingKey,
 };
 use clap::Parser;
@@ -49,7 +49,8 @@ impl VerifyCmd {
         );
 
         let start = std::time::Instant::now();
-        if let Err(e) = verify(zkvm_proof, vk) {
+        let verifier = ZKVMVerifier::new(vk);
+        if let Err(e) = verify(&zkvm_proof, &verifier) {
             bail!("Verification failed: {e:?}");
         }
         print_cargo_message(
