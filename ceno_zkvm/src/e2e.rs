@@ -238,14 +238,14 @@ fn init_mem(program: &Program, platform: &Platform) -> Vec<MemInitRecord> {
 }
 
 pub struct ConstraintSystemConfig<E: ExtensionField> {
-    zkvm_cs: ZKVMConstraintSystem<E>,
-    config: Rv32imConfig<E>,
-    mmu_config: MmuConfig<E>,
-    dummy_config: DummyExtraConfig<E>,
-    prog_config: ProgramTableConfig,
+    pub zkvm_cs: ZKVMConstraintSystem<E>,
+    pub config: Rv32imConfig<E>,
+    pub mmu_config: MmuConfig<E>,
+    pub dummy_config: DummyExtraConfig<E>,
+    pub prog_config: ProgramTableConfig,
 }
 
-fn construct_configs<E: ExtensionField>(
+pub fn construct_configs<E: ExtensionField>(
     program_params: ProgramParams,
 ) -> ConstraintSystemConfig<E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
