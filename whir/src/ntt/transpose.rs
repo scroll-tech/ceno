@@ -1,10 +1,13 @@
+use crate::ntt::matrix_skip::MatrixMutSkip;
+
 use super::{super::utils::is_power_of_two, MatrixMut, utils::workload_size};
 use std::mem::swap;
 
-use ark_std::{end_timer, start_timer};
+use p3::matrix::{Matrix, dense::RowMajorMatrix};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 #[cfg(feature = "parallel")]
 use rayon::join;
+use sumcheck::macros::{entered_span, exit_span};
 
 // NOTE: The assumption that rows and cols are a power of two are actually only relevant for the square matrix case.
 // (This is because the algorithm recurses into 4 sub-matrices of half dimension; we assume those to be square matrices as well, which only works for powers of two).
@@ -42,6 +45,29 @@ pub fn transpose<F: Sized + Copy + Send>(matrix: &mut [F], rows: usize, cols: us
     }
 }
 
+/// Transpose each column of the rmm as if it is a matrix
+pub fn transpose_rmm_column_wise<F: Sized + Copy + Send + Sync>(
+    matrix: &mut RowMajorMatrix<F>,
+    rows: usize,
+    cols: usize,
+) {
+    debug_assert_eq!(matrix.height(), rows * cols);
+    let skip = matrix.width();
+    let mut scratch: Vec<F> = Vec::with_capacity(matrix.height() * matrix.width());
+    #[allow(clippy::uninit_vec)]
+    unsafe {
+        scratch.set_len(matrix.height() * matrix.width());
+    }
+    let copy_timer = entered_span!("Copy to scratch");
+    scratch.copy_from_slice(&matrix.values);
+    exit_span!(copy_timer);
+    let src = MatrixMutSkip::from_mut_slice(scratch.as_mut_slice(), rows, cols, skip, 0);
+    let dst = MatrixMutSkip::from_mut_slice(matrix.values.as_mut_slice(), cols, rows, skip, 0);
+    let copy_timer = entered_span!("Transpose copy");
+    transpose_copy_batch(src, dst);
+    exit_span!(copy_timer);
+}
+
 pub fn transpose_bench_allocate<F: Sized + Copy + Send>(
     matrix: &mut [F],
     rows: usize,
@@ -62,22 +88,22 @@ pub fn transpose_bench_allocate<F: Sized + Copy + Send>(
     } else {
         // TODO: Special case for rows = 2 * cols and cols = 2 * rows.
         // TODO: Special case for very wide matrices (e.g. n x 16).
-        let allocate_timer = start_timer!(|| "Allocate scratch.");
+        let allocate_timer = entered_span!("Allocate scratch.");
         let mut scratch = Vec::with_capacity(rows * cols);
         #[allow(clippy::uninit_vec)]
         unsafe {
             scratch.set_len(rows * cols);
         }
-        end_timer!(allocate_timer);
+        exit_span!(allocate_timer);
         for matrix in matrix.chunks_exact_mut(rows * cols) {
-            let copy_timer = start_timer!(|| "Copy from slice.");
+            let copy_timer = entered_span!("Copy from slice.");
             scratch.copy_from_slice(matrix);
-            end_timer!(copy_timer);
+            exit_span!(copy_timer);
             let src = MatrixMut::from_mut_slice(scratch.as_mut_slice(), rows, cols);
             let dst = MatrixMut::from_mut_slice(matrix, cols, rows);
-            let transpose_copy_timer = start_timer!(|| "Transpose Copy.");
+            let transpose_copy_timer = entered_span!("Transpose Copy.");
             transpose_copy(src, dst);
-            end_timer!(transpose_copy_timer);
+            exit_span!(transpose_copy_timer);
         }
     }
 }
@@ -104,9 +130,9 @@ pub fn transpose_test<F: Sized + Copy + Send>(
         let buffer = &mut buffer[0..rows * cols];
         // TODO: Special case for rows = 2 * cols and cols = 2 * rows.
         // TODO: Special case for very wide matrices (e.g. n x 16).
-        let transpose_timer = start_timer!(|| "Transpose.");
+        let transpose_timer = entered_span!("Transpose");
         for matrix in matrix.chunks_exact_mut(rows * cols) {
-            let copy_timer = start_timer!(|| "Copy from slice.");
+            let copy_timer = entered_span!("Copy from slice");
             // buffer.copy_from_slice(matrix);
             buffer
                 .par_iter_mut()
@@ -114,16 +140,16 @@ pub fn transpose_test<F: Sized + Copy + Send>(
                 .for_each(|(dst, src)| {
                     *dst = *src;
                 });
-            end_timer!(copy_timer);
-            let transform_timer = start_timer!(|| "From mut slice.");
+            exit_span!(copy_timer);
+            let transform_timer = entered_span!("From mut slice");
             let src = MatrixMut::from_mut_slice(buffer, rows, cols);
             let dst = MatrixMut::from_mut_slice(matrix, cols, rows);
-            end_timer!(transform_timer);
-            let transpose_copy_timer = start_timer!(|| "Transpose copy.");
+            exit_span!(transform_timer);
+            let transpose_copy_timer = entered_span!("Transpose copy");
             transpose_copy(src, dst);
-            end_timer!(transpose_copy_timer);
+            exit_span!(transpose_copy_timer);
         }
-        end_timer!(transpose_timer);
+        exit_span!(transpose_timer);
     }
 }
 
@@ -140,6 +166,11 @@ fn transpose_copy<F: Sized + Copy + Send>(src: MatrixMut<F>, dst: MatrixMut<F>) 
     transpose_copy_not_parallel(src, dst);
     #[cfg(feature = "parallel")]
     transpose_copy_parallel(src, dst);
+}
+
+fn transpose_copy_batch<F: Sized + Copy + Send>(src: MatrixMutSkip<F>, dst: MatrixMutSkip<F>) {
+    #[cfg(feature = "parallel")]
+    transpose_copy_parallel_batch(src, dst);
 }
 
 /// Sets `dst` to the transpose of `src`. This will panic if the sizes of `src` and `dst` are not compatible.
@@ -168,6 +199,36 @@ fn transpose_copy_parallel<F: Sized + Copy + Send>(
         for i in 0..src.rows() {
             for j in 0..src.cols() {
                 dst[(j, i)] = src[(i, j)];
+            }
+        }
+    }
+}
+
+#[cfg(feature = "parallel")]
+fn transpose_copy_parallel_batch<'a, F: Sized + Copy + Send>(
+    src: MatrixMutSkip<'a, F>,
+    mut dst: MatrixMutSkip<'a, F>,
+) {
+    assert_eq!(src.rows(), dst.cols());
+    assert_eq!(src.cols(), dst.rows());
+    if src.rows() * src.cols() > workload_size::<F>() {
+        // Split along longest axis and recurse.
+        // This results in a cache-oblivious algorithm.
+        let ((a, b), (x, y)) = if src.rows() > src.cols() {
+            let n = src.rows() / 2;
+            (src.split_vertical(n), dst.split_horizontal(n))
+        } else {
+            let n = src.cols() / 2;
+            (src.split_horizontal(n), dst.split_vertical(n))
+        };
+        join(
+            || transpose_copy_parallel_batch(a, x),
+            || transpose_copy_parallel_batch(b, y),
+        );
+    } else {
+        for i in 0..src.rows() {
+            for j in 0..src.cols() {
+                dst.copy_from_another_matrix_batch(&src, j, i, i, j);
             }
         }
     }

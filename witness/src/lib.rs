@@ -71,6 +71,12 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         inner
     }
 
+    pub fn set_num_rows_to_height(&mut self, new_height: usize, fill: T) {
+        assert!(new_height >= self.height());
+        self.inner.pad_to_height(new_height, fill);
+        self.num_rows = new_height;
+    }
+
     pub fn n_col(&self) -> usize {
         self.inner.width
     }
@@ -164,6 +170,10 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         };
         self.is_padded = true;
     }
+
+    pub fn into_inner(self) -> p3::matrix::dense::RowMajorMatrix<T> {
+        self.inner
+    }
 }
 
 impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
@@ -183,6 +193,41 @@ impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
                     .copied()
                     .collect::<Vec<_>>()
                     .into_mle()
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn to_cols_base<E: ff_ext::ExtensionField<BaseField = F>>(&self) -> Vec<Vec<F>> {
+        debug_assert!(self.is_padded);
+        let n_column = self.inner.width;
+        (0..n_column)
+            .into_par_iter()
+            .map(|i| {
+                self.inner
+                    .values
+                    .iter()
+                    .skip(i)
+                    .step_by(n_column)
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn to_cols_ext<E: ff_ext::ExtensionField<BaseField = F>>(&self) -> Vec<Vec<E>> {
+        debug_assert!(self.is_padded);
+        let n_column = self.inner.width;
+        (0..n_column)
+            .into_par_iter()
+            .map(|i| {
+                self.inner
+                    .values
+                    .iter()
+                    .skip(i)
+                    .step_by(n_column)
+                    .copied()
+                    .map(|v| E::from_base(&v))
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>()
     }
