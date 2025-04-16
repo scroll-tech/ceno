@@ -112,7 +112,7 @@ impl<F: ExtensionField> SumcheckCore<F> {
         &mut self,
         folding_factor: usize,
         combination_randomness: F, // Scale the initial point
-        folding_randomness: &Vec<F>,
+        folding_randomness: &[F],
     ) {
         assert_eq!(folding_randomness.len(), folding_factor);
         assert!(self.num_variables >= folding_factor);

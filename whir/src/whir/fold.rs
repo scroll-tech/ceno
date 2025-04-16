@@ -23,7 +23,7 @@ pub fn compute_fold<F: Field>(
     let mut answers = answers.to_vec();
 
     // We recursively compute the fold, rec is where it is
-    for rec in 0..folding_factor {
+    for rec in folding_randomness.iter().take(folding_factor) {
         let offset = answers.len() / 2;
         let mut new_answers = vec![F::ZERO; offset];
         let mut coset_index_inv = F::ONE;
@@ -35,7 +35,7 @@ pub fn compute_fold<F: Field>(
             let left = f_value_0 + f_value_1;
             let right = point_inv * (f_value_0 - f_value_1);
 
-            new_answers[i] = two_inv * (left + folding_randomness[rec] * right);
+            new_answers[i] = two_inv * (left + *rec * right);
             coset_index_inv *= coset_gen_inv;
         }
         answers = new_answers;
@@ -222,7 +222,7 @@ pub fn expand_from_univariate<F: Field>(point: F, num_variables: usize) -> Vec<F
 }
 
 /// There is an alternative (possibly more efficient) implementation that iterates over the x in Gray code ordering.
-
+///
 /// LagrangePolynomialIterator for a given multilinear n-dimensional `point` iterates over pairs (x, y)
 /// where x ranges over all possible {0,1}^n
 /// and y equals the product y_1 * ... * y_n where
@@ -242,8 +242,8 @@ pub struct LagrangePolynomialIterator<F: Field> {
 }
 
 impl<F: Field> LagrangePolynomialIterator<F> {
-    pub fn new(point: &Vec<F>) -> Self {
-        let mut point = point.clone();
+    pub fn new(point: &[F]) -> Self {
+        let mut point = point.to_owned();
         point.reverse();
 
         let num_variables = point.len();
@@ -464,8 +464,7 @@ mod tests {
 
         for index in 0..num {
             let offset_inv = root_of_unity_inv.exp_u64(index as u64);
-            let span =
-                (index * folding_factor_exp)..((index + 1) * folding_factor_exp);
+            let span = (index * folding_factor_exp)..((index + 1) * folding_factor_exp);
 
             let answer_unprocessed = compute_fold(
                 &unprocessed[span.clone()],

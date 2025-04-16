@@ -357,9 +357,9 @@ where
             .map(|answer| {
                 let fold_size = 1 << self.0.folding_factor.at_round(round_state.round);
                 let mut res = vec![E::ZERO; fold_size];
-                for i in 0..fold_size {
-                    for j in 0..num_polys {
-                        res[i] += answer[0][i * num_polys + j] * batching_randomness[j];
+                for (i, s) in res.iter_mut().enumerate().take(fold_size) {
+                    for (j, r) in batching_randomness.iter().enumerate().take(num_polys) {
+                        *s += answer[0][i * num_polys + j] * *r;
                     }
                 }
                 res
@@ -381,8 +381,6 @@ where
                         // The coset is w^index * <w_coset_generator>
                         // let _coset_offset = domain_gen.pow(&[*index as u64]);
                         let coset_offset_inv = domain_gen_inv.exp_u64(*index as u64);
-
-                        
 
                         compute_fold(
                             batched_answers,

@@ -136,6 +136,7 @@ where
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn batch_verify_internal<T: Transcript<E>>(
         &self,
         transcript: &mut T,
@@ -428,6 +429,7 @@ where
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn write_proof_to_transcript_batch<T: Transcript<E>>(
         &self,
         transcript: &mut T,
@@ -448,7 +450,6 @@ where
 
         let mut initial_sumcheck_rounds = Vec::new();
         let mut folding_randomness: Vec<E>;
-        
 
         assert!(self.params.initial_statement, "must be true for pcs");
         // Derive combination randomness and first sumcheck polynomial
@@ -560,10 +561,10 @@ where
                         if !batched_randomness.is_empty() {
                             let fold_size = 1 << self.params.folding_factor.at_round(r);
                             let mut res = vec![E::ZERO; fold_size];
-                            for i in 0..fold_size {
-                                for j in 0..num_polys {
-                                    res[i] +=
-                                        raw_answer[0][i * num_polys + j] * batched_randomness[j];
+                            for (i, s) in res.iter_mut().enumerate().take(fold_size) {
+                                for (j, r) in batched_randomness.iter().enumerate().take(num_polys)
+                                {
+                                    *s += raw_answer[0][i * num_polys + j] * *r;
                                 }
                             }
                             res
@@ -670,9 +671,9 @@ where
                     if !batched_randomness.is_empty() {
                         let fold_size = 1 << self.params.folding_factor.at_round(0);
                         let mut res = vec![E::ZERO; fold_size];
-                        for i in 0..fold_size {
-                            for j in 0..num_polys {
-                                res[i] += raw_answer[0][i * num_polys + j] * batched_randomness[j];
+                        for (i, s) in res.iter_mut().enumerate().take(fold_size) {
+                            for (j, r) in batched_randomness.iter().enumerate().take(num_polys) {
+                                *s += raw_answer[0][i * num_polys + j] * *r;
                             }
                         }
                         res

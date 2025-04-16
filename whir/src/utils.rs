@@ -48,8 +48,8 @@ pub fn base_decomposition(value: usize, base: u8, n_bits: usize) -> Vec<u8> {
     let mut value = value;
 
     // Compute the base decomposition
-    for i in 0..n_bits {
-        result[i] = (value % (base as usize)) as u8;
+    for r in result.iter_mut().take(n_bits) {
+        *r = (value % (base as usize)) as u8;
         value /= base as usize;
     }
     // TODO: Should we assert!(value == 0) here to check that the orginally passed `value` is < base^n_bits ?
