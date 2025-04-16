@@ -11,7 +11,6 @@ use mpcs::{
 use std::collections::BTreeMap;
 
 use multilinear_extensions::mle::MultilinearExtension;
-use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 
@@ -46,21 +45,19 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
         };
 
         let mut transcript = T::new(b"BaseFold");
-        let rmm = vec![(0, RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1))]
-            .into_iter()
-            .collect::<BTreeMap<_, _>>();
-        let comm = Pcs::batch_commit_and_write(&pp, rmm, &mut transcript).unwrap();
+        let mut rng = rand::thread_rng();
+        let rmms = BTreeMap::from([(0, RowMajorMatrix::rand(&mut rng, 1 << num_vars, 1))]);
+        let comm = Pcs::batch_commit_and_write(&pp, rmms.clone(), &mut transcript).unwrap();
         let poly = Pcs::get_arc_mle_witness_from_commitment(&comm).remove(0);
 
         group.bench_function(BenchmarkId::new("commit", format!("{}", num_vars)), |b| {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let rmm = vec![(0, RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1))]
-                        .into_iter()
-                        .collect::<BTreeMap<_, _>>();
+                    let mut transcript = T::new(b"BaseFold");
+                    let rmms = rmms.clone();
                     let instant = std::time::Instant::now();
-                    Pcs::batch_commit(&pp, rmm).unwrap();
+                    Pcs::batch_commit_and_write(&pp, rmms, &mut transcript).unwrap();
                     let elapsed = instant.elapsed();
                     time += elapsed;
                 }
@@ -117,13 +114,12 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
             let circuit_num_polys = vec![(batch_size, 0)];
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
-            let rmms = BTreeMap::from([(
-                0,
-                RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
-            )]);
+            let mut rng = rand::thread_rng();
+            let rmms =
+                BTreeMap::from([(0, RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size))]);
 
             let polys = rmms[&0].to_mles();
-            let comm = Pcs::batch_commit_and_write(&pp, rmms, &mut transcript).unwrap();
+            let comm = Pcs::batch_commit_and_write(&pp, rmms.clone(), &mut transcript).unwrap();
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
@@ -131,12 +127,10 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                     b.iter_custom(|iters| {
                         let mut time = Duration::new(0, 0);
                         for _ in 0..iters {
-                            let rmms = BTreeMap::from([(
-                                0,
-                                RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size),
-                            )]);
+                            let mut transcript = T::new(b"BaseFold");
+                            let rmms = rmms.clone();
                             let instant = std::time::Instant::now();
-                            Pcs::batch_commit(&pp, rmms).unwrap();
+                            Pcs::batch_commit_and_write(&pp, rmms, &mut transcript).unwrap();
                             let elapsed = instant.elapsed();
                             time += elapsed;
                         }
@@ -144,6 +138,7 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                     })
                 },
             );
+
             let point = get_point_from_challenge(num_vars, &mut transcript);
             let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
             transcript.append_field_element_exts(&evals);
