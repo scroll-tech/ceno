@@ -1,5 +1,4 @@
 pub mod impl_babybear {
-
     use crate::array_try_from_uniform_bytes;
     use p3::{
         self,

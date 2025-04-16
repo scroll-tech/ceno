@@ -362,7 +362,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .into_iter()
     }
 }
-
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
