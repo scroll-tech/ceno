@@ -87,11 +87,10 @@ where
         circuit_codeword_index: BTreeMap<usize, usize>,
     ) -> Self {
         let mmcs = poseidon2_merkle_tree::<E>();
-        // size = height * 2 because we concat pi[left]/pi[right] under same row index
         let log2_max_codeword_size = log2_strict_usize(
             mmcs.get_matrices(&codeword)
                 .iter()
-                .map(|m| m.height() * 2)
+                .map(|m| m.values.len())
                 .max()
                 .unwrap(),
         );
