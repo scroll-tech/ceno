@@ -213,7 +213,7 @@ pub fn setup_platform(
     }
 }
 
-fn init_mem(program: &Program, platform: &Platform) -> Vec<MemInitRecord> {
+pub fn init_mem(program: &Program, platform: &Platform) -> Vec<MemInitRecord> {
     let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
         addr: *addr,
         value: *value,
