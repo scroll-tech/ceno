@@ -68,6 +68,8 @@ where
     pub(crate) codeword: MerkleTree<E::BaseField>,
 
     pub(crate) log2_max_codeword_size: usize,
+    // for small polynomials, the prover commits the entire polynomial as merkle leaves without encoding to codeword
+    // the verifier performs direct checks on these leaves without requiring a proximity test.
     pub(crate) trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
     // poly groups w.r.t circuit index
     pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
