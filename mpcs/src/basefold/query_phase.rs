@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, collections::BTreeMap, slice};
+use std::{cmp::Reverse, slice};
 
 use crate::{
     Point,
@@ -114,7 +114,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     queries: &QueryOpeningProofs<E>,
     fixed_comm: Option<&BasefoldCommitment<E>>,
     witin_comm: &BasefoldCommitment<E>,
-    circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
+    circuit_meta: &[CircuitIndexMeta],
     commits: &[Digest<E>],
     fold_challenges: &[E],
     sumcheck_messages: &[Vec<E>],
@@ -122,6 +122,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    debug_assert_eq!(point_evals.len(), circuit_meta.len());
     let encode_span = entered_span!("encode_final_codeword");
     let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
         vp,
@@ -141,14 +142,13 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let log2_witin_max_codeword_size =
         max_num_var + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log();
 
-    // an vector with same length as circuit_meta_map, which is sorted by num_var in descending order
-    // vector keep circuit information, so we can fetch respective circuit in constant time
-    let folding_sorted_order = circuit_meta_map
+    // an vector with same length as circuit_meta, which is sorted by num_var in descending order and keep its index
+    // for reverse lookup when retrieving next base codeword to involve into batching
+    let folding_sorted_order = circuit_meta
         .iter()
+        .enumerate()
         .sorted_by_key(|(_, CircuitIndexMeta { witin_num_vars, .. })| Reverse(witin_num_vars))
-        .map(|(circuit_index, CircuitIndexMeta { witin_num_vars, .. })| {
-            (witin_num_vars, circuit_index)
-        })
+        .map(|(index, CircuitIndexMeta { witin_num_vars, .. })| (witin_num_vars, index))
         .collect_vec();
     izip!(indices, queries).for_each(
         |(idx, ((witin_commit_leafs, witin_commit_proof), fixed_commit_option, opening_ext))| {
@@ -157,7 +157,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let mut idx = idx >> 1;
 
             let (witin_dimentions, fixed_dimentions) =
-                get_base_codeword_dimentions::<E, Spec>(circuit_meta_map);
+                get_base_codeword_dimentions::<E, Spec>(circuit_meta);
             // verify witness
             mmcs.verify_batch(
                 &witin_comm.commit,
@@ -167,8 +167,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 witin_commit_proof,
             )
             .expect("verify witin commit batch failed");
-            // verify fixed
 
+            // verify fixed
             let fixed_commit_leafs = if let Some(fixed_comm) = fixed_comm {
                 let (fixed_commit_leafs, fixed_commit_proof) =
                     &fixed_commit_option.as_ref().unwrap();
@@ -193,28 +193,23 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 &vec![]
             };
 
-            let mut witin_commit_leafs_iter = witin_commit_leafs.iter();
             let mut fixed_commit_leafs_iter = fixed_commit_leafs.iter();
             let mut batch_coeffs_iter = batch_coeffs.iter();
 
-            // circuit_index -> (lo, hi)
-            // TODO use pure vector for it instead of BTreeMap
-            let base_codeword_lo_hi = circuit_meta_map
+            let base_codeword_lo_hi = circuit_meta
                 .iter()
+                .zip_eq(witin_commit_leafs)
                 .map(
                     |(
-                        circuit_index,
                         CircuitIndexMeta {
                             witin_num_polys,
                             fixed_num_vars,
                             fixed_num_polys,
                             ..
                         },
+                        witin_leafs,
                     )| {
-                        let (lo, hi) = witin_commit_leafs_iter
-                            .next()
-                            .into_iter()
-                            .map(|leafs| (leafs, *witin_num_polys))
+                        let (lo, hi) = std::iter::once((witin_leafs, *witin_num_polys))
                             .chain((*fixed_num_vars > 0).then(|| {
                                 (fixed_commit_leafs_iter.next().unwrap(), *fixed_num_polys)
                             }))
@@ -242,12 +237,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                                 (lo_wit + lo_fixed, hi_wit + hi_fixed)
                             })
                             .expect("unreachable");
-                        (*circuit_index, (lo, hi))
+                        (lo, hi)
                     },
                 )
-                .collect::<BTreeMap<_, _>>();
+                .collect_vec();
             debug_assert_eq!(folding_sorted_order.len(), base_codeword_lo_hi.len());
-            debug_assert!(witin_commit_leafs_iter.next().is_none());
             debug_assert!(fixed_commit_leafs_iter.next().is_none());
             debug_assert!(batch_coeffs_iter.next().is_none());
 
@@ -270,8 +264,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let mut folded = folding_sorted_order_iter
                 .by_ref()
                 .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
-                .map(|(_, circuit_index)| {
-                    let (lo, hi) = &base_codeword_lo_hi[circuit_index];
+                .map(|(_, index)| {
+                    let (lo, hi) = &base_codeword_lo_hi[*index];
 
                     let coeff =
                         <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
@@ -297,8 +291,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 let new_involved_codewords = folding_sorted_order_iter
                     .by_ref()
                     .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
-                    .map(|(_, circuit_index)| {
-                        let (lo, hi) = &base_codeword_lo_hi[circuit_index];
+                    .map(|(_, index)| {
+                        let (lo, hi) = &base_codeword_lo_hi[*index];
                         if is_interpolate_to_right_index {
                             *hi
                         } else {
@@ -357,8 +351,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         // we need to scale up with scalar for witin_num_vars < max_num_var
         dot_product::<E, _, _>(
             batch_coeffs.iter().copied(),
-            point_evals.iter().zip_eq(circuit_meta_map.iter()).flat_map(
-                |((_, evals), (_, CircuitIndexMeta { witin_num_vars, .. }))| {
+            point_evals.iter().zip_eq(circuit_meta.iter()).flat_map(
+                |((_, evals), CircuitIndexMeta { witin_num_vars, .. })| {
                     evals.iter().copied().map(move |eval| {
                         eval * E::from_u64(1 << (max_num_var - witin_num_vars) as u64)
                     })
@@ -401,10 +395,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 }
 
 fn get_base_codeword_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
-    circuit_meta_map: &BTreeMap<usize, CircuitIndexMeta>,
+    circuit_meta_map: &[CircuitIndexMeta],
 ) -> (Vec<Dimensions>, Vec<Dimensions>) {
     let (wit_dim, fixed_dim): (Vec<_>, Vec<_>) = circuit_meta_map
-        .values()
+        .iter()
         .map(
             |CircuitIndexMeta {
                  witin_num_vars,

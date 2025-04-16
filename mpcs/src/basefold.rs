@@ -525,8 +525,8 @@ where
         );
 
         // preprocess data into respective group, in particularly, trivials vs non-trivials
-        let mut circuit_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
-        let mut circuit_trivial_meta_map = BTreeMap::<usize, CircuitIndexMeta>::new();
+        let mut circuit_meta_map = vec![];
+        let mut circuit_trivial_meta = vec![];
         let mut evals_iter = evals.iter().cloned();
         let (trivial_point_evals, point_evals) = izip!(&circuit_num_vars, points).fold(
             (vec![], vec![]),
@@ -551,7 +551,7 @@ where
                             evals_iter.next().unwrap()[0..*expected_fixed_num_poly].to_vec(),
                         )
                     }
-                    circuit_trivial_meta_map.insert(*circuit_index, circuit_meta);
+                    circuit_trivial_meta.push((circuit_index, circuit_meta));
                 } else {
                     point_evals.push((
                         point.clone(),
@@ -564,7 +564,7 @@ where
                             evals_iter.next().unwrap()[0..*expected_fixed_num_poly].to_vec(),
                         );
                     }
-                    circuit_meta_map.insert(*circuit_index, circuit_meta);
+                    circuit_meta_map.push(circuit_meta);
                 }
 
                 (trivial_point_evals, point_evals)
@@ -573,16 +573,14 @@ where
         assert!(evals_iter.next().is_none());
 
         // check trivial proofs
-        if !circuit_trivial_meta_map.is_empty() {
+        if !circuit_trivial_meta.is_empty() {
             let trivial_fixed_commit = fixed_comms
                 .as_ref()
                 .map(|fc| BTreeMap::from_iter(fc.trivial_commits.iter().cloned()))
                 .unwrap_or_default();
-            let trivial_witin_commit =
-                BTreeMap::from_iter(witin_comms.trivial_commits.iter().cloned());
             assert!(proof.trivial_proof.is_some());
             assert!(
-                circuit_trivial_meta_map
+                circuit_trivial_meta
                     .iter()
                     .zip_eq(proof.trivial_proof.as_ref().unwrap())
                     .zip_eq(&witin_comms.trivial_commits)
@@ -599,26 +597,27 @@ where
 
             // 1. check mmcs verify opening
             // 2. check mle.evaluate(point) == evals
-            circuit_trivial_meta_map
+            circuit_trivial_meta
                 .iter()
                 .zip_eq(proof.trivial_proof.as_ref().unwrap())
                 .zip_eq(&trivial_point_evals)
+                .zip_eq(&witin_comms.trivial_commits)
                 .try_for_each(
                     |(
                         (
                             (
-                                circuit_index,
-                                CircuitIndexMeta {
-                                    fixed_num_polys, ..
-                                },
+                                (
+                                    circuit_index,
+                                    CircuitIndexMeta {
+                                        fixed_num_polys, ..
+                                    },
+                                ),
+                                (_, proof),
                             ),
-                            (_, proof),
+                            (point, witin_fixed_evals),
                         ),
-                        (point, witin_fixed_evals),
+                        (_, witin_commit),
                     )| {
-                        let witin_commit = trivial_witin_commit
-                            .get(circuit_index)
-                            .expect("proof must exist");
                         let witin_rmm = proof[0].clone();
                         let (commit, _) = mmcs.commit_matrix(witin_rmm.clone());
                         if commit != *witin_commit {
@@ -635,6 +634,7 @@ where
                             let fixed_commit = trivial_fixed_commit
                                 .get(circuit_index)
                                 .expect("proof must exist");
+                            // NOTE rmm clone here is ok since trivial proof is relatively small
                             let (commit, _) = mmcs.commit_matrix(fixed_rmm.clone());
                             if commit != *fixed_commit {
                                 Err(Error::MerkleRootMismatch)?;
@@ -672,18 +672,18 @@ where
             );
         }
 
-        // verify commit_phase
-        let batch_group_size = circuit_meta_map
-            .values()
+        // verify non trivial proof
+        let total_num_polys = circuit_meta_map
+            .iter()
             .map(|circuit_meta| circuit_meta.witin_num_polys + circuit_meta.fixed_num_polys)
-            .collect_vec();
-        let total_num_polys = batch_group_size.iter().sum();
+            .sum();
         let batch_coeffs =
             &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
 
         let max_num_var = *circuit_num_vars.iter().map(|(_, n)| n).max().unwrap();
         let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
 
+        // prepare folding challenges via sumcheck round msg + FRI commitment
         let mut fold_challenges: Vec<E> = Vec::with_capacity(max_num_var);
         let commits = &proof.commits;
         let sumcheck_messages = &proof.sumcheck_messages;
@@ -707,6 +707,7 @@ where
             max_num_var + Spec::get_rate_log(),
         );
 
+        // verify basefold sumcheck + FRI codeword query
         batch_verifier_query_phase::<E, Spec>(
             max_num_var,
             &queries,
