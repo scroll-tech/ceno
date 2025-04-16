@@ -21,7 +21,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub use self::{
     ntt_impl::{intt, intt_batch, intt_batch_rmm, ntt, ntt_batch},
-    transpose::{transpose, transpose_bench_allocate, transpose_rmm, transpose_test},
+    transpose::{transpose, transpose_bench_allocate, transpose_rmm_column_wise, transpose_test},
     wavelet::wavelet_transform,
 };
 

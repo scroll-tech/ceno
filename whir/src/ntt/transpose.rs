@@ -46,7 +46,7 @@ pub fn transpose<F: Sized + Copy + Send>(matrix: &mut [F], rows: usize, cols: us
 }
 
 /// Transpose each column of the rmm as if it is a matrix
-pub fn transpose_rmm<F: Sized + Copy + Send + Sync>(
+pub fn transpose_rmm_column_wise<F: Sized + Copy + Send + Sync>(
     matrix: &mut RowMajorMatrix<F>,
     rows: usize,
     cols: usize,
