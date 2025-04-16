@@ -40,6 +40,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         ZKVMVerifier { vk }
     }
 
+    pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS> {
+        self.vk
+    }
+
     /// Verify a trace from start to halt.
     #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(

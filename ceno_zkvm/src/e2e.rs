@@ -1,4 +1,5 @@
 use crate::{
+    error::ZKVMError,
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
@@ -19,14 +20,20 @@ use ceno_emul::{
     Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::PolynomialCommitmentScheme;
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use p3::goldilocks::Goldilocks;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
-use transcript::BasicTranscript as Transcript;
+use tracing::info;
+use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
+
+pub type E = GoldilocksExt2;
+pub type B = Goldilocks;
+pub type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,
@@ -407,6 +414,7 @@ pub fn generate_witness<E: ExtensionField>(
 
 // Encodes useful early return points of the e2e pipeline
 pub enum Checkpoint {
+    Keygen,
     PrepE2EProving,
     PrepWitnessGen,
     PrepSanityCheck,
@@ -415,7 +423,7 @@ pub enum Checkpoint {
 
 // Currently handles state required by the sanity check in `bin/e2e.rs`
 // Future cases would require this to be an enum
-pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifyingKey<E, PCS>);
+pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVerifyingKey<E, PCS>>);
 
 // Runs end-to-end pipeline, stopping at a certain checkpoint and yielding useful state.
 //
@@ -439,7 +447,7 @@ pub fn run_e2e_with_checkpoint<
     public_io: Vec<u32>,
     max_steps: usize,
     checkpoint: Checkpoint,
-) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
+) -> (IntermediateState<E, PCS>, Box<dyn FnOnce()>) {
     let static_addrs = init_static_addrs(&program);
 
     let pubio_len = platform.public_io.iter_addresses().len();
@@ -483,12 +491,15 @@ pub fn run_e2e_with_checkpoint<
         .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
+    if let Checkpoint::Keygen = checkpoint {
+        return ((None, Some(vk)), Box::new(|| ()));
+    }
 
     // Generate witness
     let is_mock_proving = std::env::var("MOCK_PROVING").is_ok();
     if let Checkpoint::PrepE2EProving = checkpoint {
         return (
-            None,
+            (None, None),
             Box::new(move || {
                 _ = run_e2e_proof::<E, _>(
                     program,
@@ -513,7 +524,7 @@ pub fn run_e2e_with_checkpoint<
 
     if let Checkpoint::PrepWitnessGen = checkpoint {
         return (
-            None,
+            (None, None),
             Box::new(move || _ = generate_witness(&system_config, emul_result, &program, false)),
         );
     }
@@ -545,10 +556,10 @@ pub fn run_e2e_with_checkpoint<
     run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
 
     if let Checkpoint::PrepSanityCheck = checkpoint {
-        return (Some((zkvm_proof, vk)), Box::new(|| ()));
+        return ((Some(zkvm_proof), Some(vk)), Box::new(|| ()));
     }
 
-    (None, Box::new(|| ()))
+    ((None, None), Box::new(|| ()))
 }
 
 // Runs program emulation + witness generation + proving
@@ -655,4 +666,24 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
         if platform.can_read(addr) { "R" } else { "-" },
         if platform.can_write(addr) { "W" } else { "-" },
     )
+}
+
+pub fn verify(
+    zkvm_proof: &ZKVMProof<E, Pcs>,
+    verifier: &ZKVMVerifier<E, Pcs>,
+) -> Result<(), ZKVMError> {
+    // print verification statistics like proof size and hash count
+    let stat_recorder = StatisticRecorder::default();
+    let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+    verifier.verify_proof_halt(
+        zkvm_proof.clone(),
+        transcript,
+        zkvm_proof.has_halt(&verifier.vk),
+    )?;
+    info!("e2e proof stat: {}", zkvm_proof);
+    info!(
+        "hashes count = {}",
+        stat_recorder.into_inner().field_appended_num
+    );
+    Ok(())
 }

@@ -1,0 +1,29 @@
+[package]
+categories.workspace = true
+description = "cargo-ceno cli tools"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "cargo-ceno"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true, features = ["std", "backtrace"] }
+bincode.workspace = true
+cargo_metadata = "0.19"
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
+parse-size = "1.1"
+tempfile = "3.19"
+tracing.workspace = true
+tracing-forest.workspace = true
+tracing-subscriber.workspace = true
+
+ceno_emul = { path = "../ceno_emul" }
+ceno_host = { path = "../ceno_host" }
+ceno_zkvm = { path = "../ceno_zkvm" }
+
+[build-dependencies]
+vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_set"] }
