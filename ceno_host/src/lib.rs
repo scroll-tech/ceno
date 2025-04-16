@@ -1,14 +1,17 @@
-use std::{
-    iter::{repeat, zip},
-    sync::Arc,
-};
-
 use anyhow::Result;
-use ceno_emul::{IterAddresses, Platform, Program, VMState, host_utils::read_all_messages};
+use ceno_emul::{
+    IterAddresses, Platform, Program, VMState, WORD_SIZE, Word, host_utils::read_all_messages,
+};
 use itertools::{Itertools, chain};
 use rkyv::{
     Serialize, api::high::HighSerializer, rancor::Error, ser::allocator::ArenaHandle, to_bytes,
     util::AlignedVec,
+};
+use std::{
+    fs, io,
+    iter::{repeat, zip},
+    path::Path,
+    sync::Arc,
 };
 
 // We want to get access to the default value of `AlignedVec::ALIGNMENT`, and using it directly like this
@@ -166,4 +169,13 @@ pub fn run(
         .expect("Failed to run the program");
     eprintln!("Emulator ran for {} steps.", steps.len());
     read_all_messages(&state)
+}
+
+pub fn memory_from_file<P: AsRef<Path>>(path: P) -> io::Result<Vec<u32>> {
+    let mut buf = fs::read(path)?;
+    buf.resize(buf.len().next_multiple_of(WORD_SIZE), 0);
+    Ok(buf
+        .chunks_exact(WORD_SIZE)
+        .map(|word| Word::from_le_bytes(word.try_into().unwrap()))
+        .collect_vec())
 }

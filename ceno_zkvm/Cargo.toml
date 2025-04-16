@@ -20,6 +20,7 @@ base64 = "0.22"
 ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
+
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
@@ -41,7 +42,7 @@ tracing-forest.workspace = true
 tracing-subscriber.workspace = true
 
 
-bincode = "1"
+bincode.workspace = true
 clap = { version = "4.5", features = ["derive"] }
 generic_static = "0.2"
 parse-size = "1.1"
@@ -77,3 +78,11 @@ name = "fibonacci"
 [[bench]]
 harness = false
 name = "fibonacci_witness"
+
+[[bench]]
+harness = false
+name = "quadratic_sorting"
+
+[[bench]]
+harness = false
+name = "is_prime"
