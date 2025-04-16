@@ -120,7 +120,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
 
 #[derive(Clone, Debug)]
 pub struct VerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub(crate) cs: ConstraintSystem<E>,
+    pub cs: ConstraintSystem<E>,
     pub fixed_commit: Option<PCS::Commitment>,
 }
 
