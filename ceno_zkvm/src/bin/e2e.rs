@@ -7,7 +7,7 @@ use ceno_zkvm::{
 };
 use clap::Parser;
 use p3::field::PrimeCharacteristicRing;
-use std::{panic, panic::AssertUnwindSafe};
+use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
@@ -25,8 +25,8 @@ fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    // /// The path to the ELF file to execute.
-    // elf: String,
+    /// The path to the ELF file to execute.
+    elf: PathBuf,
     /// The path to the proof file to write.
     #[arg(default_value = "proof.bin")]
     proof_file: String,
@@ -134,10 +134,9 @@ fn main() {
         .next_power_of_two()
         .max(16);
 
-    // tracing::info!("Loading ELF file: {}", &args.elf);
-    // let elf_bytes = fs::read(&args.elf).expect("read elf file");
-    let elf_bytes = ceno_examples::ceno_rt_mini;
-    let program = Program::load_elf(elf_bytes, u32::MAX).unwrap();
+    tracing::info!("Loading ELF file: {}", args.elf.display());
+    let elf_bytes = fs::read(&args.elf).expect("read elf file");
+    let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = setup_platform(
         args.platform,
         &program,
