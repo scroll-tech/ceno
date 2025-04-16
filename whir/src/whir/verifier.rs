@@ -217,7 +217,8 @@ where
                 &stir_challenges_indexes,
                 merkle_proof_with_answers,
                 p3::util::log2_strict_usize(domain_size / fold_size),
-            ).is_err()
+            )
+            .is_err()
             {
                 return Err(Error::InvalidProof("Merkle proof failed".to_string()));
             }
