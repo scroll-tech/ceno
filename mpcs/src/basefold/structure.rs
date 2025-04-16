@@ -112,7 +112,7 @@ where
             self.commit.clone(),
             self.trivial_proofdata
                 .iter()
-                .map(|(circuit_index, (digest, _))| (*circuit_index, digest.clone()))
+                .map(|(_, (digest, _))| digest.clone())
                 .collect_vec(),
             self.log2_max_codeword_size,
         )
@@ -144,8 +144,7 @@ where
 {
     pub(super) commit: Digest<E>,
     pub(crate) log2_max_codeword_size: usize,
-    // (circuit_index, commitment)
-    pub(crate) trivial_commits: Vec<(usize, Digest<E>)>,
+    pub(crate) trivial_commits: Vec<Digest<E>>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
@@ -154,7 +153,7 @@ where
 {
     pub fn new(
         commit: Digest<E>,
-        trivial_commits: Vec<(usize, Digest<E>)>,
+        trivial_commits: Vec<Digest<E>>,
         log2_max_codeword_size: usize,
     ) -> Self {
         Self {
@@ -167,10 +166,6 @@ where
     pub fn commit(&self) -> Digest<E> {
         self.commit.clone()
     }
-
-    // pub fn num_vars(&self) -> Option<usize> {
-    //     self.num_vars
-    // }
 }
 
 impl<E: ExtensionField> PartialEq for BasefoldCommitmentWithWitness<E>
@@ -266,7 +261,7 @@ pub type QueryOpeningProofs<E> = Vec<(
     >,
 )>;
 
-pub type TrivialProof<E> = Vec<(usize, Vec<DenseMatrix<<E as ExtensionField>::BaseField>>)>;
+pub type TrivialProof<E> = Vec<Vec<DenseMatrix<<E as ExtensionField>::BaseField>>>;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -282,28 +277,8 @@ where
     pub(crate) final_message: Vec<Vec<E>>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
-    // circuit_index -> vec![witness, fixed], where fixed is optional
+    // vec![witness, fixed], where fixed is optional
     pub(crate) trivial_proof: Option<TrivialProof<E>>,
-}
-
-impl<E: ExtensionField> BasefoldProof<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    // pub fn trivial(evals: DenseMatrix<E::BaseField>) -> Self {
-    //     Self {
-    //         sumcheck_messages: vec![],
-    //         commits: vec![],
-    //         final_message: vec![],
-    //         query_opening_proof: Default::default(),
-    //         sumcheck_proof: None,
-    //         trivial_proof: Some(evals),
-    //     }
-    // }
-
-    // pub fn is_trivial(&self) -> bool {
-    //     self.trivial_proof.is_some()
-    // }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
