@@ -35,8 +35,8 @@ pub struct FullMemState<Record> {
     priv_io: Vec<Record>,
 }
 
-type InitMemState = FullMemState<MemInitRecord>;
-type FinalMemState = FullMemState<MemFinalRecord>;
+pub type InitMemState = FullMemState<MemInitRecord>;
+pub type FinalMemState = FullMemState<MemFinalRecord>;
 
 pub struct EmulationResult {
     exit_code: Option<u32>,
@@ -264,7 +264,7 @@ pub fn construct_configs<E: ExtensionField>(
     }
 }
 
-fn generate_fixed_traces<E: ExtensionField>(
+pub fn generate_fixed_traces<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     init_mem_state: &InitMemState,
     program: &Program,
