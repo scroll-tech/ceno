@@ -399,6 +399,18 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
             2,
         )
     } else {
+        // aggregate codeword with same length
+        let codeword_to_fold = (0..target_len)
+            .into_par_iter()
+            .map(|index| {
+                running_codeword_opt
+                    .into_iter()
+                    .chain(codewords_matched.iter().map(|m| m.as_view()))
+                    .map(|codeword| codeword.values[index])
+                    .sum::<E>()
+            })
+            .collect::<Vec<E>>();
+
         RowMajorMatrix::new(
             (0..target_len)
                 .into_par_iter()
@@ -407,19 +419,12 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     let coeff = &folding_coeffs[index >> 1];
 
                     // 1st part folded with challenge then sum
-                    let cur_same_pos_sum = running_codeword_opt
-                        .into_iter()
-                        .chain(codewords_matched.iter().map(|m| m.as_view()))
-                        .map(|codeword| {
-                            codeword_fold_with_challenge(
-                                &codeword.values[index..index + 2],
-                                challenge,
-                                *coeff,
-                                inv_2,
-                            )
-                        })
-                        .sum::<E>();
-
+                    let cur_same_pos_sum = codeword_fold_with_challenge(
+                        &codeword_to_fold[index..index + 2],
+                        challenge,
+                        *coeff,
+                        inv_2,
+                    );
                     // 2nd part: retrieve respective index then sum
                     let next_same_pos_sum = codewords_next_level_matched
                         .iter()
