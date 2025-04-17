@@ -3,11 +3,11 @@
 
 use std::time::Duration;
 
-use ark_std::test_rng;
 use criterion::*;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::Itertools;
 use p3::field::PrimeCharacteristicRing;
+use rand::thread_rng;
 use sumcheck::structs::IOPProverState;
 
 use multilinear_extensions::{
@@ -42,7 +42,7 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
 }
 
 fn prepare_input<'a, E: ExtensionField>(nv: usize) -> (E, Vec<ArcMultilinearExtension<'a, E>>) {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     let fs = (0..NUM_DEGREE)
         .map(|_| {
             let mle: ArcMultilinearExtension<'a, E> =
