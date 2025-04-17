@@ -107,7 +107,7 @@ enum InternalDivRem<E: ExtensionField> {
         is_dividend_signed_min: IsEqualConfig,
         is_divisor_neg_one: IsEqualConfig,
         is_signed_overflow: WitIn,
-        remainder_nonnegative: AssertLtConfig,
+        remainder_nonnegative: Box<AssertLtConfig>,
     },
 }
 
@@ -256,7 +256,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         is_dividend_signed_min,
                         is_divisor_neg_one,
                         is_signed_overflow,
-                        remainder_nonnegative,
+                        remainder_nonnegative: Box::new(remainder_nonnegative),
                     },
                     remainder_pos_orientation,
                     divisor_pos_orientation,
