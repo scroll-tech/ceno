@@ -1,4 +1,5 @@
 use itertools::{Itertools, chain};
+use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
@@ -12,11 +13,10 @@ use crate::{
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
 };
 use p3::field::PrimeCharacteristicRing;
-
 use witness::RowMajorMatrix;
 
 /// namespace used for annotation, preserve meta info during circuit construction
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct NameSpace {
     namespace: Vec<String>,
 }
@@ -53,20 +53,22 @@ impl NameSpace {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
     pub table_spec: SetTableSpec,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SetTableSpec {
     pub len: Option<usize>,
     pub structural_witins: Vec<StructuralWitIn>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct SetTableExpression<E: ExtensionField> {
     /// table expression
     pub expr: Expression<E>,
@@ -76,7 +78,8 @@ pub struct SetTableExpression<E: ExtensionField> {
     pub table_spec: SetTableSpec,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
@@ -212,12 +215,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         max_len: usize,
         offset: u32,
         multi_factor: usize,
+        descending: bool,
     ) -> StructuralWitIn {
         let wit_in = StructuralWitIn {
             id: self.num_structural_witin,
             max_len,
             offset,
             multi_factor,
+            descending,
         };
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 

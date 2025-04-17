@@ -36,7 +36,7 @@ jobs:
             ~/.cargo/git/db/
             target/
             ceno_rt/target/
-            example/target/
+            examples/target/
           key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: lint-${{ runner.os }}-cargo-
 

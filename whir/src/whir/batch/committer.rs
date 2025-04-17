@@ -1,184 +1,158 @@
 use crate::{
-    ntt::expand_from_coeff,
-    poly_utils::{MultilinearPoint, coeffs::CoefficientList, fold::restructure_evaluations},
-    utils,
-    whir::committer::{Committer, Witness},
+    crypto::{Digest, DigestExt, MerkleTree, write_digest_to_transcript},
+    error::Error,
+    ntt::expand_from_coeff_rmm,
+    utils::{self, evaluate_as_multilinear_evals, interpolate_over_boolean_hypercube_rmm},
+    whir::{
+        committer::Committer,
+        fold::{expand_from_univariate, restructure_evaluations_mut_rmm},
+        verifier::WhirCommitmentInTranscript,
+    },
 };
-use ark_crypto_primitives::merkle_tree::{Config, MerkleTree};
-use ark_ff::FftField;
-use ark_poly::EvaluationDomain;
-use ark_std::{end_timer, start_timer};
 use derive_more::Debug;
-use nimue::{
-    ByteWriter, ProofResult,
-    plugins::ark::{FieldChallenges, FieldWriter},
+use ff_ext::ExtensionField;
+use p3::{
+    matrix::{Matrix, dense::RowMajorMatrix},
+    util::log2_strict_usize,
 };
+use sumcheck::macros::{entered_span, exit_span};
+use transcript::{BasicTranscript, Transcript};
 
-use crate::whir::fs_utils::DigestWriter;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-#[derive(Debug, Clone)]
-pub struct Witnesses<F, MerkleConfig>
-where
-    MerkleConfig: Config,
-{
-    pub(crate) polys: Vec<CoefficientList<F>>,
+#[derive(Debug)]
+pub struct Witnesses<E: ExtensionField> {
+    pub(crate) polys: Vec<Vec<E::BaseField>>,
     #[debug(skip)]
-    pub(crate) merkle_tree: MerkleTree<MerkleConfig>,
-    pub(crate) merkle_leaves: Vec<F>,
-    pub(crate) ood_points: Vec<F>,
-    pub(crate) ood_answers: Vec<F>,
+    pub(crate) merkle_tree: MerkleTree<E>,
+    pub(crate) root: Digest<E>,
+    pub(crate) ood_points: Vec<E>,
+    pub(crate) ood_answers: Vec<E>,
 }
 
-impl<F, MerkleConfig: Config> From<Witness<F, MerkleConfig>> for Witnesses<F, MerkleConfig> {
-    fn from(witness: Witness<F, MerkleConfig>) -> Self {
-        Self {
-            polys: vec![witness.polynomial],
-            merkle_tree: witness.merkle_tree,
-            merkle_leaves: witness.merkle_leaves,
-            ood_points: witness.ood_points,
-            ood_answers: witness.ood_answers,
+impl<E: ExtensionField> Witnesses<E> {
+    pub fn merkle_tree(&self) -> &MerkleTree<E> {
+        &self.merkle_tree
+    }
+
+    pub fn root(&self) -> Digest<E> {
+        self.root.clone()
+    }
+
+    pub fn to_commitment_in_transcript(&self) -> WhirCommitmentInTranscript<E> {
+        WhirCommitmentInTranscript {
+            root: self.root(),
+            ood_points: self.ood_points.clone(),
+            ood_answers: self.ood_answers.clone(),
         }
+    }
+
+    pub fn num_vars(&self) -> usize {
+        log2_strict_usize(self.polys[0].len())
     }
 }
 
-impl<F: Clone, MerkleConfig: Config> From<Witnesses<F, MerkleConfig>> for Witness<F, MerkleConfig> {
-    fn from(witness: Witnesses<F, MerkleConfig>) -> Self {
-        Self {
-            polynomial: witness.polys[0].clone(),
-            merkle_tree: witness.merkle_tree,
-            merkle_leaves: witness.merkle_leaves,
-            ood_points: witness.ood_points,
-            ood_answers: witness.ood_answers,
-        }
-    }
-}
-
-impl<F, MerkleConfig, PowStrategy> Committer<F, MerkleConfig, PowStrategy>
+impl<E: ExtensionField> Committer<E>
 where
-    F: FftField,
-    MerkleConfig: Config<Leaf = [F]>,
-    PowStrategy: Sync,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
 {
-    pub fn batch_commit<Merlin>(
+    pub fn batch_commit(
         &self,
-        merlin: &mut Merlin,
-        polys: &[CoefficientList<F::BasePrimeField>],
-    ) -> ProofResult<Witnesses<F, MerkleConfig>>
-    where
-        Merlin: FieldWriter<F> + FieldChallenges<F> + ByteWriter + DigestWriter<MerkleConfig>,
-    {
-        let timer = start_timer!(|| "Batch Commit");
-        let base_domain = self.0.starting_domain.base_domain.unwrap();
-        let expansion = base_domain.size() / polys[0].num_coeffs();
-        let expand_timer = start_timer!(|| "Batch Expand");
-        let evals = polys
-            .par_iter()
-            .map(|poly| expand_from_coeff(poly.coeffs(), expansion))
-            .collect::<Vec<Vec<_>>>();
-        end_timer!(expand_timer);
-
-        assert_eq!(base_domain.size(), evals[0].len());
-
-        // These stacking operations are bottleneck of the commitment process.
-        // Try to finish the tasks with as few allocations as possible.
-        let stack_evaluations_timer = start_timer!(|| "Stack Evaluations");
-        let folded_evals = evals
-            .into_par_iter()
-            .map(|evals| {
-                let sub_stack_evaluations_timer = start_timer!(|| "Sub Stack Evaluations");
-                let ret = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
-                end_timer!(sub_stack_evaluations_timer);
-                ret
-            })
-            .map(|evals| {
-                let restructure_evaluations_timer = start_timer!(|| "Restructure Evaluations");
-                let ret = restructure_evaluations(
-                    evals,
-                    self.0.fold_optimisation,
-                    base_domain.group_gen(),
-                    base_domain.group_gen_inv(),
-                    self.0.folding_factor.at_round(0),
-                );
-                end_timer!(restructure_evaluations_timer);
-                ret
-            })
-            .flat_map(|evals| evals.into_par_iter().map(F::from_base_prime_field))
-            .collect::<Vec<_>>();
-        end_timer!(stack_evaluations_timer);
-
-        let allocate_timer = start_timer!(|| "Allocate buffer.");
-
-        let mut buffer = Vec::with_capacity(folded_evals.len());
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            buffer.set_len(folded_evals.len());
-        }
-        end_timer!(allocate_timer);
-        let horizontal_stacking_timer = start_timer!(|| "Horizontal Stacking");
-        let folded_evals = super::utils::horizontal_stacking(
-            folded_evals,
-            base_domain.size(),
+        mut rmm: witness::RowMajorMatrix<E::BaseField>,
+    ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
+        let num_polys = rmm.width();
+        let mut transcript = BasicTranscript::<E>::new(b"commitment");
+        let timer = entered_span!("Batch Commit");
+        let prepare_timer = entered_span!("Prepare");
+        let polys: Vec<Vec<E::BaseField>> = rmm.to_cols_base::<E>();
+        exit_span!(prepare_timer);
+        let expansion = self.0.starting_domain.size() / polys[0].len();
+        let interpolate_timer = entered_span!("Interpolate over hypercube rmm");
+        interpolate_over_boolean_hypercube_rmm(&mut rmm);
+        exit_span!(interpolate_timer);
+        let expand_timer = entered_span!("Batch Expand");
+        let mut rmm: witness::RowMajorMatrix<E::BaseField> =
+            expand_from_coeff_rmm::<E::BaseField>(rmm, expansion);
+        exit_span!(expand_timer);
+        let stack_timer = entered_span!("Stack evaluations");
+        utils::stack_evaluations_mut_rmm(&mut rmm, self.0.folding_factor.at_round(0));
+        exit_span!(stack_timer);
+        let restructure_timer = entered_span!("Restructure evaluations");
+        let domain_gen_inverse = self.0.starting_domain.base_domain_group_gen_inv();
+        restructure_evaluations_mut_rmm(
+            &mut rmm,
+            self.0.fold_optimisation,
+            domain_gen_inverse,
             self.0.folding_factor.at_round(0),
-            buffer.as_mut_slice(),
         );
-        end_timer!(horizontal_stacking_timer);
+        exit_span!(restructure_timer);
 
-        // Group folds together as a leaf.
+        let merkle_build_timer = entered_span!("Build Merkle Tree");
+
         let fold_size = 1 << self.0.folding_factor.at_round(0);
-        #[cfg(not(feature = "parallel"))]
-        let leafs_iter = folded_evals.chunks_exact(fold_size * polys.len());
-        #[cfg(feature = "parallel")]
-        let leafs_iter = folded_evals.par_chunks_exact(fold_size * polys.len());
+        let (root, merkle_tree) = self.0.hash_params.commit_matrix_base(RowMajorMatrix::new(
+            rmm.into_inner().values,
+            fold_size * num_polys,
+        ));
+        exit_span!(merkle_build_timer);
 
-        let merkle_build_timer = start_timer!(|| "Build Merkle Tree");
-        let merkle_tree = MerkleTree::<MerkleConfig>::new(
-            &self.0.leaf_hash_params,
-            &self.0.two_to_one_params,
-            leafs_iter,
-        )
-        .unwrap();
-        end_timer!(merkle_build_timer);
+        write_digest_to_transcript(&root, &mut transcript);
 
-        let root = merkle_tree.root();
-
-        merlin.add_digest(root)?;
-
-        let mut ood_points = vec![F::ZERO; self.0.committment_ood_samples];
-        let mut ood_answers = vec![F::ZERO; polys.len() * self.0.committment_ood_samples];
-        if self.0.committment_ood_samples > 0 {
-            merlin.fill_challenge_scalars(&mut ood_points)?;
-            ood_points
+        let ood_timer = entered_span!("Compute OOD answers");
+        let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
+            let ood_points =
+                transcript.sample_and_append_vec(b"ood_points", self.0.committment_ood_samples);
+            #[cfg(feature = "parallel")]
+            let ood_answers = ood_points
                 .par_iter()
-                .zip(ood_answers.par_chunks_mut(polys.len()))
-                .for_each(|(ood_point, ood_answers)| {
-                    for j in 0..polys.len() {
-                        let eval = polys[j].evaluate_at_extension(
-                            &MultilinearPoint::expand_from_univariate(
-                                *ood_point,
-                                self.0.mv_parameters.num_variables,
-                            ),
-                        );
-                        ood_answers[j] = eval;
-                    }
-                });
-            merlin.add_scalars(&ood_answers)?;
-        }
+                .flat_map(|ood_point| {
+                    polys.par_iter().map(|poly| {
+                        evaluate_as_multilinear_evals(
+                            poly,
+                            &expand_from_univariate(*ood_point, self.0.mv_parameters.num_variables),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            #[cfg(not(feature = "parallel"))]
+            let ood_answers = ood_points
+                .iter()
+                .flat_map(|ood_point| {
+                    mles.iter().map(|poly| {
+                        poly.evaluate(&expand_from_univariate(
+                            *ood_point,
+                            self.0.mv_parameters.num_variables,
+                        ))
+                    })
+                })
+                .collect::<Vec<_>>();
+            transcript.append_field_element_exts(&ood_answers);
+            (ood_points, ood_answers)
+        } else {
+            (
+                vec![E::ZERO; self.0.committment_ood_samples],
+                vec![E::ZERO; self.0.committment_ood_samples],
+            )
+        };
+        exit_span!(ood_timer);
 
-        let polys = polys
-            .into_par_iter()
-            .map(|poly| poly.clone().to_extension())
-            .collect::<Vec<_>>();
+        exit_span!(timer);
 
-        end_timer!(timer);
-
-        Ok(Witnesses {
-            polys,
-            merkle_tree,
-            merkle_leaves: folded_evals,
-            ood_points,
-            ood_answers,
-        })
+        let commitment = WhirCommitmentInTranscript {
+            root: root.clone(),
+            ood_points: ood_points.clone(),
+            ood_answers: ood_answers.clone(),
+        };
+        Ok((
+            Witnesses {
+                polys,
+                root,
+                merkle_tree,
+                ood_points,
+                ood_answers,
+            },
+            commitment,
+        ))
     }
 }

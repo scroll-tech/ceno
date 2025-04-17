@@ -4,6 +4,7 @@
 #![feature(generic_arg_infer)]
 
 pub mod basic;
+
 mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;

@@ -1,6 +1,7 @@
 use std::{fs, path::PathBuf, time::Duration};
 
 use ceno_emul::{Platform, Program};
+use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
@@ -42,6 +43,10 @@ fn fibonacci_witness(c: &mut Criterion) {
     let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
     group.sample_size(NUM_SAMPLES);
 
+    // retrive 1 << 20th fibonacci element >> max_steps
+    let mut hints = CenoStdin::default();
+    let _ = hints.write(&20);
+
     // Benchmark the proving time
     group.bench_function(
         BenchmarkId::new(
@@ -55,6 +60,7 @@ fn fibonacci_witness(c: &mut Criterion) {
                     let (_, generate_witness) = run_e2e_with_checkpoint::<E, Pcs>(
                         program.clone(),
                         platform.clone(),
+                        (&hints).into(),
                         vec![],
                         max_steps,
                         Checkpoint::PrepWitnessGen,

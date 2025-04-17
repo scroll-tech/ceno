@@ -14,7 +14,7 @@ use std::{
 mod allocator;
 
 mod mmio;
-pub use mmio::{read, read_slice};
+pub use mmio::{commit, read, read_slice};
 
 mod io;
 pub use io::info_out;
