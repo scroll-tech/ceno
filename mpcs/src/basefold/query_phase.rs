@@ -2,7 +2,7 @@ use std::{cmp::Reverse, slice};
 
 use crate::{
     Point,
-    basefold::structure::{CircuitIndexMeta, MerkleTreeExt},
+    basefold::structure::{CircuitIndexMeta, MerkleTreeExt, QueryOpeningProof},
     util::{codeword_fold_with_challenge, merkle_tree::poseidon2_merkle_tree},
 };
 use ff_ext::ExtensionField;
@@ -11,6 +11,7 @@ use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::{Field, PrimeCharacteristicRing, dot_product},
+    fri::{BatchOpening, CommitPhaseProofStep},
     matrix::{Dimensions, dense::RowMajorMatrix},
     util::log2_strict_usize,
 };
@@ -53,7 +54,7 @@ where
     queries
         .iter()
         .map(|idx| {
-            let witin_base_opening = {
+            let witin_base_proof = {
                 // extract the even part of `idx`
                 // ---------------------------------
                 // the oracle values are committed in a row-bit-reversed format.
@@ -63,12 +64,15 @@ where
                 // however, since `p_d[j]` and `p_d[j + n_{d-1}]` are already concatenated in the same merkle leaf,
                 // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
                 let idx = idx >> 1;
-                let (values, proof) = mmcs.open_batch(idx, &witin_comms.codeword);
-                (values, proof)
+                let (opened_values, opening_proof) = mmcs.open_batch(idx, &witin_comms.codeword);
+                BatchOpening {
+                    opened_values,
+                    opening_proof,
+                }
             };
 
-            let fixed_base_opening = if let Some(fixed_comms) = fixed_comms {
-                // follow same rule as `witin_base_opening`
+            let fixed_base_proof = if let Some(fixed_comms) = fixed_comms {
+                // follow same rule as witin base proof
                 let idx_shift = witin_comms.log2_max_codeword_size as i32
                     - fixed_comms.log2_max_codeword_size as i32;
                 let idx = if idx_shift > 0 {
@@ -77,30 +81,43 @@ where
                     idx << -idx_shift
                 };
                 let idx = idx >> 1;
-                let (values, proof) = mmcs.open_batch(idx, &fixed_comms.codeword);
-                Some((values, proof))
+                let (opened_values, opening_proof) = mmcs.open_batch(idx, &fixed_comms.codeword);
+                Some(BatchOpening {
+                    opened_values,
+                    opening_proof,
+                })
             } else {
                 None
             };
 
             // this is equivalent with "idx = idx % n_{d-1}" operation in non row bit reverse format
             let idx = idx >> 1;
-            let (_, opening_ext) = trees.iter().fold((idx, vec![]), |(idx, mut proofs), tree| {
-                // differentiate interpolate to left or right position at next layer
-                let is_interpolate_to_right_index = (idx & 1) == 1;
-                // mask the least significant bit (LSB) for the same reason as above:
-                // 1. we only need the even part of the index.
-                // 2. since even and odd parts are concatenated in the same leaf,
-                //    the overall merkle tree height is effectively halved,
-                //    so we divide by 2.
-                let (mut values, proof) = mmcs_ext.open_batch(idx >> 1, tree);
-                let leafs = values.pop().unwrap();
-                debug_assert_eq!(leafs.len(), 2);
-                let sibling = leafs[(!is_interpolate_to_right_index) as usize];
-                proofs.push((sibling, proof));
-                (idx >> 1, proofs)
-            });
-            (witin_base_opening, fixed_base_opening, opening_ext)
+            let (_, commit_phase_openings) =
+                trees
+                    .iter()
+                    .fold((idx, vec![]), |(idx, mut commit_phase_openings), tree| {
+                        // differentiate interpolate to left or right position at next layer
+                        let is_interpolate_to_right_index = (idx & 1) == 1;
+                        // mask the least significant bit (LSB) for the same reason as above:
+                        // 1. we only need the even part of the index.
+                        // 2. since even and odd parts are concatenated in the same leaf,
+                        //    the overall merkle tree height is effectively halved,
+                        //    so we divide by 2.
+                        let (mut values, proof) = mmcs_ext.open_batch(idx >> 1, tree);
+                        let leafs = values.pop().unwrap();
+                        debug_assert_eq!(leafs.len(), 2);
+                        let sibling = leafs[(!is_interpolate_to_right_index) as usize];
+                        commit_phase_openings.push(CommitPhaseProofStep {
+                            sibling_value: sibling,
+                            opening_proof: proof,
+                        });
+                        (idx >> 1, commit_phase_openings)
+                    });
+            QueryOpeningProof {
+                witin_base_proof,
+                fixed_base_proof,
+                commit_phase_openings,
+            }
         })
         .collect_vec()
 }
@@ -154,7 +171,18 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         .collect_vec();
 
     indices.iter().zip_eq(queries).for_each(
-        |(idx, ((witin_commit_leafs, witin_commit_proof), fixed_commit_option, opening_ext))| {
+        |(
+            idx,
+            QueryOpeningProof {
+                witin_base_proof:
+                    BatchOpening {
+                        opened_values: witin_opened_values,
+                        opening_proof: witin_opening_proof,
+                    },
+                fixed_base_proof: fixed_commit_option,
+                commit_phase_openings: opening_ext,
+            },
+        )| {
             // verify base oracle query proof
             // refer to prover documentation for the reason of right shift by 1
             let mut idx = idx >> 1;
@@ -166,15 +194,17 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 &witin_comm.commit,
                 &witin_dimentions,
                 idx,
-                witin_commit_leafs,
-                witin_commit_proof,
+                witin_opened_values,
+                witin_opening_proof,
             )
             .expect("verify witin commit batch failed");
 
             // verify fixed
             let fixed_commit_leafs = if let Some(fixed_comm) = fixed_comm {
-                let (fixed_commit_leafs, fixed_commit_proof) =
-                    &fixed_commit_option.as_ref().unwrap();
+                let BatchOpening {
+                    opened_values: fixed_opened_values,
+                    opening_proof: fixed_opening_proof,
+                } = &fixed_commit_option.as_ref().unwrap();
                 mmcs.verify_batch(
                     &fixed_comm.commit,
                     &fixed_dimentions,
@@ -187,11 +217,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                             idx << -idx_shift
                         }
                     },
-                    fixed_commit_leafs,
-                    fixed_commit_proof,
+                    fixed_opened_values,
+                    fixed_opening_proof,
                 )
                 .expect("verify fixed commit batch failed");
-                fixed_commit_leafs
+                fixed_opened_values
             } else {
                 &vec![]
             };
@@ -201,7 +231,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
             let base_codeword_lo_hi = circuit_meta
                 .iter()
-                .zip_eq(witin_commit_leafs)
+                .zip_eq(witin_opened_values)
                 .map(
                     |(
                         CircuitIndexMeta {
@@ -281,7 +311,13 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 .sum::<E>();
 
             let mut n_d_i = n_d_next;
-            for ((pi_comm, r), (leaf, proof)) in commits
+            for (
+                (pi_comm, r),
+                CommitPhaseProofStep {
+                    sibling_value: leaf,
+                    opening_proof: proof,
+                },
+            ) in commits
                 .iter()
                 .zip_eq(fold_challenges.iter().skip(1))
                 .zip_eq(opening_ext)

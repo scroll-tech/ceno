@@ -6,7 +6,8 @@ use core::fmt::Debug;
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Itertools, izip};
 use p3::{
-    commit::Mmcs,
+    commit::{ExtensionMmcs, Mmcs},
+    fri::{BatchOpening, CommitPhaseProofStep},
     matrix::{Matrix, dense::DenseMatrix},
 };
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
@@ -233,33 +234,33 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     }
 }
 
-pub type MKProofNTo1<F1, P> = (Vec<Vec<F1>>, P);
-// for 2 to 1, leaf layer just need one value, as the other can be interpolated from previous layer
-pub type MKProof2To1<F1, P> = (F1, P);
-pub type QueryOpeningProofs<E> = Vec<(
-    MKProofNTo1<
+pub type ExtMmcs<E> = ExtensionMmcs<
+    <E as ExtensionField>::BaseField,
+    E,
+    <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
+>;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct QueryOpeningProof<E: ExtensionField> {
+    pub witin_base_proof: BatchOpening<
         <E as ExtensionField>::BaseField,
-        <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
-            <E as ExtensionField>::BaseField,
-        >>::Proof,
+        <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
     >,
-    Option<
-        MKProofNTo1<
+    pub fixed_base_proof: Option<
+        BatchOpening<
             <E as ExtensionField>::BaseField,
-            <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
-                <E as ExtensionField>::BaseField,
-            >>::Proof,
+            <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
         >,
     >,
-    Vec<
-        MKProof2To1<
-            E,
-            <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
-                <E as ExtensionField>::BaseField,
-            >>::Proof,
-        >,
-    >,
-)>;
+    #[allow(clippy::type_complexity)]
+    pub commit_phase_openings: Vec<CommitPhaseProofStep<E, ExtMmcs<E>>>,
+}
+
+pub type QueryOpeningProofs<E> = Vec<QueryOpeningProof<E>>;
 
 pub type TrivialProof<E> = Vec<Vec<DenseMatrix<<E as ExtensionField>::BaseField>>>;
 
