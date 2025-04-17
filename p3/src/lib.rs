@@ -1,9 +1,14 @@
 pub use p3_baby_bear as babybear;
 pub use p3_challenger as challenger;
+pub use p3_commit as commit;
+pub use p3_dft as dft;
 pub use p3_field as field;
 pub use p3_goldilocks as goldilocks;
+pub use p3_matrix as matrix;
 pub use p3_maybe_rayon as maybe_rayon;
 pub use p3_mds as mds;
+pub use p3_merkle_tree as merkle_tree;
 pub use p3_poseidon as poseidon;
 pub use p3_poseidon2 as poseidon2;
 pub use p3_symmetric as symmetric;
+pub use p3_util as util;

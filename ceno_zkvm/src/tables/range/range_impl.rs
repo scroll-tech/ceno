@@ -25,7 +25,7 @@ impl RangeTableConfig {
         rom_type: ROMType,
         table_len: usize,
     ) -> Result<Self, ZKVMError> {
-        let range = cb.create_structural_witin(|| "structural range witin", table_len, 0, 1);
+        let range = cb.create_structural_witin(|| "structural range witin", table_len, 0, 1, false);
         let mlt = cb.create_witin(|| "mlt");
 
         let record_exprs = vec![range.expr()];

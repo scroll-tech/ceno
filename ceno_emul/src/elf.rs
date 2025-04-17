@@ -16,7 +16,10 @@
 
 extern crate alloc;
 
+use std::iter::successors;
+
 use alloc::collections::BTreeMap;
+use itertools::Itertools;
 
 use crate::{CENO_PLATFORM, addr::WORD_SIZE, disassemble::transpile, rv32im::Instruction};
 use anyhow::{Context, Result, anyhow, bail};
@@ -34,6 +37,8 @@ pub struct Program {
     pub entry: u32,
     /// This is the lowest address of the program's executable code
     pub base_address: u32,
+    /// This is the heap start address, match with _sheap retrieve from elf
+    pub sheap: u32,
     /// The instructions of the program
     pub instructions: Vec<Instruction>,
     /// The initial memory image
@@ -45,6 +50,7 @@ impl From<&[Instruction]> for Program {
         Self {
             entry: CENO_PLATFORM.pc_base(),
             base_address: CENO_PLATFORM.pc_base(),
+            sheap: CENO_PLATFORM.heap.start,
             instructions: insn_codes.to_vec(),
             image: Default::default(),
         }
@@ -56,12 +62,14 @@ impl Program {
     pub fn new(
         entry: u32,
         base_address: u32,
+        sheap: u32,
         instructions: Vec<Instruction>,
         image: BTreeMap<u32, u32>,
     ) -> Program {
         Self {
             entry,
             base_address,
+            sheap,
             instructions,
             image,
         }
@@ -148,8 +156,7 @@ impl Program {
                     );
                 }
                 if i >= file_size {
-                    // Past the file size, all zeros.
-                    image.insert(addr, 0);
+                    // Past the file size and skip.
                 } else {
                     let mut word = 0;
                     // Don't read past the end of the file.
@@ -176,10 +183,68 @@ impl Program {
 
         let instructions = transpile(base_address, &instructions);
 
+        // program data include text/rodata/data/bss
+        // truncate padding 0 section after bss
+        let mut program_data = image
+            .into_iter()
+            .sorted_by_key(|(addr, _)| *addr)
+            .collect_vec();
+
+        // record current max address of bss
+        // as later when we do static program data padding, it must cover max bss section and assure it's well constrained
+        let bss_max_addr = program_data.last().cloned();
+
+        // padding program_data to next power of 2 from last addr
+        let padding_size = program_data.len().next_power_of_two() - program_data.len();
+        if padding_size > 0 {
+            program_data.extend(
+                successors(
+                    program_data.last().map(|d| (d.0 + WORD_SIZE as u32, 0)),
+                    |(prev_addr, _)| Some((prev_addr + WORD_SIZE as u32, 0)),
+                )
+                .take(padding_size)
+                .collect_vec(),
+            );
+        }
+
+        let Some(((padded_max_static_addr, _), (bss_max_addr, _))) =
+            program_data.last().zip(bss_max_addr)
+        else {
+            return Err(anyhow!("invalid size of data"));
+        };
+
+        if *padded_max_static_addr < bss_max_addr {
+            return Err(anyhow!(
+                "padded_max_static_addr should larger than bss_max_addr"
+            ));
+        }
+
+        // retrieve sheap from elf
+        let sheap = elf
+            .symbol_table()?
+            .and_then(|(symtab, strtab)| {
+                symtab.iter().find_map(|symbol| {
+                    strtab
+                        .get(symbol.st_name as usize)
+                        .ok()
+                        .filter(|&name| name == "_sheap")
+                        .map(|_| symbol.st_value)
+                })
+            })
+            .ok_or_else(|| anyhow!("unable to find _sheap symbol"))? as u32;
+
+        // there should be no
+        if *padded_max_static_addr >= sheap {
+            return Err(anyhow!(
+                "padded_max_static_addr overlap with _sheap heap start address"
+            ));
+        }
+
         Ok(Program {
             entry,
             base_address,
-            image,
+            sheap,
+            image: program_data.into_iter().collect::<BTreeMap<u32, u32>>(),
             instructions,
         })
     }
