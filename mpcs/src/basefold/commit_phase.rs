@@ -7,6 +7,7 @@ use super::{
 use crate::{
     Point,
     util::{
+        codeword_fold_with_challenge,
         hash::write_digest_to_transcript,
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
         pop_front_while, split_by_sizes,
@@ -373,16 +374,16 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let inv_2 = E::BaseField::from_u64(2).inverse();
     debug_assert_eq!(folding_coeffs.len(), 1 << level);
 
-    // take codewrods match with target length then fold
+    // take codewords match with target length then fold
     let codewords_matched =
         pop_front_while(codewords, |codeword| codeword.values.len() == target_len);
-    // take codewrods match next target length in preparation of being committed together
+    // take codewords match next target length in preparation of being committed together
     let codewords_next_level_matched = pop_front_while(codewords, |codeword| {
         codeword.values.len() == next_level_target_len
     });
 
     // optimize for single codeword match
-    let folded_codeword = if (running_codeword_opt.is_some() as usize + codewords_matched.len())
+    let folded_codeword = if (usize::from(running_codeword_opt.is_some()) + codewords_matched.len())
         == 1
         && codewords_next_level_matched.is_empty()
     {
@@ -393,14 +394,7 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 .values
                 .par_chunks_exact(2)
                 .zip(folding_coeffs)
-                .map(|(ys, coeff)| {
-                    let (left, right) = (ys[0], ys[1]);
-                    // original (left, right) = (lo + hi*x, lo - hi*x), lo, hi are codeword, but after times x it's not codeword
-                    // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
-                    let (lo, hi) = ((left + right) * inv_2, (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
-                    // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
-                    lo + (hi - lo) * challenge
-                })
+                .map(|(ys, coeff)| codeword_fold_with_challenge(ys, challenge, *coeff, inv_2))
                 .collect::<Vec<_>>(),
             2,
         )
@@ -417,13 +411,12 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
                         .into_iter()
                         .chain(codewords_matched.iter().map(|m| m.as_view()))
                         .map(|codeword| {
-                            let (left, right) =
-                                (codeword.values[index], codeword.values[index + 1]);
-                            // original (left, right) = (lo + hi*x, lo - hi*x), lo, hi are codeword, but after times x it's not codeword
-                            // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
-                            let (lo, hi) = ((left + right) * inv_2, (left - right) * *coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
-                            // we do fold on folded = (1-r) * left_codeword + r * right_codeword, as it match perfectly with raw message in lagrange domain fixed variable
-                            lo + (hi - lo) * challenge
+                            codeword_fold_with_challenge(
+                                &codeword.values[index..index + 2],
+                                challenge,
+                                *coeff,
+                                inv_2,
+                            )
                         })
                         .sum::<E>();
 

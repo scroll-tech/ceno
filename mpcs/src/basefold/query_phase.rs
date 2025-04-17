@@ -3,14 +3,14 @@ use std::{cmp::Reverse, slice};
 use crate::{
     Point,
     basefold::structure::{CircuitIndexMeta, MerkleTreeExt},
-    util::merkle_tree::poseidon2_merkle_tree,
+    util::{codeword_fold_with_challenge, merkle_tree::poseidon2_merkle_tree},
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    field::dot_product,
+    field::{Field, PrimeCharacteristicRing, dot_product},
     matrix::{Dimensions, dense::RowMajorMatrix},
     util::log2_strict_usize,
 };
@@ -122,6 +122,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    let inv_2 = E::BaseField::from_u64(2).inverse();
     debug_assert_eq!(point_evals.len(), circuit_meta.len());
     let encode_span = entered_span!("encode_final_codeword");
     let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
@@ -266,7 +267,6 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 .peeking_take_while(|(num_vars, _)| **num_vars == cur_num_var)
                 .map(|(_, index)| {
                     let (lo, hi) = &base_codeword_lo_hi[*index];
-
                     let coeff =
                         <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
                             vp,
@@ -274,8 +274,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                                 + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
                                 - 1,
                         )[idx];
-                    let (lo, hi) = ((*lo + *hi).halve(), (*lo - *hi) * coeff);
-                    lo + (hi - lo) * *r
+                    codeword_fold_with_challenge(&[*lo, *hi], *r, coeff, inv_2)
                 })
                 .sum::<E>();
 
@@ -330,9 +329,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     .len(),
                     n_d_i >> 1
                 );
-                let (left, right) = (leafs[0], leafs[1]);
-                let (lo, hi) = ((left + right).halve(), (left - right) * coeff);
-                folded = lo + (hi - lo) * *r;
+                folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
                 n_d_i >>= 1;
             }
             debug_assert!(folding_sorted_order_iter.next().is_none());
