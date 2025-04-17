@@ -39,7 +39,7 @@ pub struct KeccakParams {}
 pub struct KeccakLayout<E> {
     params: KeccakParams,
 
-    committed_bits_id: usize,
+    input_columns: Vec<usize>,
 
     result: Vec<EvalExpression>,
     _marker: PhantomData<E>,
@@ -345,7 +345,8 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
     }
 
     fn build_commit_phase(&mut self, chip: &mut Chip) {
-        [self.committed_bits_id] = chip.allocate_committed_base();
+        let input_columns: [usize; KECCAK_INPUT_SIZE] = chip.allocate_committed_base();
+        self.input_columns = input_columns.into();
     }
 
     fn build_gkr_phase(&mut self, chip: &mut Chip) {
@@ -759,13 +760,14 @@ where
     type Trace = KeccakTrace;
 
     fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
-        let mut res = vec![];
+        let mut poly = vec![vec![]; KECCAK_INPUT_SIZE];
         for instance in phase1.instances {
-            res.push(u64s_to_felts::<E>(
-                instance.into_iter().map(|e| e as u64).collect_vec(),
-            ));
+            let felts = u64s_to_felts::<E>(instance.into_iter().map(|e| e as u64).collect_vec());
+            for i in 0..KECCAK_INPUT_SIZE {
+                poly[i].push(felts[i]);
+            }
         }
-        res
+        poly
     }
 
     fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E> {
@@ -779,13 +781,20 @@ where
             n_layers
         ];
 
-        for com_state in phase1 {
+        let num_instances = phase1[0].len();
+
+        for i in 0..num_instances {
             fn conv64to8(input: u64) -> [u64; 8] {
                 MaskRepresentation::new(vec![(64, input).into()])
                     .convert(vec![8; 8])
                     .values()
                     .try_into()
                     .unwrap()
+            }
+
+            let mut com_state = vec![];
+            for j in 0..KECCAK_INPUT_SIZE {
+                com_state.push(phase1[j][i]);
             }
 
             let mut and_lookups: Vec<Vec<u64>> = vec![vec![]; ROUNDS];
