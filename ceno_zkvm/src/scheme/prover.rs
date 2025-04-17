@@ -977,9 +977,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
-                        witness: w,
-                    }]
+                    vec![
+                        TowerProverSpec { witness: r },
+                        TowerProverSpec { witness: w },
+                    ]
                 })
                 .collect_vec(),
             lk_wit_layers

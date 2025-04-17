@@ -562,7 +562,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
-        let log2_num_instances = ceil_log2(num_instances);
+        let log2_num_instances = next_pow2_instance_padding(num_instances).ilog2() as usize;
 
         // in table proof, we always skip same point sumcheck for now
         // as tower sumcheck batch product argument/logup in same length
