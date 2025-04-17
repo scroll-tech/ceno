@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use super::{EncodingProverParameters, EncodingScheme};
-use crate::{Error, basefold::PolyEvalsCodeword};
+use crate::Error;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use p3::{
@@ -100,7 +100,7 @@ where
 
     type VerifierParameters = RSCodeVerifierParameters<E>;
 
-    type EncodedData = PolyEvalsCodeword<E>;
+    type EncodedData = DenseMatrix<E::BaseField>;
 
     fn setup(_max_message_size_log: usize) -> Self::PublicParameters {
         RSCodeParameters {
@@ -184,18 +184,14 @@ where
         ))
     }
 
-    fn encode(pp: &Self::ProverParameters, rmm: RowMajorMatrix<E::BaseField>) -> Self::EncodedData {
+    fn encode(
+        pp: &Self::ProverParameters,
+        rmm: RowMajorMatrix<E::BaseField>,
+    ) -> Result<Self::EncodedData, Error> {
         let num_vars = rmm.num_vars();
         let num_polys = rmm.width();
         if num_vars > pp.get_max_message_size_log() {
-            return PolyEvalsCodeword::TooBig(num_vars);
-        }
-
-        // In this case, the polynomial is so small that the opening is trivial.
-        // So we just build the Merkle tree over the polynomial evaluations.
-        // No codeword is needed.
-        if num_vars <= Spec::get_basecode_msg_size_log() {
-            return PolyEvalsCodeword::TooSmall(Box::new(rmm.into_default_padded_p3_rmm()));
+            return Err(Error::PolynomialTooLarge(num_vars));
         }
 
         // here 2 resize happend. first is padding to next pow2 height, second is extend to 2^get_rate_log times size
@@ -218,8 +214,7 @@ where
         // to make 2 consecutive position to be open together, we trickily "concat" 2 consecutive leafs
         // so both can be open under same row index
         let codeword = DenseMatrix::new(codeword, num_polys * 2);
-
-        PolyEvalsCodeword::Normal(Box::new(codeword))
+        Ok(codeword)
     }
 
     fn encode_small(
@@ -296,13 +291,21 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use ff_ext::GoldilocksExt2;
     use itertools::izip;
-    use p3::{goldilocks::Goldilocks, util::log2_strict_usize};
+    use p3::{
+        commit::{ExtensionMmcs, Mmcs},
+        goldilocks::Goldilocks,
+    };
 
     use rand::rngs::OsRng;
+    use transcript::BasicTranscript;
 
-    use crate::basefold::commit_phase::basefold_one_round_by_interpolation_weights;
+    use crate::{
+        basefold::commit_phase::basefold_fri_round, util::merkle_tree::poseidon2_merkle_tree,
+    };
 
     use super::*;
 
@@ -314,15 +317,11 @@ mod tests {
     #[test]
     pub fn test_message_codeword_linearity() {
         let num_vars = 10;
+        let mmcs_ext = ExtensionMmcs::<F, E, _>::new(poseidon2_merkle_tree::<E>());
         let rmm: RowMajorMatrix<F> = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, 1);
         let pp = <Code as EncodingScheme<E>>::setup(num_vars);
         let (pp, vp) = Code::trim(pp, num_vars).unwrap();
-        let codeword = Code::encode(&pp, rmm.clone());
-        let codeword = match codeword {
-            PolyEvalsCodeword::Normal(dense_matrix) => dense_matrix,
-            PolyEvalsCodeword::TooSmall(_) => todo!(),
-            PolyEvalsCodeword::TooBig(_) => todo!(),
-        };
+        let codeword = Code::encode(&pp, rmm.clone()).expect("encode error");
         assert_eq!(
             codeword.values.len(),
             1 << (num_vars + <Code as EncodingScheme<E>>::get_rate_log())
@@ -338,13 +337,21 @@ mod tests {
             izip!(&codeword.values, &codeword_ext.values).all(|(base, ext)| E::from(*base) == *ext)
         );
 
+        let mut codeword_ext = VecDeque::from(vec![codeword_ext]);
+        let mut transcript = BasicTranscript::new(b"test");
+
         // test basefold.encode(raw_message.fold(1-r, r)) ?= codeword.fold(1-r, r)
+        let mut prove_data = vec![];
         let r = E::from_u64(97);
-        let folded_codeword = basefold_one_round_by_interpolation_weights::<E, BasefoldRSParams>(
+        basefold_fri_round::<E, BasefoldRSParams>(
             &pp,
-            log2_strict_usize(codeword_ext.values.len()) - 1,
-            &codeword_ext.values,
+            &mut codeword_ext,
+            &mut prove_data,
+            &mut vec![],
+            &mmcs_ext,
             r,
+            false,
+            &mut transcript,
         );
 
         // encoded folded raw message
@@ -358,6 +365,9 @@ mod tests {
                 1,
             ),
         );
-        assert_eq!(&folded_codeword.values, &codeword_from_folded_rmm.values);
+        assert_eq!(
+            &mmcs_ext.get_matrices(&prove_data[0])[0].values,
+            &codeword_from_folded_rmm.values
+        );
     }
 }

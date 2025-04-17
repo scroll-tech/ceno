@@ -410,7 +410,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-forest",
- "tracing-subscriber 0.3.19",
+ "tracing-subscriber",
  "vergen-git2",
 ]
 
@@ -1910,6 +1910,7 @@ dependencies = [
  "p3-commit",
  "p3-dft",
  "p3-field",
+ "p3-fri",
  "p3-goldilocks",
  "p3-matrix",
  "p3-maybe-rayon",
@@ -1994,6 +1995,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-fri"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-interpolation",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+ "rand",
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "p3-goldilocks"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
@@ -2009,6 +2029,17 @@ dependencies = [
  "paste",
  "rand",
  "serde",
+]
+
+[[package]]
+name = "p3-interpolation"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/plonky3?rev=20c3cb9#20c3cb9119da0d5196d7a2e7b2e4f1a62dc8cae7"
+dependencies = [
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
 ]
 
 [[package]]

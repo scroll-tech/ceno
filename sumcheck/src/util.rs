@@ -287,10 +287,15 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
                 let blow_factor = 1 << (merged_num_vars - poly.num_vars());
                 DenseMultilinearExtension::from_evaluations_ext_vec(
                     merged_num_vars,
-                    poly.get_base_field_vec()
-                        .iter()
-                        .flat_map(|e| std::iter::repeat(E::from(*e)).take(blow_factor))
-                        .collect_vec(),
+                    op_mle!(
+                        poly,
+                        |poly| {
+                            poly.iter()
+                                .flat_map(|e| std::iter::repeat(*e).take(blow_factor))
+                                .collect_vec()
+                        },
+                        |base_poly| base_poly.iter().map(|e| E::from(*e)).collect_vec()
+                    ),
                 )
             }
         };
@@ -300,9 +305,9 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
 }
 
 /// retrieve virtual poly from sumcheck prover state to single virtual poly
-pub fn merge_sumcheck_prover_state<E: ExtensionField>(
-    prover_states: Vec<IOPProverState<'_, E>>,
-) -> VirtualPolynomial<'_, E> {
+pub fn merge_sumcheck_prover_state<'a, E: ExtensionField>(
+    prover_states: &[IOPProverState<'a, E>],
+) -> VirtualPolynomial<'a, E> {
     merge_sumcheck_polys(
         prover_states.iter().map(|ps| &ps.poly).collect_vec(),
         Some(prover_states[0].poly_meta.clone()),
