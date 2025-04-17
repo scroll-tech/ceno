@@ -454,11 +454,10 @@ where
 
         exit_span!(span);
         Ok(Self::Proof {
-            sumcheck_messages: commit_phase_proof.sumcheck_messages,
             commits: commit_phase_proof.commits,
             final_message: commit_phase_proof.final_message,
             query_opening_proof,
-            sumcheck_proof: None,
+            sumcheck_proof: Some(commit_phase_proof.sumcheck_messages),
             trivial_proof,
         })
     }
@@ -645,7 +644,9 @@ where
                 )?;
         }
 
-        if !circuit_metas.is_empty() {
+        if circuit_metas.is_empty() {
+            return Ok(());
+        } else {
             assert!(
                 !proof.final_message.is_empty()
                     && proof
@@ -656,6 +657,7 @@ where
                         .all_equal(),
                 "final message size should be equal to 1 << Spec::get_basecode_msg_size_log()"
             );
+            assert!(proof.sumcheck_proof.is_some(), "sumcheck proof must exist");
         }
 
         // verify non trivial proof
@@ -672,9 +674,9 @@ where
         // prepare folding challenges via sumcheck round msg + FRI commitment
         let mut fold_challenges: Vec<E> = Vec::with_capacity(max_num_var);
         let commits = &proof.commits;
-        let sumcheck_messages = &proof.sumcheck_messages;
+        let sumcheck_messages = proof.sumcheck_proof.as_ref().unwrap();
         for i in 0..num_rounds {
-            transcript.append_field_element_exts(sumcheck_messages[i].as_slice());
+            transcript.append_field_element_exts(sumcheck_messages[i].evaluations.as_slice());
             fold_challenges.push(
                 transcript
                     .sample_and_append_challenge(b"commit round")

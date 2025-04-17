@@ -17,6 +17,7 @@ use p3::{
 use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
     macros::{entered_span, exit_span},
+    structs::IOPProverMessage,
     util::interpolate_uni_poly,
 };
 use transcript::Transcript;
@@ -117,7 +118,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     circuit_meta: &[CircuitIndexMeta],
     commits: &[Digest<E>],
     fold_challenges: &[E],
-    sumcheck_messages: &[Vec<E>],
+    sumcheck_messages: &[IOPProverMessage<E>],
     point_evals: &[(Point<E>, Vec<E>)],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
@@ -356,19 +357,19 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 }
             )
         ),
-        { sumcheck_messages[0][0] + sumcheck_messages[0][1] }
+        { sumcheck_messages[0].evaluations[0] + sumcheck_messages[0].evaluations[1] }
     );
     // 2. check every round of sumcheck match with prev claims
     for i in 0..fold_challenges.len() - 1 {
         assert_eq!(
-            interpolate_uni_poly(&sumcheck_messages[i], fold_challenges[i]),
-            { sumcheck_messages[i + 1][0] + sumcheck_messages[i + 1][1] }
+            interpolate_uni_poly(&sumcheck_messages[i].evaluations, fold_challenges[i]),
+            { sumcheck_messages[i + 1].evaluations[0] + sumcheck_messages[i + 1].evaluations[1] }
         );
     }
     // 3. check final evaluation are correct
     assert_eq!(
         interpolate_uni_poly(
-            &sumcheck_messages[fold_challenges.len() - 1],
+            &sumcheck_messages[fold_challenges.len() - 1].evaluations,
             fold_challenges[fold_challenges.len() - 1]
         ),
         izip!(final_message, point_evals.iter().map(|(point, _)| point))

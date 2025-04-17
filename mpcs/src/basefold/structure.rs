@@ -272,7 +272,6 @@ pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) sumcheck_messages: Vec<Vec<E>>,
     pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<Vec<E>>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
@@ -290,7 +289,7 @@ pub struct BasefoldCommitPhaseProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) sumcheck_messages: Vec<Vec<E>>,
+    pub(crate) sumcheck_messages: Vec<IOPProverMessage<E>>,
     pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<Vec<E>>,
 }

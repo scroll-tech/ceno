@@ -28,7 +28,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::collections::VecDeque;
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::IOPProverState,
+    structs::{IOPProverMessage, IOPProverState},
     util::{AdditiveVec, merge_sumcheck_prover_state, optimal_sumcheck_threads},
 };
 use transcript::{Challenge, Transcript};
@@ -457,7 +457,7 @@ fn basefold_one_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     prover_states: &mut Vec<IOPProverState<'_, E>>,
     challenge: Option<Challenge<E>>,
-    sumcheck_messages: &mut Vec<Vec<E>>,
+    sumcheck_messages: &mut Vec<IOPProverMessage<E>>,
     codewords: &mut VecDeque<RowMajorMatrix<E>>,
     transcript: &mut impl Transcript<E>,
     trees: &mut Vec<MerkleTreeExt<E>>,
@@ -490,7 +490,9 @@ where
                 acc
             });
     transcript.append_field_element_exts(&evaluations.0);
-    sumcheck_messages.push(evaluations.0);
+    sumcheck_messages.push(IOPProverMessage {
+        evaluations: evaluations.0,
+    });
     exit_span!(sumcheck_round_span);
 
     let next_challenge = transcript.sample_and_append_challenge(b"commit round");
