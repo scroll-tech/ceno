@@ -658,6 +658,7 @@ where
                 "final message size should be equal to 1 << Spec::get_basecode_msg_size_log()"
             );
             assert!(proof.sumcheck_proof.is_some(), "sumcheck proof must exist");
+            assert_eq!(proof.query_opening_proof.len(), Spec::get_number_queries())
         }
 
         // verify non trivial proof

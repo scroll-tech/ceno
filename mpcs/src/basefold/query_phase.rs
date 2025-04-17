@@ -152,7 +152,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         .sorted_by_key(|(_, CircuitIndexMeta { witin_num_vars, .. })| Reverse(witin_num_vars))
         .map(|(index, CircuitIndexMeta { witin_num_vars, .. })| (witin_num_vars, index))
         .collect_vec();
-    izip!(indices, queries).for_each(
+
+    indices.iter().zip_eq(queries).for_each(
         |(idx, ((witin_commit_leafs, witin_commit_proof), fixed_commit_option, opening_ext))| {
             // verify base oracle query proof
             // refer to prover documentation for the reason of right shift by 1
