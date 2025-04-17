@@ -443,6 +443,7 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
         trees.push(merkle_tree);
     }
 
+    // skip last round commitment as verifer need to derive encode(final_message) = final_codeword itself
     if !is_last_round {
         let (commitment, merkle_tree) = mmcs_ext.commit_matrix(folded_codeword);
         write_digest_to_transcript(&commitment, transcript);

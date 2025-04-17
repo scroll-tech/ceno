@@ -103,13 +103,13 @@ where
                         // 2. since even and odd parts are concatenated in the same leaf,
                         //    the overall merkle tree height is effectively halved,
                         //    so we divide by 2.
-                        let (mut values, proof) = mmcs_ext.open_batch(idx >> 1, tree);
+                        let (mut values, opening_proof) = mmcs_ext.open_batch(idx >> 1, tree);
                         let leafs = values.pop().unwrap();
                         debug_assert_eq!(leafs.len(), 2);
-                        let sibling = leafs[(!is_interpolate_to_right_index) as usize];
+                        let sibling_value = leafs[(!is_interpolate_to_right_index) as usize];
                         commit_phase_openings.push(CommitPhaseProofStep {
-                            sibling_value: sibling,
-                            opening_proof: proof,
+                            sibling_value,
+                            opening_proof,
                         });
                         (idx >> 1, commit_phase_openings)
                     });
@@ -280,6 +280,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
             // fold and query
             let mut cur_num_var = max_num_var;
+            // -1 because for there are only #max_num_var-1 openings proof
             let rounds = cur_num_var
                 - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log()
                 - 1;
