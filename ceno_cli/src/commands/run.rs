@@ -111,7 +111,7 @@ impl CmdInner {
         build.run(toolchain.clone())?;
 
         let target_elf = target_selection.get_target_path(&self.compilation_options);
-        assert!(target_elf.exists());
+        assert!(target_elf.exists(), "{}", target_elf.display());
 
         match kind {
             RunKind::Keygen => {
