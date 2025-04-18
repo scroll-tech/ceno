@@ -321,7 +321,7 @@ pub fn split_by_sizes<'a, T>(input: &'a [T], sizes: &[usize]) -> Vec<&'a [T]> {
 /// # arguments
 /// * `deque` - the mutable VecDeque to operate on.
 /// * `pred` - a predicate function that takes a reference to an element
-///            and returns `true` if the element should be removed.
+///   and returns `true` if the element should be removed.
 ///
 /// # returns
 /// a `Vec<T>` containing all the elements that were removed.

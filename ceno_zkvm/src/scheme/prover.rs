@@ -517,7 +517,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             if num_instances < sel_r.len() {
                 sel_r.splice(
                     num_instances..sel_r.len(),
-                    std::iter::repeat(E::ZERO).take(sel_r.len() - num_instances),
+                    std::iter::repeat_n(E::ZERO, sel_r.len() - num_instances),
                 );
             }
 
@@ -525,7 +525,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             if num_instances < sel_w.len() {
                 sel_w.splice(
                     num_instances..sel_w.len(),
-                    std::iter::repeat(E::ZERO).take(sel_w.len() - num_instances),
+                    std::iter::repeat_n(E::ZERO, sel_w.len() - num_instances),
                 );
             }
 
@@ -533,7 +533,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             if num_instances < sel_lk.len() {
                 sel_lk.splice(
                     num_instances..sel_lk.len(),
-                    std::iter::repeat(E::ZERO).take(sel_lk.len() - num_instances),
+                    std::iter::repeat_n(E::ZERO, sel_lk.len() - num_instances),
                 );
             }
 
@@ -551,8 +551,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 if num_instances < sel_non_lc_zero_sumcheck.len() {
                     sel_non_lc_zero_sumcheck.splice(
                         num_instances..sel_non_lc_zero_sumcheck.len(),
-                        std::iter::repeat(E::ZERO)
-                            .take(sel_non_lc_zero_sumcheck.len() - num_instances),
+                        std::iter::repeat_n(
+                            E::ZERO,
+                            sel_non_lc_zero_sumcheck.len() - num_instances,
+                        ),
                     );
                 }
                 let sel_non_lc_zero_sumcheck: ArcMultilinearExtension<E> =
@@ -977,9 +979,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
-                        witness: w,
-                    }]
+                    vec![
+                        TowerProverSpec { witness: r },
+                        TowerProverSpec { witness: w },
+                    ]
                 })
                 .collect_vec(),
             lk_wit_layers

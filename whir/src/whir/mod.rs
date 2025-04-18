@@ -89,10 +89,10 @@ mod tests {
 
         let params = WhirConfig::<E>::new(mv_params, whir_params);
 
-        let polynomial = DenseMultilinearExtension::from_evaluations_vec(num_variables, vec![
-                <E as ExtensionField>::BaseField::from_u64(1);
-                num_coeffs
-            ]);
+        let polynomial = DenseMultilinearExtension::from_evaluations_vec(
+            num_variables,
+            vec![<E as ExtensionField>::BaseField::from_u64(1); num_coeffs],
+        );
 
         let points: Vec<_> = (0..num_points)
             .map(|_| E::random_vec(num_variables, &mut rng))

@@ -25,12 +25,15 @@ mod tests {
     fn test_sumcheck_folding_factor_1() {
         let folding_factor = 1;
         let eval_point = vec![F::from_u64(10), F::from_u64(11)];
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
-            F::from_u64(1),
-            F::from_u64(5),
-            F::from_u64(10),
-            F::from_u64(14),
-        ]);
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            2,
+            vec![
+                F::from_u64(1),
+                F::from_u64(5),
+                F::from_u64(10),
+                F::from_u64(14),
+            ],
+        );
 
         let claimed_value = polynomial.evaluate(&eval_point);
 
@@ -58,12 +61,15 @@ mod tests {
     fn test_single_folding() {
         let num_variables = 2;
         let folding_factor = 2;
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
-            F::from_u64(1),
-            F::from_u64(2),
-            F::from_u64(3),
-            F::from_u64(4),
-        ]);
+        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+            2,
+            vec![
+                F::from_u64(1),
+                F::from_u64(2),
+                F::from_u64(3),
+                F::from_u64(4),
+            ],
+        );
 
         let ood_point = expand_from_univariate(F::from_u64(2), num_variables);
         let statement_point = expand_from_univariate(F::from_u64(3), num_variables);

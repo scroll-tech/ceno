@@ -226,11 +226,8 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
     assert!(!virtual_polys.is_empty());
     assert!(virtual_polys.len().is_power_of_two());
     let log2_poly_len = ceil_log2(virtual_polys.len());
-    let poly_meta = poly_meta.unwrap_or(
-        std::iter::repeat(PolyMeta::Normal)
-            .take(virtual_polys.len())
-            .collect_vec(),
-    );
+    let poly_meta = poly_meta
+        .unwrap_or(std::iter::repeat_n(PolyMeta::Normal, virtual_polys.len()).collect_vec());
     let mut final_poly = virtual_polys[0].clone();
     final_poly.aux_info.max_num_variables = 0;
 
@@ -294,7 +291,7 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
                         poly,
                         |poly| {
                             poly.iter()
-                                .flat_map(|e| std::iter::repeat(*e).take(blow_factor))
+                                .flat_map(|e| std::iter::repeat_n(*e, blow_factor))
                                 .collect_vec()
                         },
                         |base_poly| base_poly.iter().map(|e| E::from(*e)).collect_vec()

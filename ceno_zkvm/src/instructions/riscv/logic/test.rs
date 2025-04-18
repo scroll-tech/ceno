@@ -29,19 +29,20 @@ fn test_opcode_and() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
-    let (raw_witin, lkm) =
-        AndInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-            StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                A,
-                B,
-                Change::new(0, A & B),
-                0,
-            ),
-        ])
-        .unwrap();
+    let (raw_witin, lkm) = AndInstruction::assign_instances(
+        &config,
+        cb.cs.num_witin as usize,
+        vec![StepRecord::new_r_instruction(
+            3,
+            MOCK_PC_START,
+            insn_code,
+            A,
+            B,
+            Change::new(0, A & B),
+            0,
+        )],
+    )
+    .unwrap();
 
     let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A & B));
 
@@ -69,19 +70,20 @@ fn test_opcode_or() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::OR, 2, 3, 4, 0);
-    let (raw_witin, lkm) =
-        OrInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-            StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                A,
-                B,
-                Change::new(0, A | B),
-                0,
-            ),
-        ])
-        .unwrap();
+    let (raw_witin, lkm) = OrInstruction::assign_instances(
+        &config,
+        cb.cs.num_witin as usize,
+        vec![StepRecord::new_r_instruction(
+            3,
+            MOCK_PC_START,
+            insn_code,
+            A,
+            B,
+            Change::new(0, A | B),
+            0,
+        )],
+    )
+    .unwrap();
 
     let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A | B));
 
@@ -109,19 +111,20 @@ fn test_opcode_xor() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::XOR, 2, 3, 4, 0);
-    let (raw_witin, lkm) =
-        XorInstruction::assign_instances(&config, cb.cs.num_witin as usize, vec![
-            StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                A,
-                B,
-                Change::new(0, A ^ B),
-                0,
-            ),
-        ])
-        .unwrap();
+    let (raw_witin, lkm) = XorInstruction::assign_instances(
+        &config,
+        cb.cs.num_witin as usize,
+        vec![StepRecord::new_r_instruction(
+            3,
+            MOCK_PC_START,
+            insn_code,
+            A,
+            B,
+            Change::new(0, A ^ B),
+            0,
+        )],
+    )
+    .unwrap();
 
     let expected_rd_written = UInt8::from_const_unchecked(split_to_u8::<u64>(A ^ B));
 
