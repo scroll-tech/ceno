@@ -1,6 +1,5 @@
 use std::{mem, sync::Arc};
 
-use ark_std::{end_timer, start_timer};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -320,7 +319,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         phase2_numvar: Option<usize>,
         poly_meta: Option<Vec<PolyMeta>>,
     ) -> Self {
-        let start = start_timer!(|| "sum check prover init");
+        let start = entered_span!("sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
@@ -332,7 +331,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 "num_vars too small for concurrency"
             );
         }
-        end_timer!(start);
+        exit_span!(start);
 
         let max_degree = polynomial.aux_info.max_degree;
         assert!(extrapolation_aux.len() == max_degree - 1);
@@ -360,15 +359,14 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         &mut self,
         challenge: &Option<Challenge<E>>,
     ) -> IOPProverMessage<E> {
-        let start =
-            start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
+        let start = entered_span!("sum check prove {}-th round and update state", self.round);
 
         assert!(
             self.round < self.poly.aux_info.max_num_variables,
             "Prover is not active"
         );
 
-        // let fix_argument = start_timer!(|| "fix argument");
+        // let fix_argument = entered_span!("fix argument");
 
         // Step 1:
         // fix argument and evaluate f(x) over x_m = r; where r is the challenge
@@ -396,7 +394,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             self.fix_var(r.elements);
         }
         exit_span!(span);
-        // end_timer!(fix_argument);
+        // exit_span!fix_argument);
 
         self.round += 1;
 
@@ -440,7 +438,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         );
         exit_span!(span);
 
-        end_timer!(start);
+        exit_span!(start);
 
         IOPProverMessage {
             evaluations: products_sum,
@@ -528,7 +526,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 ..Default::default()
             });
         }
-        let start = start_timer!(|| "sum check prove");
+        let start = entered_span!("sum check prove");
 
         transcript.append_message(&num_variables.to_le_bytes());
         transcript.append_message(&max_degree.to_le_bytes());
@@ -564,7 +562,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         };
         exit_span!(span);
 
-        end_timer!(start);
+        exit_span!(start);
         (
             IOPProof {
                 // the point consists of the first elements in the challenge
@@ -582,7 +580,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomial<'a, E>) -> Self {
-        let start = start_timer!(|| "sum check prover init");
+        let start = entered_span!("sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
             "Attempt to prove a constant."
@@ -609,7 +607,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             poly_index_fixvar_in_place: vec![false; num_polys],
         };
 
-        end_timer!(start);
+        exit_span!(start);
         prover_state
     }
 
@@ -622,15 +620,14 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         &mut self,
         challenge: &Option<Challenge<E>>,
     ) -> IOPProverMessage<E> {
-        let start =
-            start_timer!(|| format!("sum check prove {}-th round and update state", self.round));
+        let start = entered_span!("sum check prove {}-th round and update state", self.round);
 
         assert!(
             self.round < self.poly.aux_info.max_num_variables,
             "Prover is not active"
         );
 
-        // let fix_argument = start_timer!(|| "fix argument");
+        // let fix_argument = entered_span!("fix argument");
 
         // Step 1:
         // fix argument and evaluate f(x) over x_m = r; where r is the challenge
@@ -654,7 +651,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             self.fix_var(r.elements);
         }
         exit_span!(span);
-        // end_timer!(fix_argument);
+        // exit_span!fix_argument);
 
         self.round += 1;
 
@@ -710,7 +707,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .unwrap();
         exit_span!(span);
 
-        end_timer!(start);
+        exit_span!(start);
 
         IOPProverMessage {
             evaluations: products_sum,
