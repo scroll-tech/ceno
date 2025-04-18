@@ -598,6 +598,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
+ "subprotocols",
  "sumcheck",
  "tempfile",
  "thread_local",

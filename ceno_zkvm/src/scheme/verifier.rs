@@ -307,6 +307,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             num_product_fanin,
             transcript,
         )?;
+
+        if let Some(evals) = &proof.gkr_out_evals {
+            let gkr_reads = evals.iter().take(50).collect_vec();
+            let intersection_size = gkr_reads
+                .iter()
+                .counts()
+                .iter()
+                .map(|(val, count)| {
+                    let proof_count = proof
+                        .r_records_in_evals
+                        .iter()
+                        .filter(|x| x == *val)
+                        .count();
+                    *count.min(&proof_count)
+                })
+                .sum::<usize>();
+            dbg!(&intersection_size);
+            panic!();
+        }
         assert!(record_evals.len() == 2, "[r_record, w_record]");
         assert!(logup_q_evals.len() == 1, "[lk_q_record]");
         assert!(logup_p_evals.len() == 1, "[lk_p_record]");

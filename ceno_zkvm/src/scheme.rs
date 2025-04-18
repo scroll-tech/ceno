@@ -50,6 +50,8 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     pub wits_commit: PCS::Commitment,
     pub wits_opening_proof: PCS::Proof,
     pub wits_in_evals: Vec<E>,
+
+    pub gkr_out_evals: Option<Vec<E>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

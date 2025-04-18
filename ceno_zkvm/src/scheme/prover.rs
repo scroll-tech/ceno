@@ -702,23 +702,35 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(pcs_open_span);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
-        if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
+        let gkr_out_evals = if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
             let mut gkr_iop_pk = gkr_iop_pk.clone();
             let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
 
             let point = Arc::new(input_open_point);
             dbg!(&point);
-            // let mut prover_transcript = transcript::BasicTranscript::<E>::new(b"protocol");
-            let out_evals = chain!(
-                r_records_in_evals.clone(),
-                w_records_in_evals.clone(),
-                lk_records_in_evals.clone()
-            )
-            .map(|record| PointAndEval {
-                point: point.clone(),
-                eval: record,
-            })
-            .collect_vec();
+            // // let mut prover_transcript = transcript::BasicTranscript::<E>::new(b"protocol");
+            // let out_evals = chain!(
+            //     r_records_in_evals.clone(),
+            //     w_records_in_evals.clone(),
+            //     lk_records_in_evals.clone()
+            // )
+            // .map(|record| PointAndEval {
+            //     point: point.clone(),
+            //     eval: record,
+            // })
+            // .collect_vec();
+
+            let out_evals = gkr_wit
+                .layers
+                .last()
+                .unwrap()
+                .bases
+                .iter()
+                .map(|base| PointAndEval {
+                    point: point.clone(),
+                    eval: subprotocols::utils::evaluate_mle_ext(&base, &point),
+                })
+                .collect_vec();
 
             // out_evals from point and output polynomials instead of *_records which is combined
 
@@ -726,7 +738,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .prove(gkr_wit, &out_evals, &vec![], transcript)
                 .expect("Failed to prove phase");
             // unimplemented!("cannot fully handle GKRIOP component yet")
-        }
+            Some(out_evals.into_iter().map(|pae| pae.eval).collect_vec())
+        } else {
+            None
+        };
 
         // extend with Optio(gkr evals (not combined))
         Ok(ZKVMOpcodeProof {
@@ -745,6 +760,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             wits_commit,
             wits_opening_proof,
             wits_in_evals,
+            gkr_out_evals,
         })
     }
 
