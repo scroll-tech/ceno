@@ -95,7 +95,7 @@ fn bench_add(c: &mut Criterion) {
                                 "ADD",
                                 &prover.pk.pp,
                                 &circuit_pk,
-                                &None,
+                                None,
                                 polys.into_iter().map(|mle| mle.into()).collect_vec(),
                                 commit,
                                 &[],

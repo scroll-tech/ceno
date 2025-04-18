@@ -50,7 +50,7 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
     pub witness: Vec<Vec<ArcMultilinearExtension<'a, E>>>,
 }
 
-pub type WitnessId = u16;
+pub type WitnessId = u32;
 pub type ChallengeId = u16;
 
 #[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]

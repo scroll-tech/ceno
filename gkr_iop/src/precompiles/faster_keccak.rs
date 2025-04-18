@@ -345,8 +345,10 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
     }
 
     fn build_commit_phase(&mut self, chip: &mut Chip) {
-        let input_columns: [usize; KECCAK_INPUT_SIZE] = chip.allocate_committed_base();
-        self.input_columns = input_columns.into();
+        //let input_columns: [usize; KECCAK_INPUT_SIZE] =
+        // chip.allocate_committed_base(); self.input_columns =
+        // input_columns.into();
+        let committed = chip.allocate_committed_base::<{ 50 + 40144 }>();
     }
 
     fn build_gkr_phase(&mut self, chip: &mut Chip) {
@@ -1073,8 +1075,6 @@ where
                 .collect_vec(),
             );
         }
-
-        dbg!(layer_wits.len());
 
         let len = layer_wits.len() - 1;
         layer_wits[..len].reverse();

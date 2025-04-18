@@ -85,6 +85,7 @@ where
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
         lookups: &[E::BaseField],
+        aux_wits: &[E::BaseField],
     ) -> Result<(), ZKVMError>;
 
     fn phase1_witness_from_steps(
@@ -122,7 +123,8 @@ where
             &vec![],
         );
 
-        let lookups = {
+        let (lookups, aux_wits) = {
+            // Keccak-specific
             let mut lookups = vec![vec![]; steps.len()];
             for witness in gkr_witness
                 .layers
@@ -137,7 +139,19 @@ where
                     lookups[i].push(witness[i]);
                 }
             }
-            lookups
+
+            let mut aux_wits: Vec<Vec<E::BaseField>> = vec![vec![]; steps.len()];
+            let n_layers = gkr_witness.layers.len();
+
+            for i in 0..steps.len() {
+                for layer in gkr_witness.layers[..n_layers - 1].iter() {
+                    for base in layer.bases.iter() {
+                        aux_wits[i].push(base[i]);
+                    }
+                }
+            }
+
+            (lookups, aux_wits)
         };
 
         // dbg!(&lookups);
@@ -163,6 +177,7 @@ where
                             &mut lk_multiplicity,
                             step,
                             &lookups[*i],
+                            &aux_wits[*i],
                         )
                     })
                     .collect::<Vec<_>>()

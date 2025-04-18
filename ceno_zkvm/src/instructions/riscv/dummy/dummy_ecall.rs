@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use ceno_emul::{Change, InsnKind, KeccakSpec, StepRecord, SyscallSpec};
 use ff_ext::{ExtensionField, SmallField};
-use itertools::Itertools;
+use itertools::{Itertools, zip_eq};
 
 use super::{super::insn_base::WriteMEM, dummy_circuit::DummyConfig};
 use crate::{
@@ -79,12 +79,14 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             .collect::<Result<Vec<_>, _>>()?;
 
         // Temporarily set this to < 24 to avoid cb.num_witin overflow
-        let active_rounds = 12;
+        let active_rounds = 24;
 
         let mut lookups = Vec::with_capacity(
             active_rounds
                 * (3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND),
         );
+
+        let mut aux_wits = vec![];
 
         if S::HAS_LOOKUPS {
             dbg!(lookups.capacity());
@@ -110,6 +112,10 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
                     lookups.push(wit);
                 }
             }
+
+            for i in 0..40144 {
+                aux_wits.push(cb.create_witin(|| format!("aux_wit{i}")));
+            }
         }
 
         Ok(LargeEcallConfig {
@@ -118,6 +124,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             reg_writes,
             mem_writes,
             lookups,
+            aux_wits,
         })
     }
 
@@ -184,10 +191,11 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
         lookups: &[E::BaseField],
+        aux_wits: &[E::BaseField],
     ) -> Result<(), ZKVMError> {
         Self::assign_instance(config, instance, lk_multiplicity, step)?;
 
-        let active_rounds = 12;
+        let active_rounds = 24;
         let mut wit_iter = lookups.iter().map(|f| f.to_canonical_u64());
         let mut var_iter = config.lookups.iter();
 
@@ -223,6 +231,10 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
             }
         }
 
+        dbg!(aux_wits.len());
+        for (aux_wit_var, aux_wit) in zip_eq(config.aux_wits.iter(), aux_wits) {
+            set_val!(instance, aux_wit_var, (aux_wit.to_canonical_u64()));
+        }
         assert!(var_iter.next().is_none());
 
         Ok(())
@@ -236,5 +248,7 @@ pub struct LargeEcallConfig<E: ExtensionField> {
 
     start_addr: WitIn,
     mem_writes: Vec<(WitIn, Change<WitIn>, WriteMEM)>,
+
+    aux_wits: Vec<WitIn>,
     lookups: Vec<WitIn>,
 }
