@@ -313,10 +313,8 @@ impl CompilationOptions {
     pub fn get_profile(&self) -> &str {
         if self.release {
             "release"
-        } else if let Some(profile) = self.profile.as_deref() {
-            profile
         } else {
-            "debug"
+            self.profile.as_deref().unwrap_or("debug")
         }
     }
 
