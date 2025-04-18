@@ -275,7 +275,10 @@ pub fn setup_platform(
         public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
         ..preset
     };
-    assert!(platform.validate(), "invalid platform configuration: {platform}");
+    assert!(
+        platform.validate(),
+        "invalid platform configuration: {platform}"
+    );
 
     platform
 }
