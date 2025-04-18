@@ -266,9 +266,7 @@ pub fn setup_platform(
         heap.start..heap_end as u32
     };
 
-    // TODO check AFTER padding, all addresses no overlapping
-
-    Platform {
+    let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
@@ -276,7 +274,10 @@ pub fn setup_platform(
         heap,
         public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
         ..preset
-    }
+    };
+    assert!(platform.validate(), "invalid platform configuration: {platform}");
+
+    platform
 }
 
 fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {

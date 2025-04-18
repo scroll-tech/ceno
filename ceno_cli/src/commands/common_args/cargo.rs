@@ -211,7 +211,7 @@ impl TargetSelection {
             .as_deref()
             .unwrap_or_else(|| Path::new("target"))
             .join(RUSTC_TARGET)
-            .join(compilation_options.profile.as_deref().unwrap_or("debug"));
+            .join(compilation_options.get_profile());
         if let Some(bin) = self.bin.as_ref() {
             prefix.join(bin)
         } else if let Some(example) = self.example.as_ref() {
@@ -309,6 +309,17 @@ impl FeatureSelection {
 }
 
 impl CompilationOptions {
+    /// Get the target profile
+    pub fn get_profile(&self) -> &str {
+        if self.release {
+            "release"
+        } else if let Some(profile) = self.profile.as_deref() {
+            profile
+        } else {
+            "debug"
+        }
+    }
+
     /// Apply the args to the cargo command.
     pub fn apply_to(&self, command: &mut Command) -> anyhow::Result<Option<TempDir>> {
         if let Some(jobs) = self.jobs {
