@@ -676,7 +676,11 @@ pub fn verify(
     // print verification statistics like proof size and hash count
     let stat_recorder = StatisticRecorder::default();
     let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
-    verifier.verify_proof_halt(zkvm_proof.clone(), transcript, zkvm_proof.has_halt())?;
+    verifier.verify_proof_halt(
+        zkvm_proof.clone(),
+        transcript,
+        zkvm_proof.has_halt(&verifier.vk),
+    )?;
     info!("e2e proof stat: {}", zkvm_proof);
     info!(
         "hashes count = {}",
