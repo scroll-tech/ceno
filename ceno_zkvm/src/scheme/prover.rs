@@ -1,12 +1,12 @@
 use ceno_emul::KeccakSpec;
 use ff_ext::ExtensionField;
-use gkr_iop::gkr::GKRCircuitWitness;
+use gkr_iop::{evaluation::PointAndEval, gkr::GKRCircuitWitness};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 
-use itertools::{Itertools, enumerate, izip};
+use itertools::{Itertools, chain, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -706,8 +706,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let mut gkr_iop_pk = gkr_iop_pk.clone();
             let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
 
+            let point = Arc::new(input_open_point);
+            dbg!(&point);
             // let mut prover_transcript = transcript::BasicTranscript::<E>::new(b"protocol");
-            let out_evals = vec![];
+            let out_evals = chain!(
+                r_records_in_evals.clone(),
+                w_records_in_evals.clone(),
+                lk_records_in_evals.clone()
+            )
+            .map(|record| PointAndEval {
+                point: point.clone(),
+                eval: record,
+            })
+            .collect_vec();
+
+            // out_evals from point and output polynomials instead of *_records which is combined
 
             let gkr_iop::gkr::GKRProverOutput { gkr_proof, .. } = gkr_circuit
                 .prove(gkr_wit, &out_evals, &vec![], transcript)
@@ -715,6 +728,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             // unimplemented!("cannot fully handle GKRIOP component yet")
         }
 
+        // extend with Optio(gkr evals (not combined))
         Ok(ZKVMOpcodeProof {
             num_instances,
             record_r_out_evals,

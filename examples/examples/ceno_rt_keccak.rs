@@ -6,7 +6,7 @@ extern crate ceno_rt;
 use ceno_rt::{info_out, syscalls::syscall_keccak_permute};
 use core::slice;
 
-const ITERATIONS: usize = 3;
+const ITERATIONS: usize = 8;
 
 fn main() {
     let mut state = [0_u64; 25];
