@@ -1113,9 +1113,8 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
     let gkr_witness: GKRCircuitWitness<E> = layout.gkr_witness(&phase1_witness, &vec![]);
 
     let out_evals = {
-        let point1 = Arc::new(vec![E::ZERO]);
-        let point2 = Arc::new(vec![E::ONE]);
-        let final_output1 = gkr_witness
+        let point = Arc::new(vec![E::from_u64(29)]);
+        let output_records1 = gkr_witness
             .layers
             .last()
             .unwrap()
@@ -1124,7 +1123,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
             .iter()
             .map(|base| base[0].clone())
             .collect_vec();
-        let final_output2 = gkr_witness
+        let output_records2 = gkr_witness
             .layers
             .last()
             .unwrap()
@@ -1134,36 +1133,27 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
             .map(|base| base[1].clone())
             .collect_vec();
 
-        // if test {
-        //     // confront outputs with tiny_keccak result
-        //     let mut keccak_output64 = state_mask64.values().try_into().unwrap();
-        //     keccakf(&mut keccak_output64);
+        let evals = zip(&output_records1, &output_records2)
+            .map(|(p0, p1)| {
+                let poly = vec![p0.clone(), p1.clone()];
+                subprotocols::utils::evaluate_mle_ext(&poly, &point)
+            })
+            .collect_vec();
 
-        //     let keccak_output32 = MaskRepresentation::from(
-        //         keccak_output64.into_iter().map(|e| (64, e)).collect_vec(),
-        //     )
-        //     .convert(vec![32; 50])
-        //     .values();
-
-        //     let keccak_output32 = u64s_to_felts::<E>(keccak_output32);
-        //     assert_eq!(keccak_output32, final_output[..50]);
-        // }
-
-        let len = final_output1.len();
+        dbg!(&evals);
+        let len = output_records1.len();
         assert_eq!(
             len,
             KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS
         );
-        assert!(final_output1.len() == final_output2.len());
-        let gkr_outputs = chain!(
-            zip(final_output1, once(point1).cycle().take(len)),
-            zip(final_output2, once(point2).cycle().take(len))
-        );
-        gkr_outputs
+        assert!(output_records1.len() == output_records2.len());
+
+        evals
             .into_iter()
-            .map(|(elem, point)| PointAndEval {
+            .map(|elem| PointAndEval {
                 point: point.clone(),
-                eval: E::from_bases(&[elem, Goldilocks::ZERO]),
+                //eval: elem,
+                eval: E::ONE,
             })
             .collect_vec()
     };
@@ -1176,6 +1166,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
 
     if verify {
         {
+            dbg!("sanity");
             let mut verifier_transcript = BasicTranscript::<E>::new(b"protocol");
 
             gkr_circuit
