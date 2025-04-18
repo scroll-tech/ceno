@@ -205,6 +205,9 @@ where
         transcript: &'a mut Trans,
         expr_names: Vec<String>,
     ) -> Self {
+        // Fill in missing debug data
+        let mut expr_names = expr_names;
+        expr_names.resize(1, "nothing".to_owned());
         Self {
             sigma,
             expr,

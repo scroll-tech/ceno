@@ -215,6 +215,10 @@ where
         challenges: &'a [E],
         transcript: &'a mut Trans,
     ) -> Self {
+        // Fill in missing debug data
+        let mut expr_names = expr_names;
+        expr_names.resize(exprs.len(), "nothing".to_owned());
+
         let inv_of_one_minus_points = points
             .iter()
             .flat_map(|point| point.iter().map(|p| E::ONE - *p).collect_vec())
@@ -294,6 +298,9 @@ where
         );
 
         // Check the final evaluations.
+        assert_eq!(expr_names.len(), exprs.len());
+        // assert_eq!(expected_claims.len(), expr_names.len());
+
         for (expected_claim, (expr, _), expr_name) in izip!(expected_claims, exprs, expr_names) {
             let got_claim = expr.evaluate(&ext_mle_evals, &base_mle_evals, &[], &[], challenges);
 

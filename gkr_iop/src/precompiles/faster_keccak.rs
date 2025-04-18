@@ -1152,8 +1152,8 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
             .into_iter()
             .map(|elem| PointAndEval {
                 point: point.clone(),
-                //eval: elem,
-                eval: E::ONE,
+                eval: elem,
+                //eval: E::ONE,
             })
             .collect_vec()
     };
