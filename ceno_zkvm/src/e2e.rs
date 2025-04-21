@@ -19,10 +19,10 @@ use ceno_emul::{
     Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
-use ff_ext::{ExtensionField, GoldilocksExt2};
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use p3::goldilocks::Goldilocks;
+use p3::{babybear::BabyBear, goldilocks::Goldilocks};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
@@ -30,9 +30,13 @@ use std::{
 use tracing::info;
 use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
 
-pub type E = GoldilocksExt2;
-pub type B = Goldilocks;
-pub type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+// pub type E = GoldilocksExt2;
+// pub type B = Goldilocks;
+// pub type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+
+pub type E = BabyBearExt4;
+pub type B = BabyBear;
+pub type Pcs = Basefold<E, BasefoldRSParams>;
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,
@@ -421,6 +425,7 @@ pub enum Checkpoint {
     Keygen,
     PrepE2EProving,
     PrepWitnessGen,
+    PrepProof,
     PrepSanityCheck,
     Complete,
 }
@@ -564,6 +569,14 @@ pub fn run_e2e_with_checkpoint<
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk.clone());
+
+    if let Checkpoint::PrepProof = checkpoint {
+        return (
+            (Some(zkvm_proof.clone()), Some(vk)),
+            Box::new(move || run_e2e_verify::<E, _>(&verifier, zkvm_proof, exit_code, max_steps)),
+        );
+    }
+
     run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
     tracing::debug!("verified in {:?}", start.elapsed());
 

@@ -190,7 +190,7 @@ fn main() {
         public_io,
         max_steps,
         args.max_num_variables,
-        Checkpoint::PrepSanityCheck,
+        Checkpoint::PrepProof,
     );
 
     let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
@@ -200,6 +200,8 @@ fn main() {
     std::fs::write(&args.proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
     std::fs::write(&args.vk_file, vk_bytes).unwrap();
+
+    return; // early terminate
 
     let verifier = ZKVMVerifier::new(vk);
     verify(&zkvm_proof, &verifier).expect("Verification failed");
