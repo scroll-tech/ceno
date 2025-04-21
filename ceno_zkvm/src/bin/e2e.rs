@@ -2,7 +2,7 @@ use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::{B, Checkpoint, E, Pcs, Preset, run_e2e_with_checkpoint, setup_platform, verify},
-    scheme::{ZKVMProof, verifier::ZKVMVerifier},
+    scheme::{ZKVMProof, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     with_panic_hook,
 };
 use clap::Parser;
@@ -67,6 +67,10 @@ struct Args {
     /// Heap size in bytes.
     #[arg(long, default_value = "2M", value_parser = parse_size)]
     heap_size: u32,
+
+    /// Max number of variables
+    #[clap(long, default_value_t = MAX_NUM_VARIABLES)]
+    max_num_variables: usize,
 
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
@@ -185,6 +189,7 @@ fn main() {
         hints,
         public_io,
         max_steps,
+        args.max_num_variables,
         Checkpoint::PrepSanityCheck,
     );
 

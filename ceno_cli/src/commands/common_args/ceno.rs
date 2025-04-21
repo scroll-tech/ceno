@@ -2,7 +2,10 @@ use crate::utils::*;
 use anyhow::{Context, bail};
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-use ceno_zkvm::{e2e::*, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{
+    e2e::*,
+    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+};
 use clap::Args;
 use std::{
     fs::File,
@@ -17,8 +20,12 @@ pub struct CenoOptions {
     pub platform: Preset,
 
     /// The maximum number of steps to execute the program.
-    #[arg(short, long, default_value_t = usize::MAX)]
+    #[arg(long, default_value_t = usize::MAX)]
     pub max_steps: usize,
+
+    /// The maximum number of variables the polynomial commitment scheme
+    #[arg(long, default_value_t = MAX_NUM_VARIABLES)]
+    pub max_num_variables: usize,
 
     /// Prover-private unconstrained input.
     /// This is a raw file mapped as a memory segment. Zero-padded to the right to the next power-of-two size.
@@ -252,6 +259,7 @@ fn run_elf_inner<P: AsRef<Path>>(
         hints,
         public_io,
         options.max_steps,
+        options.max_num_variables,
         checkpoint,
     ))
 }

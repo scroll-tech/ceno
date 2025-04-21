@@ -5,9 +5,9 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::constants::MAX_NUM_VARIABLES,
 };
 use criterion::*;
-
 use ff_ext::GoldilocksExt2;
 use mpcs::BasefoldDefault;
 
@@ -61,6 +61,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                             hints.clone(),
                             vec![],
                             max_steps,
+                            MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
                         );
                         let instant = std::time::Instant::now();
