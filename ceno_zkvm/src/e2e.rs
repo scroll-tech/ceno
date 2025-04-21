@@ -94,6 +94,7 @@ fn emulate_program(
 
     let final_access = vm.tracer().final_accesses();
     let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
+    tracing::debug!("program took {end_cycle} cycles");
 
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
