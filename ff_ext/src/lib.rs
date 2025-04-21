@@ -15,6 +15,8 @@ pub use babybear::impl_babybear::*;
 mod goldilock;
 pub use goldilock::impl_goldilocks::*;
 mod poseidon;
+#[cfg(debug_assertions)]
+pub use poseidon::impl_instruments::*;
 pub use poseidon::{FieldChallengerExt, PoseidonField};
 
 pub(crate) fn array_try_from_uniform_bytes<

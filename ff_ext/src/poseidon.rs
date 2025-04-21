@@ -1,4 +1,4 @@
-use p3::{challenger::FieldChallenger, commit::Mmcs, field::PrimeField};
+use p3::{self, challenger::FieldChallenger, commit::Mmcs, field::PrimeField};
 
 use crate::{ExtensionField, SmallField};
 
@@ -37,4 +37,58 @@ pub(crate) fn new_array<const N: usize, F: PrimeField>(input: [u64; N]) -> [F; N
         i += 1;
     }
     output
+}
+
+#[cfg(debug_assertions)]
+pub mod impl_instruments {
+    use std::sync::{Arc, Mutex};
+
+    use once_cell::sync::Lazy;
+    use p3::symmetric::Permutation;
+
+    pub type PermCount = Arc<Mutex<usize>>;
+    static PERM_COUNT: Lazy<PermCount> = Lazy::new(|| Arc::new(Mutex::new(0)));
+
+    #[derive(Clone, Debug)]
+    pub struct Instrumented<P> {
+        pub inner_perm: P,
+        pub perm_count: PermCount,
+    }
+
+    impl<P> Instrumented<P> {
+        pub fn new(inner_perm: P) -> Self {
+            Self {
+                inner_perm,
+                perm_count: PERM_COUNT.clone(),
+            }
+        }
+
+        pub fn clear_metrics() {
+            if let Ok(mut count) = PERM_COUNT.lock() {
+                *count = 0;
+            } else {
+                unreachable!("Failed to acquire lock on INPUT_LENS_BY_TYPE");
+            }
+        }
+
+        pub fn format_metrics() -> String {
+            format!("perm_count: {}", PERM_COUNT.lock().unwrap())
+        }
+
+        fn bump_perm_count(&self) {
+            let mut count = self.perm_count.lock().unwrap();
+            *count += 1;
+        }
+    }
+
+    impl<T: Clone, P: Permutation<T>> Permutation<T> for Instrumented<P> {
+        fn permute_mut(&self, input: &mut T) {
+            self.bump_perm_count();
+            self.inner_perm.permute_mut(input);
+        }
+        fn permute(&self, input: T) -> T {
+            self.bump_perm_count();
+            self.inner_perm.permute(input)
+        }
+    }
 }
