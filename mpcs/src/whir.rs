@@ -3,13 +3,12 @@ mod structure;
 
 use std::collections::BTreeMap;
 
-use crate::Point;
-
 use super::PolynomialCommitmentScheme;
+use crate::{PCSFriParam, Point, SecurityLevel};
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
 use p3::{commit::Mmcs, util::log2_strict_usize};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 use structure::WhirCommitment;
@@ -23,6 +22,15 @@ use whir_external::{
         prover::Prover, verifier::Verifier,
     },
 };
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WHIRDummyParams;
+
+impl PCSFriParam for WHIRDummyParams {
+    fn get_pow_bits_by_level(&self, _pow_strategy: crate::PowStrategy) -> usize {
+        todo!()
+    }
+}
 
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
@@ -38,7 +46,7 @@ where
     <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
         Send + Sync,
 {
-    type Param = ();
+    type Param = WHIRDummyParams;
     type ProverParam = ();
     type VerifierParam = ();
     type Commitment = WhirCommitment<E>;
@@ -46,8 +54,11 @@ where
     type CommitmentWithWitness = Witnesses<E>;
     type CommitmentChunk = WhirCommitment<E>;
 
-    fn setup(_poly_size: usize) -> Result<Self::Param, crate::Error> {
-        Ok(())
+    fn setup(
+        _poly_size: usize,
+        _security_level: SecurityLevel,
+    ) -> Result<Self::Param, crate::Error> {
+        Ok(WHIRDummyParams {})
     }
 
     fn trim(

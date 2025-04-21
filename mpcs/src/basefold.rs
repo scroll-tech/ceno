@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    Error, Point, PolynomialCommitmentScheme,
+    Error, Point, PolynomialCommitmentScheme, SecurityLevel,
     util::{
         hash::write_digest_to_transcript,
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
@@ -172,10 +172,13 @@ where
     type CommitmentChunk = Digest<E>;
     type Proof = BasefoldProof<E>;
 
-    fn setup(poly_size: usize) -> Result<Self::Param, Error> {
+    fn setup(poly_size: usize, security_level: SecurityLevel) -> Result<Self::Param, Error> {
         let pp = <Spec::EncodingScheme as EncodingScheme<E>>::setup(log2_strict_usize(poly_size));
 
-        Ok(BasefoldParams { params: pp })
+        Ok(BasefoldParams {
+            params: pp,
+            security_level,
+        })
     }
 
     /// Derive the proving key and verification key from the public parameter.

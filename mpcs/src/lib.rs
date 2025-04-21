@@ -1,6 +1,6 @@
 #![deny(clippy::cargo)]
 use ff_ext::ExtensionField;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, fmt::Debug};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
@@ -120,7 +120,7 @@ where
 }
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
-    type Param: Clone + Debug + Serialize + DeserializeOwned;
+    type Param: Clone + Debug + Serialize + DeserializeOwned + PCSFriParam;
     type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
     type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
     type CommitmentWithWitness;
@@ -128,7 +128,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
     type CommitmentChunk: Clone;
     type Proof: Clone + Serialize + DeserializeOwned;
 
-    fn setup(poly_size: usize) -> Result<Self::Param, Error>;
+    fn setup(poly_size: usize, security_level: SecurityLevel) -> Result<Self::Param, Error>;
 
     fn trim(
         param: Self::Param,
@@ -244,6 +244,19 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
     fn get_arc_mle_witness_from_commitment(
         commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>>;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum SecurityLevel {
+    Conjecture100bits,
+}
+
+pub enum PowStrategy {
+    StartFoldPow,
+}
+
+pub trait PCSFriParam {
+    fn get_pow_bits_by_level(&self, pow_strategy: PowStrategy) -> usize;
 }
 
 #[derive(Clone, Debug)]

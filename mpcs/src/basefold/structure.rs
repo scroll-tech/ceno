@@ -1,4 +1,5 @@
 use crate::{
+    PCSFriParam, SecurityLevel,
     basefold::log2_strict_usize,
     util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
 };
@@ -33,6 +34,21 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(super) params: <Spec::EncodingScheme as EncodingScheme<E>>::PublicParameters,
+    pub(super) security_level: SecurityLevel,
+}
+
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for BasefoldParams<E, Spec> {
+    fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
+        match (
+            &self.security_level,
+            pow_strategy,
+            <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
+            <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
+        ) {
+            (SecurityLevel::Conjecture100bits, crate::PowStrategy::StartFoldPow, 1, 100) => 16,
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
