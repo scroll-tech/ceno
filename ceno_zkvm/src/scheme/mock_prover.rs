@@ -15,7 +15,6 @@ use crate::{
     },
     witness::{LkMultiplicity, LkMultiplicityRaw},
 };
-use ark_std::test_rng;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
@@ -411,7 +410,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     let cache = CACHE.get_or_init(StaticTypeMap::new);
 
     let (challenges_repr, table) = cache.call_once::<E, _>(|| {
-        let mut rng = test_rng();
+        let mut rng = thread_rng();
         let challenge = [E::random(&mut rng), E::random(&mut rng)];
         let mut keccak = Keccak::v256();
         let mut filename_digest = [0u8; 32];

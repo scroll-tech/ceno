@@ -6,12 +6,15 @@ use std::{
     sync::Arc,
 };
 
-use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension, op_mle, util::max_usable_threads,
-    virtual_poly::VirtualPolynomial, virtual_polys::PolyMeta,
+    macros::{entered_span, exit_span},
+    mle::DenseMultilinearExtension,
+    op_mle,
+    util::max_usable_threads,
+    virtual_poly::VirtualPolynomial,
+    virtual_polys::PolyMeta,
 };
 use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
@@ -148,7 +151,7 @@ fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
 /// TODO: The quadratic term can be removed by precomputing the lagrange
 /// coefficients.
 pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
-    let start = start_timer!(|| "sum check interpolate uni poly opt");
+    let start = entered_span!("sum check interpolate uni poly opt");
 
     let len = p_i.len();
     let mut evals = vec![];
@@ -192,7 +195,7 @@ pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
             denom_down *= F::from_u64(i as u64);
         }
     }
-    end_timer!(start);
+    exit_span!(start);
     res
 }
 

@@ -141,6 +141,24 @@ impl Platform {
     pub const fn code_success() -> u32 {
         0
     }
+
+    /// Validate the platform configuration, range shall not overlap.
+    pub fn validate(&self) -> bool {
+        let mut ranges = [
+            &self.rom,
+            &self.stack,
+            &self.heap,
+            &self.public_io,
+            &self.hints,
+        ];
+        ranges.sort_by_key(|r| r.start);
+        for i in 0..ranges.len() - 1 {
+            if ranges[i].end > ranges[i + 1].start {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,6 @@ use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
-        constants::MAX_NUM_VARIABLES,
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
         verifier::ZKVMVerifier,
@@ -94,6 +93,7 @@ fn emulate_program(
 
     let final_access = vm.tracer().final_accesses();
     let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
+    tracing::debug!("program took {end_cycle} cycles");
 
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
@@ -266,9 +266,7 @@ pub fn setup_platform(
         heap.start..heap_end as u32
     };
 
-    // TODO check AFTER padding, all addresses no overlapping
-
-    Platform {
+    let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
@@ -276,7 +274,13 @@ pub fn setup_platform(
         heap,
         public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
         ..preset
-    }
+    };
+    assert!(
+        platform.validate(),
+        "invalid platform configuration: {platform}"
+    );
+
+    platform
 }
 
 fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
@@ -446,6 +450,7 @@ pub fn run_e2e_with_checkpoint<
     hints: Vec<u32>,
     public_io: Vec<u32>,
     max_steps: usize,
+    max_num_variables: usize,
     checkpoint: Checkpoint,
 ) -> (IntermediateState<E, PCS>, Box<dyn FnOnce()>) {
     let static_addrs = init_static_addrs(&program);
@@ -483,14 +488,16 @@ pub fn run_e2e_with_checkpoint<
     let zkvm_fixed_traces = generate_fixed_traces(&system_config, &init_full_mem, &program);
 
     // Keygen
-    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let start = std::time::Instant::now();
+    let pcs_param = PCS::setup(1 << max_num_variables).expect("Basefold PCS setup");
+    let (pp, vp) = PCS::trim(pcs_param, 1 << max_num_variables).expect("Basefold trim");
     let pk = system_config
         .zkvm_cs
         .clone()
         .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
     let vk = pk.get_vk();
+    tracing::debug!("keygen done in {:?}", start.elapsed());
     if let Checkpoint::Keygen = checkpoint {
         return ((None, Some(vk)), Box::new(|| ()));
     }
@@ -516,7 +523,9 @@ pub fn run_e2e_with_checkpoint<
     }
 
     // Emulate program
+    let start = std::time::Instant::now();
     let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform);
+    tracing::debug!("emulate done in {:?}", start.elapsed());
 
     // Clone some emul_result fields before consuming
     let pi = emul_result.pi.clone();
@@ -546,14 +555,17 @@ pub fn run_e2e_with_checkpoint<
     }
 
     // Run proof phase
+    let start = std::time::Instant::now();
     let transcript = Transcript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
+    tracing::debug!("proof created in {:?}", start.elapsed());
 
+    let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk.clone());
-
     run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+    tracing::debug!("verified in {:?}", start.elapsed());
 
     if let Checkpoint::PrepSanityCheck = checkpoint {
         return ((Some(zkvm_proof), Some(vk)), Box::new(|| ()));
