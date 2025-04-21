@@ -1,6 +1,10 @@
 mod spec;
 mod structure;
 
+use std::collections::BTreeMap;
+
+use crate::Point;
+
 use super::PolynomialCommitmentScheme;
 use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
@@ -10,6 +14,7 @@ pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 use structure::WhirCommitment;
 pub use structure::{Whir, WhirDefault};
+use transcript::Transcript;
 use whir_external::{
     crypto::{DigestExt, MerklePathBase, MerklePathExt, MerkleTreeBase, MerkleTreeExt},
     parameters::MultivariateParameters,
@@ -133,15 +138,15 @@ where
 
     fn batch_commit(
         _pp: &Self::ProverParam,
-        rmm: witness::RowMajorMatrix<E::BaseField>,
+        mut rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(true);
         let whir_config = WhirConfig::new(
-            MultivariateParameters::new(log2_strict_usize(rmm.num_instances())),
+            MultivariateParameters::new(log2_strict_usize(rmms[&0].num_instances())),
             parameters,
         );
         let (witness, _commitment) = Committer::new(whir_config)
-            .batch_commit(rmm)
+            .batch_commit(rmms.remove(&0).unwrap())
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness)
@@ -149,11 +154,13 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
-        _polys: &[ArcMultilinearExtension<E>],
-        _comms: &[Self::CommitmentWithWitness],
-        _points: &[Vec<E>],
-        _evals: &[crate::Evaluation<E>],
-        _transcript: &mut impl transcript::Transcript<E>,
+        _num_instances: &[(usize, usize)],
+        _fixed_comms: Option<&Self::CommitmentWithWitness>,
+        _witin_comms: &Self::CommitmentWithWitness,
+        _points: &[Point<E>],
+        _evals: &[Vec<E>],
+        _circuit_num_polys: &[(usize, usize)],
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }
@@ -177,11 +184,14 @@ where
 
     fn batch_verify(
         _vp: &Self::VerifierParam,
-        _comms: &[Self::Commitment],
-        _points: &[Vec<E>],
-        _evals: &[crate::Evaluation<E>],
+        _num_instances: &[(usize, usize)],
+        _points: &[Point<E>],
+        _fixed_comms: Option<&Self::Commitment>,
+        _witin_comms: &Self::Commitment,
+        _evals: &[Vec<E>],
         _proof: &Self::Proof,
-        _transcript: &mut impl transcript::Transcript<E>,
+        _circuit_num_polys: &[(usize, usize)],
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
     }
@@ -258,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn whir_simple_batch_commit_open_verify_goldilocks() {
+    fn whir_batch_commit_open_verify_goldilocks() {
         {
             // Both challenge and poly are over base field
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(10, 16, 1);

@@ -1,10 +1,14 @@
 use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 
-use crate::{op_mle, util::ceil_log2};
-use ark_std::{end_timer, rand::RngCore, start_timer};
+use crate::{
+    macros::{entered_span, exit_span},
+    op_mle,
+    util::ceil_log2,
+};
 use core::hash::Hash;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::field::{Field, PrimeCharacteristicRing};
+use rand::Rng;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -274,9 +278,9 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     }
 
     /// Generate a random evaluation of a multilinear poly
-    pub fn random(nv: usize, mut rng: &mut impl RngCore) -> Self {
+    pub fn random<R: Rng>(nv: usize, rng: &mut R) -> Self {
         let eval = (0..1 << nv)
-            .map(|_| E::BaseField::random(&mut rng))
+            .map(|_| E::BaseField::random(&mut *rng))
             .collect();
         DenseMultilinearExtension::from_evaluations_vec(nv, eval)
     }
@@ -285,12 +289,12 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// Returns
     /// - the list of polynomials,
     /// - its sum of polynomial evaluations over the boolean hypercube.
-    pub fn random_mle_list(
+    pub fn random_mle_list<R: Rng>(
         nv: usize,
         degree: usize,
-        mut rng: &mut impl RngCore,
+        rng: &mut R,
     ) -> (Vec<ArcDenseMultilinearExtension<E>>, E) {
-        let start = start_timer!(|| "sample random mle list");
+        let start = entered_span!("sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
             multiplicands.push(Vec::with_capacity(1 << nv))
@@ -301,7 +305,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             let mut product = E::ONE;
 
             for e in multiplicands.iter_mut() {
-                let val = E::BaseField::random(&mut rng);
+                let val = E::BaseField::random(&mut *rng);
                 e.push(val);
                 product *= val
             }
@@ -313,17 +317,17 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
             .collect();
 
-        end_timer!(start);
+        exit_span!(start);
         (list, sum)
     }
 
     // Build a randomize list of mle-s whose sum is zero.
-    pub fn random_zero_mle_list(
+    pub fn random_zero_mle_list<R: Rng>(
         nv: usize,
         degree: usize,
-        mut rng: impl RngCore,
+        rng: &mut R,
     ) -> Vec<ArcDenseMultilinearExtension<E>> {
-        let start = start_timer!(|| "sample random zero mle list");
+        let start = entered_span!("sample random zero mle list");
 
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
@@ -332,7 +336,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         for _ in 0..(1 << nv) {
             multiplicands[0].push(E::BaseField::ZERO);
             for e in multiplicands.iter_mut().skip(1) {
-                e.push(E::BaseField::random(&mut rng));
+                e.push(E::BaseField::random(&mut *rng));
             }
         }
 
@@ -341,7 +345,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
             .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
             .collect();
 
-        end_timer!(start);
+        exit_span!(start);
         list
     }
 }

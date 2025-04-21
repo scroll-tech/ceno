@@ -1,6 +1,5 @@
 #![deny(clippy::cargo)]
-#![feature(decl_macro)]
-pub mod macros;
+pub use multilinear_extensions::macros;
 mod prover;
 pub mod structs;
 pub mod util;
