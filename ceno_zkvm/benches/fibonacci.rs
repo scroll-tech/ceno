@@ -5,7 +5,7 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::verifier::ZKVMVerifier,
+    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
 };
 use criterion::*;
 use transcript::{BasicTranscriptWithStat, StatisticRecorder};
@@ -49,6 +49,7 @@ fn fibonacci_prove(c: &mut Criterion) {
             (&hints).into(),
             vec![],
             max_steps,
+            MAX_NUM_VARIABLES,
             Checkpoint::PrepSanityCheck,
         );
         let proof = proof.expect("PrepSanityCheck do not provide proof");
@@ -90,6 +91,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                             (&hints).into(),
                             vec![],
                             max_steps,
+                            MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
                         );
                         let instant = std::time::Instant::now();
