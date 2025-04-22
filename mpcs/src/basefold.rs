@@ -446,7 +446,7 @@ where
         };
         exit_span!(commit_trivial_span);
 
-        let pow_bits = pp.get_pow_bits_by_level(crate::PowStrategy::StartFoldPow);
+        let pow_bits = pp.get_pow_bits_by_level(crate::PowStrategy::FriPow);
         let pow_witness = if pow_bits > 0 {
             let grind_span = entered_span!("Basefold::open::grind");
             let pow_witness = transcript.grind(pow_bits);
@@ -708,7 +708,7 @@ where
         transcript.append_field_element_exts_iter(proof.final_message.iter().flatten());
 
         // check pow
-        let pow_bits = vp.get_pow_bits_by_level(crate::PowStrategy::StartFoldPow);
+        let pow_bits = vp.get_pow_bits_by_level(crate::PowStrategy::FriPow);
         if pow_bits > 0 {
             assert!(transcript.check_witness(pow_bits, proof.pow_witness));
         }

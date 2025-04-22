@@ -64,12 +64,7 @@ macro_rules! impl_pcs_fri_param {
                     <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
                     <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
                 ) {
-                    (
-                        SecurityLevel::Conjecture100bits,
-                        crate::PowStrategy::StartFoldPow,
-                        1,
-                        100,
-                    ) => 16,
+                    (SecurityLevel::Conjecture100bits, crate::PowStrategy::FriPow, 1, 100) => 16,
                     _ => unimplemented!(),
                 }
             }

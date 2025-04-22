@@ -257,7 +257,7 @@ pub enum SecurityLevel {
 }
 
 pub enum PowStrategy {
-    StartFoldPow,
+    FriPow,
 }
 
 pub trait PCSFriParam {
