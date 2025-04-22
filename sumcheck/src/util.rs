@@ -6,12 +6,15 @@ use std::{
     sync::Arc,
 };
 
-use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension, op_mle, util::max_usable_threads,
-    virtual_poly::VirtualPolynomial, virtual_polys::PolyMeta,
+    macros::{entered_span, exit_span},
+    mle::DenseMultilinearExtension,
+    op_mle,
+    util::max_usable_threads,
+    virtual_poly::VirtualPolynomial,
+    virtual_polys::PolyMeta,
 };
 use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
@@ -148,7 +151,7 @@ fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
 /// TODO: The quadratic term can be removed by precomputing the lagrange
 /// coefficients.
 pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
-    let start = start_timer!(|| "sum check interpolate uni poly opt");
+    let start = entered_span!("sum check interpolate uni poly opt");
 
     let len = p_i.len();
     let mut evals = vec![];
@@ -192,7 +195,7 @@ pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
             denom_down *= F::from_u64(i as u64);
         }
     }
-    end_timer!(start);
+    exit_span!(start);
     res
 }
 
@@ -287,10 +290,15 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
                 let blow_factor = 1 << (merged_num_vars - poly.num_vars());
                 DenseMultilinearExtension::from_evaluations_ext_vec(
                     merged_num_vars,
-                    poly.get_base_field_vec()
-                        .iter()
-                        .flat_map(|e| std::iter::repeat(E::from(*e)).take(blow_factor))
-                        .collect_vec(),
+                    op_mle!(
+                        poly,
+                        |poly| {
+                            poly.iter()
+                                .flat_map(|e| std::iter::repeat(*e).take(blow_factor))
+                                .collect_vec()
+                        },
+                        |base_poly| base_poly.iter().map(|e| E::from(*e)).collect_vec()
+                    ),
                 )
             }
         };
@@ -300,9 +308,9 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
 }
 
 /// retrieve virtual poly from sumcheck prover state to single virtual poly
-pub fn merge_sumcheck_prover_state<E: ExtensionField>(
-    prover_states: Vec<IOPProverState<'_, E>>,
-) -> VirtualPolynomial<'_, E> {
+pub fn merge_sumcheck_prover_state<'a, E: ExtensionField>(
+    prover_states: &[IOPProverState<'a, E>],
+) -> VirtualPolynomial<'a, E> {
     merge_sumcheck_polys(
         prover_states.iter().map(|ps| &ps.poly).collect_vec(),
         Some(prover_states[0].poly_meta.clone()),

@@ -17,5 +17,4 @@ serde.workspace = true
 unroll = "0.1"
 
 [dev-dependencies]
-ark-std.workspace = true
 rand.workspace = true

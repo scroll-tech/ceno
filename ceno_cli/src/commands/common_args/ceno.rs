@@ -2,7 +2,10 @@ use crate::utils::*;
 use anyhow::{Context, bail};
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-use ceno_zkvm::{e2e::*, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{
+    e2e::*,
+    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+};
 use clap::Args;
 use std::{
     fs::File,
@@ -17,8 +20,12 @@ pub struct CenoOptions {
     pub platform: Preset,
 
     /// The maximum number of steps to execute the program.
-    #[arg(short, long, default_value_t = usize::MAX)]
+    #[arg(long, default_value_t = usize::MAX)]
     pub max_steps: usize,
+
+    /// The maximum number of variables the polynomial commitment scheme
+    #[arg(long, default_value_t = MAX_NUM_VARIABLES)]
+    pub max_num_variables: usize,
 
     /// Prover-private unconstrained input.
     /// This is a raw file mapped as a memory segment. Zero-padded to the right to the next power-of-two size.
@@ -149,7 +156,7 @@ impl CenoOptions {
         let ((_, vk), _) = run_elf_inner(self, elf_path, Checkpoint::Keygen)?;
         let vk = vk.expect("Keygen should yield vk.");
         if let Some(out_vk) = self.out_vk.as_ref() {
-            let path = out_vk.canonicalize()?;
+            let path = canonicalize_allow_nx(out_vk)?;
             print_cargo_message("Writing", format_args!("vk to {}", path.display()));
             let vk_file =
                 File::create(&path).context(format!("failed to create {}", path.display()))?;
@@ -185,7 +192,7 @@ impl CenoOptions {
         );
 
         if let Some(out_proof) = self.out_proof.as_ref() {
-            let path = out_proof.canonicalize()?;
+            let path = canonicalize_allow_nx(out_proof)?;
             print_cargo_message("Writing", format_args!("proof to {}", path.display()));
             let proof_file =
                 File::create(&path).context(format!("failed to create {}", path.display()))?;
@@ -193,7 +200,7 @@ impl CenoOptions {
                 .context("failed to serialize zkvm proof")?;
         }
         if let Some(out_vk) = self.out_vk.as_ref() {
-            let path = out_vk.canonicalize()?;
+            let path = canonicalize_allow_nx(out_vk)?;
             print_cargo_message("Writing", format_args!("vk to {}", path.display()));
             let vk_file =
                 File::create(&path).context(format!("failed to create {}", path.display()))?;
@@ -252,6 +259,7 @@ fn run_elf_inner<P: AsRef<Path>>(
         hints,
         public_io,
         options.max_steps,
+        options.max_num_variables,
         checkpoint,
     ))
 }

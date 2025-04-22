@@ -10,6 +10,7 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 use std::collections::BTreeSet;
+use sumcheck::macros::{entered_span, exit_span};
 
 // checks whether the given number n is a power of two.
 pub fn is_power_of_two(n: usize) -> bool {
@@ -135,7 +136,7 @@ pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &
 }
 
 pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
-    // let timer = start_timer!(|| "interpolate_over_hypercube");
+    let timer = entered_span!("interpolate_over_hypercube");
     // iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let n = p3::util::log2_strict_usize(evals.len());
 
@@ -154,11 +155,11 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
             }
         });
     }
-    // end_timer!(timer);
+    exit_span!(timer);
 }
 
 pub fn interpolate_over_boolean_hypercube_rmm<F: Field>(evals: &mut RowMajorMatrix<F>) {
-    // let timer = start_timer!(|| "interpolate_over_hypercube");
+    let timer = entered_span!("interpolate_over_boolean_hypercube_rmm");
     // iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
     let n = p3::util::log2_strict_usize(evals.height());
 
@@ -187,7 +188,7 @@ pub fn interpolate_over_boolean_hypercube_rmm<F: Field>(evals: &mut RowMajorMatr
             }
         });
     }
-    // end_timer!(timer);
+    exit_span!(timer);
 }
 
 pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
