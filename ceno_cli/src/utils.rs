@@ -126,3 +126,35 @@ pub fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
         .parse_size(s)
         .map(|size| size as u32)
 }
+
+/// Canonicalize a path allowing for non-existent paths.
+pub fn canonicalize_allow_nx<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
+    let path = path.as_ref();
+    if path.exists() {
+        return path.canonicalize();
+    }
+
+    let mut cur = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    let mut tails = Vec::new();
+    while !cur.exists() {
+        let name = cur.file_name().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("cannot peel off component from `{}`", cur.display()),
+            )
+        })?;
+        tails.push(name.to_os_string());
+        cur.pop();
+    }
+
+    let mut canon = cur.canonicalize()?;
+    for seg in tails.into_iter().rev() {
+        canon.push(seg);
+    }
+    Ok(canon)
+}
