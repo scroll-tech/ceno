@@ -67,7 +67,7 @@ pub mod impl_instruments {
             if let Ok(mut count) = PERM_COUNT.lock() {
                 *count = 0;
             } else {
-                unreachable!("Failed to acquire lock on INPUT_LENS_BY_TYPE");
+                unreachable!("Failed to acquire lock");
             }
         }
 
