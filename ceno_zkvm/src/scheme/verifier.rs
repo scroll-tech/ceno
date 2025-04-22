@@ -278,7 +278,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         #[cfg(debug_assertions)]
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
-                "main_sumcheck",
+                "tower_verify+main-sumcheck",
             );
         }
 
