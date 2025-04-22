@@ -156,7 +156,7 @@ impl CenoOptions {
         let ((_, vk), _) = run_elf_inner(self, elf_path, Checkpoint::Keygen)?;
         let vk = vk.expect("Keygen should yield vk.");
         if let Some(out_vk) = self.out_vk.as_ref() {
-            let path = out_vk.canonicalize()?;
+            let path = canonicalize_allow_nx(out_vk)?;
             print_cargo_message("Writing", format_args!("vk to {}", path.display()));
             let vk_file =
                 File::create(&path).context(format!("failed to create {}", path.display()))?;
@@ -192,7 +192,7 @@ impl CenoOptions {
         );
 
         if let Some(out_proof) = self.out_proof.as_ref() {
-            let path = out_proof.canonicalize()?;
+            let path = canonicalize_allow_nx(out_proof)?;
             print_cargo_message("Writing", format_args!("proof to {}", path.display()));
             let proof_file =
                 File::create(&path).context(format!("failed to create {}", path.display()))?;
@@ -200,7 +200,7 @@ impl CenoOptions {
                 .context("failed to serialize zkvm proof")?;
         }
         if let Some(out_vk) = self.out_vk.as_ref() {
-            let path = out_vk.canonicalize()?;
+            let path = canonicalize_allow_nx(out_vk)?;
             print_cargo_message("Writing", format_args!("vk to {}", path.display()));
             let vk_file =
                 File::create(&path).context(format!("failed to create {}", path.display()))?;
