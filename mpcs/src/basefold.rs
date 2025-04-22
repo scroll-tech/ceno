@@ -8,7 +8,7 @@ use crate::{
     },
 };
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
-use ff_ext::{ExtensionField, Instrumented, PoseidonField};
+use ff_ext::ExtensionField;
 use p3::{
     commit::Mmcs, field::PrimeCharacteristicRing, matrix::dense::DenseMatrix,
     util::log2_strict_usize,
@@ -39,6 +39,9 @@ mod commit_phase;
 use commit_phase::batch_commit_phase;
 mod encoding;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
 
 mod query_phase;
 
