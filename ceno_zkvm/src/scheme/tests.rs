@@ -23,7 +23,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
-use mpcs::{PolynomialCommitmentScheme, WhirDefault};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
@@ -91,7 +91,7 @@ fn test_rw_lk_expression_combination() {
         type Pcs = WhirDefault<E>;
 
         // pcs setup
-        Pcs::setup(1 << 8).unwrap();
+        Pcs::setup(1 << 8, SecurityLevel::default()).unwrap();
         let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
 
         // configure
@@ -156,7 +156,7 @@ fn test_rw_lk_expression_combination() {
         // verify proof
         let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
+        let mut v_transcript = BasicTranscriptWithStat::new(stat_recorder.clone(), b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&witin_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -180,7 +180,7 @@ fn test_rw_lk_expression_combination() {
             .expect("verifier failed");
         println!(
             "hashed fields {}",
-            stat_recorder.into_inner().field_appended_num
+            stat_recorder.lock().unwrap().field_appended_num
         );
     }
 
@@ -212,7 +212,7 @@ fn test_single_add_instance_e2e() {
         Default::default(),
     );
 
-    Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
@@ -297,7 +297,7 @@ fn test_single_add_instance_e2e() {
     println!("encoded zkvm proof {}", &zkvm_proof,);
     let stat_recorder = StatisticRecorder::default();
     {
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        let transcript = BasicTranscriptWithStat::new(stat_recorder.clone(), b"riscv");
         assert!(
             verifier
                 .verify_proof(zkvm_proof, transcript)
@@ -306,7 +306,7 @@ fn test_single_add_instance_e2e() {
     }
     println!(
         "hash_num: {}",
-        stat_recorder.into_inner().field_appended_num
+        stat_recorder.lock().unwrap().field_appended_num
     );
 }
 

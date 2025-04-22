@@ -328,6 +328,7 @@ dependencies = [
  "ceno_zkvm",
  "clap",
  "console",
+ "mpcs",
  "parse-size",
  "tempfile",
  "tracing",

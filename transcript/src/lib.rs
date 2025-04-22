@@ -20,7 +20,7 @@ pub struct Challenge<F> {
 
 use ff_ext::ExtensionField;
 /// The Transcript trait
-pub trait Transcript<E: ExtensionField>: GrindingChallenger {
+pub trait Transcript<E: ExtensionField>: GrindingChallenger<Witness = E::BaseField> {
     /// Append a slice of base field elemets to the transcript.
     ///
     /// An implementation has to provide at least one of

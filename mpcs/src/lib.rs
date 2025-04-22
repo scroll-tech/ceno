@@ -248,8 +248,11 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
     ) -> Vec<ArcMultilinearExtension<'static, E>>;
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Serialize, Deserialize,
+)]
 pub enum SecurityLevel {
+    #[default]
     Conjecture100bits,
 }
 

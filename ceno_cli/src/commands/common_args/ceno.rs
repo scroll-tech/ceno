@@ -7,6 +7,7 @@ use ceno_zkvm::{
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
 };
 use clap::Args;
+use mpcs::SecurityLevel;
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -38,6 +39,10 @@ pub struct CenoOptions {
     /// Public constrained input.
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// The preset configuration to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
+    security_level: SecurityLevel,
 
     /// Stack size in bytes.
     #[arg(long, default_value = "2M", value_parser = parse_size)]
@@ -153,7 +158,7 @@ impl CenoOptions {
     /// Run keygen the ceno elf file with given options
     pub fn keygen<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let ((_, vk), _) = run_elf_inner(self, elf_path, Checkpoint::Keygen)?;
+        let ((_, vk), _) = run_elf_inner(self, elf_path, Checkpoint::Keygen, self.security_level)?;
         let vk = vk.expect("Keygen should yield vk.");
         if let Some(out_vk) = self.out_vk.as_ref() {
             let path = out_vk.canonicalize()?;
@@ -168,7 +173,12 @@ impl CenoOptions {
     /// Run the ceno elf file with given options
     pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let (_, runner) = run_elf_inner(self, elf_path, Checkpoint::PrepWitnessGen)?;
+        let (_, runner) = run_elf_inner(
+            self,
+            elf_path,
+            Checkpoint::PrepWitnessGen,
+            self.security_level,
+        )?;
         runner();
         Ok(())
     }
@@ -177,7 +187,12 @@ impl CenoOptions {
     pub fn prove<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
 
-        let ((zkvm_proof, vk), _) = run_elf_inner(self, elf_path, Checkpoint::PrepSanityCheck)?;
+        let ((zkvm_proof, vk), _) = run_elf_inner(
+            self,
+            elf_path,
+            Checkpoint::PrepSanityCheck,
+            self.security_level,
+        )?;
         let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
         let vk = vk.expect("PrepSanityCheck should yield vk.");
 
@@ -217,6 +232,7 @@ fn run_elf_inner<P: AsRef<Path>>(
     options: &CenoOptions,
     elf_path: P,
     checkpoint: Checkpoint,
+    security_level: SecurityLevel,
 ) -> anyhow::Result<E2EResult> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
@@ -261,5 +277,6 @@ fn run_elf_inner<P: AsRef<Path>>(
         options.max_steps,
         options.max_num_variables,
         checkpoint,
+        security_level,
     ))
 }

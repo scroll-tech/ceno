@@ -1,9 +1,9 @@
 use std::array;
 
-use crate::GrindingChallenger;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use ff_ext::ExtensionField;
-use poseidon::challenger::CanSampleBits;
+use p3::challenger::{CanSampleBits, GrindingChallenger};
+use poseidon::challenger::CanObserve;
 
 use crate::{Challenge, Transcript};
 
@@ -101,6 +101,12 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
 
 impl<E: ExtensionField> CanSampleBits<usize> for TranscriptSyncronized<E> {
     fn sample_bits(&mut self, _bits: usize) -> usize {
+        unimplemented!()
+    }
+}
+
+impl<E: ExtensionField> CanObserve<E::BaseField> for TranscriptSyncronized<E> {
+    fn observe(&mut self, _value: E::BaseField) {
         unimplemented!()
     }
 }

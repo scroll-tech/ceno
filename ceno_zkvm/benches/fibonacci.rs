@@ -11,7 +11,7 @@ use criterion::*;
 use transcript::{BasicTranscriptWithStat, StatisticRecorder};
 
 use ff_ext::GoldilocksExt2;
-use mpcs::BasefoldDefault;
+use mpcs::{BasefoldDefault, SecurityLevel};
 
 criterion_group! {
   name = fibonacci_prove_group;
@@ -51,13 +51,14 @@ fn fibonacci_prove(c: &mut Criterion) {
             max_steps,
             MAX_NUM_VARIABLES,
             Checkpoint::PrepSanityCheck,
+            SecurityLevel::default(),
         );
         let proof = proof.expect("PrepSanityCheck do not provide proof");
         let vk = vk.expect("PrepSanityCheck do not provide verifier");
 
         println!("e2e proof {}", proof);
         let stat_recorder = StatisticRecorder::default();
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+        let transcript = BasicTranscriptWithStat::new(stat_recorder.clone(), b"riscv");
         let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
         assert!(
             verifier
@@ -68,7 +69,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         println!(
             "max_steps = {}, hashes count = {}",
             max_steps,
-            stat_recorder.into_inner().field_appended_num
+            stat_recorder.lock().unwrap().field_appended_num
         );
 
         // expand more input size once runtime is acceptable
@@ -93,6 +94,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                             max_steps,
                             MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
+                            SecurityLevel::default(),
                         );
                         let instant = std::time::Instant::now();
                         run_e2e_proof();

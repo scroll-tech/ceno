@@ -440,7 +440,7 @@ pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVeri
 // (1.) is useful for exposing state which must be further combined with
 // state external to this pipeline (e.g, sanity check in bin/e2e.rs)
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn run_e2e_with_checkpoint<
     E: ExtensionField + LkMultiplicityKey + serde::de::DeserializeOwned,
     PCS: PolynomialCommitmentScheme<E> + 'static,
@@ -687,7 +687,7 @@ pub fn verify(
 ) -> Result<(), ZKVMError> {
     // print verification statistics like proof size and hash count
     let stat_recorder = StatisticRecorder::default();
-    let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+    let transcript = BasicTranscriptWithStat::new(stat_recorder.clone(), b"riscv");
     verifier.verify_proof_halt(
         zkvm_proof.clone(),
         transcript,
@@ -696,7 +696,7 @@ pub fn verify(
     info!("e2e proof stat: {}", zkvm_proof);
     info!(
         "hashes count = {}",
-        stat_recorder.into_inner().field_appended_num
+        stat_recorder.lock().unwrap().field_appended_num
     );
     Ok(())
 }

@@ -1,23 +1,23 @@
 use crate::{BasicTranscript, Challenge, ForkableTranscript, GrindingChallenger, Transcript};
 use ff_ext::ExtensionField;
 use p3::challenger::{CanObserve, CanSampleBits};
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default)]
 pub struct Statistic {
     pub field_appended_num: u32,
 }
 
-pub type StatisticRecorder = RefCell<Statistic>;
+pub type StatisticRecorder = Arc<Mutex<Statistic>>;
 
 #[derive(Clone)]
-pub struct BasicTranscriptWithStat<'a, E: ExtensionField> {
+pub struct BasicTranscriptWithStat<E: ExtensionField> {
     inner: BasicTranscript<E>,
-    stat: &'a StatisticRecorder,
+    stat: StatisticRecorder,
 }
 
-impl<'a, E: ExtensionField> BasicTranscriptWithStat<'a, E> {
-    pub fn new(stat: &'a StatisticRecorder, label: &'static [u8]) -> Self {
+impl<E: ExtensionField> BasicTranscriptWithStat<E> {
+    pub fn new(stat: Arc<Mutex<Statistic>>, label: &'static [u8]) -> Self {
         Self {
             inner: BasicTranscript::new(label),
             stat,
@@ -25,14 +25,22 @@ impl<'a, E: ExtensionField> BasicTranscriptWithStat<'a, E> {
     }
 }
 
-impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
+impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<E> {
     fn append_field_elements(&mut self, elements: &[E::BaseField]) {
-        self.stat.borrow_mut().field_appended_num += 1;
+        if let Ok(mut stat) = self.stat.lock() {
+            stat.field_appended_num += 1;
+        } else {
+            panic!("StatisticRecorder mutex is poisoned");
+        }
         self.inner.append_field_elements(elements)
     }
 
     fn append_field_element_ext(&mut self, element: &E) {
-        self.stat.borrow_mut().field_appended_num += E::DEGREE as u32;
+        if let Ok(mut stat) = self.stat.lock() {
+            stat.field_appended_num += E::DEGREE as u32;
+        } else {
+            panic!("statisticRecorder mutex is poisoned");
+        }
         self.inner.append_field_element_ext(element)
     }
 
@@ -61,24 +69,27 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
     }
 }
 
-impl<E: ExtensionField> CanObserve<E::BaseField> for BasicTranscriptWithStat<'_, E> {
+impl<E: ExtensionField> CanObserve<E::BaseField> for BasicTranscriptWithStat<E> {
     fn observe(&mut self, value: E::BaseField) {
         self.inner.observe(value)
     }
 }
 
-impl<E: ExtensionField> GrindingChallenger for BasicTranscriptWithStat<'_, E> {
+impl<E: ExtensionField> CanSampleBits<usize> for BasicTranscriptWithStat<E> {
+    fn sample_bits(&mut self, bits: usize) -> usize {
+        self.inner.sample_bits(bits)
+    }
+}
+
+impl<E: ExtensionField> GrindingChallenger for BasicTranscriptWithStat<E> {
     type Witness = E::BaseField;
     fn grind(&mut self, bits: usize) -> E::BaseField {
         self.inner.grind(bits)
     }
+
     fn check_witness(&mut self, bits: usize, witness: E::BaseField) -> bool {
         self.inner.check_witness(bits, witness)
     }
 }
 
-impl<E: ExtensionField> CanSampleBits<usize> for BasicTranscriptWithStat<'_, E> {
-    fn sample_bits(&mut self, bits: usize) -> usize {
-        self.inner.sample_bits(bits)
-    }
-}
+impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWithStat<E> {}

@@ -193,7 +193,7 @@ where
                 (
                     BasefoldProverParams {
                         encoding_params: pp,
-                        security_level: security_level.clone(),
+                        security_level,
                     },
                     BasefoldVerifierParams {
                         encoding_params: vp,
@@ -707,15 +707,11 @@ where
         let final_message = &proof.final_message;
         transcript.append_field_element_exts_iter(proof.final_message.iter().flatten());
 
+        // check pow
         let pow_bits = vp.get_pow_bits_by_level(crate::PowStrategy::StartFoldPow);
-        let pow_witness = if pow_bits > 0 {
-            let grind_span = entered_span!("Basefold::open::grind");
-            let pow_witness = transcript.check_witness(pow_bits);
-            exit_span!(grind_span);
-            pow_witness
-        } else {
-            E::BaseField::ZERO
-        };
+        if pow_bits > 0 {
+            assert!(transcript.check_witness(pow_bits, proof.pow_witness));
+        }
 
         let queries: Vec<_> = transcript.sample_bits_and_append_vec(
             b"query indices",
