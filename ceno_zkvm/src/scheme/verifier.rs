@@ -1,6 +1,9 @@
 use std::marker::PhantomData;
 
-use ff_ext::{ExtensionField, Instrumented, PoseidonField};
+use ff_ext::ExtensionField;
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
 
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -295,13 +298,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;
-
-        #[cfg(debug_assertions)]
-        {
-            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
-                "batch_verify",
-            );
-        }
 
         let initial_global_state = eval_by_expr_with_instance(
             &[],
