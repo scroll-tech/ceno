@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, Instrumented, PoseidonField};
 
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -163,6 +163,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
             .map_err(ZKVMError::PCSError)?;
 
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "batch_commit",
+            );
+        }
+
         // alpha, beta
         let challenges = [
             transcript.read_challenge().elements,
@@ -268,6 +275,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             )));
         }
 
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "main_sumcheck",
+            );
+        }
+
         // verify mpcs
         PCS::batch_verify(
             &self.vk.vp,
@@ -281,6 +295,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;
+
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "batch_verify",
+            );
+        }
 
         let initial_global_state = eval_by_expr_with_instance(
             &[],

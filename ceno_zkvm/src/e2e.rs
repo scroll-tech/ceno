@@ -702,7 +702,7 @@ pub fn verify(
     #[cfg(debug_assertions)]
     {
         info!(
-            "instrumented metrics {}",
+            "instrumented metrics\n{}",
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
             )
         );
