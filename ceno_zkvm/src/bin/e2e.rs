@@ -76,8 +76,8 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
-    /// The preset configuration to use.
-    #[arg(short, long, value_enum, default_value_t = SecurityLevel::Conjecture100bits)]
+    /// The security level to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
 }
 
