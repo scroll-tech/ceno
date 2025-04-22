@@ -1573,6 +1573,7 @@ dependencies = [
  "aes",
  "bincode",
  "bitvec",
+ "clap",
  "criterion",
  "ctr",
  "ff_ext",

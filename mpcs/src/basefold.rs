@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    Error, Point, PolynomialCommitmentScheme, SecurityLevel,
+    Error, PCSFriParam, Point, PolynomialCommitmentScheme, SecurityLevel,
     util::{
         hash::write_digest_to_transcript,
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
@@ -187,14 +187,17 @@ where
         pp: Self::Param,
         poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
+        let security_level = pp.security_level;
         <Spec::EncodingScheme as EncodingScheme<E>>::trim(pp.params, log2_strict_usize(poly_size))
             .map(|(pp, vp)| {
                 (
                     BasefoldProverParams {
                         encoding_params: pp,
+                        security_level: security_level.clone(),
                     },
                     BasefoldVerifierParams {
                         encoding_params: vp,
+                        security_level,
                     },
                 )
             })
@@ -443,6 +446,16 @@ where
         };
         exit_span!(commit_trivial_span);
 
+        let pow_bits = pp.get_pow_bits_by_level(crate::PowStrategy::StartFoldPow);
+        let pow_witness = if pow_bits > 0 {
+            let grind_span = entered_span!("Basefold::open::grind");
+            let pow_witness = transcript.grind(pow_bits);
+            exit_span!(grind_span);
+            pow_witness
+        } else {
+            E::BaseField::ZERO
+        };
+
         let query_span = entered_span!("Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
@@ -462,6 +475,7 @@ where
             query_opening_proof,
             sumcheck_proof: Some(commit_phase_proof.sumcheck_messages),
             trivial_proof,
+            pow_witness,
         })
     }
 
@@ -692,6 +706,16 @@ where
         }
         let final_message = &proof.final_message;
         transcript.append_field_element_exts_iter(proof.final_message.iter().flatten());
+
+        let pow_bits = vp.get_pow_bits_by_level(crate::PowStrategy::StartFoldPow);
+        let pow_witness = if pow_bits > 0 {
+            let grind_span = entered_span!("Basefold::open::grind");
+            let pow_witness = transcript.check_witness(pow_bits);
+            exit_span!(grind_span);
+            pow_witness
+        } else {
+            E::BaseField::ZERO
+        };
 
         let queries: Vec<_> = transcript.sample_bits_and_append_vec(
             b"query indices",

@@ -1,5 +1,5 @@
 use ff_ext::{ExtensionField, FieldChallengerExt};
-use p3::challenger::CanSampleBits;
+use p3::challenger::{CanSampleBits, GrindingChallenger};
 use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
@@ -54,10 +54,29 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     fn sample_vec(&mut self, n: usize) -> Vec<E> {
         self.challenger.sample_ext_vec(n)
     }
+}
 
+impl<E: ExtensionField> CanObserve<E::BaseField> for BasicTranscript<E> {
+    fn observe(&mut self, value: E::BaseField) {
+        self.challenger.observe(value)
+    }
+}
+
+impl<E: ExtensionField> CanSampleBits<usize> for BasicTranscript<E> {
     fn sample_bits(&mut self, bits: usize) -> usize {
         self.challenger.sample_bits(bits)
     }
 }
 
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}
+
+impl<E: ExtensionField> GrindingChallenger for BasicTranscript<E> {
+    type Witness = E::BaseField;
+    fn grind(&mut self, bits: usize) -> E::BaseField {
+        self.challenger.grind(bits)
+    }
+
+    fn check_witness(&mut self, bits: usize, witness: E::BaseField) -> bool {
+        self.challenger.check_witness(bits, witness)
+    }
+}

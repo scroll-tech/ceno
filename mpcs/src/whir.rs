@@ -46,9 +46,9 @@ where
     <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<E::BaseField>>::Proof:
         Send + Sync,
 {
-    type Param = WHIRDummyParams;
-    type ProverParam = ();
-    type VerifierParam = ();
+    type Param = ();
+    type ProverParam = WHIRDummyParams;
+    type VerifierParam = WHIRDummyParams;
     type Commitment = WhirCommitment<E>;
     type Proof = WhirProof<E>;
     type CommitmentWithWitness = Witnesses<E>;
@@ -58,14 +58,14 @@ where
         _poly_size: usize,
         _security_level: SecurityLevel,
     ) -> Result<Self::Param, crate::Error> {
-        Ok(WHIRDummyParams {})
+        Ok(())
     }
 
     fn trim(
-        param: Self::Param,
+        _param: Self::Param,
         _poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        Ok((param, param))
+        Ok((WHIRDummyParams {}, WHIRDummyParams {}))
     }
 
     fn commit(

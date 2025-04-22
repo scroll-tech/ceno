@@ -21,7 +21,7 @@ use ceno_emul::{
 use clap::ValueEnum;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 use p3::goldilocks::Goldilocks;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -452,6 +452,7 @@ pub fn run_e2e_with_checkpoint<
     max_steps: usize,
     max_num_variables: usize,
     checkpoint: Checkpoint,
+    security_level: SecurityLevel,
 ) -> (IntermediateState<E, PCS>, Box<dyn FnOnce()>) {
     let static_addrs = init_static_addrs(&program);
 
@@ -489,7 +490,7 @@ pub fn run_e2e_with_checkpoint<
 
     // Keygen
     let start = std::time::Instant::now();
-    let pcs_param = PCS::setup(1 << max_num_variables).expect("Basefold PCS setup");
+    let pcs_param = PCS::setup(1 << max_num_variables, security_level).expect("Basefold PCS setup");
     let (pp, vp) = PCS::trim(pcs_param, 1 << max_num_variables).expect("Basefold trim");
     let pk = system_config
         .zkvm_cs

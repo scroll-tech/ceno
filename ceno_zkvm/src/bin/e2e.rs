@@ -6,6 +6,7 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
+use mpcs::SecurityLevel;
 use p3::field::PrimeCharacteristicRing;
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
@@ -74,6 +75,10 @@ struct Args {
 
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// The preset configuration to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::Conjecture100bits)]
+    security_level: SecurityLevel,
 }
 
 fn main() {
@@ -191,6 +196,7 @@ fn main() {
         max_steps,
         args.max_num_variables,
         Checkpoint::PrepSanityCheck,
+        args.security_level,
     );
 
     let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");

@@ -1,5 +1,6 @@
-use crate::{BasicTranscript, Challenge, ForkableTranscript, Transcript};
+use crate::{BasicTranscript, Challenge, ForkableTranscript, GrindingChallenger, Transcript};
 use ff_ext::ExtensionField;
+use p3::challenger::{CanObserve, CanSampleBits};
 use std::cell::RefCell;
 
 #[derive(Debug, Default)]
@@ -58,10 +59,26 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscriptWithStat<'_, E> {
     fn sample_vec(&mut self, n: usize) -> Vec<E> {
         self.inner.sample_vec(n)
     }
+}
 
+impl<E: ExtensionField> CanObserve<E::BaseField> for BasicTranscriptWithStat<'_, E> {
+    fn observe(&mut self, value: E::BaseField) {
+        self.inner.observe(value)
+    }
+}
+
+impl<E: ExtensionField> GrindingChallenger for BasicTranscriptWithStat<'_, E> {
+    type Witness = E::BaseField;
+    fn grind(&mut self, bits: usize) -> E::BaseField {
+        self.inner.grind(bits)
+    }
+    fn check_witness(&mut self, bits: usize, witness: E::BaseField) -> bool {
+        self.inner.check_witness(bits, witness)
+    }
+}
+
+impl<E: ExtensionField> CanSampleBits<usize> for BasicTranscriptWithStat<'_, E> {
     fn sample_bits(&mut self, bits: usize) -> usize {
         self.inner.sample_bits(bits)
     }
 }
-
-impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscriptWithStat<'_, E> {}

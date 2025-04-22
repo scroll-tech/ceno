@@ -1,4 +1,8 @@
-use p3::{challenger::FieldChallenger, commit::Mmcs, field::PrimeField};
+use p3::{
+    challenger::{FieldChallenger, GrindingChallenger},
+    commit::Mmcs,
+    field::PrimeField,
+};
 
 use crate::{ExtensionField, SmallField};
 
@@ -21,7 +25,7 @@ pub trait PoseidonField: PrimeField + SmallField {
     // compression
     type C: Clone + Sync;
     type MMCS: Mmcs<Self> + Clone + Sync;
-    type T: FieldChallenger<Self> + Clone;
+    type T: FieldChallenger<Self> + Clone + GrindingChallenger<Witness = Self>;
     fn get_default_challenger() -> Self::T;
     fn get_default_perm() -> Self::P;
     fn get_default_sponge() -> Self::S;

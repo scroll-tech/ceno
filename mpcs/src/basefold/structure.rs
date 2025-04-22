@@ -34,10 +34,26 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(super) params: <Spec::EncodingScheme as EncodingScheme<E>>::PublicParameters,
+    pub(crate) security_level: SecurityLevel,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
+    pub encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     pub(super) security_level: SecurityLevel,
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for BasefoldParams<E, Spec> {
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
+    pub fn get_max_message_size_log(&self) -> usize {
+        self.encoding_params.get_max_message_size_log()
+    }
+}
+
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for BasefoldProverParams<E, Spec> {
     fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
         match (
             &self.security_level,
@@ -56,23 +72,23 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for BasefoldParams<E,
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
-    pub encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-}
-
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
-    pub fn get_max_message_size_log(&self) -> usize {
-        self.encoding_params.get_max_message_size_log()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
 pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
     pub(super) encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
+    pub(super) security_level: SecurityLevel,
+}
+
+impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for BasefoldVerifierParams<E, Spec> {
+    fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
+        match (
+            &self.security_level,
+            pow_strategy,
+            <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
+            <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
+        ) {
+            (SecurityLevel::Conjecture100bits, crate::PowStrategy::StartFoldPow, 1, 100) => 16,
+            _ => unimplemented!(),
+        }
+    }
 }
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
@@ -295,6 +311,7 @@ where
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // vec![witness, fixed], where fixed is optional
     pub(crate) trivial_proof: Option<TrivialProof<E>>,
+    pub(crate) pow_witness: E::BaseField,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

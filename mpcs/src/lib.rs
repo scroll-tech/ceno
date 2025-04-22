@@ -1,4 +1,5 @@
 #![deny(clippy::cargo)]
+use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, fmt::Debug};
@@ -21,8 +22,9 @@ pub type Point<F> = Vec<F>;
 
 pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     poly_size: usize,
+    security_level: SecurityLevel,
 ) -> Result<Pcs::Param, Error> {
-    Pcs::setup(poly_size)
+    Pcs::setup(poly_size, security_level)
 }
 
 pub fn pcs_trim<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
@@ -120,9 +122,9 @@ where
 }
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
-    type Param: Clone + Debug + Serialize + DeserializeOwned + PCSFriParam;
-    type ProverParam: Clone + Debug + Serialize + DeserializeOwned;
-    type VerifierParam: Clone + Debug + Serialize + DeserializeOwned;
+    type Param: Clone + Debug + Serialize + DeserializeOwned;
+    type ProverParam: Clone + Debug + Serialize + DeserializeOwned + PCSFriParam;
+    type VerifierParam: Clone + Debug + Serialize + DeserializeOwned + PCSFriParam;
     type CommitmentWithWitness;
     type Commitment: Clone + Serialize + DeserializeOwned;
     type CommitmentChunk: Clone;
@@ -246,7 +248,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
     ) -> Vec<ArcMultilinearExtension<'static, E>>;
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
 pub enum SecurityLevel {
     Conjecture100bits,
 }
@@ -318,7 +320,7 @@ pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
 // compiled in the release build. Need a better solution.
 #[doc(hidden)]
 pub mod test_util {
-    use crate::PolynomialCommitmentScheme;
+    use crate::{PolynomialCommitmentScheme, SecurityLevel};
 
     use ff_ext::ExtensionField;
 
@@ -342,7 +344,7 @@ pub mod test_util {
         num_vars: usize,
     ) -> (Pcs::ProverParam, Pcs::VerifierParam) {
         let poly_size = 1 << num_vars;
-        let param = Pcs::setup(poly_size).unwrap();
+        let param = Pcs::setup(poly_size, SecurityLevel::Conjecture100bits).unwrap();
         Pcs::trim(param, poly_size).unwrap()
     }
 
