@@ -53,18 +53,28 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
     }
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for BasefoldProverParams<E, Spec> {
-    fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
-        match (
-            &self.security_level,
-            pow_strategy,
-            <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
-            <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
-        ) {
-            (SecurityLevel::Conjecture100bits, crate::PowStrategy::StartFoldPow, 1, 100) => 16,
-            _ => unimplemented!(),
+macro_rules! impl_pcs_fri_param {
+    ($type_name:ident) => {
+        impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for $type_name<E, Spec> {
+            // refer security bit setting from https://github.com/openvm-org/stark-backend/blob/92171baab084b7aaeabc659d0e616cd93a3fdea4/crates/stark-sdk/src/config/fri_params.rs#L59
+            fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
+                match (
+                    &self.security_level,
+                    pow_strategy,
+                    <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
+                    <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
+                ) {
+                    (
+                        SecurityLevel::Conjecture100bits,
+                        crate::PowStrategy::StartFoldPow,
+                        1,
+                        100,
+                    ) => 16,
+                    _ => unimplemented!(),
+                }
+            }
         }
-    }
+    };
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,19 +87,8 @@ pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
     pub(super) security_level: SecurityLevel,
 }
 
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for BasefoldVerifierParams<E, Spec> {
-    fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
-        match (
-            &self.security_level,
-            pow_strategy,
-            <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
-            <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
-        ) {
-            (SecurityLevel::Conjecture100bits, crate::PowStrategy::StartFoldPow, 1, 100) => 16,
-            _ => unimplemented!(),
-        }
-    }
-}
+impl_pcs_fri_param!(BasefoldProverParams);
+impl_pcs_fri_param!(BasefoldVerifierParams);
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
 /// used to generate this commitment and for assistant in opening
