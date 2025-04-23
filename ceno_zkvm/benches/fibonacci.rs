@@ -8,10 +8,10 @@ use ceno_zkvm::{
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
 };
 use criterion::*;
-use transcript::{BasicTranscriptWithStat, StatisticRecorder};
 
 use ff_ext::GoldilocksExt2;
 use mpcs::{BasefoldDefault, SecurityLevel};
+use transcript::BasicTranscript;
 
 criterion_group! {
   name = fibonacci_prove_group;
@@ -57,8 +57,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         let vk = vk.expect("PrepSanityCheck do not provide verifier");
 
         println!("e2e proof {}", proof);
-        let stat_recorder = StatisticRecorder::default();
-        let transcript = BasicTranscriptWithStat::new(stat_recorder.clone(), b"riscv");
+        let transcript = BasicTranscript::new(b"riscv");
         let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
         assert!(
             verifier
@@ -66,11 +65,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                 .expect("verify proof return with error"),
         );
         println!();
-        println!(
-            "max_steps = {}, hashes count = {}",
-            max_steps,
-            stat_recorder.lock().unwrap().field_appended_num
-        );
+        println!("max_steps = {}", max_steps);
 
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("fibonacci_max_steps_{}", max_steps));

@@ -19,20 +19,34 @@ use ceno_emul::{
     Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
-use ff_ext::{ExtensionField, GoldilocksExt2};
+use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
-use p3::goldilocks::Goldilocks;
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 use tracing::info;
-use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
+use transcript::BasicTranscript as Transcript;
 
-pub type E = GoldilocksExt2;
-pub type B = Goldilocks;
-pub type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
+
+/// The polynomial commitment scheme kind
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum PcsKind {
+    #[default]
+    Basefold,
+    Whir,
+}
+
+/// The field type
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum FieldType {
+    #[default]
+    Goldilocks,
+    BabyBear,
+}
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,
@@ -497,7 +511,7 @@ pub fn run_e2e_with_checkpoint<
         .clone()
         .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
-    let vk = pk.get_vk();
+    let vk = pk.get_vk_slow();
     tracing::debug!("keygen done in {:?}", start.elapsed());
     if let Checkpoint::Keygen = checkpoint {
         return ((None, Some(vk)), Box::new(|| ()));
@@ -681,22 +695,29 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
     )
 }
 
-pub fn verify(
-    zkvm_proof: &ZKVMProof<E, Pcs>,
-    verifier: &ZKVMVerifier<E, Pcs>,
+pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Serialize>(
+    zkvm_proof: &ZKVMProof<E, PCS>,
+    verifier: &ZKVMVerifier<E, PCS>,
 ) -> Result<(), ZKVMError> {
-    // print verification statistics like proof size and hash count
-    let stat_recorder = StatisticRecorder::default();
-    let transcript = BasicTranscriptWithStat::new(stat_recorder.clone(), b"riscv");
+    #[cfg(debug_assertions)]
+    {
+        Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+    }
+    let transcript = Transcript::new(b"riscv");
     verifier.verify_proof_halt(
         zkvm_proof.clone(),
         transcript,
         zkvm_proof.has_halt(&verifier.vk),
     )?;
+    // print verification statistics like proof size and hash count
     info!("e2e proof stat: {}", zkvm_proof);
-    info!(
-        "hashes count = {}",
-        stat_recorder.lock().unwrap().field_appended_num
-    );
+    #[cfg(debug_assertions)]
+    {
+        info!(
+            "instrumented metrics\n{}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
+        );
+    }
     Ok(())
 }

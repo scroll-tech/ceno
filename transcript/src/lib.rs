@@ -5,13 +5,11 @@
 
 pub mod basic;
 
-mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
 use ff_ext::SmallField;
 use itertools::Itertools;
 use p3::{challenger::GrindingChallenger, field::PrimeCharacteristicRing};
-pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
 pub use syncronized::TranscriptSyncronized;
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Challenge<F> {

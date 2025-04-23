@@ -93,11 +93,26 @@ pub mod impl_babybear {
         }
     }
 
+    #[cfg(debug_assertions)]
+    use crate::poseidon::impl_instruments::*;
+    #[cfg(debug_assertions)]
+    use p3::symmetric::CryptographicPermutation;
+
+    #[cfg(debug_assertions)]
+    impl CryptographicPermutation<[BabyBear; POSEIDON2_BABYBEAR_WIDTH]>
+        for Instrumented<Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>>
+    {
+    }
+
     impl PoseidonField for BabyBear {
+        #[cfg(debug_assertions)]
+        type P = Instrumented<Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>>;
+        #[cfg(not(debug_assertions))]
         type P = Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>;
+
         type T = DuplexChallenger<Self, Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE>;
-        type S = PaddingFreeSponge<Self::P, 16, 8, 8>;
-        type C = TruncatedPermutation<Self::P, 2, 8, 16>;
+        type S = PaddingFreeSponge<Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE, 8>;
+        type C = TruncatedPermutation<Self::P, 2, 8, POSEIDON2_BABYBEAR_WIDTH>;
         type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 8>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<
@@ -108,6 +123,18 @@ pub mod impl_babybear {
             >::new(Self::get_default_perm())
         }
 
+        #[cfg(debug_assertions)]
+        fn get_default_perm() -> Self::P {
+            Instrumented::new(Poseidon2BabyBear::new(
+                ExternalLayerConstants::new(
+                    BABYBEAR_RC16_EXTERNAL_INITIAL.to_vec(),
+                    BABYBEAR_RC16_EXTERNAL_FINAL.to_vec(),
+                ),
+                BABYBEAR_RC16_INTERNAL.to_vec(),
+            ))
+        }
+
+        #[cfg(not(debug_assertions))]
         fn get_default_perm() -> Self::P {
             Poseidon2BabyBear::new(
                 ExternalLayerConstants::new(
