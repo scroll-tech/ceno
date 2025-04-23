@@ -244,10 +244,10 @@ mod tests {
     #[test]
     fn test_sumcheck_folding_factor_1() {
         let num_rounds = 2;
-        let eval_points = vec![vec![F::from_u64(10), F::from_u64(11)], vec![
-            F::from_u64(7),
-            F::from_u64(8),
-        ]];
+        let eval_points = vec![
+            vec![F::from_u64(10), F::from_u64(11)],
+            vec![F::from_u64(7), F::from_u64(8)],
+        ];
         let polynomials = vec![
             vec![
                 F::from_u64(1),
