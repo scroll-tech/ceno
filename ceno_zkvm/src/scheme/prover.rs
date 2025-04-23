@@ -83,7 +83,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // commit to fixed commitment
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-        if let Some(fixed_commit) = &self.pk.get_vk().fixed_commit {
+        if let Some(fixed_commit) = &self.pk.fixed_commit {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
         exit_span!(span);

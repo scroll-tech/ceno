@@ -496,7 +496,7 @@ pub fn run_e2e_with_checkpoint<
         .clone()
         .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
-    let vk = pk.get_vk();
+    let vk = pk.get_vk_slow();
     tracing::debug!("keygen done in {:?}", start.elapsed());
     if let Checkpoint::Keygen = checkpoint {
         return ((None, Some(vk)), Box::new(|| ()));
