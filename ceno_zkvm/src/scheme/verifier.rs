@@ -273,6 +273,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.w_expressions.len(),
             cs.lk_expressions.len(),
         );
+
+        // dbg!(&cs.r_expressions);
+
         let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
             ceil_log2(w_counts_per_instance),
@@ -308,24 +311,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
         )?;
 
-        if let Some(evals) = &proof.gkr_out_evals {
-            let gkr_reads = evals.iter().take(50).collect_vec();
-            let intersection_size = gkr_reads
-                .iter()
-                .counts()
-                .iter()
-                .map(|(val, count)| {
-                    let proof_count = proof
-                        .r_records_in_evals
-                        .iter()
-                        .filter(|x| x == *val)
-                        .count();
-                    *count.min(&proof_count)
-                })
-                .sum::<usize>();
-            dbg!(&intersection_size);
-            panic!();
-        }
         assert!(record_evals.len() == 2, "[r_record, w_record]");
         assert!(logup_q_evals.len() == 1, "[lk_q_record]");
         assert!(logup_p_evals.len() == 1, "[lk_p_record]");
@@ -344,6 +329,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             record_evals[1].point.clone(),
             logup_q_evals[0].point.clone(),
         );
+
+        // dbg!(&rt_r, &rt_w, &rt_lk);
 
         let alpha_pow = get_challenge_pows(
             MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
@@ -420,6 +407,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 },
             )
         };
+
+        if let Some(evals) = &proof.gkr_out_evals {
+            let gkr_reads = evals.iter().take(50).collect_vec();
+            let intersection_size = gkr_reads
+                .iter()
+                .counts()
+                .iter()
+                .map(|(val, count)| {
+                    let proof_count = proof
+                        .r_records_in_evals
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, x)| **x * eq_r[*i] == ***val)
+                        .count();
+                    *count.min(&proof_count)
+                })
+                .sum::<usize>();
+            dbg!(&intersection_size);
+            panic!();
+        }
 
         let computed_evals = [
             // read
