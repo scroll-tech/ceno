@@ -24,6 +24,9 @@ tracing-subscriber.workspace = true
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 ceno_zkvm = { path = "../ceno_zkvm" }
+mpcs = { path = "../mpcs" }
+ff_ext = { path = "../ff_ext" }
+p3 = { path = "../p3" }
 
 [build-dependencies]
 vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_set"] }

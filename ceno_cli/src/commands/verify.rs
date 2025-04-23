@@ -1,11 +1,13 @@
 use crate::utils::print_cargo_message;
 use anyhow::{Context, bail};
 use ceno_zkvm::{
-    e2e::{E, Pcs, verify},
+    e2e::verify,
     scheme::{ZKVMProof, verifier::ZKVMVerifier},
     structs::ZKVMVerifyingKey,
 };
 use clap::Parser;
+use ff_ext::GoldilocksExt2;
+use mpcs::{Basefold, BasefoldRSParams};
 use std::{fs::File, path::PathBuf};
 
 #[derive(Parser)]
@@ -21,6 +23,9 @@ pub struct VerifyCmd {
 
 impl VerifyCmd {
     pub fn run(self) -> anyhow::Result<()> {
+        type E = GoldilocksExt2;
+        type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+
         let start = std::time::Instant::now();
         let zkvm_proof: ZKVMProof<E, Pcs> = bincode::deserialize_from(
             File::open(&self.proof).context("Failed to open proof file")?,

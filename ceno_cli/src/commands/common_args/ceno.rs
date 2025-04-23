@@ -4,9 +4,13 @@ use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    scheme::{
+        constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+    },
 };
 use clap::Args;
+use ff_ext::{ExtensionField, GoldilocksExt2};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -58,6 +62,9 @@ pub struct CenoOptions {
     #[arg(long)]
     profiling: Option<usize>,
 }
+
+type E = GoldilocksExt2;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
 impl CenoOptions {
     /// Try set up the logger based on the verbosity level
@@ -153,7 +160,7 @@ impl CenoOptions {
     /// Run keygen the ceno elf file with given options
     pub fn keygen<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let ((_, vk), _) = run_elf_inner(self, elf_path, Checkpoint::Keygen)?;
+        let ((_, vk), _) = run_elf_inner::<_, E, Pcs>(self, elf_path, Checkpoint::Keygen)?;
         let vk = vk.expect("Keygen should yield vk.");
         if let Some(out_vk) = self.out_vk.as_ref() {
             let path = canonicalize_allow_nx(out_vk)?;
@@ -168,7 +175,7 @@ impl CenoOptions {
     /// Run the ceno elf file with given options
     pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let (_, runner) = run_elf_inner(self, elf_path, Checkpoint::PrepWitnessGen)?;
+        let (_, runner) = run_elf_inner::<_, E, Pcs>(self, elf_path, Checkpoint::PrepWitnessGen)?;
         runner();
         Ok(())
     }
@@ -177,7 +184,8 @@ impl CenoOptions {
     pub fn prove<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
 
-        let ((zkvm_proof, vk), _) = run_elf_inner(self, elf_path, Checkpoint::PrepSanityCheck)?;
+        let ((zkvm_proof, vk), _) =
+            run_elf_inner::<_, E, Pcs>(self, elf_path, Checkpoint::PrepSanityCheck)?;
         let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
         let vk = vk.expect("PrepSanityCheck should yield vk.");
 
@@ -211,13 +219,17 @@ impl CenoOptions {
     }
 }
 
-type E2EResult = (IntermediateState<E, Pcs>, Box<dyn FnOnce()>);
+type E2EResult<E, Pcs> = (IntermediateState<E, Pcs>, Box<dyn FnOnce()>);
 
-fn run_elf_inner<P: AsRef<Path>>(
+fn run_elf_inner<
+    P: AsRef<Path>,
+    E: ExtensionField + LkMultiplicityKey,
+    Pcs: PolynomialCommitmentScheme<E> + 'static,
+>(
     options: &CenoOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2EResult> {
+) -> anyhow::Result<E2EResult<E, Pcs>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;

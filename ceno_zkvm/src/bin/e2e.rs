@@ -1,11 +1,13 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
-    e2e::{B, Checkpoint, E, Pcs, Preset, run_e2e_with_checkpoint, setup_platform, verify},
+    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform, verify},
     scheme::{ZKVMProof, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     with_panic_hook,
 };
 use clap::Parser;
+use ff_ext::{ExtensionField, GoldilocksExt2};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use p3::field::PrimeCharacteristicRing;
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
@@ -75,6 +77,9 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 }
+
+type E = GoldilocksExt2;
+type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
 
 fn main() {
     let args = {
@@ -207,12 +212,15 @@ fn main() {
     soundness_test(zkvm_proof, &verifier);
 }
 
-fn soundness_test(mut zkvm_proof: ZKVMProof<E, Pcs>, verifier: &ZKVMVerifier<E, Pcs>) {
+fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+    mut zkvm_proof: ZKVMProof<E, Pcs>,
+    verifier: &ZKVMVerifier<E, Pcs>,
+) {
     // do sanity check
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![B::ONE];
-    zkvm_proof.raw_pi[1] = vec![B::ONE];
+    zkvm_proof.raw_pi[0] = vec![E::BaseField::ONE];
+    zkvm_proof.raw_pi[1] = vec![E::BaseField::ONE];
 
     // capture panic message, if have
     let result = with_panic_hook(Box::new(|_info| ()), || {
