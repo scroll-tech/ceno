@@ -1,16 +1,21 @@
 pub mod arithmetic;
 pub mod expression;
 pub mod hash;
-pub mod parallel;
 use std::collections::VecDeque;
 
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools, izip};
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
+use multilinear_extensions::{
+    mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
+    op_mle,
+};
 use serde::{Deserialize, Serialize};
 pub mod merkle_tree;
-use crate::{Error, util::parallel::parallelize};
-use p3::field::{PrimeCharacteristicRing, PrimeField};
+use crate::Error;
+use p3::{
+    field::{PrimeCharacteristicRing, PrimeField},
+    maybe_rayon::prelude::*,
+};
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
     let bases = x.as_bases();
@@ -187,6 +192,7 @@ pub fn resize_num_vars<E: ExtensionField>(
     poly.num_vars = num_vars;
 }
 
+// TODO remove this function once mpcs development stable
 pub fn add_polynomial_with_coeff<E: ExtensionField>(
     lhs: &mut DenseMultilinearExtension<E>,
     rhs: &DenseMultilinearExtension<E>,
@@ -205,14 +211,11 @@ pub fn add_polynomial_with_coeff<E: ExtensionField>(
             if rhs.num_vars < lhs.num_vars {
                 match &mut lhs.evaluations {
                     FieldType::Ext(ref mut lhs) => {
-                        parallelize(lhs, |(lhs, start)| {
-                            for (index, lhs) in lhs.iter_mut().enumerate() {
-                                *lhs += *coeff
-                                    * poly_index_ext(
-                                        rhs,
-                                        (start + index) & ((1 << rhs.num_vars) - 1),
-                                    );
-                            }
+                        let mask = (1 << rhs.num_vars) - 1;
+                        op_mle!(rhs, |rhs| {
+                            lhs.par_iter_mut()
+                                .enumerate()
+                                .for_each(|(index, lhs)| *lhs += *coeff * rhs[index & mask]);
                         });
                     }
                     FieldType::Base(ref mut lhs_evals) => {
@@ -234,10 +237,10 @@ pub fn add_polynomial_with_coeff<E: ExtensionField>(
             } else {
                 match &mut lhs.evaluations {
                     FieldType::Ext(ref mut lhs) => {
-                        parallelize(lhs, |(lhs, start)| {
-                            for (index, lhs) in lhs.iter_mut().enumerate() {
-                                *lhs += *coeff * poly_index_ext(rhs, start + index);
-                            }
+                        op_mle!(rhs, |rhs| {
+                            lhs.par_iter_mut()
+                                .zip(rhs.par_iter())
+                                .for_each(|(lhs, rhs)| *lhs += *coeff * *rhs);
                         });
                     }
                     FieldType::Base(ref mut lhs_evals) => {
