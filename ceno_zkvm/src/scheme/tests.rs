@@ -112,7 +112,7 @@ fn test_rw_lk_expression_combination() {
             .clone()
             .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
             .unwrap();
-        let vk = pk.get_vk();
+        let vk = pk.get_vk_slow();
 
         // generate mock witness
         let num_instances = 1 << 8;
@@ -253,7 +253,7 @@ fn test_single_add_instance_e2e() {
         .clone()
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
-    let vk = pk.get_vk();
+    let vk = pk.get_vk_slow();
 
     // single instance
     let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
