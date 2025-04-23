@@ -1,9 +1,9 @@
-use ark_std::test_rng;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::{
     field::{PrimeCharacteristicRing, extension::BinomialExtensionField},
     goldilocks::Goldilocks,
 };
+use rand::thread_rng;
 
 type F = Goldilocks;
 type E = BinomialExtensionField<F, 2>;
@@ -16,7 +16,7 @@ use crate::{
 
 #[test]
 fn test_virtual_polynomial_additions() {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     for nv in 2..5 {
         for num_products in 2..5 {
             let base: Vec<E> = (0..nv).map(|_| E::random(&mut rng)).collect();
@@ -36,7 +36,7 @@ fn test_virtual_polynomial_additions() {
 
 #[test]
 fn test_eq_xr() {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     for nv in 4..10 {
         let r: Vec<_> = (0..nv).map(|_| E::random(&mut rng)).collect();
         let eq_x_r = build_eq_x_r(r.as_ref());

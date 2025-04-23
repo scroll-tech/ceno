@@ -53,18 +53,18 @@ pub mod impl_goldilocks {
         type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 4>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>::new(
-                    Self::get_default_perm(),
-                )
+                Self::get_default_perm(),
+            )
         }
 
         fn get_default_perm() -> Self::P {
             Poseidon2GoldilocksHL::new(
-                    ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(
-                        HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
-                        new_array,
-                    ),
-                    new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
-                )
+                ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(
+                    HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
+                    new_array,
+                ),
+                new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
+            )
         }
 
         fn get_default_sponge() -> Self::S {
@@ -123,27 +123,13 @@ pub mod impl_goldilocks {
         const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
             Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
         const TWO_ADIC_ROOT_OF_UNITY: Self = BinomialExtensionField::new_unchecked(
-            Goldilocks::ext_two_adic_generator_const(Goldilocks::TWO_ADICITY),
+            Goldilocks::ext_two_adic_generator_const(<GoldilocksExt2 as TwoAdicField>::TWO_ADICITY),
         );
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
 
         type BaseField = Goldilocks;
-
-        fn from_bases(bases: &[Goldilocks]) -> Self {
-            debug_assert_eq!(bases.len(), 2);
-            Self::from_basis_coefficients_slice(bases)
-        }
-
-        fn as_bases(&self) -> &[Goldilocks] {
-            self.as_basis_coefficients_slice()
-        }
-
-        /// Convert limbs into self
-        fn from_limbs(limbs: &[Self::BaseField]) -> Self {
-            Self::from_bases(&limbs[0..2])
-        }
 
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
             self.as_basis_coefficients_slice()

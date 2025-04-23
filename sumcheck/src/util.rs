@@ -6,11 +6,15 @@ use std::{
     sync::Arc,
 };
 
-use ark_std::{end_timer, start_timer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension, op_mle, util::max_usable_threads,
+    macros::{entered_span, exit_span},
+    mle::DenseMultilinearExtension,
+    op_mle,
+    util::max_usable_threads,
     virtual_poly::VirtualPolynomial,
+    virtual_polys::PolyMeta,
 };
 use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
@@ -147,7 +151,7 @@ fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
 /// TODO: The quadratic term can be removed by precomputing the lagrange
 /// coefficients.
 pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
-    let start = start_timer!(|| "sum check interpolate uni poly opt");
+    let start = entered_span!("sum check interpolate uni poly opt");
 
     let len = p_i.len();
     let mut evals = vec![];
@@ -191,7 +195,7 @@ pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
             denom_down *= F::from_u64(i as u64);
         }
     }
-    end_timer!(start);
+    exit_span!(start);
     res
 }
 
@@ -213,32 +217,104 @@ pub fn ceil_log2(x: usize) -> usize {
     usize_bits - (x - 1).leading_zeros() as usize
 }
 
+/// merge vector of virtual poly into single virtual poly
+/// NOTE this function assume polynomial in each virtual_polys are "small", due to this function need quite of clone
 pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
+    virtual_polys: Vec<&VirtualPolynomial<'a, E>>,
+    poly_meta: Option<Vec<PolyMeta>>,
+) -> VirtualPolynomial<'a, E> {
+    assert!(!virtual_polys.is_empty());
+    assert!(virtual_polys.len().is_power_of_two());
+    let log2_poly_len = ceil_log2(virtual_polys.len());
+    let poly_meta = poly_meta.unwrap_or(
+        std::iter::repeat(PolyMeta::Normal)
+            .take(virtual_polys.len())
+            .collect_vec(),
+    );
+    let mut final_poly = virtual_polys[0].clone();
+    final_poly.aux_info.max_num_variables = 0;
+
+    // usually phase1 lefted num_var is 0, thus only constant term lefted
+    // but we also support phase1 stop earlier, so each poly still got num_var > 0
+    // assuming sumcheck implemented in suffix alignment to batch different num_vars
+
+    // sanity check: all PolyMeta::Normal should have the same phase1_lefted_numvar
+    debug_assert!(
+        virtual_polys[0]
+            .flattened_ml_extensions
+            .iter()
+            .zip_eq(&poly_meta)
+            .filter(|(_, poly_meta)| { matches!(poly_meta, PolyMeta::Normal) })
+            .map(|(poly, _)| poly.num_vars())
+            .all_equal()
+    );
+    let merged_num_vars = poly_meta
+        .iter()
+        .enumerate()
+        .find_map(|(index, poly_meta)| {
+            if matches!(poly_meta, PolyMeta::Normal) {
+                let phase1_lefted_numvar =
+                    virtual_polys[0].flattened_ml_extensions[index].num_vars();
+                Some(phase1_lefted_numvar + log2_poly_len)
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            // all poly are phase2 only, find which the max num_var
+            virtual_polys[0]
+                .flattened_ml_extensions
+                .iter()
+                .map(|poly| poly.num_vars())
+                .max()
+        })
+        .expect("unreachable");
+
+    for (i, poly_meta) in (0..virtual_polys[0].flattened_ml_extensions.len()).zip_eq(&poly_meta) {
+        final_poly.aux_info.max_num_variables =
+            final_poly.aux_info.max_num_variables.max(merged_num_vars);
+        let ml_ext = match poly_meta {
+            PolyMeta::Normal => DenseMultilinearExtension::from_evaluations_ext_vec(
+                merged_num_vars,
+                virtual_polys
+                    .iter()
+                    .flat_map(|virtual_poly| {
+                        let mle = &virtual_poly.flattened_ml_extensions[i];
+                        op_mle!(mle, |f| f.to_vec(), |_v| unreachable!())
+                    })
+                    .collect::<Vec<E>>(),
+            ),
+            PolyMeta::Phase2Only => {
+                let poly = &virtual_polys[0].flattened_ml_extensions[i];
+                assert!(poly.num_vars() <= log2_poly_len);
+                let blow_factor = 1 << (merged_num_vars - poly.num_vars());
+                DenseMultilinearExtension::from_evaluations_ext_vec(
+                    merged_num_vars,
+                    op_mle!(
+                        poly,
+                        |poly| {
+                            poly.iter()
+                                .flat_map(|e| std::iter::repeat(*e).take(blow_factor))
+                                .collect_vec()
+                        },
+                        |base_poly| base_poly.iter().map(|e| E::from(*e)).collect_vec()
+                    ),
+                )
+            }
+        };
+        final_poly.flattened_ml_extensions[i] = Arc::new(ml_ext);
+    }
+    final_poly
+}
+
+/// retrieve virtual poly from sumcheck prover state to single virtual poly
+pub fn merge_sumcheck_prover_state<'a, E: ExtensionField>(
     prover_states: &[IOPProverState<'a, E>],
 ) -> VirtualPolynomial<'a, E> {
-    let log2_prover_states_len = ceil_log2(prover_states.len());
-    let mut poly = prover_states[0].poly.clone(); // assume poly evaluation size already been small
-    poly.aux_info.max_num_variables = 0;
-    for i in 0..poly.flattened_ml_extensions.len() {
-        let num_vars = ceil_log2(
-            prover_states[0].poly.flattened_ml_extensions[i]
-                .evaluations()
-                .len(),
-        ) + log2_prover_states_len;
-        poly.aux_info.max_num_variables = poly.aux_info.max_num_variables.max(num_vars);
-        let ml_ext = DenseMultilinearExtension::from_evaluations_ext_vec(
-            num_vars,
-            prover_states
-                .iter()
-                .flat_map(|prover_state| {
-                    let mle = &prover_state.poly.flattened_ml_extensions[i];
-                    op_mle!(mle, |f| f.to_vec(), |_v| unreachable!())
-                })
-                .collect::<Vec<E>>(),
-        );
-        poly.flattened_ml_extensions[i] = Arc::new(ml_ext);
-    }
-    poly
+    merge_sumcheck_polys(
+        prover_states.iter().map(|ps| &ps.poly).collect_vec(),
+        Some(prover_states[0].poly_meta.clone()),
+    )
 }
 
 /// we expect each thread at least take 4 num of sumcheck variables

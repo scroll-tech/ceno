@@ -3,6 +3,7 @@ pub use p3_challenger as challenger;
 pub use p3_commit as commit;
 pub use p3_dft as dft;
 pub use p3_field as field;
+pub use p3_fri as fri;
 pub use p3_goldilocks as goldilocks;
 pub use p3_matrix as matrix;
 pub use p3_maybe_rayon as maybe_rayon;

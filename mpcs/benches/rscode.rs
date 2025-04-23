@@ -41,7 +41,7 @@ fn bench_encoding(c: &mut Criterion) {
                         for _ in 0..iters {
                             let rmm = RowMajorMatrix::rand(&mut OsRng, 1 << num_vars, batch_size);
                             let instant = std::time::Instant::now();
-                            <<BasefoldRSParams as BasefoldSpec<E>>::EncodingScheme as EncodingScheme<E,>>::encode(&pp.encoding_params, rmm);
+                            <<BasefoldRSParams as BasefoldSpec<E>>::EncodingScheme as EncodingScheme<E,>>::encode(&pp.encoding_params, rmm).expect("encode error");
                             let elapsed = instant.elapsed();
                             time += elapsed;
                         }
