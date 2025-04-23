@@ -22,6 +22,10 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
+
 use itertools::Itertools;
 use mpcs::{PolynomialCommitmentScheme, WhirDefault};
 use multilinear_extensions::{
@@ -29,7 +33,7 @@ use multilinear_extensions::{
 };
 use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
+use transcript::{BasicTranscript, Transcript};
 
 use super::{
     PublicValues,
@@ -154,9 +158,8 @@ fn test_rw_lk_expression_combination() {
             .expect("create_proof failed");
 
         // verify proof
-        let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
+        let mut v_transcript = BasicTranscript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&witin_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -165,6 +168,10 @@ fn test_rw_lk_expression_combination() {
         ];
 
         assert_eq!(prover_challenges, verifier_challenges);
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+        }
         let _rt_input = verifier
             .verify_opcode_proof(
                 name.as_str(),
@@ -178,10 +185,14 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
-        println!(
-            "hashed fields {}",
-            stat_recorder.into_inner().field_appended_num
+        #[cfg(debug_assertions)]
+        {
+            println!(
+            "instrumented metrics {}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
         );
+        }
     }
 
     // <lookup count, rw count>
@@ -295,19 +306,25 @@ fn test_single_add_instance_e2e() {
         .expect("create_proof failed");
 
     println!("encoded zkvm proof {}", &zkvm_proof,);
-    let stat_recorder = StatisticRecorder::default();
+
+    #[cfg(debug_assertions)]
     {
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
-        assert!(
-            verifier
-                .verify_proof(zkvm_proof, transcript)
-                .expect("verify proof return with error"),
+        Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+    }
+    let transcript = BasicTranscript::new(b"riscv");
+    assert!(
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect("verify proof return with error"),
+    );
+    #[cfg(debug_assertions)]
+    {
+        println!(
+            "instrumented metrics {}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
         );
     }
-    println!(
-        "hash_num: {}",
-        stat_recorder.into_inner().field_appended_num
-    );
 }
 
 /// test various product argument size, starting from minimal leaf size 2

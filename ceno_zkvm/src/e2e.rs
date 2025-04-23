@@ -27,7 +27,10 @@ use std::{
     sync::Arc,
 };
 use tracing::info;
-use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
+use transcript::BasicTranscript as Transcript;
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
 
 /// The polynomial commitment scheme kind
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -695,18 +698,25 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
     zkvm_proof: &ZKVMProof<E, PCS>,
     verifier: &ZKVMVerifier<E, PCS>,
 ) -> Result<(), ZKVMError> {
-    // print verification statistics like proof size and hash count
-    let stat_recorder = StatisticRecorder::default();
-    let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
+    #[cfg(debug_assertions)]
+    {
+        Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+    }
+    let transcript = Transcript::new(b"riscv");
     verifier.verify_proof_halt(
         zkvm_proof.clone(),
         transcript,
         zkvm_proof.has_halt(&verifier.vk),
     )?;
+    // print verification statistics like proof size and hash count
     info!("e2e proof stat: {}", zkvm_proof);
-    info!(
-        "hashes count = {}",
-        stat_recorder.into_inner().field_appended_num
-    );
+    #[cfg(debug_assertions)]
+    {
+        info!(
+            "instrumented metrics\n{}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
+        );
+    }
     Ok(())
 }
