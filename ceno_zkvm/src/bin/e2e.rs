@@ -104,12 +104,12 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
-    /// The pcs to use.
-    #[arg(short, long, value_enum, default_value_t = PCS::default())]
+    /// The polynomial-commitment-scheme to use.
+    #[arg(long, value_enum, default_value_t = PCS::default())]
     pcs: PCS,
 
-    /// The field to use.
-    #[arg(short, long, value_enum, default_value_t = FieldType::default())]
+    /// The field to use, e.g. goldilocks
+    #[arg(long, value_enum, default_value_t = FieldType::default())]
     fieldtype: FieldType,
 }
 
