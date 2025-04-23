@@ -295,7 +295,7 @@ fn generate_fixed_traces<E: ExtensionField>(
 }
 
 pub fn generate_witness<E: ExtensionField>(
-    system_config: &mut ConstraintSystemConfig<E>,
+    system_config: &ConstraintSystemConfig<E>,
     emul_result: EmulationResult,
     program: &Program,
     is_mock_proving: bool,
@@ -312,7 +312,7 @@ pub fn generate_witness<E: ExtensionField>(
         .unwrap();
     system_config
         .dummy_config
-        .assign_opcode_circuit(&mut system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
+        .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities(is_mock_proving);
 
@@ -394,7 +394,7 @@ pub fn run_e2e_with_checkpoint<
     };
 
     let program = Arc::new(program);
-    let mut system_config = construct_configs::<E>(program_params);
+    let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
 
     // IO is not used in this program, but it must have a particular size at the moment.
@@ -432,7 +432,7 @@ pub fn run_e2e_with_checkpoint<
                     init_full_mem,
                     platform,
                     hints,
-                    &mut system_config,
+                    &system_config,
                     pk,
                     zkvm_fixed_traces,
                     is_mock_proving,
@@ -451,13 +451,11 @@ pub fn run_e2e_with_checkpoint<
     if let Checkpoint::PrepWitnessGen = checkpoint {
         return (
             None,
-            Box::new(move || {
-                _ = generate_witness(&mut system_config, emul_result, &program, false)
-            }),
+            Box::new(move || _ = generate_witness(&system_config, emul_result, &program, false)),
         );
     }
 
-    let zkvm_witness = generate_witness(&mut system_config, emul_result, &program, is_mock_proving);
+    let zkvm_witness = generate_witness(&system_config, emul_result, &program, is_mock_proving);
 
     // proving
     let prover = ZKVMProver::new(pk);
@@ -498,7 +496,7 @@ pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommi
     init_full_mem: InitMemState,
     platform: Platform,
     hints: Vec<u32>,
-    system_config: &mut ConstraintSystemConfig<E>,
+    system_config: &ConstraintSystemConfig<E>,
     pk: ZKVMProvingKey<E, PCS>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
     is_mock_proving: bool,

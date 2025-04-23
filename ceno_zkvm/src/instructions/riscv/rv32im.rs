@@ -526,7 +526,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
     pub fn assign_opcode_circuit(
         &self,
-        cs: &mut ZKVMConstraintSystem<E>,
+        cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
         steps: GroupedSteps,
     ) -> Result<(), ZKVMError> {

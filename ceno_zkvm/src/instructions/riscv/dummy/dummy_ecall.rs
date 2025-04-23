@@ -11,7 +11,7 @@ use crate::{
     error::ZKVMError,
     expression::{ToExpr, WitIn},
     instructions::{
-        GKRIOPInstruction, Instruction,
+        GKRIOPInstruction, GKRinfo, Instruction,
         riscv::{constants::UInt, insn_base::WriteRD},
     },
     set_val,
@@ -21,10 +21,7 @@ use ff_ext::FieldInto;
 
 use gkr_iop::{
     ProtocolWitnessGenerator,
-    precompiles::{
-        AND_LOOKUPS_PER_ROUND, KeccakLayout, KeccakTrace, RANGE_LOOKUPS_PER_ROUND,
-        XOR_LOOKUPS_PER_ROUND,
-    },
+    precompiles::{AND_LOOKUPS, KeccakLayout, KeccakTrace, RANGE_LOOKUPS, XOR_LOOKUPS},
 };
 
 /// LargeEcallDummy can handle any instruction and produce its effects,
@@ -37,7 +34,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
     type InstructionConfig = LargeEcallConfig<E>;
 
     fn name() -> String {
-        format!("{}_DUMMY", S::NAME)
+        S::NAME.to_owned()
     }
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
         let dummy_insn = DummyConfig::construct_circuit(
@@ -78,45 +75,9 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Temporarily set this to < 24 to avoid cb.num_witin overflow
-        let active_rounds = 24;
-
-        let mut lookups = Vec::with_capacity(
-            active_rounds
-                * (3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND),
-        );
-
-        let mut aux_wits = vec![];
-
-        if S::HAS_LOOKUPS {
-            dbg!(lookups.capacity());
-
-            for round in 0..active_rounds {
-                for i in 0..AND_LOOKUPS_PER_ROUND {
-                    let a = cb.create_witin(|| format!("and_lookup_{round}_{i}_a"));
-                    let b = cb.create_witin(|| format!("and_lookup_{round}_{i}_b"));
-                    let c = cb.create_witin(|| format!("and_lookup_{round}_{i}_c"));
-                    cb.lookup_and_byte(a.into(), b.into(), c.into())?;
-                    lookups.extend(vec![a, b, c]);
-                }
-                for i in 0..XOR_LOOKUPS_PER_ROUND {
-                    let a = cb.create_witin(|| format!("xor_lookup_{round}_{i}_a"));
-                    let b = cb.create_witin(|| format!("xor_lookup_{round}_{i}_b"));
-                    let c = cb.create_witin(|| format!("xor_lookup_{round}_{i}_c"));
-                    cb.lookup_xor_byte(a.into(), b.into(), c.into())?;
-                    lookups.extend(vec![a, b, c]);
-                }
-                for i in 0..RANGE_LOOKUPS_PER_ROUND {
-                    let wit = cb.create_witin(|| format!("range_lookup_{round}_{i}"));
-                    cb.assert_ux::<_, _, 16>(|| "nada", wit.into())?;
-                    lookups.push(wit);
-                }
-            }
-
-            for i in 0..40144 {
-                aux_wits.push(cb.create_witin(|| format!("aux_wit{i}")));
-            }
-        }
+        // Will be filled in by GKR Instruction trait
+        let lookups = vec![];
+        let aux_wits = vec![];
 
         Ok(LargeEcallConfig {
             dummy_insn,
@@ -164,6 +125,57 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> {
     type Layout = KeccakLayout<E>;
 
+    fn gkr_info() -> crate::instructions::GKRinfo {
+        GKRinfo {
+            and_lookups: 3 * AND_LOOKUPS,
+            xor_lookups: 3 * XOR_LOOKUPS,
+            range_lookups: RANGE_LOOKUPS,
+            aux_wits: 40144,
+        }
+    }
+
+    fn construct_circuit_with_gkr_iop(
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
+        let mut partial_config = Self::construct_circuit(cb)?;
+
+        assert!(partial_config.lookups.is_empty());
+        assert!(partial_config.aux_wits.is_empty());
+
+        // TODO: capacity
+        let mut lookups = vec![];
+        let mut aux_wits = vec![];
+
+        for i in 0..AND_LOOKUPS {
+            let a = cb.create_witin(|| format!("and_lookup_{i}_a"));
+            let b = cb.create_witin(|| format!("and_lookup_{i}_b"));
+            let c = cb.create_witin(|| format!("and_lookup_{i}_c"));
+            cb.lookup_and_byte(a.into(), b.into(), c.into())?;
+            lookups.extend(vec![a, b, c]);
+        }
+        for i in 0..XOR_LOOKUPS {
+            let a = cb.create_witin(|| format!("xor_lookup_{i}_a"));
+            let b = cb.create_witin(|| format!("xor_lookup_{i}_b"));
+            let c = cb.create_witin(|| format!("xor_lookup_{i}_c"));
+            cb.lookup_xor_byte(a.into(), b.into(), c.into())?;
+            lookups.extend(vec![a, b, c]);
+        }
+        for i in 0..RANGE_LOOKUPS {
+            let wit = cb.create_witin(|| format!("range_lookup_{i}"));
+            cb.assert_ux::<_, _, 16>(|| "nada", wit.into())?;
+            lookups.push(wit);
+        }
+
+        for i in 0..40144 {
+            aux_wits.push(cb.create_witin(|| format!("aux_wit{i}")));
+        }
+
+        partial_config.lookups = lookups;
+        partial_config.aux_wits = aux_wits;
+
+        Ok(partial_config)
+    }
+
     fn phase1_witness_from_steps(
         layout: &Self::Layout,
         steps: &[StepRecord],
@@ -195,7 +207,6 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
     ) -> Result<(), ZKVMError> {
         Self::assign_instance(config, instance, lk_multiplicity, step)?;
 
-        let active_rounds = 24;
         let mut wit_iter = lookups.iter().map(|f| f.to_canonical_u64());
         let mut var_iter = config.lookups.iter();
 
@@ -206,29 +217,19 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
             let wit = wit_iter.next().unwrap();
             let var = var_iter.next().unwrap();
             set_val!(instance, var, wit);
-            // set_val!(instance, var, 0);
             wit
         };
 
-        for _round in 0..active_rounds {
-            for _i in 0..AND_LOOKUPS_PER_ROUND {
-                lk_multiplicity.lookup_and_byte(pop_arg(), pop_arg());
-                // lk_multiplicity.lookup_and_byte(0, 0);
-                // pop_arg();
-                // pop_arg();
-                pop_arg();
-            }
-            for _i in 0..XOR_LOOKUPS_PER_ROUND {
-                lk_multiplicity.lookup_xor_byte(pop_arg(), pop_arg());
-                // lk_multiplicity.lookup_xor_byte(0, 0);
-                // pop_arg();
-                // pop_arg();
-                pop_arg();
-            }
-            for _i in 0..RANGE_LOOKUPS_PER_ROUND {
-                lk_multiplicity.assert_ux::<16>(pop_arg());
-                // pop_arg();
-            }
+        for _i in 0..AND_LOOKUPS {
+            lk_multiplicity.lookup_and_byte(pop_arg(), pop_arg());
+            pop_arg();
+        }
+        for _i in 0..XOR_LOOKUPS {
+            lk_multiplicity.lookup_xor_byte(pop_arg(), pop_arg());
+            pop_arg();
+        }
+        for _i in 0..RANGE_LOOKUPS {
+            lk_multiplicity.assert_ux::<16>(pop_arg());
         }
 
         dbg!(aux_wits.len());

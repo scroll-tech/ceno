@@ -22,6 +22,8 @@ pub trait SyscallSpec {
     const CODE: u32;
 
     const HAS_LOOKUPS: bool = false;
+
+    const GKR_OUTPUTS: usize = 0;
 }
 
 /// Trace the inputs and effects of a syscall.

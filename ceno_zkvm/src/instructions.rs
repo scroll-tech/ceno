@@ -74,11 +74,39 @@ pub trait Instruction<E: ExtensionField> {
     }
 }
 
+pub struct GKRinfo {
+    pub and_lookups: usize,
+    pub xor_lookups: usize,
+    pub range_lookups: usize,
+    pub aux_wits: usize,
+}
+
+impl GKRinfo {
+    fn lookup_total(&self) -> usize {
+        self.and_lookups + self.xor_lookups + self.range_lookups
+    }
+}
+
 pub trait GKRIOPInstruction<E: ExtensionField>
 where
     Self: Instruction<E>,
 {
     type Layout: ProtocolWitnessGenerator<E> + ProtocolBuilder;
+
+    fn construct_circuit_with_gkr_iop(
+        cb: &mut CircuitBuilder<E>,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
+        unimplemented!();
+    }
+
+    fn phase1_witness_from_steps(
+        layout: &Self::Layout,
+        steps: &[StepRecord],
+    ) -> Vec<Vec<E::BaseField>>;
+
+    // Number of lookup arguments used by this GKR proof
+    fn gkr_info() -> GKRinfo;
+
     fn assign_instance_with_gkr_iop(
         config: &Self::InstructionConfig,
         instance: &mut [E::BaseField],
@@ -88,16 +116,11 @@ where
         aux_wits: &[E::BaseField],
     ) -> Result<(), ZKVMError>;
 
-    fn phase1_witness_from_steps(
-        layout: &Self::Layout,
-        steps: &[StepRecord],
-    ) -> Vec<Vec<E::BaseField>>;
-
     fn assign_instances_with_gkr_iop(
         config: &Self::InstructionConfig,
         num_witin: usize,
         steps: Vec<StepRecord>,
-        gkr_layout: &mut Self::Layout,
+        gkr_layout: &Self::Layout,
     ) -> Result<
         (
             RowMajorMatrix<E::BaseField>,
@@ -124,17 +147,14 @@ where
         );
 
         let (lookups, aux_wits) = {
-            // Keccak-specific
+            // Extract lookups and auxiliary witnesses from GKR protocol
+            // Here we assume that the gkr_witness's last layer is a convenience layer which holds
+            // the output records for all instances; further, we assume that the last ```Self::lookup_count()```
+            // elements of this layer are the lookup arguments.
             let mut lookups = vec![vec![]; steps.len()];
-            for witness in gkr_witness
-                .layers
-                .last()
-                .unwrap()
-                .bases
-                .iter()
-                .skip(100)
-                .cloned()
-            {
+            let last_layer = gkr_witness.layers.last().unwrap().bases.clone();
+            let len = last_layer.len();
+            for witness in last_layer[len - Self::gkr_info().lookup_total()..].iter() {
                 for i in 0..witness.len() {
                     lookups[i].push(witness[i]);
                 }
@@ -144,6 +164,7 @@ where
             let n_layers = gkr_witness.layers.len();
 
             for i in 0..steps.len() {
+                // Omit last layer, which stores outputs and not real witnesses
                 for layer in gkr_witness.layers[..n_layers - 1].iter() {
                     for base in layer.bases.iter() {
                         aux_wits[i].push(base[i]);
@@ -153,8 +174,6 @@ where
 
             (lookups, aux_wits)
         };
-
-        // dbg!(&lookups);
 
         raw_witin_iter
             .zip(

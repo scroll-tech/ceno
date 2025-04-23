@@ -7,13 +7,9 @@ use crate::{
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord};
+use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
 use ff_ext::ExtensionField;
-use gkr_iop::{
-    ProtocolWitnessGenerator,
-    gkr::GKRCircuitWitness,
-    precompiles::{KeccakLayout, KeccakTrace},
-};
+use gkr_iop::{gkr::GKRCircuitWitness, precompiles::KeccakLayout};
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
@@ -264,7 +260,19 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder>::build(params);
         self.keccak_gkr_iop = KeccakGKRIOP { layout, chip };
 
-        self.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>()
+        let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", KeccakSpec::NAME));
+        let mut circuit_builder =
+            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
+        let config =
+            LargeEcallDummy::<E, KeccakSpec>::construct_circuit_with_gkr_iop(&mut circuit_builder)
+                .unwrap();
+        assert!(
+            self.circuit_css
+                .insert(KeccakSpec::NAME.to_owned(), cs)
+                .is_none()
+        );
+
+        config
     }
 
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
@@ -367,7 +375,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_keccakf_circuit(
         &mut self,
         // TODO: do without mutability requirement
-        css: &mut ZKVMConstraintSystem<E>,
+        css: &ZKVMConstraintSystem<E>,
         config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
@@ -380,7 +388,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 config,
                 cs.num_witin as usize,
                 records,
-                &mut css.keccak_gkr_iop.layout,
+                &css.keccak_gkr_iop.layout,
             )?;
         self.keccak_gkr_wit = gkr_witness;
 

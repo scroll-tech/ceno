@@ -409,8 +409,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         };
 
         if let Some(evals) = &proof.gkr_out_evals {
-            let gkr_reads = evals.iter().take(50).collect_vec();
-            let intersection_size = gkr_reads
+            dbg!(&sel_r);
+            // let gkr_reads = evals.iter().take(50).collect_vec();
+            let intersection_size = evals
                 .iter()
                 .counts()
                 .iter()
@@ -419,13 +420,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .r_records_in_evals
                         .iter()
                         .enumerate()
-                        .filter(|(i, x)| **x * eq_r[*i] == ***val)
+                        .filter(|(i, x)| *alpha_read * **val == **x)
                         .count();
                     *count.min(&proof_count)
                 })
                 .sum::<usize>();
             dbg!(&intersection_size);
-            panic!();
+            // panic!();
         }
 
         let computed_evals = [

@@ -481,7 +481,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
             }
 
-            dbg!(sel_r.len());
+            // dbg!(sel_r);
+            // panic!();
 
             let mut sel_w = build_eq_x_r_vec(&rt_w[log2_w_count..]);
             if num_instances < sel_w.len() {

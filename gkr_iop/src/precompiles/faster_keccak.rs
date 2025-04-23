@@ -313,8 +313,6 @@ pub const KECCAK_OUTPUT_SIZE: usize = 50;
 pub const AND_LOOKUPS_PER_ROUND: usize = 200;
 pub const XOR_LOOKUPS_PER_ROUND: usize = 608;
 pub const RANGE_LOOKUPS_PER_ROUND: usize = 290;
-pub const LOOKUPS_PER_ROUND: usize =
-    AND_LOOKUPS_PER_ROUND + XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
 pub const LOOKUP_FELTS_PER_ROUND: usize =
     3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
 
@@ -378,7 +376,9 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
         let mut evals = vec![];
         let mut expr_names = vec![];
 
-        let mut lookup_index = 0;
+        let mut global_and_lookup = 0;
+        let mut global_xor_lookup = 3 * AND_LOOKUPS;
+        let mut global_range_lookup = 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS;
 
         for x in 0..5 {
             for y in 0..5 {
@@ -657,25 +657,21 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                     })
                     .count();
 
-                // TODO: use real challenge
-                let alpha = Constant::Base(1 << 8);
-                let beta = Constant::Base(0);
-
-                // Send all lookups to the final output layer
-                // for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups)
-                //     .flatten()
-                //     .enumerate()
-                // {
-                //     expressions.push(lookup.clone());
                 for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups)
                     .flatten()
                     .enumerate()
                 {
                     expressions.push(lookup);
-                    //expressions.push(lookup.compress(alpha.clone(), beta.clone()));
-                    expr_names.push(format!("{i}th: aha"));
-                    evals.push(lookup_outputs[lookup_index].clone());
-                    lookup_index += 1;
+                    expr_names.push(format!("round {round}: {i}th lookup felt"));
+                    let idx = if i < 3 * AND_LOOKUPS_PER_ROUND {
+                        &mut global_and_lookup
+                    } else if i < 3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND {
+                        &mut global_xor_lookup
+                    } else {
+                        &mut global_range_lookup
+                    };
+                    evals.push(lookup_outputs[*idx].clone());
+                    *idx += 1;
                 }
 
                 chip.add_layer(Layer::new(
@@ -698,7 +694,9 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
             },
         );
 
-        assert!(lookup_index == LOOKUP_FELTS_PER_ROUND * ROUNDS);
+        assert!(global_and_lookup == 3 * AND_LOOKUPS);
+        assert!(global_xor_lookup == 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS);
+        assert!(global_range_lookup == LOOKUP_FELTS_PER_ROUND * ROUNDS);
 
         let (state8, _) = chip.allocate_wits_in_layer::<200, 0>();
 
@@ -1054,17 +1052,24 @@ where
 
             // For temporary convenience, use one extra layer to store the correct outputs
             // of the circuit This is not used during proving
-            let lookups = (0..24)
-                .into_iter()
-                .rev()
-                .flat_map(|i| {
-                    chain!(
-                        and_lookups[i].clone(),
-                        xor_lookups[i].clone(),
-                        range_lookups[i].clone()
-                    )
-                })
-                .collect_vec();
+            let lookups = chain!(
+                (0..ROUNDS)
+                    .into_iter()
+                    .rev()
+                    .map(|i| and_lookups[i].clone())
+                    .flatten(),
+                (0..ROUNDS)
+                    .into_iter()
+                    .rev()
+                    .map(|i| xor_lookups[i].clone())
+                    .flatten(),
+                (0..ROUNDS)
+                    .into_iter()
+                    .rev()
+                    .map(|i| range_lookups[i].clone())
+                    .flatten()
+            )
+            .collect_vec();
 
             push_instance(
                 chain!(
@@ -1140,7 +1145,6 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
             })
             .collect_vec();
 
-        dbg!(&evals);
         let len = output_records1.len();
         assert_eq!(
             len,
