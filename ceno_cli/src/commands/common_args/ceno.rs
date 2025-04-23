@@ -10,7 +10,7 @@ use ceno_zkvm::{
 };
 use clap::Args;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
 use serde::Serialize;
 use std::{
     fs::File,
@@ -176,8 +176,14 @@ impl CenoOptions {
                     self, elf_path,
                 )
             }
-            (PcsKind::Whir, FieldType::Goldilocks) => todo!(),
-            (PcsKind::Whir, FieldType::BabyBear) => todo!(),
+            (PcsKind::Whir, FieldType::Goldilocks) => {
+                keygen_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Whir, FieldType::BabyBear) => {
+                keygen_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+            }
         }
     }
 
@@ -201,8 +207,22 @@ impl CenoOptions {
                 )?
                 .1
             }
-            (PcsKind::Whir, FieldType::Goldilocks) => todo!(),
-            (PcsKind::Whir, FieldType::BabyBear) => todo!(),
+            (PcsKind::Whir, FieldType::Goldilocks) => {
+                run_elf_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
+                    self,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?
+                .1
+            }
+            (PcsKind::Whir, FieldType::BabyBear) => {
+                run_elf_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
+                    self,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?
+                .1
+            }
         };
         runner();
         Ok(())
@@ -222,8 +242,14 @@ impl CenoOptions {
                     self, elf_path,
                 )
             }
-            (PcsKind::Whir, FieldType::Goldilocks) => todo!(),
-            (PcsKind::Whir, FieldType::BabyBear) => todo!(),
+            (PcsKind::Whir, FieldType::Goldilocks) => {
+                prove_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Whir, FieldType::BabyBear) => {
+                prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+            }
         }
     }
 }

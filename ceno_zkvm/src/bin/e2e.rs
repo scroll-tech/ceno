@@ -12,7 +12,7 @@ use ceno_zkvm::{
 };
 use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
 use p3::field::PrimeCharacteristicRing;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
@@ -223,8 +223,30 @@ fn main() {
                 args.vk_file,
             )
         }
-        (PcsKind::Whir, FieldType::Goldilocks) => todo!(),
-        (PcsKind::Whir, FieldType::BabyBear) => todo!(),
+        (PcsKind::Whir, FieldType::Goldilocks) => {
+            run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>>(
+                program,
+                platform,
+                hints,
+                public_io,
+                max_steps,
+                args.max_num_variables,
+                args.proof_file,
+                args.vk_file,
+            )
+        }
+        (PcsKind::Whir, FieldType::BabyBear) => {
+            run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>>(
+                program,
+                platform,
+                hints,
+                public_io,
+                max_steps,
+                args.max_num_variables,
+                args.proof_file,
+                args.vk_file,
+            )
+        }
     }
 }
 
