@@ -22,13 +22,31 @@ use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::PolynomialCommitmentScheme;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 use tracing::info;
 use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
+
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Serialize, Deserialize,
+)]
+pub enum PCS {
+    #[default]
+    Basefold,
+    Whir,
+}
+
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default, Serialize, Deserialize,
+)]
+pub enum FieldType {
+    #[default]
+    GoldilocksExt2,
+    BabyBearExt4,
+}
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,

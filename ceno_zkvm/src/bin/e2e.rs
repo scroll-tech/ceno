@@ -1,12 +1,12 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform, verify},
+    e2e::{Checkpoint, FieldType, PCS, Preset, run_e2e_with_checkpoint, setup_platform, verify},
     scheme::{ZKVMProof, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
     with_panic_hook,
 };
 use clap::Parser;
-use ff_ext::{ExtensionField, GoldilocksExt2};
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use p3::field::PrimeCharacteristicRing;
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
@@ -17,12 +17,39 @@ use tracing_subscriber::{
 };
 use transcript::BasicTranscript as Transcript;
 
+macro_rules! run_and_check {
+    ($program:expr, $platform:expr, $hints:expr, $public_io:expr, $max_steps:expr, $args:expr, $E:ty, $Pcs:ty) => {{
+        let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<$E, $Pcs>(
+            $program,
+            $platform,
+            $hints,
+            $public_io,
+            $max_steps,
+            $args.max_num_variables,
+            Checkpoint::PrepSanityCheck,
+        );
+
+        let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
+        let vk = vk.expect("PrepSanityCheck should yield vk.");
+
+        let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
+        std::fs::write(&$args.proof_file, proof_bytes).unwrap();
+        let vk_bytes = bincode::serialize(&vk).unwrap();
+        std::fs::write(&$args.vk_file, vk_bytes).unwrap();
+
+        let verifier = ZKVMVerifier::new(vk);
+        verify(&zkvm_proof, &verifier).expect("Verification failed");
+        soundness_test(zkvm_proof, &verifier);
+    }};
+}
+
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
         .with_binary()
         .parse_size(s)
         .map(|size| size as u32)
 }
+
 /// Prove the execution of a fixed RISC-V program.
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -76,10 +103,15 @@ struct Args {
 
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
-}
 
-type E = GoldilocksExt2;
-type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    /// The pcs to use.
+    #[arg(short, long, value_enum, default_value_t = PCS::default())]
+    pcs: PCS,
+
+    /// The field to use.
+    #[arg(short, long, value_enum, default_value_t = FieldType::default())]
+    fieldtype: FieldType,
+}
 
 fn main() {
     let args = {
@@ -188,28 +220,30 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<E, Pcs>(
-        program,
-        platform,
-        hints,
-        public_io,
-        max_steps,
-        args.max_num_variables,
-        Checkpoint::PrepSanityCheck,
-    );
-
-    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
-    let vk = vk.expect("PrepSanityCheck should yield vk.");
-
-    let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
-    std::fs::write(&args.proof_file, proof_bytes).unwrap();
-    let vk_bytes = bincode::serialize(&vk).unwrap();
-    std::fs::write(&args.vk_file, vk_bytes).unwrap();
-
-    let verifier = ZKVMVerifier::new(vk);
-    verify(&zkvm_proof, &verifier).expect("Verification failed");
-    // FIXME: it is a bit wired, let us move it else where later.
-    soundness_test(zkvm_proof, &verifier);
+    match (args.pcs, args.fieldtype) {
+        (PCS::Basefold, FieldType::GoldilocksExt2) => run_and_check!(
+            program,
+            platform,
+            hints,
+            public_io,
+            max_steps,
+            args,
+            GoldilocksExt2,
+            Basefold<GoldilocksExt2, BasefoldRSParams>
+        ),
+        (PCS::Basefold, FieldType::BabyBearExt4) => run_and_check!(
+            program,
+            platform,
+            hints,
+            public_io,
+            max_steps,
+            args,
+            BabyBearExt4,
+            Basefold<BabyBearExt4, BasefoldRSParams>
+        ),
+        (PCS::Whir, FieldType::GoldilocksExt2) => todo!(),
+        (PCS::Whir, FieldType::BabyBearExt4) => todo!(),
+    }
 }
 
 fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
