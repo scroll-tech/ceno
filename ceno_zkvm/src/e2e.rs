@@ -19,10 +19,9 @@ use ceno_emul::{
     Tracer, VMState, WORD_SIZE, WordAddr,
 };
 use clap::ValueEnum;
-use ff_ext::{ExtensionField, GoldilocksExt2};
+use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use p3::goldilocks::Goldilocks;
+use mpcs::PolynomialCommitmentScheme;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
@@ -30,9 +29,21 @@ use std::{
 use tracing::info;
 use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
 
-pub type E = GoldilocksExt2;
-pub type B = Goldilocks;
-pub type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+/// The polynomial commitment scheme kind
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum PcsKind {
+    #[default]
+    Basefold,
+    Whir,
+}
+
+/// The field type
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum FieldType {
+    #[default]
+    Goldilocks,
+    BabyBear,
+}
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,
@@ -680,9 +691,9 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
     )
 }
 
-pub fn verify(
-    zkvm_proof: &ZKVMProof<E, Pcs>,
-    verifier: &ZKVMVerifier<E, Pcs>,
+pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Serialize>(
+    zkvm_proof: &ZKVMProof<E, PCS>,
+    verifier: &ZKVMVerifier<E, PCS>,
 ) -> Result<(), ZKVMError> {
     // print verification statistics like proof size and hash count
     let stat_recorder = StatisticRecorder::default();

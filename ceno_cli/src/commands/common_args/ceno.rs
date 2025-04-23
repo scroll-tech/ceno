@@ -4,9 +4,14 @@ use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    scheme::{
+        constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+    },
 };
 use clap::Args;
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
+use serde::Serialize;
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -18,6 +23,13 @@ pub struct CenoOptions {
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
     pub platform: Preset,
+
+    /// The polynomial commitment scheme to use.
+    #[arg(long, value_enum, default_value_t = PcsKind::default())]
+    pcs: PcsKind,
+    /// The field to use, eg. goldilocks
+    #[arg(long, value_enum, default_value_t = FieldType::default())]
+    field: FieldType,
 
     /// The maximum number of steps to execute the program.
     #[arg(long, default_value_t = usize::MAX)]
@@ -153,22 +165,65 @@ impl CenoOptions {
     /// Run keygen the ceno elf file with given options
     pub fn keygen<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let ((_, vk), _) = run_elf_inner(self, elf_path, Checkpoint::Keygen)?;
-        let vk = vk.expect("Keygen should yield vk.");
-        if let Some(out_vk) = self.out_vk.as_ref() {
-            let path = canonicalize_allow_nx(out_vk)?;
-            print_cargo_message("Writing", format_args!("vk to {}", path.display()));
-            let vk_file =
-                File::create(&path).context(format!("failed to create {}", path.display()))?;
-            bincode::serialize_into(vk_file, &vk).context("failed to serialize vk")?;
+        match (self.pcs, self.field) {
+            (PcsKind::Basefold, FieldType::Goldilocks) => {
+                keygen_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Basefold, FieldType::BabyBear) => {
+                keygen_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Whir, FieldType::Goldilocks) => {
+                keygen_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Whir, FieldType::BabyBear) => {
+                keygen_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+            }
         }
-        Ok(())
     }
 
     /// Run the ceno elf file with given options
     pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let (_, runner) = run_elf_inner(self, elf_path, Checkpoint::PrepWitnessGen)?;
+        let runner = match (self.pcs, self.field) {
+            (PcsKind::Basefold, FieldType::Goldilocks) => {
+                run_elf_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
+                    self,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?
+                .1
+            }
+            (PcsKind::Basefold, FieldType::BabyBear) => {
+                run_elf_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
+                    self,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?
+                .1
+            }
+            (PcsKind::Whir, FieldType::Goldilocks) => {
+                run_elf_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
+                    self,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?
+                .1
+            }
+            (PcsKind::Whir, FieldType::BabyBear) => {
+                run_elf_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
+                    self,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?
+                .1
+            }
+        };
         runner();
         Ok(())
     }
@@ -176,48 +231,40 @@ impl CenoOptions {
     /// Run and prove the ceno elf file with given options
     pub fn prove<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-
-        let ((zkvm_proof, vk), _) = run_elf_inner(self, elf_path, Checkpoint::PrepSanityCheck)?;
-        let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
-        let vk = vk.expect("PrepSanityCheck should yield vk.");
-
-        let start = std::time::Instant::now();
-        let verifier = ZKVMVerifier::new(vk);
-        if let Err(e) = verify(&zkvm_proof, &verifier) {
-            bail!("Verification failed: {e:?}");
+        match (self.pcs, self.field) {
+            (PcsKind::Basefold, FieldType::Goldilocks) => {
+                prove_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Basefold, FieldType::BabyBear) => {
+                prove_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Whir, FieldType::Goldilocks) => {
+                prove_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
+                    self, elf_path,
+                )
+            }
+            (PcsKind::Whir, FieldType::BabyBear) => {
+                prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+            }
         }
-        print_cargo_message(
-            "Verified",
-            format_args!("proof in {:.2}s", start.elapsed().as_secs_f32()),
-        );
-
-        if let Some(out_proof) = self.out_proof.as_ref() {
-            let path = canonicalize_allow_nx(out_proof)?;
-            print_cargo_message("Writing", format_args!("proof to {}", path.display()));
-            let proof_file =
-                File::create(&path).context(format!("failed to create {}", path.display()))?;
-            bincode::serialize_into(proof_file, &zkvm_proof)
-                .context("failed to serialize zkvm proof")?;
-        }
-        if let Some(out_vk) = self.out_vk.as_ref() {
-            let path = canonicalize_allow_nx(out_vk)?;
-            print_cargo_message("Writing", format_args!("vk to {}", path.display()));
-            let vk_file =
-                File::create(&path).context(format!("failed to create {}", path.display()))?;
-            bincode::serialize_into(vk_file, &verifier.into_inner())
-                .context("failed to serialize vk")?;
-        }
-        Ok(())
     }
 }
 
-type E2EResult = (IntermediateState<E, Pcs>, Box<dyn FnOnce()>);
+type E2EResult<E, PCS> = (IntermediateState<E, PCS>, Box<dyn FnOnce()>);
 
-fn run_elf_inner<P: AsRef<Path>>(
+fn run_elf_inner<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+    P: AsRef<Path>,
+>(
     options: &CenoOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2EResult> {
+) -> anyhow::Result<E2EResult<E, PCS>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -253,7 +300,7 @@ fn run_elf_inner<P: AsRef<Path>>(
         platform.hints.len()
     );
 
-    Ok(run_e2e_with_checkpoint::<E, Pcs>(
+    Ok(run_e2e_with_checkpoint::<E, PCS>(
         program,
         platform,
         hints,
@@ -262,4 +309,66 @@ fn run_elf_inner<P: AsRef<Path>>(
         options.max_num_variables,
         checkpoint,
     ))
+}
+
+fn keygen_inner<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    P: AsRef<Path>,
+>(
+    args: &CenoOptions,
+    elf_path: P,
+) -> anyhow::Result<()> {
+    let ((_, vk), _) = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::Keygen)?;
+    let vk = vk.expect("Keygen should yield vk.");
+    if let Some(out_vk) = args.out_vk.as_ref() {
+        let path = canonicalize_allow_nx(out_vk)?;
+        print_cargo_message("Writing", format_args!("vk to {}", path.display()));
+        let vk_file =
+            File::create(&path).context(format!("failed to create {}", path.display()))?;
+        bincode::serialize_into(vk_file, &vk).context("failed to serialize vk")?;
+    }
+    Ok(())
+}
+
+fn prove_inner<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    P: AsRef<Path>,
+>(
+    args: &CenoOptions,
+    elf_path: P,
+) -> anyhow::Result<()> {
+    let ((zkvm_proof, vk), _) =
+        run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::PrepSanityCheck)?;
+    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
+    let vk = vk.expect("PrepSanityCheck should yield vk.");
+
+    let start = std::time::Instant::now();
+    let verifier = ZKVMVerifier::new(vk);
+    if let Err(e) = verify(&zkvm_proof, &verifier) {
+        bail!("Verification failed: {e:?}");
+    }
+    print_cargo_message(
+        "Verified",
+        format_args!("proof in {:.2}s", start.elapsed().as_secs_f32()),
+    );
+
+    if let Some(out_proof) = args.out_proof.as_ref() {
+        let path = canonicalize_allow_nx(out_proof)?;
+        print_cargo_message("Writing", format_args!("proof to {}", path.display()));
+        let proof_file =
+            File::create(&path).context(format!("failed to create {}", path.display()))?;
+        bincode::serialize_into(proof_file, &zkvm_proof)
+            .context("failed to serialize zkvm proof")?;
+    }
+    if let Some(out_vk) = args.out_vk.as_ref() {
+        let path = canonicalize_allow_nx(out_vk)?;
+        print_cargo_message("Writing", format_args!("vk to {}", path.display()));
+        let vk_file =
+            File::create(&path).context(format!("failed to create {}", path.display()))?;
+        bincode::serialize_into(vk_file, &verifier.into_inner())
+            .context("failed to serialize vk")?;
+    }
+    Ok(())
 }
