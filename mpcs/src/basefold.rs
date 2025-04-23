@@ -40,6 +40,9 @@ use commit_phase::batch_commit_phase;
 mod encoding;
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
+
 mod query_phase;
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> Basefold<E, Spec>
@@ -642,6 +645,12 @@ where
                             })
                     },
                 )?;
+            #[cfg(debug_assertions)]
+            {
+                Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                    "batch_verify::trivial_verify",
+                );
+            }
         }
 
         if circuit_metas.is_empty() {
@@ -669,6 +678,13 @@ where
         let batch_coeffs =
             &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
 
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "batch_verify::batch_coeffs",
+            );
+        }
+
         let max_num_var = *circuit_num_vars.iter().map(|(_, n)| n).max().unwrap();
         let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
 
@@ -687,6 +703,12 @@ where
                 write_digest_to_transcript(&commits[i], transcript);
             }
         }
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "batch_verify::interleaving_folding",
+            );
+        }
         let final_message = &proof.final_message;
         transcript.append_field_element_exts_iter(proof.final_message.iter().flatten());
 
@@ -695,6 +717,12 @@ where
             Spec::get_number_queries(),
             max_num_var + Spec::get_rate_log(),
         );
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "batch_verify::query_sample",
+            );
+        }
 
         // verify basefold sumcheck + FRI codeword query
         batch_verifier_query_phase::<E, Spec>(
@@ -712,6 +740,13 @@ where
             sumcheck_messages,
             &point_evals,
         );
+
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "batch_verify::queries",
+            );
+        }
 
         Ok(())
     }
