@@ -296,7 +296,7 @@ fn keygen_inner<
     let ((_, vk), _) = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::Keygen)?;
     let vk = vk.expect("Keygen should yield vk.");
     if let Some(out_vk) = args.out_vk.as_ref() {
-        let path = out_vk.canonicalize()?;
+        let path = canonicalize_allow_nx(out_vk)?;
         print_cargo_message("Writing", format_args!("vk to {}", path.display()));
         let vk_file =
             File::create(&path).context(format!("failed to create {}", path.display()))?;
@@ -329,7 +329,7 @@ fn prove_inner<
     );
 
     if let Some(out_proof) = args.out_proof.as_ref() {
-        let path = out_proof.canonicalize()?;
+        let path = canonicalize_allow_nx(out_proof)?;
         print_cargo_message("Writing", format_args!("proof to {}", path.display()));
         let proof_file =
             File::create(&path).context(format!("failed to create {}", path.display()))?;
@@ -337,7 +337,7 @@ fn prove_inner<
             .context("failed to serialize zkvm proof")?;
     }
     if let Some(out_vk) = args.out_vk.as_ref() {
-        let path = out_vk.canonicalize()?;
+        let path = canonicalize_allow_nx(out_vk)?;
         print_cargo_message("Writing", format_args!("vk to {}", path.display()));
         let vk_file =
             File::create(&path).context(format!("failed to create {}", path.display()))?;
