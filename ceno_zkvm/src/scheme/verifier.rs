@@ -1,6 +1,7 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use ark_std::iterable::Iterable;
+use ceno_emul::{KeccakSpec, SyscallSpec};
 use ff_ext::ExtensionField;
 
 use itertools::{Itertools, chain, interleave, izip};
@@ -17,6 +18,7 @@ use witness::next_pow2_instance_padding;
 use crate::{
     error::ZKVMError,
     expression::{Instance, StructuralWitIn},
+    instructions::{GKRIOPInstruction, riscv::dummy::LargeEcallDummy},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
@@ -408,25 +410,51 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             )
         };
 
-        if let Some(evals) = &proof.gkr_out_evals {
-            dbg!(&sel_r);
-            // let gkr_reads = evals.iter().take(50).collect_vec();
-            let intersection_size = evals
+        if name == KeccakSpec::NAME {
+            // TODO: remove clone
+            let gkr_iop = proof
+                .gkr_opcode_proof
+                .clone()
+                .expect("Keccak syscall should contain GKR-IOP proof");
+
+            // Match output_evals with EcallDummy polynomials
+            let mut matches = 0;
+            for (i, gkr_out_eval) in gkr_iop.output_evals.iter().enumerate() {
+                // assert_eq!(
+                //     *gkr_out_eval,
+                //     proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_map(i)],
+                //     "{i}"
+                // );
+                if *gkr_out_eval
+                    == proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_map(i)]
+                {
+                    matches += 1;
+                } else {
+                    dbg!(i);
+                }
+            }
+            dbg!(matches);
+            panic!();
+            // Verify GKR proof
+            let point = Arc::new(input_opening_point.clone());
+            let out_evals = gkr_iop
+                .output_evals
                 .iter()
-                .counts()
-                .iter()
-                .map(|(val, count)| {
-                    let proof_count = proof
-                        .r_records_in_evals
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, x)| *alpha_read * **val == **x)
-                        .count();
-                    *count.min(&proof_count)
+                .map(|eval| gkr_iop::evaluation::PointAndEval {
+                    point: point.clone(),
+                    eval: eval.clone(),
                 })
-                .sum::<usize>();
-            dbg!(&intersection_size);
-            // panic!();
+                .collect_vec();
+
+            gkr_iop
+                .circuit
+                .verify(
+                    gkr_iop.prover_output.gkr_proof.clone(),
+                    &out_evals,
+                    &vec![],
+                    transcript,
+                )
+                .expect("GKR IOP verify failure");
         }
 
         let computed_evals = [

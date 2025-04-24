@@ -112,6 +112,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 
         // Assign memory.
         for ((addr, value, writer), op) in config.mem_writes.iter().zip_eq(&ops.mem_ops) {
+            dbg!(&op.value.before);
             set_val!(instance, value.before, op.value.before as u64);
             set_val!(instance, value.after, op.value.after as u64);
             set_val!(instance, addr, u64::from(op.addr));
@@ -173,7 +174,21 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         partial_config.lookups = lookups;
         partial_config.aux_wits = aux_wits;
 
+        dbg!(&partial_config.mem_writes[0].1.after);
+        dbg!(&partial_config.mem_writes[1].1.before);
+        dbg!(&partial_config.lookups[0]);
+
         Ok(partial_config)
+    }
+
+    fn output_map(i: usize) -> usize {
+        if i < 50 {
+            27 + 6 * i
+        } else if i < 100 {
+            26 + 6 * (i - 50)
+        } else {
+            326 + i - 100
+        }
     }
 
     fn phase1_witness_from_steps(

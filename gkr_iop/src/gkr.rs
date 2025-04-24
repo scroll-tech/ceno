@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::{chain, izip, Itertools};
 use layer::{Layer, LayerWitness};
+use serde::Serialize;
 use subprotocols::{expression::Point, sumcheck::SumcheckProof};
 use transcript::Transcript;
 
@@ -12,7 +13,7 @@ use crate::{
 pub mod layer;
 pub mod mock;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct GKRCircuit {
     pub layers: Vec<Layer>,
 
@@ -27,13 +28,16 @@ pub struct GKRCircuitWitness<E: ExtensionField> {
     pub layers: Vec<LayerWitness<E>>,
 }
 
+#[derive(Clone, Serialize)]
 pub struct GKRProverOutput<E: ExtensionField, Evaluation> {
     pub gkr_proof: GKRProof<E>,
     pub opening_evaluations: Vec<Evaluation>,
 }
 
+#[derive(Clone, Serialize)]
 pub struct GKRProof<E: ExtensionField>(pub Vec<SumcheckProof<E>>);
 
+#[derive(Clone, Debug, Serialize)]
 pub struct Evaluation<E: ExtensionField> {
     pub value: E,
     pub point: Point<E>,

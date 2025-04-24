@@ -99,6 +99,11 @@ where
         unimplemented!();
     }
 
+    // Returns index of `i-th` GKR-IOP output-eval in PCS
+    fn output_map(i: usize) -> usize {
+        unimplemented!();
+    }
+
     fn phase1_witness_from_steps(
         layout: &Self::Layout,
         steps: &[StepRecord],

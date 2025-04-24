@@ -3,6 +3,7 @@ use std::{iter, mem, sync::Arc, vec};
 use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::chain;
+use serde::Serialize;
 use transcript::Transcript;
 
 use crate::{
@@ -40,6 +41,7 @@ where
     num_vars: usize,
 }
 
+#[derive(Clone, Serialize)]
 pub struct SumcheckProof<E: ExtensionField> {
     /// Messages for each round.
     pub univariate_polys: Vec<Vec<Vec<E>>>,

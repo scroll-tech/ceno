@@ -745,6 +745,10 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
             evals,
             expr_names,
         ));
+
+        // TODO: allocate everything
+        chip.allocate_base_opening(0, state8[[0, 0, 0]].clone().1);
+        chip.allocate_base_opening(1, state8[[0, 0, 1]].clone().1);
     }
 }
 
@@ -824,11 +828,20 @@ where
                 }
             };
 
-            let state32 = com_state
+            let mut state32 = com_state
                 .into_iter()
                 // TODO double check assumptions about canonical
                 .map(|e| e.to_canonical_u64())
                 .collect_vec();
+
+            //dbg!(&state32);
+            //panic!();
+
+            // TODO: Need to swap to match front-end encoding?
+            // for i in 0..25 {
+            //     state32.swap(2 * i, 2 * i + 1);
+            // }
+
             let mut state64 = [[0u64; 5]; 5];
             let mut state8 = [[[0u64; 8]; 5]; 5];
 
@@ -1071,6 +1084,7 @@ where
             )
             .collect_vec();
 
+            dbg!(&keccak_output32);
             push_instance(
                 chain!(
                     keccak_output32.into_iter().flatten().flatten(),
@@ -1118,6 +1132,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
     let gkr_witness: GKRCircuitWitness<E> = layout.gkr_witness(&phase1_witness, &vec![]);
 
     let out_evals = {
+        // TODO: hard-coded for two instances, improve
         let point = Arc::new(vec![E::from_u64(29)]);
         let output_records1 = gkr_witness
             .layers

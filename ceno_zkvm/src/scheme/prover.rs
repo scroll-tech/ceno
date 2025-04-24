@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{evaluation::PointAndEval, gkr::GKRCircuitWitness};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    marker::PhantomData,
     sync::Arc,
 };
 
@@ -31,6 +32,7 @@ use crate::{
         riscv::{dummy::LargeEcallDummy, ecall::EcallDummy},
     },
     scheme::{
+        GKROpcodeProof,
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
@@ -481,9 +483,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
             }
 
-            // dbg!(sel_r);
-            // panic!();
-
             let mut sel_w = build_eq_x_r_vec(&rt_w[log2_w_count..]);
             if num_instances < sel_w.len() {
                 sel_w.splice(
@@ -703,23 +702,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(pcs_open_span);
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
-        let gkr_out_evals = if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
-            let mut gkr_iop_pk = gkr_iop_pk.clone();
+        let gkr_opcode_proof = if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
+            let gkr_iop_pk = gkr_iop_pk.clone();
             let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
 
             let point = Arc::new(input_open_point);
-            dbg!(&point);
-            // // let mut prover_transcript = transcript::BasicTranscript::<E>::new(b"protocol");
-            // let out_evals = chain!(
-            //     r_records_in_evals.clone(),
-            //     w_records_in_evals.clone(),
-            //     lk_records_in_evals.clone()
-            // )
-            // .map(|record| PointAndEval {
-            //     point: point.clone(),
-            //     eval: record,
-            // })
-            // .collect_vec();
 
             let out_evals = gkr_wit
                 .layers
@@ -735,11 +722,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
             // out_evals from point and output polynomials instead of *_records which is combined
 
-            let gkr_iop::gkr::GKRProverOutput { gkr_proof, .. } = gkr_circuit
+            let prover_output = gkr_circuit
                 .prove(gkr_wit, &out_evals, &vec![], transcript)
                 .expect("Failed to prove phase");
             // unimplemented!("cannot fully handle GKRIOP component yet")
-            Some(out_evals.into_iter().map(|pae| pae.eval).collect_vec())
+
+            dbg!(&prover_output.opening_evaluations.len());
+            let output_evals = out_evals.into_iter().map(|pae| pae.eval).collect_vec();
+
+            Some(GKROpcodeProof {
+                output_evals,
+                prover_output,
+                circuit: gkr_circuit,
+                _marker: PhantomData::default(),
+            })
         } else {
             None
         };
@@ -761,7 +757,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             wits_commit,
             wits_opening_proof,
             wits_in_evals,
-            gkr_out_evals,
+            gkr_opcode_proof,
         })
     }
 

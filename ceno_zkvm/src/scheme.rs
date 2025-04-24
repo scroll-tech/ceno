@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use gkr_iop::gkr::{Evaluation, GKRCircuit, GKRProverOutput};
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use p3::field::PrimeCharacteristicRing;
@@ -6,6 +7,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::BTreeMap,
     fmt::{self, Debug},
+    marker::PhantomData,
     ops::Div,
 };
 use sumcheck::structs::IOPProverMessage;
@@ -51,7 +53,15 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     pub wits_opening_proof: PCS::Proof,
     pub wits_in_evals: Vec<E>,
 
-    pub gkr_out_evals: Option<Vec<E>>,
+    pub gkr_opcode_proof: Option<GKROpcodeProof<E, PCS>>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct GKROpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    output_evals: Vec<E>,
+    prover_output: GKRProverOutput<E, Evaluation<E>>,
+    circuit: GKRCircuit,
+    _marker: PhantomData<PCS>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
