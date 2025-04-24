@@ -209,7 +209,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                false,
+                Checkpoint::Complete,
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
@@ -222,7 +222,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                true, // FIXME: when whir and babybear is ready
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
@@ -235,7 +235,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                true, // FIXME: when whir and babybear is ready
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
@@ -248,7 +248,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                true, // FIXME: when whir and babybear is ready
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
     }
@@ -267,28 +267,29 @@ fn run_inner<
     max_num_variables: usize,
     proof_file: PathBuf,
     vk_file: PathBuf,
-    skip_verify: bool,
+    checkpoint: Checkpoint,
 ) {
-    let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<E, PCS>(
+    let result = run_e2e_with_checkpoint::<E, PCS>(
         program,
         platform,
         hints,
         public_io,
         max_steps,
         max_num_variables,
-        Checkpoint::PrepSanityCheck,
-        skip_verify,
+        checkpoint,
     );
 
-    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
-    let vk = vk.expect("PrepSanityCheck should yield vk.");
+    let zkvm_proof = result
+        .proof
+        .expect("PrepSanityCheck should yield zkvm_proof.");
+    let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
     fs::write(&proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
-    if !skip_verify {
+    if checkpoint > Checkpoint::PrepVerify {
         let verifier = ZKVMVerifier::new(vk);
         verify(&zkvm_proof, &verifier).expect("Verification failed");
         soundness_test(zkvm_proof, &verifier);

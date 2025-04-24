@@ -190,45 +190,40 @@ impl CenoOptions {
     /// Run the ceno elf file with given options
     pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let runner = match (self.pcs, self.field) {
+        match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                    false,
                 )?
-                .1
+                .next_step()
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                    false,
                 )?
-                .1
+                .next_step()
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                    false,
                 )?
-                .1
+                .next_step()
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                    false,
                 )?
-                .1
+                .next_step()
             }
         };
-        runner();
         Ok(())
     }
 
@@ -238,29 +233,35 @@ impl CenoOptions {
         match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
-                    self, elf_path, false,
+                    self,
+                    elf_path,
+                    Checkpoint::Complete,
                 )
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 prove_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
-                    self, elf_path, true, // FIXME: when whir and babybear is ready
+                    self,
+                    elf_path,
+                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
-                    self, elf_path, true, // FIXME: when whir and babybear is ready
+                    self,
+                    elf_path,
+                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
                 prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
-                    self, elf_path, true, // FIXME: when whir and babybear is ready
+                    self,
+                    elf_path,
+                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
             }
         }
     }
 }
-
-type E2EResult<E, PCS> = (IntermediateState<E, PCS>, Box<dyn FnOnce()>);
 
 fn run_elf_inner<
     E: ExtensionField + LkMultiplicityKey,
@@ -270,8 +271,7 @@ fn run_elf_inner<
     options: &CenoOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-    skip_verify: bool, // FIXME: when whir and babybear is ready
-) -> anyhow::Result<E2EResult<E, PCS>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -315,7 +315,6 @@ fn run_elf_inner<
         options.max_steps,
         options.max_num_variables,
         checkpoint,
-        skip_verify, // FIXME: when whir and babybear is ready
     ))
 }
 
@@ -327,8 +326,8 @@ fn keygen_inner<
     args: &CenoOptions,
     elf_path: P,
 ) -> anyhow::Result<()> {
-    let ((_, vk), _) = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::Keygen, false)?;
-    let vk = vk.expect("Keygen should yield vk.");
+    let result = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::PrepE2EProving)?;
+    let vk = result.vk.expect("Keygen should yield vk.");
     if let Some(out_vk) = args.out_vk.as_ref() {
         let path = canonicalize_allow_nx(out_vk)?;
         print_cargo_message("Writing", format_args!("vk to {}", path.display()));
@@ -346,12 +345,11 @@ fn prove_inner<
 >(
     args: &CenoOptions,
     elf_path: P,
-    skip_verify: bool,
+    checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
-    let ((zkvm_proof, vk), _) =
-        run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::PrepSanityCheck, skip_verify)?;
-    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
-    let vk = vk.expect("PrepSanityCheck should yield vk.");
+    let result = run_elf_inner::<E, PCS, P>(args, elf_path, checkpoint)?;
+    let zkvm_proof = result.proof.expect("PrepSanityCheck should yield proof.");
+    let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk);

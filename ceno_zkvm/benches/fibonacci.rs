@@ -43,18 +43,17 @@ fn fibonacci_prove(c: &mut Criterion) {
         let mut hints = CenoStdin::default();
         let _ = hints.write(&20);
         // estimate proof size data first
-        let ((proof, vk), _) = run_e2e_with_checkpoint::<E, Pcs>(
+        let result = run_e2e_with_checkpoint::<E, Pcs>(
             program.clone(),
             platform.clone(),
             (&hints).into(),
             vec![],
             max_steps,
             MAX_NUM_VARIABLES,
-            Checkpoint::PrepSanityCheck,
-            false,
+            Checkpoint::Complete,
         );
-        let proof = proof.expect("PrepSanityCheck do not provide proof");
-        let vk = vk.expect("PrepSanityCheck do not provide verifier");
+        let proof = result.proof.expect("PrepSanityCheck do not provide proof");
+        let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
 
         println!("e2e proof {}", proof);
         let transcript = BasicTranscript::new(b"riscv");
@@ -81,7 +80,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let (_, run_e2e_proof) = run_e2e_with_checkpoint::<E, Pcs>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             (&hints).into(),
@@ -89,10 +88,9 @@ fn fibonacci_prove(c: &mut Criterion) {
                             max_steps,
                             MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
-                            false,
                         );
                         let instant = std::time::Instant::now();
-                        run_e2e_proof();
+                        result.next_step();
                         let elapsed = instant.elapsed();
                         println!(
                             "Fibonacci::create_proof, max_steps = {}, time = {}",

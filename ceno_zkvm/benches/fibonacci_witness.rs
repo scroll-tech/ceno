@@ -57,7 +57,7 @@ fn fibonacci_witness(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let (_, generate_witness) = run_e2e_with_checkpoint::<E, Pcs>(
+                    let result = run_e2e_with_checkpoint::<E, Pcs>(
                         program.clone(),
                         platform.clone(),
                         (&hints).into(),
@@ -65,10 +65,9 @@ fn fibonacci_witness(c: &mut Criterion) {
                         max_steps,
                         MAX_NUM_VARIABLES,
                         Checkpoint::PrepWitnessGen,
-                        false,
                     );
                     let instant = std::time::Instant::now();
-                    generate_witness();
+                    result.next_step();
                     let elapsed = instant.elapsed();
                     time += elapsed;
                 }

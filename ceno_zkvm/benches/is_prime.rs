@@ -53,7 +53,7 @@ fn is_prime_1(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
 
                     for _ in 0..iters {
-                        let (_, prove) = run_e2e_with_checkpoint::<E, Pcs>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             hints.clone(),
@@ -61,10 +61,9 @@ fn is_prime_1(c: &mut Criterion) {
                             max_steps,
                             MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
-                            false,
                         );
                         let instant = std::time::Instant::now();
-                        prove();
+                        result.next_step();
                         time += instant.elapsed();
                     }
                     time
