@@ -301,12 +301,13 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 .map(|(_, index)| {
                     let (lo, hi) = &base_codeword_lo_hi[*index];
                     let coeff =
-                        <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+                        <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                             vp,
                             cur_num_var
                                 + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
                                 - 1,
-                        )[idx];
+                            idx,
+                        );
                     codeword_fold_with_challenge(&[*lo, *hi], *r, coeff, inv_2)
                 })
                 .sum::<E>();
@@ -355,18 +356,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                         proof,
                     )
                     .expect("verify failed");
-                let coeff =
-                    <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
-                        vp,
-                        log2_strict_usize(n_d_i) - 1,
-                    )[idx];
-                debug_assert_eq!(
-                    <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
-                        vp,
-                        log2_strict_usize(n_d_i) - 1,
-                    )
-                    .len(),
-                    n_d_i >> 1
+                let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
+                    vp,
+                    log2_strict_usize(n_d_i) - 1,
+                    idx,
                 );
                 folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
                 n_d_i >>= 1;
