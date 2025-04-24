@@ -62,8 +62,8 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                             vec![],
                             max_steps,
                             MAX_NUM_VARIABLES,
-                            Checkpoint::PrepE2EProving,
                             SecurityLevel::default(),
+                            Checkpoint::PrepE2EProving,
                         );
                         let instant = std::time::Instant::now();
                         result.next_step();

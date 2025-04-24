@@ -64,8 +64,8 @@ fn fibonacci_witness(c: &mut Criterion) {
                         vec![],
                         max_steps,
                         MAX_NUM_VARIABLES,
-                        Checkpoint::PrepWitnessGen,
                         SecurityLevel::default(),
+                        Checkpoint::PrepWitnessGen,
                     );
                     let instant = std::time::Instant::now();
                     result.next_step();

@@ -320,8 +320,8 @@ fn run_elf_inner<
         public_io,
         options.max_steps,
         options.max_num_variables,
-        checkpoint,
         options.security_level,
+        checkpoint,
     ))
 }
 
