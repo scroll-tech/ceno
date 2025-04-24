@@ -9,7 +9,7 @@ use ceno_zkvm::{
 };
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use mpcs::BasefoldDefault;
+use mpcs::{BasefoldDefault, SecurityLevel};
 
 criterion_group! {
   name = is_prime;
@@ -61,6 +61,7 @@ fn is_prime_1(c: &mut Criterion) {
                             max_steps,
                             MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
+                            SecurityLevel::default(),
                         );
                         let instant = std::time::Instant::now();
                         result.next_step();

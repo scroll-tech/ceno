@@ -12,7 +12,9 @@ use ceno_zkvm::{
 };
 use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
+use mpcs::{
+    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
+};
 use p3::field::PrimeCharacteristicRing;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
@@ -89,6 +91,10 @@ struct Args {
 
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// The security level to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
+    security_level: SecurityLevel,
 }
 
 fn main() {
@@ -209,6 +215,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
                 Checkpoint::Complete,
             )
         }
@@ -222,6 +229,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
                 Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
@@ -235,6 +243,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
                 Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
@@ -248,6 +257,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
                 Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
@@ -267,6 +277,7 @@ fn run_inner<
     max_num_variables: usize,
     proof_file: PathBuf,
     vk_file: PathBuf,
+    security_level: SecurityLevel,
     checkpoint: Checkpoint,
 ) {
     let result = run_e2e_with_checkpoint::<E, PCS>(
@@ -276,6 +287,7 @@ fn run_inner<
         public_io,
         max_steps,
         max_num_variables,
+        security_level,
         checkpoint,
     );
 

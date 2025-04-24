@@ -21,7 +21,7 @@ use ceno_emul::{
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::PolynomialCommitmentScheme;
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
@@ -509,6 +509,7 @@ pub fn run_e2e_with_checkpoint<
     public_io: Vec<u32>,
     max_steps: usize,
     max_num_variables: usize,
+    security_level: SecurityLevel,
     checkpoint: Checkpoint,
 ) -> E2ECheckpointResult<E, PCS> {
     let static_addrs = init_static_addrs(&program);
@@ -547,7 +548,7 @@ pub fn run_e2e_with_checkpoint<
 
     // Keygen
     let start = std::time::Instant::now();
-    let pcs_param = PCS::setup(1 << max_num_variables).expect("Basefold PCS setup");
+    let pcs_param = PCS::setup(1 << max_num_variables, security_level).expect("Basefold PCS setup");
     let (pp, vp) = PCS::trim(pcs_param, 1 << max_num_variables).expect("Basefold trim");
     let pk = system_config
         .zkvm_cs

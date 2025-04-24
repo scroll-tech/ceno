@@ -10,7 +10,9 @@ use ceno_zkvm::{
 };
 use clap::Args;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
+use mpcs::{
+    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
+};
 use serde::Serialize;
 use std::{
     fs::File,
@@ -50,6 +52,10 @@ pub struct CenoOptions {
     /// Public constrained input.
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// The preset configuration to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
+    security_level: SecurityLevel,
 
     /// Stack size in bytes.
     #[arg(long, default_value = "2M", value_parser = parse_size)]
@@ -315,6 +321,7 @@ fn run_elf_inner<
         options.max_steps,
         options.max_num_variables,
         checkpoint,
+        options.security_level,
     ))
 }
 

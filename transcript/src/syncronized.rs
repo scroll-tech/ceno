@@ -2,6 +2,8 @@ use std::array;
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use ff_ext::ExtensionField;
+use p3::challenger::{CanSampleBits, GrindingChallenger};
+use poseidon::challenger::CanObserve;
 
 use crate::{Challenge, Transcript};
 
@@ -95,8 +97,26 @@ impl<E: ExtensionField> Transcript<E> for TranscriptSyncronized<E> {
     fn sample_vec(&mut self, _n: usize) -> Vec<E> {
         unimplemented!()
     }
+}
 
+impl<E: ExtensionField> CanSampleBits<usize> for TranscriptSyncronized<E> {
     fn sample_bits(&mut self, _bits: usize) -> usize {
+        unimplemented!()
+    }
+}
+
+impl<E: ExtensionField> CanObserve<E::BaseField> for TranscriptSyncronized<E> {
+    fn observe(&mut self, _value: E::BaseField) {
+        unimplemented!()
+    }
+}
+
+impl<E: ExtensionField> GrindingChallenger for TranscriptSyncronized<E> {
+    type Witness = E::BaseField;
+    fn grind(&mut self, _bits: usize) -> E::BaseField {
+        unimplemented!()
+    }
+    fn check_witness(&mut self, _bits: usize, _witness: E::BaseField) -> bool {
         unimplemented!()
     }
 }
