@@ -15,6 +15,7 @@ use crate::{
     structs::{TowerProofs, ZKVMVerifyingKey},
 };
 
+pub mod hal;
 pub mod constants;
 pub mod prover;
 pub mod utils;
