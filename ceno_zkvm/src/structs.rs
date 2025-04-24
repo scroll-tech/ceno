@@ -39,8 +39,6 @@ pub struct TowerProofs<E: ExtensionField> {
     pub logup_specs_points: Vec<Vec<Point<E>>>,
 }
 
-
-
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 

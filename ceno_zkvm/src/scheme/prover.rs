@@ -24,14 +24,13 @@ use crate::{
     expression::Instance,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
+        hal::TowerProverSpec,
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
             wit_infer_by_expr,
         },
     },
-    structs::{
-        ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
-    },
+    structs::{ProvingKey, TowerProofs, TowerProver, ZKVMProvingKey, ZKVMWitnesses},
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 
