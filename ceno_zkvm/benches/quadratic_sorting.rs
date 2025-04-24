@@ -63,6 +63,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                             max_steps,
                             MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
+                            false,
                         );
                         let instant = std::time::Instant::now();
                         prove();

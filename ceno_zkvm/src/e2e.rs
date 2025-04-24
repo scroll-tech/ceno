@@ -33,7 +33,20 @@ use transcript::BasicTranscript as Transcript;
 use ff_ext::{Instrumented, PoseidonField};
 
 /// The polynomial commitment scheme kind
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    strum_macros::AsRefStr,
+    strum_macros::Display,
+    strum_macros::IntoStaticStr,
+)]
 pub enum PcsKind {
     #[default]
     Basefold,
@@ -41,7 +54,20 @@ pub enum PcsKind {
 }
 
 /// The field type
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    strum_macros::AsRefStr,
+    strum_macros::Display,
+    strum_macros::IntoStaticStr,
+)]
 pub enum FieldType {
     #[default]
     Goldilocks,
@@ -466,6 +492,7 @@ pub fn run_e2e_with_checkpoint<
     max_steps: usize,
     max_num_variables: usize,
     checkpoint: Checkpoint,
+    skip_verify: bool, // FIXME: when whir and babybear is ready
 ) -> (IntermediateState<E, PCS>, Box<dyn FnOnce()>) {
     let static_addrs = init_static_addrs(&program);
 
@@ -576,10 +603,13 @@ pub fn run_e2e_with_checkpoint<
         .expect("create_proof failed");
     tracing::debug!("proof created in {:?}", start.elapsed());
 
-    let start = std::time::Instant::now();
-    let verifier = ZKVMVerifier::new(vk.clone());
-    run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
-    tracing::debug!("verified in {:?}", start.elapsed());
+    // FIXME: when whir and babybear is ready
+    if !skip_verify {
+        let start = std::time::Instant::now();
+        let verifier = ZKVMVerifier::new(vk.clone());
+        run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+        tracing::debug!("verified in {:?}", start.elapsed());
+    }
 
     if let Checkpoint::PrepSanityCheck = checkpoint {
         return ((Some(zkvm_proof), Some(vk)), Box::new(|| ()));

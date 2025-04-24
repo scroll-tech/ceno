@@ -51,6 +51,7 @@ fn fibonacci_prove(c: &mut Criterion) {
             max_steps,
             MAX_NUM_VARIABLES,
             Checkpoint::PrepSanityCheck,
+            false,
         );
         let proof = proof.expect("PrepSanityCheck do not provide proof");
         let vk = vk.expect("PrepSanityCheck do not provide verifier");
@@ -88,6 +89,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                             max_steps,
                             MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
+                            false,
                         );
                         let instant = std::time::Instant::now();
                         run_e2e_proof();

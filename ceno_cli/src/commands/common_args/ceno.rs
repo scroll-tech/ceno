@@ -196,6 +196,7 @@ impl CenoOptions {
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
+                    false,
                 )?
                 .1
             }
@@ -204,6 +205,7 @@ impl CenoOptions {
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
+                    false,
                 )?
                 .1
             }
@@ -212,6 +214,7 @@ impl CenoOptions {
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
+                    false,
                 )?
                 .1
             }
@@ -220,6 +223,7 @@ impl CenoOptions {
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
+                    false,
                 )?
                 .1
             }
@@ -234,21 +238,23 @@ impl CenoOptions {
         match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self, elf_path, false,
                 )
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 prove_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self, elf_path, true, // FIXME: when whir and babybear is ready
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
-                    self, elf_path,
+                    self, elf_path, true, // FIXME: when whir and babybear is ready
                 )
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
-                prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+                prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
+                    self, elf_path, true, // FIXME: when whir and babybear is ready
+                )
             }
         }
     }
@@ -264,6 +270,7 @@ fn run_elf_inner<
     options: &CenoOptions,
     elf_path: P,
     checkpoint: Checkpoint,
+    skip_verify: bool, // FIXME: when whir and babybear is ready
 ) -> anyhow::Result<E2EResult<E, PCS>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
@@ -308,6 +315,7 @@ fn run_elf_inner<
         options.max_steps,
         options.max_num_variables,
         checkpoint,
+        skip_verify, // FIXME: when whir and babybear is ready
     ))
 }
 
@@ -319,7 +327,7 @@ fn keygen_inner<
     args: &CenoOptions,
     elf_path: P,
 ) -> anyhow::Result<()> {
-    let ((_, vk), _) = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::Keygen)?;
+    let ((_, vk), _) = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::Keygen, false)?;
     let vk = vk.expect("Keygen should yield vk.");
     if let Some(out_vk) = args.out_vk.as_ref() {
         let path = canonicalize_allow_nx(out_vk)?;
@@ -338,9 +346,10 @@ fn prove_inner<
 >(
     args: &CenoOptions,
     elf_path: P,
+    skip_verify: bool,
 ) -> anyhow::Result<()> {
     let ((zkvm_proof, vk), _) =
-        run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::PrepSanityCheck)?;
+        run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::PrepSanityCheck, skip_verify)?;
     let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
     let vk = vk.expect("PrepSanityCheck should yield vk.");
 

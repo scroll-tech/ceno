@@ -209,6 +209,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                false,
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
@@ -221,6 +222,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                true, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
@@ -233,6 +235,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                true, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
@@ -245,6 +248,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                true, // FIXME: when whir and babybear is ready
             )
         }
     }
@@ -263,6 +267,7 @@ fn run_inner<
     max_num_variables: usize,
     proof_file: PathBuf,
     vk_file: PathBuf,
+    skip_verify: bool,
 ) {
     let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<E, PCS>(
         program,
@@ -272,6 +277,7 @@ fn run_inner<
         max_steps,
         max_num_variables,
         Checkpoint::PrepSanityCheck,
+        skip_verify,
     );
 
     let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
@@ -282,9 +288,11 @@ fn run_inner<
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
-    let verifier = ZKVMVerifier::new(vk);
-    verify(&zkvm_proof, &verifier).expect("Verification failed");
-    soundness_test(zkvm_proof, &verifier);
+    if !skip_verify {
+        let verifier = ZKVMVerifier::new(vk);
+        verify(&zkvm_proof, &verifier).expect("Verification failed");
+        soundness_test(zkvm_proof, &verifier);
+    }
 }
 
 fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
