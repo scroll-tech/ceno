@@ -480,7 +480,7 @@ pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVeri
 // (1.) is useful for exposing state which must be further combined with
 // state external to this pipeline (e.g, sanity check in bin/e2e.rs)
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_e2e_with_checkpoint<
     E: ExtensionField + LkMultiplicityKey + serde::de::DeserializeOwned,
     PCS: PolynomialCommitmentScheme<E> + 'static,
