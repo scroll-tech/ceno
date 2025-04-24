@@ -10,7 +10,7 @@ use ceno_zkvm::{
 use criterion::*;
 
 use ff_ext::GoldilocksExt2;
-use mpcs::BasefoldDefault;
+use mpcs::{BasefoldDefault, SecurityLevel};
 use transcript::BasicTranscript;
 
 criterion_group! {
@@ -51,6 +51,7 @@ fn fibonacci_prove(c: &mut Criterion) {
             max_steps,
             MAX_NUM_VARIABLES,
             Checkpoint::PrepSanityCheck,
+            SecurityLevel::default(),
         );
         let proof = proof.expect("PrepSanityCheck do not provide proof");
         let vk = vk.expect("PrepSanityCheck do not provide verifier");
@@ -88,6 +89,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                             max_steps,
                             MAX_NUM_VARIABLES,
                             Checkpoint::PrepE2EProving,
+                            SecurityLevel::default(),
                         );
                         let instant = std::time::Instant::now();
                         run_e2e_proof();

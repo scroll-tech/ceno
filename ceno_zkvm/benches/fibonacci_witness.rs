@@ -9,7 +9,7 @@ use ceno_zkvm::{
 };
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use mpcs::BasefoldDefault;
+use mpcs::{BasefoldDefault, SecurityLevel};
 
 criterion_group! {
   name = fibonacci;
@@ -65,6 +65,7 @@ fn fibonacci_witness(c: &mut Criterion) {
                         max_steps,
                         MAX_NUM_VARIABLES,
                         Checkpoint::PrepWitnessGen,
+                        SecurityLevel::default(),
                     );
                     let instant = std::time::Instant::now();
                     generate_witness();

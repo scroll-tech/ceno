@@ -12,7 +12,9 @@ use ceno_zkvm::{
 };
 use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
+use mpcs::{
+    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
+};
 use p3::field::PrimeCharacteristicRing;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
@@ -89,6 +91,10 @@ struct Args {
 
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// The security level to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
+    security_level: SecurityLevel,
 }
 
 fn main() {
@@ -209,6 +215,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
@@ -221,6 +228,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
@@ -233,6 +241,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
@@ -245,6 +254,7 @@ fn main() {
                 args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
+                args.security_level,
             )
         }
     }
@@ -263,6 +273,7 @@ fn run_inner<
     max_num_variables: usize,
     proof_file: PathBuf,
     vk_file: PathBuf,
+    security_level: SecurityLevel,
 ) {
     let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<E, PCS>(
         program,
@@ -272,6 +283,7 @@ fn run_inner<
         max_steps,
         max_num_variables,
         Checkpoint::PrepSanityCheck,
+        security_level,
     );
 
     let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");

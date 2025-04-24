@@ -1,4 +1,5 @@
 use crate::{
+    PCSFriParam, SecurityLevel,
     basefold::log2_strict_usize,
     util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
 };
@@ -33,6 +34,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(super) params: <Spec::EncodingScheme as EncodingScheme<E>>::PublicParameters,
+    pub(crate) security_level: SecurityLevel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -42,12 +44,32 @@ where
 ))]
 pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
     pub encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    pub(super) security_level: SecurityLevel,
 }
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
     pub fn get_max_message_size_log(&self) -> usize {
         self.encoding_params.get_max_message_size_log()
     }
+}
+
+macro_rules! impl_pcs_fri_param {
+    ($type_name:ident) => {
+        impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for $type_name<E, Spec> {
+            // refer security bit setting from https://github.com/openvm-org/stark-backend/blob/92171baab084b7aaeabc659d0e616cd93a3fdea4/crates/stark-sdk/src/config/fri_params.rs#L59
+            fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
+                match (
+                    &self.security_level,
+                    pow_strategy,
+                    <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
+                    <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
+                ) {
+                    (SecurityLevel::Conjecture100bits, crate::PowStrategy::FriPow, 1, 100) => 16,
+                    _ => unimplemented!(),
+                }
+            }
+        }
+    };
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -57,7 +79,11 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
 ))]
 pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
     pub(super) encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
+    pub(super) security_level: SecurityLevel,
 }
+
+impl_pcs_fri_param!(BasefoldProverParams);
+impl_pcs_fri_param!(BasefoldVerifierParams);
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
 /// used to generate this commitment and for assistant in opening
@@ -279,6 +305,7 @@ where
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // vec![witness, fixed], where fixed is optional
     pub(crate) trivial_proof: Option<TrivialProof<E>>,
+    pub(crate) pow_witness: E::BaseField,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -35,7 +35,7 @@ impl RSCodeSpec for RSCodeDefaultSpec {
     // $$
     // If we take $\lambda=100$ and $\rho=1/2$, then the number of queries is $200$.
     fn get_number_queries() -> usize {
-        200
+        100
     }
 
     fn get_rate_log() -> usize {

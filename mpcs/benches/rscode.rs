@@ -5,6 +5,7 @@ use criterion::*;
 use ff_ext::GoldilocksExt2;
 use mpcs::{
     self, Basefold, BasefoldRSParams, BasefoldSpec, EncodingScheme, PolynomialCommitmentScheme,
+    SecurityLevel,
 };
 
 use rand::rngs::OsRng;
@@ -28,7 +29,7 @@ fn bench_encoding(c: &mut Criterion) {
             let batch_size = 1 << batch_size_log;
             let (pp, _) = {
                 let poly_size = 1 << num_vars;
-                let param = Pcs::setup(poly_size).unwrap();
+                let param = Pcs::setup(poly_size, SecurityLevel::default()).unwrap();
                 Pcs::trim(param, poly_size).unwrap()
             };
 
