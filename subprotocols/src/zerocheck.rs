@@ -262,8 +262,6 @@ where
             base_mle_evals,
         } = proof;
 
-        // dbg!(&exprs);
-
         let (in_point, expected_claims) = univariate_polys.into_iter().enumerate().fold(
             (vec![], sigmas),
             |(mut last_point, last_sigmas), (round, round_msg)| {
@@ -278,7 +276,6 @@ where
                 let sigmas = izip!(&exprs, &inv_of_one_minus_points, round_msg, last_sigmas)
                     .map(|((_, point), inv_of_one_minus_point, poly, last_sigma)| {
                         let len = poly.len() + 1;
-                        // dbg!(&round, &point, &inv_of_one_minus_point, &poly);
                         // last_sigma = (1 - point[round]) * eval_at_0 + point[round] * eval_at_1
                         // eval_at_0 = (last_sigma - point[round] * eval_at_1) * inv(1 - point[round])
                         let eval_at_0 = if !poly.is_empty() {

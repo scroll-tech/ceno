@@ -57,6 +57,7 @@ pub struct ZKVMOpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
 }
 
 #[derive(Clone, Serialize)]
+// WARN/TODO: depends on serde's `arc` feature which might not behave correctly
 pub struct GKROpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     output_evals: Vec<E>,
     prover_output: GKRProverOutput<E, Evaluation<E>>,

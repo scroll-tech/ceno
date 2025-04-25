@@ -276,8 +276,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.lk_expressions.len(),
         );
 
-        // dbg!(&cs.r_expressions);
-
         let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
             ceil_log2(w_counts_per_instance),
@@ -331,8 +329,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             record_evals[1].point.clone(),
             logup_q_evals[0].point.clone(),
         );
-
-        // dbg!(&rt_r, &rt_w, &rt_lk);
 
         let alpha_pow = get_challenge_pows(
             MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
@@ -418,22 +414,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .expect("Keccak syscall should contain GKR-IOP proof");
 
             // Match output_evals with EcallDummy polynomials
-            let mut matches = 0;
             for (i, gkr_out_eval) in gkr_iop.output_evals.iter().enumerate() {
                 assert_eq!(
                     *gkr_out_eval,
-                    proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_map(i)],
+                    proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_evals_map(i)],
                     "{i}"
                 );
-                if *gkr_out_eval
-                    == proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_map(i)]
-                {
-                    matches += 1;
-                } else {
-                    dbg!(i);
-                }
             }
-            dbg!(matches);
             // Verify GKR proof
             let point = Arc::new(input_opening_point.clone());
             let out_evals = gkr_iop
@@ -441,7 +428,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .iter()
                 .map(|eval| gkr_iop::evaluation::PointAndEval {
                     point: point.clone(),
-                    eval: eval.clone(),
+                    eval: *eval,
                 })
                 .collect_vec();
 
@@ -450,7 +437,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .verify(
                     gkr_iop.prover_output.gkr_proof.clone(),
                     &out_evals,
-                    &vec![],
+                    &[],
                     transcript,
                 )
                 .expect("GKR-IOP verify failure");

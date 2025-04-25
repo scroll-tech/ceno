@@ -1,31 +1,22 @@
-use std::{
-    array::from_fn,
-    cmp::Ordering,
-    iter::{once, zip},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{cmp::Ordering, marker::PhantomData, sync::Arc};
 
 use crate::{
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     evaluation::{EvalExpression, PointAndEval},
     gkr::{
-        layer::{Layer, LayerType, LayerWitness},
         GKRCircuitWitness, GKRProverOutput,
+        layer::{Layer, LayerType, LayerWitness},
     },
-    precompiles::utils::{nest, not8_expr, zero_expr, MaskRepresentation},
-    ProtocolBuilder, ProtocolWitnessGenerator,
+    precompiles::utils::{MaskRepresentation, nest, not8_expr, zero_expr},
 };
-use ark_std::log2;
-use ndarray::{range, s, ArrayView, Ix2, Ix3};
+use ndarray::{ArrayView, Ix2, Ix3, s};
 
-use witness::RowMajorMatrix;
-
-use super::utils::{u64s_to_felts, zero_eval, CenoLookup};
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+use super::utils::{CenoLookup, u64s_to_felts, zero_eval};
+use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 
 use ff_ext::{ExtensionField, SmallField};
-use itertools::{chain, iproduct, zip_eq, Itertools};
+use itertools::{Itertools, chain, iproduct, zip_eq};
 use p3_goldilocks::Goldilocks;
 use subprotocols::expression::{Constant, Expression, Witness};
 use tiny_keccak::keccakf;
@@ -38,11 +29,9 @@ pub struct KeccakParams {}
 
 #[derive(Clone, Debug, Default)]
 pub struct KeccakLayout<E> {
-    params: KeccakParams,
-
-    input_columns: Vec<usize>,
-
-    result: Vec<EvalExpression>,
+    _params: KeccakParams,
+    _input_columns: Vec<usize>,
+    _result: Vec<EvalExpression>,
     _marker: PhantomData<E>,
 }
 
@@ -53,7 +42,7 @@ fn expansion_expr<const SIZE: usize>(expansion: &[(usize, Witness)]) -> Expressi
         .fold((0, zero_expr()), |acc, (sz, felt)| {
             (
                 acc.0 + sz,
-                acc.1 * Expression::Const(Constant::Base(1 << sz)) + felt.clone().into(),
+                acc.1 * Expression::Const(Constant::Base(1 << sz)) + (*felt).into(),
             )
         });
 
@@ -195,7 +184,7 @@ impl ConstraintSystem {
     /// This algorithm imposes the following general requirements for
     /// `split_rep`:
     /// - There exists a suffix of `split_rep` which sums to exactly `delta`.
-    /// This suffix can contain several elements.
+    ///   This suffix can contain several elements.
     /// - Chunk sizes are at most 16 (so they can be range-checked) or they are
     ///   exactly equal to 32.
     /// - There exists a prefix of chunks which sums exactly to 32. This must
@@ -233,31 +222,31 @@ impl ConstraintSystem {
         // Lookup ranges
         for (size, elem) in split_rep {
             if *size != 32 {
-                self.lookup_range(elem.clone().into(), *size);
+                self.lookup_range((*elem).into(), *size);
             }
         }
 
         // constrain the fact that rep8 and repX.rotate_left(chunks_rotation) are
         // the same 64 bitstring
-        let mut helper = |rep8: &[Witness], repX: &[(usize, Witness)], chunks_rotation: usize| {
+        let mut helper = |rep8: &[Witness], rep_x: &[(usize, Witness)], chunks_rotation: usize| {
             // Do the same thing for the two 32-bit halves
-            let mut repX = repX.to_owned();
-            repX.rotate_right(chunks_rotation);
+            let mut rep_x = rep_x.to_owned();
+            rep_x.rotate_right(chunks_rotation);
 
             for i in 0..2 {
                 // The respective 4 elements in the byte representation
                 let lhs = rep8[4 * i..4 * (i + 1)]
                     .iter()
-                    .map(|wit| (8, wit.clone()))
+                    .map(|wit| (8, *wit))
                     .collect_vec();
-                let cnt = repX.len() / 2;
-                let rhs = &repX[cnt * i..cnt * (i + 1)];
+                let cnt = rep_x.len() / 2;
+                let rhs = &rep_x[cnt * i..cnt * (i + 1)];
 
                 assert_eq!(rhs.iter().map(|e| e.0).sum::<usize>(), 32);
 
                 self.constrain_reps_eq::<32>(
                     &lhs,
-                    &rhs,
+                    rhs,
                     format!(
                         "rotation internal {label}, round {i}, rot: {chunks_rotation}, delta: {delta}, {:?}",
                         sizes
@@ -338,16 +327,13 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
 
     fn init(params: Self::Params) -> Self {
         Self {
-            params,
+            _params: params,
             ..Default::default()
         }
     }
 
     fn build_commit_phase(&mut self, chip: &mut Chip) {
-        //let input_columns: [usize; KECCAK_INPUT_SIZE] =
-        // chip.allocate_committed_base(); self.input_columns =
-        // input_columns.into();
-        let committed = chip.allocate_committed_base::<{ 50 + 40144 }>();
+        let _ = chip.allocate_committed_base::<{ 50 + 40144 }>();
     }
 
     fn build_gkr_phase(&mut self, chip: &mut Chip) {
@@ -359,7 +345,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
         let [keccak_output32, keccak_input32, lookup_outputs] = [
             KECCAK_OUTPUT_SIZE,
             KECCAK_INPUT_SIZE,
-            //LOOKUPS_PER_ROUND
+            // LOOKUPS_PER_ROUND
             LOOKUP_FELTS_PER_ROUND * ROUNDS,
         ]
         .map(|many| final_outputs_iter.by_ref().take(many).collect_vec());
@@ -381,6 +367,8 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
         let mut global_xor_lookup = 3 * AND_LOOKUPS;
         let mut global_range_lookup = 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS;
 
+        let mut openings = 0;
+
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
@@ -389,9 +377,8 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                         &keccak_output8
                             .slice(s![x, y, 4 * k..4 * (k + 1)])
                             .iter()
-                            .map(|e| (8, e.0.clone()))
-                            .collect_vec()
-                            .as_slice(),
+                            .map(|e| (8, e.0))
+                            .collect_vec(),
                     );
                     expressions.push(expr);
                     evals.push(keccak_output32[evals.len()].clone());
@@ -401,7 +388,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
         }
 
         chip.add_layer(Layer::new(
-            format!("build 32-bit output"),
+            "build 32-bit output".to_string(),
             LayerType::Zerocheck,
             expressions,
             vec![],
@@ -414,7 +401,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
             expr_names,
         ));
 
-        let state8_loop = (0..ROUNDS).rev().into_iter().fold(
+        let state8_loop = (0..ROUNDS).rev().fold(
             keccak_output8.iter().map(|e| e.1.clone()).collect_vec(),
             |round_output, round| {
                 #[allow(non_snake_case)]
@@ -453,7 +440,12 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                 )
                 .collect_vec();
 
-                // TODO: replace ndarrays
+                for wit in &bases {
+                    chip.allocate_base_opening(openings, wit.clone().1);
+                    openings += 1;
+                }
+
+                // TODO: ndarrays can be replaced with normal arrays
 
                 // Input state of the round in 8-bit chunks
                 let state8: ArrayView<(Witness, EvalExpression), Ix3> =
@@ -558,6 +550,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                 let mut rotation_witness = rotation_witness.iter();
 
                 for i in 0..5 {
+                    #[allow(clippy::needless_range_loop)]
                     for j in 0..5 {
                         let arg = theta_output
                             .slice(s!(j, i, ..))
@@ -567,7 +560,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                         let (sizes, _) = rotation_split(ROTATION_CONSTANTS[j][i]);
                         let many = sizes.len();
                         let rep_split = zip_eq(sizes, rotation_witness.by_ref().take(many))
-                            .map(|(sz, (wit, _))| (sz, wit.clone()))
+                            .map(|(sz, (wit, _))| (sz, *wit))
                             .collect_vec();
                         let arg_rotated = rhopi_output
                             .slice(s!((2 * i + 3 * j) % 5, j, ..))
@@ -686,12 +679,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                     expr_names,
                 ));
 
-                state8
-                    .into_iter()
-                    .map(|e| e.1.clone())
-                    .collect_vec()
-                    .try_into()
-                    .unwrap()
+                state8.into_iter().map(|e| e.1.clone()).collect_vec()
             },
         );
 
@@ -713,10 +701,10 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                 for k in 0..2 {
                     // create an expression combining 4 elements of state8 into a single 32-bit felt
                     let expr = expansion_expr::<32>(
-                        &state8
+                        state8
                             .slice(s![x, y, 4 * k..4 * (k + 1)])
                             .iter()
-                            .map(|e| (8, e.0.clone()))
+                            .map(|e| (8, e.0))
                             .collect_vec()
                             .as_slice(),
                     );
@@ -730,14 +718,14 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
         // TODO: eliminate this duplication
         zip_eq(state8.iter(), state8_loop.iter())
             .map(|(e, e_loop)| {
-                expressions.push(e.0.clone().into());
+                expressions.push(e.0.into());
                 evals.push(e_loop.clone());
-                expr_names.push(format!("state8 identity"));
+                expr_names.push("state8 identity".to_string());
             })
             .count();
 
         chip.add_layer(Layer::new(
-            format!("build 32-bit input"),
+            "build 32-bit input".to_string(),
             LayerType::Zerocheck,
             expressions,
             vec![],
@@ -775,7 +763,7 @@ where
         poly
     }
 
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E> {
+    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], _challenges: &[E]) -> GKRCircuitWitness<E> {
         let n_layers = 24 + 2 + 1;
         let mut layer_wits = vec![
             LayerWitness {
@@ -798,6 +786,7 @@ where
             }
 
             let mut com_state = vec![];
+            #[allow(clippy::needless_range_loop)]
             for j in 0..KECCAK_INPUT_SIZE {
                 com_state.push(phase1[j][i]);
             }
@@ -864,9 +853,10 @@ where
                 curr_layer += 1;
             };
 
-            push_instance(state8.clone().into_iter().flatten().flatten().collect_vec());
+            push_instance(state8.into_iter().flatten().flatten().collect_vec());
 
-            for round in 0..24 {
+            #[allow(clippy::needless_range_loop)]
+            for round in 0..ROUNDS {
                 let mut c_aux64 = [[0u64; 5]; 5];
                 let mut c_aux8 = [[[0u64; 8]; 5]; 5];
 
@@ -918,7 +908,7 @@ where
                     }
                 }
 
-                let mut theta_state64 = state64.clone();
+                let mut theta_state64 = state64;
                 let mut theta_state8 = [[[0u64; 8]; 5]; 5];
                 let mut rotation_witness = vec![];
 
@@ -993,7 +983,7 @@ where
                 }
 
                 // Iota step
-                let mut iota_output64 = chi_output64.clone();
+                let mut iota_output64 = chi_output64;
                 let mut iota_output8 = [[[0u64; 8]; 5]; 5];
                 iota_output64[0][0] ^= RC[round];
 
@@ -1018,12 +1008,7 @@ where
                     rhopi_output8.into_iter().flatten().flatten().collect_vec(),
                     nonlinear8.into_iter().flatten().flatten().collect_vec(),
                     chi_output8.into_iter().flatten().flatten().collect_vec(),
-                    iota_output8
-                        .clone()
-                        .into_iter()
-                        .flatten()
-                        .flatten()
-                        .collect_vec(),
+                    iota_output8.into_iter().flatten().flatten().collect_vec(),
                 ];
 
                 push_instance(all_wits64.into_iter().flatten().collect_vec());
@@ -1044,26 +1029,14 @@ where
                 }
             }
 
-            push_instance(state8.clone().into_iter().flatten().flatten().collect_vec());
+            push_instance(state8.into_iter().flatten().flatten().collect_vec());
 
             // For temporary convenience, use one extra layer to store the correct outputs
             // of the circuit This is not used during proving
             let lookups = chain!(
-                (0..ROUNDS)
-                    .into_iter()
-                    .rev()
-                    .map(|i| and_lookups[i].clone())
-                    .flatten(),
-                (0..ROUNDS)
-                    .into_iter()
-                    .rev()
-                    .map(|i| xor_lookups[i].clone())
-                    .flatten(),
-                (0..ROUNDS)
-                    .into_iter()
-                    .rev()
-                    .map(|i| range_lookups[i].clone())
-                    .flatten()
+                (0..ROUNDS).rev().flat_map(|i| and_lookups[i].clone()),
+                (0..ROUNDS).rev().flat_map(|i| xor_lookups[i].clone()),
+                (0..ROUNDS).rev().flat_map(|i| range_lookups[i].clone())
             )
             .collect_vec();
 
@@ -1084,14 +1057,13 @@ where
     }
 }
 
-pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bool) -> () {
+pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bool) {
     let params = KeccakParams {};
     let (layout, chip) = KeccakLayout::build(params);
 
     let mut instances = vec![];
     for state in &states {
-        let state_mask64 =
-            MaskRepresentation::from(state.into_iter().map(|e| (64, *e)).collect_vec());
+        let state_mask64 = MaskRepresentation::from(state.iter().map(|e| (64, *e)).collect_vec());
         let state_mask32 = state_mask64.convert(vec![32; 50]);
 
         instances.push(
@@ -1113,13 +1085,11 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
     // Omit the commit phase1 and phase2.
-    let gkr_witness: GKRCircuitWitness<E> = layout.gkr_witness(&phase1_witness, &vec![]);
+    let gkr_witness: GKRCircuitWitness<E> = layout.gkr_witness(&phase1_witness, &[]);
 
     let out_evals = {
-        let log2_num_instances = (num_instances as usize)
-            .next_power_of_two()
-            .trailing_zeros() as usize;
-        let point = Arc::new(vec![E::from_u64(29); log2_num_instances]);
+        let log2_num_instances = num_instances.next_power_of_two().trailing_zeros();
+        let point = Arc::new(vec![E::from_u64(29); log2_num_instances as usize]);
 
         if test_outputs {
             // Confront outputs with tiny_keccak::keccakf call
@@ -1134,7 +1104,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
             {
                 assert_eq!(base.len(), num_instances);
                 for i in 0..num_instances {
-                    instance_outputs[i].push(base[i].clone());
+                    instance_outputs[i].push(base[i]);
                 }
             }
 
@@ -1145,8 +1115,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
                     state
                         .to_vec()
                         .iter()
-                        .map(|e| vec![*e as u32, (e >> 32) as u32])
-                        .flatten()
+                        .flat_map(|e| vec![*e as u32, (e >> 32) as u32])
                         .map(|e| Goldilocks::from_u64(e as u64))
                         .collect_vec(),
                     instance_outputs[i]
@@ -1162,7 +1131,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
             .iter()
             .map(|base| PointAndEval {
                 point: point.clone(),
-                eval: subprotocols::utils::evaluate_mle_ext(&base, &point),
+                eval: subprotocols::utils::evaluate_mle_ext(base, &point),
             })
             .collect_vec();
 
@@ -1177,7 +1146,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
     let gkr_circuit = chip.gkr_circuit();
     dbg!(&gkr_circuit.layers.len());
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
-        .prove(gkr_witness, &out_evals, &vec![], &mut prover_transcript)
+        .prove(gkr_witness, &out_evals, &[], &mut prover_transcript)
         .expect("Failed to prove phase");
 
     if verify {
@@ -1185,7 +1154,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
             let mut verifier_transcript = BasicTranscript::<E>::new(b"protocol");
 
             gkr_circuit
-                .verify(gkr_proof, &out_evals, &vec![], &mut verifier_transcript)
+                .verify(gkr_proof, &out_evals, &[], &mut verifier_transcript)
                 .expect("GKR verify failed");
 
             // Omit the PCS opening phase.
@@ -1199,13 +1168,32 @@ mod tests {
     use rand::{Rng, SeedableRng};
 
     #[test]
-    fn test_v2_keccakf() {
+    fn test_keccakf() {
         for _ in 0..3 {
-            //let random_u64: u64 = rand::random();
+            // let random_u64: u64 = rand::random();
             // Use seeded rng for debugging convenience
             let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
             let num_instances = 8;
+            let mut states: Vec<[u64; 25]> = vec![];
+
+            for _ in 0..num_instances {
+                states.push(std::array::from_fn(|_| rng.gen()))
+            }
+            run_faster_keccakf(states, true, true);
+        }
+    }
+
+    // TODO: make it pass
+    #[ignore]
+    #[test]
+    fn test_keccakf_nonpow2() {
+        for _ in 0..3 {
+            // let random_u64: u64 = rand::random();
+            // Use seeded rng for debugging convenience
+            let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+            let num_instances = 3;
             let mut states: Vec<[u64; 25]> = vec![];
 
             for _ in 0..num_instances {

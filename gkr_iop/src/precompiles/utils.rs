@@ -9,10 +9,6 @@ pub fn zero_expr() -> Expression {
     Expression::Const(Constant::Base(0))
 }
 
-pub fn one_expr() -> Expression {
-    Expression::Const(Constant::Base(1))
-}
-
 pub fn not8_expr(expr: Expression) -> Expression {
     Expression::Const(Constant::Base(0xFF)) - expr
 }
@@ -21,15 +17,12 @@ pub fn zero_eval() -> EvalExpression {
     EvalExpression::Linear(0, Constant::Base(0), Constant::Base(0))
 }
 
-pub fn nest<E: ExtensionField>(v: &Vec<E::BaseField>) -> Vec<Vec<E::BaseField>> {
-    v.clone().into_iter().map(|e| vec![e]).collect_vec()
+pub fn nest<E: ExtensionField>(v: &[E::BaseField]) -> Vec<Vec<E::BaseField>> {
+    v.iter().map(|e| vec![*e]).collect_vec()
 }
 
 pub fn u64s_to_felts<E: ExtensionField>(words: Vec<u64>) -> Vec<E::BaseField> {
-    words
-        .into_iter()
-        .map(|word| E::BaseField::from_u64(word))
-        .collect()
+    words.into_iter().map(E::BaseField::from_u64).collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,7 +83,7 @@ impl MaskRepresentation {
         for size in sizes {
             let mut mask = 0;
             for i in 0..size {
-                mask += (1 << i) * (bit_iter.next().unwrap() as u64);
+                mask += (1 << i) * bit_iter.next().unwrap();
             }
             masks.push(Mask::new(size, mask));
         }
@@ -116,10 +109,6 @@ impl MaskRepresentation {
     pub fn masks(&self) -> Vec<Mask> {
         self.rep.clone()
     }
-
-    fn len(&self) -> usize {
-        self.rep.len()
-    }
 }
 
 #[derive(Debug)]
@@ -142,32 +131,7 @@ impl IntoIterator for CenoLookup {
     }
 }
 
-impl CenoLookup {
-    // combine lookup arguments with challenges
-    pub fn compress(&self, alpha: Constant, beta: Constant) -> Expression {
-        let [alpha, beta] = [alpha, beta].map(|e| {
-            // assert!(matches!(e, Constant::Challenge(_)));
-            Expression::Const(e)
-        });
-
-        match self {
-            CenoLookup::And(a, b, c) => {
-                a.clone()
-                    + alpha.clone() * b.clone()
-                    + alpha.clone() * alpha.clone() * c.clone()
-                    + beta
-            }
-            CenoLookup::Xor(a, b, c) => {
-                a.clone()
-                    + alpha.clone() * b.clone()
-                    + alpha.clone() * alpha.clone() * c.clone()
-                    + beta
-            }
-            CenoLookup::U16(a) => a.clone() + beta,
-        }
-    }
-}
-
+#[cfg(test)]
 mod tests {
     use crate::precompiles::utils::{Mask, MaskRepresentation};
 

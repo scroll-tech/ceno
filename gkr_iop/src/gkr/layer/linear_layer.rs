@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use subprotocols::{
     error::VerifierError,
     expression::Point,

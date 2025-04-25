@@ -266,12 +266,13 @@ where
             &in_point,
             challenges,
         );
+
         if expected_claim != got_claim {
             return Err(VerifierError::ClaimNotMatch(
                 expr,
                 expected_claim,
                 got_claim,
-                "placeholder".to_string(),
+                expr_names[0].clone(),
             ));
         }
 

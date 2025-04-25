@@ -61,8 +61,8 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 
         let mem_writes = (0..S::MEM_OPS_COUNT)
             .map(|i| {
-                let val_before = cb.create_witin(|| format!("mem_before_{}", i));
-                let val_after = cb.create_witin(|| format!("mem_after_{}", i));
+                let val_before = cb.create_witin(|| format!("mem_before_{}_READ_ARG", i));
+                let val_after = cb.create_witin(|| format!("mem_after_{}_WRITE_ARG", i));
                 let addr = cb.create_witin(|| format!("addr_{}", i));
                 WriteMEM::construct_circuit(
                     cb,
@@ -112,7 +112,6 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 
         // Assign memory.
         for ((addr, value, writer), op) in config.mem_writes.iter().zip_eq(&ops.mem_ops) {
-            dbg!(&op.value.before);
             set_val!(instance, value.before, op.value.before as u64);
             set_val!(instance, value.after, op.value.after as u64);
             set_val!(instance, addr, u64::from(op.addr));
@@ -148,40 +147,40 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         let mut aux_wits = vec![];
 
         for i in 0..AND_LOOKUPS {
-            let a = cb.create_witin(|| format!("and_lookup_{i}_a"));
-            let b = cb.create_witin(|| format!("and_lookup_{i}_b"));
-            let c = cb.create_witin(|| format!("and_lookup_{i}_c"));
+            let a = cb.create_witin(|| format!("and_lookup_{i}_a_LOOKUP_ARG"));
+            let b = cb.create_witin(|| format!("and_lookup_{i}_b_LOOKUP_ARG"));
+            let c = cb.create_witin(|| format!("and_lookup_{i}_c_LOOKUP_ARG"));
             cb.lookup_and_byte(a.into(), b.into(), c.into())?;
             lookups.extend(vec![a, b, c]);
         }
         for i in 0..XOR_LOOKUPS {
-            let a = cb.create_witin(|| format!("xor_lookup_{i}_a"));
-            let b = cb.create_witin(|| format!("xor_lookup_{i}_b"));
-            let c = cb.create_witin(|| format!("xor_lookup_{i}_c"));
+            let a = cb.create_witin(|| format!("xor_lookup_{i}_a_LOOKUP_ARG"));
+            let b = cb.create_witin(|| format!("xor_lookup_{i}_b_LOOKUP_ARG"));
+            let c = cb.create_witin(|| format!("xor_lookup_{i}_c_LOOKUP_ARG"));
             cb.lookup_xor_byte(a.into(), b.into(), c.into())?;
             lookups.extend(vec![a, b, c]);
         }
         for i in 0..RANGE_LOOKUPS {
-            let wit = cb.create_witin(|| format!("range_lookup_{i}"));
+            let wit = cb.create_witin(|| format!("range_lookup_{i}_LOOKUP_ARG"));
             cb.assert_ux::<_, _, 16>(|| "nada", wit.into())?;
             lookups.push(wit);
         }
 
         for i in 0..40144 {
-            aux_wits.push(cb.create_witin(|| format!("aux_wit{i}")));
+            aux_wits.push(cb.create_witin(|| format!("{i}_GKR_WITNESS")));
         }
 
         partial_config.lookups = lookups;
         partial_config.aux_wits = aux_wits;
 
-        dbg!(&partial_config.mem_writes[0].1.after);
-        dbg!(&partial_config.mem_writes[1].1.before);
-        dbg!(&partial_config.lookups[0]);
-
         Ok(partial_config)
     }
 
-    fn output_map(i: usize) -> usize {
+    // TODO: make this nicer without access to config
+    // one alternative: the verifier uses the namespaces
+    // contained in the constraint system to select
+    // gkr-specific fields
+    fn output_evals_map(i: usize) -> usize {
         if i < 50 {
             27 + 6 * i
         } else if i < 100 {
@@ -225,9 +224,6 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         let mut wit_iter = lookups.iter().map(|f| f.to_canonical_u64());
         let mut var_iter = config.lookups.iter();
 
-        dbg!(wit_iter.clone().count());
-        dbg!(var_iter.clone().count());
-
         let mut pop_arg = || -> u64 {
             let wit = wit_iter.next().unwrap();
             let var = var_iter.next().unwrap();
@@ -247,7 +243,6 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
             lk_multiplicity.assert_ux::<16>(pop_arg());
         }
 
-        dbg!(aux_wits.len());
         for (aux_wit_var, aux_wit) in zip_eq(config.aux_wits.iter(), aux_wits) {
             set_val!(instance, aux_wit_var, (aux_wit.to_canonical_u64()));
         }

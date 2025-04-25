@@ -374,12 +374,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     pub fn assign_keccakf_circuit(
         &mut self,
-        // TODO: do without mutability requirement
         css: &ZKVMConstraintSystem<E>,
         config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
-        // Ugly copy paste from assign_opcode_circuit, but we need to use the row major matrix
         let cs = css
             .get_cs(&LargeEcallDummy::<E, KeccakSpec>::name())
             .unwrap();
@@ -391,12 +389,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 &css.keccak_gkr_iop.layout,
             )?;
         self.keccak_gkr_wit = gkr_witness;
-
-        // // Intercept row-major matrix, convert into KeccakTrace and obtain phase1_wit
-        // self.keccak_phase1wit = css
-        //     .keccak_gkr_iop
-        //     .layout
-        //     .phase1_witness(KeccakTrace::from(witness.clone()));
 
         assert!(
             self.witnesses_opcodes

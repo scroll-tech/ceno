@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use itertools::{Itertools, chain, enumerate, izip};
+use itertools::{Itertools, enumerate, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -27,10 +27,7 @@ use witness::{RowMajorMatrix, next_pow2_instance_padding};
 use crate::{
     error::ZKVMError,
     expression::Instance,
-    instructions::{
-        Instruction,
-        riscv::{dummy::LargeEcallDummy, ecall::EcallDummy},
-    },
+    instructions::{Instruction, riscv::dummy::LargeEcallDummy},
     scheme::{
         GKROpcodeProof,
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
@@ -261,6 +258,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(skip_all, name = "create_opcode_proof", fields(circuit_name=name,profiling_2), level="trace")]
     pub fn create_opcode_proof(
         &self,
@@ -455,8 +453,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             rt_tower[..log2_num_instances].to_vec(),
         );
 
-        dbg!(rt_r.len(), rt_w.len(), rt_lk.len());
-
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let alpha_pow = get_challenge_pows(
             MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
@@ -633,10 +629,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 }
         );
 
-        dbg!(r_counts_per_instance);
-        dbg!(w_counts_per_instance);
-        dbg!(lk_counts_per_instance);
-
         let mut main_sel_evals_iter = main_sel_evals.into_iter();
         main_sel_evals_iter.next(); // skip sel_r
         let r_records_in_evals = (0..r_counts_per_instance)
@@ -695,6 +687,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             opening_dur.elapsed(),
         );
         exit_span!(pcs_open_span);
+
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
 
         let gkr_opcode_proof = if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
@@ -711,25 +704,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .iter()
                 .map(|base| PointAndEval {
                     point: point.clone(),
-                    eval: subprotocols::utils::evaluate_mle_ext(&base, &point),
+                    eval: subprotocols::utils::evaluate_mle_ext(base, &point),
                 })
                 .collect_vec();
 
-            // out_evals from point and output polynomials instead of *_records which is combined
-
             let prover_output = gkr_circuit
-                .prove(gkr_wit, &out_evals, &vec![], transcript)
+                .prove(gkr_wit, &out_evals, &[], transcript)
                 .expect("Failed to prove phase");
             // unimplemented!("cannot fully handle GKRIOP component yet")
 
-            dbg!(&prover_output.opening_evaluations.len());
+            let _gkr_open_point = prover_output.opening_evaluations[0].point.clone();
+            // TODO: open polynomials for GKR proof
+
             let output_evals = out_evals.into_iter().map(|pae| pae.eval).collect_vec();
 
             Some(GKROpcodeProof {
                 output_evals,
                 prover_output,
                 circuit: gkr_circuit,
-                _marker: PhantomData::default(),
+                _marker: PhantomData,
             })
         } else {
             None

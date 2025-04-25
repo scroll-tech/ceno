@@ -1,17 +1,17 @@
 use std::{array::from_fn, marker::PhantomData, sync::Arc};
 
 use crate::{
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     evaluation::{EvalExpression, PointAndEval},
     gkr::{
-        layer::{Layer, LayerType, LayerWitness},
         GKRCircuitWitness, GKRProverOutput,
+        layer::{Layer, LayerType, LayerWitness},
     },
-    ProtocolBuilder, ProtocolWitnessGenerator,
 };
 use ff_ext::ExtensionField;
-use itertools::{chain, iproduct, Itertools};
-use p3_field::{extension::BinomialExtensionField, Field, PrimeCharacteristicRing};
+use itertools::{Itertools, chain, iproduct};
+use p3_field::{Field, PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 
 use subprotocols::expression::{Constant, Expression, Witness};
@@ -24,11 +24,11 @@ struct KeccakParams {}
 
 #[derive(Clone, Debug, Default)]
 struct KeccakLayout<E> {
-    params: KeccakParams,
+    _params: KeccakParams,
 
     committed_bits_id: usize,
 
-    result: Vec<EvalExpression>,
+    _result: Vec<EvalExpression>,
     _marker: PhantomData<E>,
 }
 
@@ -82,7 +82,7 @@ fn c<F: Field>(x: usize, z: usize, bits: &[F]) -> F {
 fn c_expr(x: usize, z: usize, state_wits: &[Witness]) -> Expression {
     (0..5)
         .map(|y| Expression::from(state_wits[from_xyz(x, y, z)]))
-        .fold(zero_expr(), |acc, x| xor_expr(acc, x))
+        .fold(zero_expr(), xor_expr)
 }
 
 fn from_xz(x: usize, z: usize) -> usize {
@@ -129,18 +129,6 @@ fn not<F: Field>(a: F) -> F {
     F::ONE - a
 }
 
-fn bools_to_u64s(state: &[bool]) -> Vec<u64> {
-    state
-        .chunks(64)
-        .map(|chunk| {
-            chunk
-                .iter()
-                .enumerate()
-                .fold(0u64, |acc, (i, &bit)| acc | ((bit as u64) << i))
-        })
-        .collect::<Vec<u64>>()
-}
-
 fn u64s_to_bools(state64: &[u64]) -> Vec<bool> {
     state64
         .iter()
@@ -148,14 +136,7 @@ fn u64s_to_bools(state64: &[u64]) -> Vec<bool> {
         .collect()
 }
 
-fn dbg_vec<F: Field>(vec: &Vec<F>) {
-    let res = vec
-        .iter()
-        .map(|f| if *f == F::ZERO { false } else { true })
-        .collect_vec();
-    // println!("{:?}", bools_to_u64s(&res));
-}
-fn chi<F: Field>(bits: &Vec<F>) -> Vec<F> {
+fn chi<F: Field>(bits: &[F]) -> Vec<F> {
     assert_eq!(bits.len(), STATE_SIZE);
 
     bits.iter()
@@ -200,9 +181,9 @@ const RC: [u64; ROUNDS] = [
     0x8000000080008008u64,
 ];
 
-fn iota<F: Field>(bits: &Vec<F>, round_value: u64) -> Vec<F> {
+fn iota<F: Field>(bits: &[F], round_value: u64) -> Vec<F> {
     assert_eq!(bits.len(), STATE_SIZE);
-    let mut ret = bits.clone();
+    let mut ret = bits.to_vec();
 
     let cast = |x| match x {
         0 => F::ZERO,
@@ -247,7 +228,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
 
     fn init(params: Self::Params) -> Self {
         Self {
-            params,
+            _params: params,
             ..Default::default()
         }
     }
@@ -259,126 +240,118 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
     fn build_gkr_phase(&mut self, chip: &mut Chip) {
         let final_output = chip.allocate_output_evals::<STATE_SIZE>();
 
-        (0..ROUNDS)
-            .rev()
-            .into_iter()
-            .fold(final_output, |round_output, round| {
-                let (chi_output, _) = chip.allocate_wits_in_layer::<STATE_SIZE, 0>();
+        (0..ROUNDS).rev().fold(final_output, |round_output, round| {
+            let (chi_output, _) = chip.allocate_wits_in_layer::<STATE_SIZE, 0>();
 
-                let exprs = (0..STATE_SIZE)
-                    .map(|i| iota_expr(&chi_output.iter().map(|e| e.0).collect_vec(), i, RC[round]))
-                    .collect_vec();
+            let exprs = (0..STATE_SIZE)
+                .map(|i| iota_expr(&chi_output.iter().map(|e| e.0).collect_vec(), i, RC[round]))
+                .collect_vec();
 
-                chip.add_layer(Layer::new(
-                    format!("Round {round}: Iota:: compute output"),
-                    LayerType::Zerocheck,
-                    exprs,
-                    vec![],
-                    chi_output.iter().map(|e| e.1.clone()).collect_vec(),
-                    vec![],
-                    round_output.to_vec(),
-                    vec![],
-                ));
+            chip.add_layer(Layer::new(
+                format!("Round {round}: Iota:: compute output"),
+                LayerType::Zerocheck,
+                exprs,
+                vec![],
+                chi_output.iter().map(|e| e.1.clone()).collect_vec(),
+                vec![],
+                round_output.to_vec(),
+                vec![],
+            ));
 
-                let (theta_output, _) = chip.allocate_wits_in_layer::<STATE_SIZE, 0>();
+            let (theta_output, _) = chip.allocate_wits_in_layer::<STATE_SIZE, 0>();
 
-                // Apply the effects of the rho + pi permutation directly o the argument of chi
-                // No need for a separate layer
-                let perm = rho_and_pi_permutation();
-                let permuted = (0..STATE_SIZE)
-                    .map(|i| theta_output[perm[i]].0)
-                    .collect_vec();
+            // Apply the effects of the rho + pi permutation directly o the argument of chi
+            // No need for a separate layer
+            let perm = rho_and_pi_permutation();
+            let permuted = (0..STATE_SIZE)
+                .map(|i| theta_output[perm[i]].0)
+                .collect_vec();
 
-                let exprs = (0..STATE_SIZE)
-                    .map(|i| chi_expr(i, &permuted))
-                    .collect_vec();
+            let exprs = (0..STATE_SIZE)
+                .map(|i| chi_expr(i, &permuted))
+                .collect_vec();
 
-                chip.add_layer(Layer::new(
-                    format!("Round {round}: Chi:: apply rho, pi and chi"),
-                    LayerType::Zerocheck,
-                    exprs,
-                    vec![],
-                    theta_output.iter().map(|e| e.1.clone()).collect_vec(),
-                    vec![],
-                    chi_output.iter().map(|e| e.1.clone()).collect_vec(),
-                    vec![],
-                ));
+            chip.add_layer(Layer::new(
+                format!("Round {round}: Chi:: apply rho, pi and chi"),
+                LayerType::Zerocheck,
+                exprs,
+                vec![],
+                theta_output.iter().map(|e| e.1.clone()).collect_vec(),
+                vec![],
+                chi_output.iter().map(|e| e.1.clone()).collect_vec(),
+                vec![],
+            ));
 
-                let (d_and_state, _) = chip.allocate_wits_in_layer::<{ D_SIZE + STATE_SIZE }, 0>();
-                let (d, state2) = d_and_state.split_at(D_SIZE);
+            let (d_and_state, _) = chip.allocate_wits_in_layer::<{ D_SIZE + STATE_SIZE }, 0>();
+            let (d, state2) = d_and_state.split_at(D_SIZE);
 
-                // Compute post-theta state using original state and D[][] values
-                let exprs = (0..STATE_SIZE)
-                    .map(|i| {
-                        let (x, y, z) = to_xyz(i);
-                        xor_expr(state2[i].0.into(), d[from_xz(x, z)].0.into())
-                    })
-                    .collect_vec();
+            // Compute post-theta state using original state and D[][] values
+            let exprs = (0..STATE_SIZE)
+                .map(|i| {
+                    let (x, _, z) = to_xyz(i);
+                    xor_expr(state2[i].0.into(), d[from_xz(x, z)].0.into())
+                })
+                .collect_vec();
 
-                chip.add_layer(Layer::new(
-                    format!("Round {round}: Theta::compute output"),
-                    LayerType::Zerocheck,
-                    exprs,
-                    vec![],
-                    d_and_state.iter().map(|e| e.1.clone()).collect_vec(),
-                    vec![],
-                    theta_output.iter().map(|e| e.1.clone()).collect_vec(),
-                    vec![],
-                ));
+            chip.add_layer(Layer::new(
+                format!("Round {round}: Theta::compute output"),
+                LayerType::Zerocheck,
+                exprs,
+                vec![],
+                d_and_state.iter().map(|e| e.1.clone()).collect_vec(),
+                vec![],
+                theta_output.iter().map(|e| e.1.clone()).collect_vec(),
+                vec![],
+            ));
 
-                let (c, []) = chip.allocate_wits_in_layer::<{ C_SIZE }, 0>();
+            let (c, []) = chip.allocate_wits_in_layer::<{ C_SIZE }, 0>();
 
-                let c_wits = c.iter().map(|e| e.0.clone()).collect_vec();
-                // Compute D[][] from C[][] values
-                let d_exprs = iproduct!(0..5usize, 0..64usize)
-                    .map(|(x, z)| d_expr(x, z, &c_wits))
-                    .collect_vec();
+            let c_wits = c.iter().map(|e| e.0).collect_vec();
+            // Compute D[][] from C[][] values
+            let d_exprs = iproduct!(0..5usize, 0..64usize)
+                .map(|(x, z)| d_expr(x, z, &c_wits))
+                .collect_vec();
 
-                chip.add_layer(Layer::new(
-                    format!("Round {round}: Theta::compute D[x][z]"),
-                    LayerType::Zerocheck,
-                    d_exprs,
-                    vec![],
-                    c.iter().map(|e| e.1.clone()).collect_vec(),
-                    vec![],
-                    d.iter().map(|e| e.1.clone()).collect_vec(),
-                    vec![],
-                ));
+            chip.add_layer(Layer::new(
+                format!("Round {round}: Theta::compute D[x][z]"),
+                LayerType::Zerocheck,
+                d_exprs,
+                vec![],
+                c.iter().map(|e| e.1.clone()).collect_vec(),
+                vec![],
+                d.iter().map(|e| e.1.clone()).collect_vec(),
+                vec![],
+            ));
 
-                let (state, []) = chip.allocate_wits_in_layer::<STATE_SIZE, 0>();
-                let state_wits = state.iter().map(|s| s.0).collect_vec();
+            let (state, []) = chip.allocate_wits_in_layer::<STATE_SIZE, 0>();
+            let state_wits = state.iter().map(|s| s.0).collect_vec();
 
-                // Compute C[][] from state
-                let c_exprs = iproduct!(0..5usize, 0..64usize)
-                    .map(|(x, z)| c_expr(x, z, &state_wits))
-                    .collect_vec();
+            // Compute C[][] from state
+            let c_exprs = iproduct!(0..5usize, 0..64usize)
+                .map(|(x, z)| c_expr(x, z, &state_wits))
+                .collect_vec();
 
-                // Copy state
-                let id_exprs: Vec<Expression> =
-                    (0..STATE_SIZE).map(|i| state_wits[i].into()).collect_vec();
+            // Copy state
+            let id_exprs: Vec<Expression> =
+                (0..STATE_SIZE).map(|i| state_wits[i].into()).collect_vec();
 
-                chip.add_layer(Layer::new(
-                    format!("Round {round}: Theta::compute C[x][z]"),
-                    LayerType::Zerocheck,
-                    chain!(c_exprs, id_exprs).collect_vec(),
-                    vec![],
-                    state.iter().map(|t| t.1.clone()).collect_vec(),
-                    vec![],
-                    chain!(
-                        c.iter().map(|e| e.1.clone()),
-                        state2.iter().map(|e| e.1.clone())
-                    )
-                    .collect_vec(),
-                    vec![],
-                ));
+            chip.add_layer(Layer::new(
+                format!("Round {round}: Theta::compute C[x][z]"),
+                LayerType::Zerocheck,
+                chain!(c_exprs, id_exprs).collect_vec(),
+                vec![],
+                state.iter().map(|t| t.1.clone()).collect_vec(),
+                vec![],
+                chain!(
+                    c.iter().map(|e| e.1.clone()),
+                    state2.iter().map(|e| e.1.clone())
+                )
+                .collect_vec(),
+                vec![],
+            ));
 
-                state
-                    .iter()
-                    .map(|e| e.1.clone())
-                    .collect_vec()
-                    .try_into()
-                    .unwrap()
-            });
+            state.iter().map(|e| e.1.clone()).collect_vec()
+        });
 
         // Skip base opening allocation
     }
@@ -404,14 +377,15 @@ where
         res
     }
 
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E> {
+    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], _challenges: &[E]) -> GKRCircuitWitness<E> {
         let mut bits = phase1[self.committed_bits_id].clone();
 
         let n_layers = 100;
         let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers + 1);
 
-        for i in 0..24 {
-            if i == 0 {
+        #[allow(clippy::needless_range_loop)]
+        for round in 0..24 {
+            if round == 0 {
                 layer_wits.push(LayerWitness::new(
                     bits.clone().into_iter().map(|b| vec![b]).collect_vec(),
                     vec![],
@@ -458,8 +432,8 @@ where
                 vec![],
             ));
 
-            if i < 23 {
-                bits = iota(&bits, RC[i]);
+            if round < 23 {
+                bits = iota(&bits, RC[round]);
                 layer_wits.push(LayerWitness::new(
                     bits.clone().into_iter().map(|b| vec![b]).collect_vec(),
                     vec![],
@@ -495,7 +469,7 @@ fn rho<T: Copy + Default>(state: &[T]) -> Vec<T> {
         (x, y) = (y, (2 * x + 3 * y) % Y);
     }
 
-    return ret.to_vec();
+    ret.to_vec()
 }
 
 // https://github.com/0xPolygonHermez/zkevm-prover/blob/main/tools/sm/keccak_f/keccak_pi.cpp
@@ -504,11 +478,10 @@ fn pi<T: Copy + Default>(state: &[T]) -> Vec<T> {
     let mut ret = [T::default(); STATE_SIZE];
 
     iproduct!(0..X, 0..Y, 0..Z)
-        .into_iter()
         .map(|(x, y, z)| ret[from_xyz(x, y, z)] = state[from_xyz((x + 3 * y) % X, x, z)])
         .count();
 
-    return ret.to_vec();
+    ret.to_vec()
 }
 
 // Combines rho and pi steps into a single permutation
@@ -517,7 +490,7 @@ fn rho_and_pi_permutation() -> Vec<usize> {
     pi(&rho(&perm))
 }
 
-pub fn run_keccakf(state: [u64; 25], verify: bool, test: bool) -> () {
+pub fn run_keccakf(state: [u64; 25], verify: bool, test: bool) {
     let params = KeccakParams {};
     let (layout, chip) = KeccakLayout::build(params);
     let gkr_circuit = chip.gkr_circuit();
@@ -530,7 +503,7 @@ pub fn run_keccakf(state: [u64; 25], verify: bool, test: bool) -> () {
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
     // Omit the commit phase1 and phase2.
-    let gkr_witness = layout.gkr_witness(&phase1_witness, &vec![]);
+    let gkr_witness = layout.gkr_witness(&phase1_witness, &[]);
 
     let out_evals = {
         let point = Arc::new(vec![]);
@@ -546,7 +519,7 @@ pub fn run_keccakf(state: [u64; 25], verify: bool, test: bool) -> () {
         let expected_result_manual = iota(&last_witness, RC[23]);
 
         if test {
-            let mut state = state.clone();
+            let mut state = state;
             keccakf(&mut state);
             let state = u64s_to_bools(&state)
                 .into_iter()
@@ -565,7 +538,7 @@ pub fn run_keccakf(state: [u64; 25], verify: bool, test: bool) -> () {
     };
 
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
-        .prove(gkr_witness, &out_evals, &vec![], &mut prover_transcript)
+        .prove(gkr_witness, &out_evals, &[], &mut prover_transcript)
         .expect("Failed to prove phase");
 
     if verify {
@@ -573,7 +546,7 @@ pub fn run_keccakf(state: [u64; 25], verify: bool, test: bool) -> () {
             let mut verifier_transcript = BasicTranscript::<E>::new(b"protocol");
 
             gkr_circuit
-                .verify(gkr_proof, &out_evals, &vec![], &mut verifier_transcript)
+                .verify(gkr_proof, &out_evals, &[], &mut verifier_transcript)
                 .expect("GKR verify failed");
 
             // Omit the PCS opening phase.

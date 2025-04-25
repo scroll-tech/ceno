@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use itertools::{chain, izip, Itertools};
+use itertools::{Itertools, chain, izip};
 use layer::{Layer, LayerWitness};
 use serde::Serialize;
 use subprotocols::{expression::Point, sumcheck::SumcheckProof};

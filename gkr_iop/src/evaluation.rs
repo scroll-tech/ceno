@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec_sequential;
 use serde::Serialize;
 use subprotocols::expression::{Constant, Point};

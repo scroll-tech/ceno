@@ -1,6 +1,5 @@
 use crate::{
     error::ZKVMError,
-    instructions::riscv::dummy::LargeEcallDummy,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;

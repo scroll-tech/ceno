@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use rand::rngs::OsRng;
 use subprotocols::{
     expression::{Expression, VectorType},
@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::{evaluation::EvalExpression, utils::SliceIterator};
 
-use super::{layer::LayerType, GKRCircuit, GKRCircuitWitness};
+use super::{GKRCircuit, GKRCircuitWitness, layer::LayerType};
 
 pub struct MockProver<E: ExtensionField>(PhantomData<E>);
 

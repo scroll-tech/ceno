@@ -23,7 +23,7 @@ gkr_iop = { path = "../gkr_iop" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 p3 = { path = "../p3" }
-subprotocols = {path = "../subprotocols"}
+subprotocols = { path = "../subprotocols" }
 sumcheck = { version = "0", path = "../sumcheck" }
 transcript = { path = "../transcript" }
 witness = { path = "../witness" }

@@ -2,18 +2,18 @@ use std::{marker::PhantomData, mem, sync::Arc};
 
 use ff_ext::ExtensionField;
 use gkr_iop::{
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     evaluation::{EvalExpression, PointAndEval},
     gkr::{
-        layer::{Layer, LayerType, LayerWitness},
         GKRCircuitWitness, GKRProverOutput,
+        layer::{Layer, LayerType, LayerWitness},
     },
-    ProtocolBuilder, ProtocolWitnessGenerator,
 };
-use itertools::{izip, Itertools};
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+use itertools::{Itertools, izip};
+use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
-use rand::{rngs::OsRng, Rng};
+use rand::{Rng, rngs::OsRng};
 use subprotocols::expression::{Constant, Expression};
 use transcript::{BasicTranscript, Transcript};
 
@@ -87,20 +87,17 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
                     num_1.0.into(),
                 ];
                 let (in_bases, in_exts) = if i == height - 1 {
-                    (
-                        vec![num_0.1.clone(), num_1.1.clone()],
-                        vec![den_0.1.clone(), den_1.1.clone()],
-                    )
+                    (vec![num_0.1.clone(), num_1.1.clone()], vec![
+                        den_0.1.clone(),
+                        den_1.1.clone(),
+                    ])
                 } else {
-                    (
-                        vec![],
-                        vec![
-                            den_0.1.clone(),
-                            den_1.1.clone(),
-                            num_0.1.clone(),
-                            num_1.1.clone(),
-                        ],
-                    )
+                    (vec![], vec![
+                        den_0.1.clone(),
+                        den_1.1.clone(),
+                        num_0.1.clone(),
+                        num_1.1.clone(),
+                    ])
                 };
                 chip.add_layer(Layer::new(
                     format!("Tower_layer_{}", i),

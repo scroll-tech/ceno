@@ -57,10 +57,9 @@ impl Chip {
 // -> [EvalExpression; N]
     {
         self.n_evaluations += N;
-        //array::from_fn(|i| EvalExpression::Single(i + self.n_evaluations - N))
+        // array::from_fn(|i| EvalExpression::Single(i + self.n_evaluations - N))
         // TODO: hotfix to avoid stack overflow, fix later
         (0..N)
-            .into_iter()
             .map(|i| EvalExpression::Single(i + self.n_evaluations - N))
             .collect_vec()
     }
