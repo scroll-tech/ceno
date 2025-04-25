@@ -661,11 +661,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 }
         );
 
-        // if let Some(gkr_iop_pk) = gkr_iop_pk {
-        //     let mut gkr_iop_pk = gkr_iop_pk.clone();
-        //     unimplemented!("cannot fully handle GKRIOP component yet")
-        // }
-
         let input_open_point = main_sel_sumcheck_proofs.point.clone();
         assert!(input_open_point.len() == log2_num_instances);
         exit_span!(main_sel_span);

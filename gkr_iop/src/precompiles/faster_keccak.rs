@@ -16,6 +16,7 @@ use crate::{
     precompiles::utils::{nest, not8_expr, zero_expr, MaskRepresentation},
     ProtocolBuilder, ProtocolWitnessGenerator,
 };
+use ark_std::log2;
 use ndarray::{range, s, ArrayView, Ix2, Ix3};
 
 use witness::RowMajorMatrix;
@@ -828,19 +829,11 @@ where
                 }
             };
 
-            let mut state32 = com_state
+            let state32 = com_state
                 .into_iter()
                 // TODO double check assumptions about canonical
                 .map(|e| e.to_canonical_u64())
                 .collect_vec();
-
-            //dbg!(&state32);
-            //panic!();
-
-            // TODO: Need to swap to match front-end encoding?
-            // for i in 0..25 {
-            //     state32.swap(2 * i, 2 * i + 1);
-            // }
 
             let mut state64 = [[0u64; 5]; 5];
             let mut state8 = [[[0u64; 8]; 5]; 5];
@@ -1033,16 +1026,6 @@ where
                         .collect_vec(),
                 ];
 
-                // let sizes = all_wits64.iter().map(|e| e.len()).collect_vec();
-                // dbg!(&sizes);
-
-                // let all_wits = nest::<E>(
-                //     &all_wits64
-                //         .into_iter()
-                //         .flat_map(|v| u64s_to_felts::<E>(v))
-                //         .collect_vec(),
-                // );
-
                 push_instance(all_wits64.into_iter().flatten().collect_vec());
 
                 state8 = iota_output8;
@@ -1084,7 +1067,6 @@ where
             )
             .collect_vec();
 
-            dbg!(&keccak_output32);
             push_instance(
                 chain!(
                     keccak_output32.into_iter().flatten().flatten(),
@@ -1102,14 +1084,14 @@ where
     }
 }
 
-pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> () {
+pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bool) -> () {
     let params = KeccakParams {};
     let (layout, chip) = KeccakLayout::build(params);
 
     let mut instances = vec![];
-    for state in states {
+    for state in &states {
         let state_mask64 =
-            MaskRepresentation::from(state.into_iter().map(|e| (64, e)).collect_vec());
+            MaskRepresentation::from(state.into_iter().map(|e| (64, *e)).collect_vec());
         let state_mask32 = state_mask64.convert(vec![32; 50]);
 
         instances.push(
@@ -1123,8 +1105,10 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
         );
     }
 
-    dbg!(instances.len());
-    let phase1_witness = layout.phase1_witness(KeccakTrace { instances });
+    let num_instances = instances.len();
+    let phase1_witness = layout.phase1_witness(KeccakTrace {
+        instances: instances.clone(),
+    });
 
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
@@ -1132,49 +1116,62 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
     let gkr_witness: GKRCircuitWitness<E> = layout.gkr_witness(&phase1_witness, &vec![]);
 
     let out_evals = {
-        // TODO: hard-coded for two instances, improve
-        let point = Arc::new(vec![E::from_u64(29)]);
-        let output_records1 = gkr_witness
-            .layers
-            .last()
-            .unwrap()
-            .bases
-            //.clone()
-            .iter()
-            .map(|base| base[0].clone())
-            .collect_vec();
-        let output_records2 = gkr_witness
-            .layers
-            .last()
-            .unwrap()
-            .bases
-            //.clone()
-            .iter()
-            .map(|base| base[1].clone())
-            .collect_vec();
+        let log2_num_instances = (num_instances as usize)
+            .next_power_of_two()
+            .trailing_zeros() as usize;
+        let point = Arc::new(vec![E::from_u64(29); log2_num_instances]);
 
-        let evals = zip(&output_records1, &output_records2)
-            .map(|(p0, p1)| {
-                let poly = vec![p0.clone(), p1.clone()];
-                subprotocols::utils::evaluate_mle_ext(&poly, &point)
+        if test_outputs {
+            // Confront outputs with tiny_keccak::keccakf call
+            let mut instance_outputs = vec![vec![]; num_instances];
+            for base in gkr_witness
+                .layers
+                .last()
+                .unwrap()
+                .bases
+                .iter()
+                .take(KECCAK_OUTPUT_SIZE)
+            {
+                assert_eq!(base.len(), num_instances);
+                for i in 0..num_instances {
+                    instance_outputs[i].push(base[i].clone());
+                }
+            }
+
+            for i in 0..num_instances {
+                let mut state = states[i];
+                keccakf(&mut state);
+                assert_eq!(
+                    state
+                        .to_vec()
+                        .iter()
+                        .map(|e| vec![*e as u32, (e >> 32) as u32])
+                        .flatten()
+                        .map(|e| Goldilocks::from_u64(e as u64))
+                        .collect_vec(),
+                    instance_outputs[i]
+                );
+            }
+        }
+
+        let out_evals = gkr_witness
+            .layers
+            .last()
+            .unwrap()
+            .bases
+            .iter()
+            .map(|base| PointAndEval {
+                point: point.clone(),
+                eval: subprotocols::utils::evaluate_mle_ext(&base, &point),
             })
             .collect_vec();
 
-        let len = output_records1.len();
         assert_eq!(
-            len,
+            out_evals.len(),
             KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS
         );
-        assert!(output_records1.len() == output_records2.len());
 
-        evals
-            .into_iter()
-            .map(|elem| PointAndEval {
-                point: point.clone(),
-                eval: elem,
-                //eval: E::ONE,
-            })
-            .collect_vec()
+        out_evals
     };
 
     let gkr_circuit = chip.gkr_circuit();
@@ -1185,7 +1182,6 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test: bool) -> (
 
     if verify {
         {
-            dbg!("sanity");
             let mut verifier_transcript = BasicTranscript::<E>::new(b"protocol");
 
             gkr_circuit
@@ -1205,13 +1201,17 @@ mod tests {
     #[test]
     fn test_v2_keccakf() {
         for _ in 0..3 {
-            let random_u64: u64 = rand::random();
+            //let random_u64: u64 = rand::random();
             // Use seeded rng for debugging convenience
             let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-            let state1: [u64; 25] = std::array::from_fn(|_| rng.gen());
-            let state2: [u64; 25] = std::array::from_fn(|_| rng.gen());
-            // let state = [0; 50];
-            run_faster_keccakf(vec![state1, state2], true, true);
+
+            let num_instances = 8;
+            let mut states: Vec<[u64; 25]> = vec![];
+
+            for _ in 0..num_instances {
+                states.push(std::array::from_fn(|_| rng.gen()))
+            }
+            run_faster_keccakf(states, true, true);
         }
     }
 }

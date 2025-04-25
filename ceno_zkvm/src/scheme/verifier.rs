@@ -420,11 +420,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             // Match output_evals with EcallDummy polynomials
             let mut matches = 0;
             for (i, gkr_out_eval) in gkr_iop.output_evals.iter().enumerate() {
-                // assert_eq!(
-                //     *gkr_out_eval,
-                //     proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_map(i)],
-                //     "{i}"
-                // );
+                assert_eq!(
+                    *gkr_out_eval,
+                    proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_map(i)],
+                    "{i}"
+                );
                 if *gkr_out_eval
                     == proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_map(i)]
                 {
@@ -434,7 +434,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
             }
             dbg!(matches);
-            panic!();
             // Verify GKR proof
             let point = Arc::new(input_opening_point.clone());
             let out_evals = gkr_iop
@@ -454,7 +453,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &vec![],
                     transcript,
                 )
-                .expect("GKR IOP verify failure");
+                .expect("GKR-IOP verify failure");
         }
 
         let computed_evals = [
