@@ -593,8 +593,8 @@ pub fn run_e2e_with_checkpoint<
             proof: None,
             vk: Some(vk),
             next_step: Some(Box::new(move || {
-                // When we run e2e and halt before generate_witness, this implies we are going to 
-                // benchmark generate_witness performance. So we skip mock proving check on 
+                // When we run e2e and halt before generate_witness, this implies we are going to
+                // benchmark generate_witness performance. So we skip mock proving check on
                 // `generate_witness` to avoid it affecting the benchmark result.
                 _ = generate_witness(&system_config, emul_result, &program, false)
             })),
