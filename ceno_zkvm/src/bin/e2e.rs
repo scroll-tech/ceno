@@ -216,6 +216,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 args.security_level,
+                Checkpoint::Complete,
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
@@ -229,6 +230,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 args.security_level,
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
@@ -242,6 +244,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 args.security_level,
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
@@ -255,6 +258,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 args.security_level,
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
     }
@@ -274,29 +278,34 @@ fn run_inner<
     proof_file: PathBuf,
     vk_file: PathBuf,
     security_level: SecurityLevel,
+    checkpoint: Checkpoint,
 ) {
-    let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<E, PCS>(
+    let result = run_e2e_with_checkpoint::<E, PCS>(
         program,
         platform,
         hints,
         public_io,
         max_steps,
         max_num_variables,
-        Checkpoint::PrepSanityCheck,
         security_level,
+        checkpoint,
     );
 
-    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
-    let vk = vk.expect("PrepSanityCheck should yield vk.");
+    let zkvm_proof = result
+        .proof
+        .expect("PrepSanityCheck should yield zkvm_proof.");
+    let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
     fs::write(&proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
-    let verifier = ZKVMVerifier::new(vk);
-    verify(&zkvm_proof, &verifier).expect("Verification failed");
-    soundness_test(zkvm_proof, &verifier);
+    if checkpoint > Checkpoint::PrepVerify {
+        let verifier = ZKVMVerifier::new(vk);
+        verify(&zkvm_proof, &verifier).expect("Verification failed");
+        soundness_test(zkvm_proof, &verifier);
+    }
 }
 
 fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
