@@ -1,10 +1,12 @@
 use crate::{expression::Expression, structs::TowerProofs};
 use ff_ext::ExtensionField;
+use mpcs::Point;
+use transcript::Transcript;
 
 pub trait ProverBackend {
     type E: ExtensionField;
     type Matrix: Send + Sync + Clone;
-    type PcsData: Send + Sync;
+    type MmcsProverData;
     type MultilinearPoly: Send + Sync;
 }
 
@@ -15,7 +17,7 @@ where
 }
 
 pub struct TowerProverSpec<PB: ProverBackend> {
-    pub layers: Vec<Vec<PB::MultilinearPoly>>,
+    pub witness: Vec<Vec<PB::MultilinearPoly>>,
 }
 
 pub trait TowerProver<PB: ProverBackend> {
@@ -27,15 +29,23 @@ pub trait TowerProver<PB: ProverBackend> {
         read_exprs: &[Expression<PB::E>],
         write_exprs: &[Expression<PB::E>],
         lookup_exprs: &[Expression<PB::E>],
-    ) -> (TowerProverSpec<PB>, TowerProverSpec<PB>);
+    ) -> (Vec<TowerProverSpec<PB>>, TowerProverSpec<PB>);
 
     fn prove(
         &self,
-        prod_specs: TowerProverSpec<PB>,
-        logup_specs: TowerProverSpec<PB>,
-    ) -> TowerProofs<PB::E>;
+        prod_specs: Vec<TowerProverSpec<PB>>,
+        logup_specs: Vec<TowerProverSpec<PB>>,
+        num_fanin: usize,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> (Point<PB::E>, TowerProofs<PB::E>);
 }
 
-pub trait MainSumcheckProver<PB: ProverBackend> {}
+pub trait MainSumcheckProver<PB: ProverBackend> {
+    fn prove_main_constraints(
+        &self,
+        polys: &[PB::MultilinearPoly],
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> (Point<PB::E>, TowerProofs<PB::E>);
+}
 
 pub trait OpeningProver<PB: ProverBackend> {}
