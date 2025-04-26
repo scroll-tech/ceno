@@ -39,16 +39,16 @@ pub type B = BabyBear;
 pub type Pcs = Basefold<E, BasefoldRSParams>;
 
 pub struct FullMemState<Record> {
-    mem: Vec<Record>,
-    io: Vec<Record>,
-    reg: Vec<Record>,
-    hints: Vec<Record>,
-    stack: Vec<Record>,
-    heap: Vec<Record>,
+    pub mem: Vec<Record>,
+    pub io: Vec<Record>,
+    pub reg: Vec<Record>,
+    pub hints: Vec<Record>,
+    pub stack: Vec<Record>,
+    pub heap: Vec<Record>,
 }
 
-type InitMemState = FullMemState<MemInitRecord>;
-type FinalMemState = FullMemState<MemFinalRecord>;
+pub type InitMemState = FullMemState<MemInitRecord>;
+pub type FinalMemState = FullMemState<MemFinalRecord>;
 
 pub struct EmulationResult {
     exit_code: Option<u32>,
@@ -307,14 +307,14 @@ fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
 }
 
 pub struct ConstraintSystemConfig<E: ExtensionField> {
-    zkvm_cs: ZKVMConstraintSystem<E>,
-    config: Rv32imConfig<E>,
-    mmu_config: MmuConfig<E>,
-    dummy_config: DummyExtraConfig<E>,
-    prog_config: ProgramTableConfig,
+    pub zkvm_cs: ZKVMConstraintSystem<E>,
+    pub config: Rv32imConfig<E>,
+    pub mmu_config: MmuConfig<E>,
+    pub dummy_config: DummyExtraConfig<E>,
+    pub prog_config: ProgramTableConfig,
 }
 
-fn construct_configs<E: ExtensionField>(
+pub fn construct_configs<E: ExtensionField>(
     program_params: ProgramParams,
 ) -> ConstraintSystemConfig<E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
@@ -333,7 +333,7 @@ fn construct_configs<E: ExtensionField>(
     }
 }
 
-fn generate_fixed_traces<E: ExtensionField>(
+pub fn generate_fixed_traces<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     init_mem_state: &InitMemState,
     program: &Program,

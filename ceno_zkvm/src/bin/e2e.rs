@@ -201,7 +201,7 @@ fn main() {
     let vk_bytes = bincode::serialize(&vk).unwrap();
     std::fs::write(&args.vk_file, vk_bytes).unwrap();
 
-    return; // early terminate
+    // return; // early terminate
 
     let verifier = ZKVMVerifier::new(vk);
     verify(&zkvm_proof, &verifier).expect("Verification failed");
