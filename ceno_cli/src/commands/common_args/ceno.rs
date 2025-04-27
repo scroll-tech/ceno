@@ -202,32 +202,28 @@ impl CenoOptions {
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .next_step()
+                )?;
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .next_step()
+                )?;
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .next_step()
+                )?;
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
                     self,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .next_step()
+                )?;
             }
         };
         Ok(())
