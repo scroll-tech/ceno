@@ -283,6 +283,7 @@ where
                         } else {
                             last_sigma
                         };
+
                         // Evaluations on degree, degree - 1, ..., 1, 0.
                         let evals_iter_rev = chain![poly.into_iter().rev(), iter::once(eval_at_0)];
 
