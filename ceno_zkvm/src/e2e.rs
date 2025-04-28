@@ -601,7 +601,9 @@ pub fn run_e2e_with_checkpoint<
         };
     }
 
+    let start = std::time::Instant::now();
     let zkvm_witness = generate_witness(&system_config, emul_result, &program, is_mock_proving);
+    tracing::debug!("witness generated in {:?}", start.elapsed());
 
     // proving
     let prover = ZKVMProver::new(pk);
