@@ -337,7 +337,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             let insn_kind = record.insn.kind;
             match insn_kind {
                 // ecall / halt
-                InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
+                ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
                     halt_records.push(record);
                 }
                 // other type of ecalls are handled by dummy ecall instruction
@@ -360,7 +360,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         }
 
         let mut all_records = GroupedSteps(all_records);
-        tracing::info!("{all_records:?}");
 
         macro_rules! assign_opcode {
             ($insn_kind:ident,$instruction:ty,$config:ident) => {
