@@ -199,6 +199,10 @@ pub enum InsnKind {
 }
 use InsnKind::*;
 
+impl InsnKind {
+    pub const KINDS: usize = 44;
+}
+
 impl From<InsnKind> for InsnCategory {
     fn from(kind: InsnKind) -> Self {
         match kind {

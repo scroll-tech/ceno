@@ -325,10 +325,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness: &mut ZKVMWitnesses<E>,
         steps: Vec<StepRecord>,
     ) -> Result<GroupedSteps, ZKVMError> {
+        assert_eq!(InsnKind::iter().len(), InsnKind::KINDS);
+        let mut size_needs = [0usize; InsnKind::KINDS];
+        for step in steps.iter() {
+            size_needs[step.insn.kind as usize] += 1;
+        }
         let mut all_records: BTreeMap<InsnKind, Vec<StepRecord>> = InsnKind::iter()
-            .map(|insn_kind| (insn_kind, Vec::new()))
+            .zip(size_needs)
+            .map(|(insn_kind, size_need)| (insn_kind, Vec::with_capacity(size_need)))
             .collect();
-        let mut halt_records = Vec::new();
+        let mut halt_records = Vec::with_capacity(1);
         steps.into_iter().for_each(|record| {
             let insn_kind = record.insn.kind;
             match insn_kind {
