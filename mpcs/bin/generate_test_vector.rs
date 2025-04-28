@@ -31,14 +31,16 @@ fn main() {
     let num_var = args.num_var;
     let (vp, comm, eval, proof) = match (args.field.as_str(), args.pcs.as_str()) {
         ("goldilocks", "whir") => {
-            generate_test_vector::<GoldilocksExt2, PcsWhirGoldilocks>(num_var)
+            generate_test_vector::<GoldilocksExt2, PcsWhirGoldilocks>(num_var as usize)
         }
         ("goldilocks", "basefold") => {
-            generate_test_vector::<GoldilocksExt2, PcsBasefoldGoldilocks>(num_var)
+            generate_test_vector::<GoldilocksExt2, PcsBasefoldGoldilocks>(num_var as usize)
         }
-        ("babybear", "whir") => generate_test_vector::<BabyBearExt4, PcsWhirBabyBear>(num_var),
+        ("babybear", "whir") => {
+            generate_test_vector::<BabyBearExt4, PcsWhirBabyBear>(num_var as usize)
+        }
         ("babybear", "basefold") => {
-            generate_test_vector::<BabyBearExt4, PcsBasefoldBabyBear>(num_var)
+            generate_test_vector::<BabyBearExt4, PcsBasefoldBabyBear>(num_var as usize)
         }
         _ => panic!("Invalid combination of field and PCS"),
     };
