@@ -423,16 +423,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // ecall / halt
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
 
-        assert_eq!(
-            all_records
-                .0
-                .iter()
-                .map(|(kind, _)| kind)
-                .copied()
-                .collect::<BTreeSet<_>>(),
+        for (kind, records) in all_records.0.iter() {
+            if records.is_empty() {
+                continue;
+            }
             // these are opcodes that haven't been implemented
-            [INVALID, ECALL].into_iter().collect::<BTreeSet<_>>(),
-        );
+            assert!(matches!(kind, INVALID | ECALL));
+        }
         Ok(all_records)
     }
 
@@ -475,8 +472,8 @@ impl fmt::Debug for GroupedSteps {
         f.debug_list()
             .entries(
                 self.0.iter()
-                    .filter(|(_, records)| !records.is_empty())
-                    .map(|(_, records)| (records.len(), records.capacity(), records.len() as f32 / records.capacity() as f32))
+                    // .filter(|(_, records)| !records.is_empty())
+                    .map(|(kind, records)| (kind, records.len(), records.capacity(), records.len() as f32 / records.capacity() as f32))
             )
             .finish()
     }
