@@ -287,7 +287,7 @@ pub fn setup_platform(
     platform
 }
 
-fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
+pub fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
     let program_addrs = program
         .image
         .iter()
