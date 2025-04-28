@@ -1,10 +1,11 @@
 use super::hal::ProverBackend;
 use crate::{
     expression::Expression,
-    scheme::hal::{TowerProver, TowerProverSpec},
+    scheme::{constants::NUM_FANIN, hal::{TowerProver, TowerProverSpec}, utils::{infer_tower_product_witness, interleaving_mles_to_mles}},
     structs::TowerProofs,
     utils::get_challenge_pows,
 };
+use crate::scheme::utils::wit_infer_by_expr;
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{enumerate, izip};
 use mpcs::Point;
@@ -61,17 +62,17 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
             })
             .collect();
 
-        let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
-        let (w_records_wit, lk_records_wit) = w_lk_records_wit.split_at(cs.w_expressions.len());
+        let (r_records_wit, w_lk_records_wit) = records_wit.split_at(read_exprs.len());
+        let (w_records_wit, lk_records_wit) = w_lk_records_wit.split_at(write_exprs.len());
         exit_span!(record_span);
 
         let wit_inference_span = entered_span!("wit_inference", profiling_3 = true);
 
         // product constraint: tower witness inference
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
-            cs.r_expressions.len(),
-            cs.w_expressions.len(),
-            cs.lk_expressions.len(),
+            read_exprs.len(),
+            write_exprs.len(),
+            lookup_exprs.len(),
         );
         let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
