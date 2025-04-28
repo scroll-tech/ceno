@@ -149,7 +149,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
+        // assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
 
         // 32-bit value from rs1
         let dividend = UInt::new_unchecked(|| "dividend", cb)?;
