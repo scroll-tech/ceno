@@ -21,31 +21,32 @@ struct Args {
     field: String,
     #[arg(short = 'p', long, default_value = "basefold")]
     pcs: String,
+    #[arg(short = 'n', long, default_value = "5")]
+    num_var: u32,
 }
 
 fn main() {
     // pass the parameters to determine which field to use, using the clap::Parser
     let args = Args::parse();
-    for num_var in 5..=10 {
-        let (vp, comm, eval, proof) = match (args.field.as_str(), args.pcs.as_str()) {
-            ("goldilocks", "whir") => {
-                generate_test_vector::<GoldilocksExt2, PcsWhirGoldilocks>(num_var)
-            }
-            ("goldilocks", "basefold") => {
-                generate_test_vector::<GoldilocksExt2, PcsBasefoldGoldilocks>(num_var)
-            }
-            ("babybear", "whir") => generate_test_vector::<BabyBearExt4, PcsWhirBabyBear>(num_var),
-            ("babybear", "basefold") => {
-                generate_test_vector::<BabyBearExt4, PcsBasefoldBabyBear>(num_var)
-            }
-            _ => panic!("Invalid combination of field and PCS"),
-        };
-        println!("num_vars: {}", num_var);
-        println!("vp: {}", vp);
-        println!("comm: {}", comm);
-        println!("eval: {}", eval);
-        println!("proof: {}", proof);
-    }
+    let num_var = args.num_var;
+    let (vp, comm, eval, proof) = match (args.field.as_str(), args.pcs.as_str()) {
+        ("goldilocks", "whir") => {
+            generate_test_vector::<GoldilocksExt2, PcsWhirGoldilocks>(num_var)
+        }
+        ("goldilocks", "basefold") => {
+            generate_test_vector::<GoldilocksExt2, PcsBasefoldGoldilocks>(num_var)
+        }
+        ("babybear", "whir") => generate_test_vector::<BabyBearExt4, PcsWhirBabyBear>(num_var),
+        ("babybear", "basefold") => {
+            generate_test_vector::<BabyBearExt4, PcsBasefoldBabyBear>(num_var)
+        }
+        _ => panic!("Invalid combination of field and PCS"),
+    };
+    println!("num_vars: {}", num_var);
+    println!("vp: {}", vp);
+    println!("comm: {}", comm);
+    println!("eval: {}", eval);
+    println!("proof: {}", proof);
 }
 
 pub fn generate_test_vector<E: ExtensionField, Pcs>(
