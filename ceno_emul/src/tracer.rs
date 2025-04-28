@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt, mem};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt, mem,
+};
+
+use ceno_rt::WORD_SIZE;
 
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
@@ -297,12 +302,15 @@ impl StepRecord {
 pub struct Tracer {
     record: StepRecord,
 
+    // record each section max access address
+    // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
+    mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: HashMap<WordAddr, Cycle>,
 }
 
 impl Default for Tracer {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -313,8 +321,43 @@ impl Tracer {
     pub const SUBCYCLE_MEM: Cycle = 3;
     pub const SUBCYCLES_PER_INSN: Cycle = 4;
 
-    pub fn new() -> Tracer {
+    pub fn new(platform: Option<&Platform>) -> Tracer {
+        let mmio_max_access = if let Some(platform) = platform {
+            let mut mmio_max_access = BTreeMap::new();
+            mmio_max_access.insert(
+                ByteAddr::from(platform.heap.start).waddr(),
+                (
+                    ByteAddr::from(platform.heap.start).waddr(),
+                    ByteAddr::from(platform.heap.end).waddr(),
+                    ByteAddr::from(platform.heap.end).waddr(),
+                    ByteAddr::from(platform.heap.start).waddr(),
+                ),
+            );
+            mmio_max_access.insert(
+                ByteAddr::from(platform.stack.start).waddr(),
+                (
+                    ByteAddr::from(platform.stack.start).waddr(),
+                    ByteAddr::from(platform.stack.end).waddr(),
+                    ByteAddr::from(platform.stack.end).waddr(),
+                    ByteAddr::from(platform.stack.start).waddr(),
+                ),
+            );
+            mmio_max_access.insert(
+                ByteAddr::from(platform.hints.start).waddr(),
+                (
+                    ByteAddr::from(platform.hints.start).waddr(),
+                    ByteAddr::from(platform.hints.end).waddr(),
+                    ByteAddr::from(platform.hints.end).waddr(),
+                    ByteAddr::from(platform.hints.start).waddr(),
+                ),
+            );
+            Some(mmio_max_access)
+        } else {
+            None
+        };
+
         Tracer {
+            mmio_min_max_access: mmio_max_access,
             record: StepRecord {
                 cycle: Self::SUBCYCLES_PER_INSN,
                 ..StepRecord::default()
@@ -385,6 +428,22 @@ impl Tracer {
             unimplemented!("Only one memory access is supported");
         }
 
+        // update min/max mmio access
+        if let Some((_, (_, end_addr, min_addr, max_addr))) = self
+            .mmio_min_max_access
+            .as_mut()
+            .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
+        {
+            if addr < *end_addr {
+                if addr >= *max_addr {
+                    *max_addr = addr + WordAddr::from(WORD_SIZE as u32); // end exclusive
+                }
+                if addr < *min_addr {
+                    *min_addr = addr; // start inclusive
+                }
+            }
+        }
+
         self.record.memory_op = Some(WriteOp {
             addr,
             value,
@@ -417,6 +476,30 @@ impl Tracer {
     /// Return the cycle of the pending instruction (after the last completed step).
     pub fn cycle(&self) -> Cycle {
         self.record.cycle
+    }
+
+    /// giving a start address, return (min, max) accessed address within section
+    pub fn probe_min_max_address_by_start_addr(
+        &self,
+        start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)> {
+        self.mmio_min_max_access
+            .as_ref()
+            .and_then(|mmio_max_access| {
+                mmio_max_access.range(..=start_addr).next_back().and_then(
+                    |(_, &(expected_start_addr, _, min, max))| {
+                        assert_eq!(
+                            start_addr, expected_start_addr,
+                            "please use section start for searching"
+                        );
+                        if start_addr == expected_start_addr && min < max {
+                            Some((min, max))
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
     }
 }
 

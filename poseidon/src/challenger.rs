@@ -56,8 +56,8 @@ impl<F> CanSampleBits<usize> for DefaultChallenger<F>
 where
     F: PoseidonField,
 {
-    fn sample_bits(&mut self, _bits: usize) -> usize {
-        todo!()
+    fn sample_bits(&mut self, bits: usize) -> usize {
+        self.inner.sample_bits(bits)
     }
 }
 

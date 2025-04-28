@@ -1,9 +1,8 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::FieldType;
-use p3::field::Field;
+use p3::{field::Field, util::log2_strict_usize};
 use rayon::prelude::{ParallelIterator, ParallelSliceMut};
-
-use crate::util::log2_strict;
+use sumcheck::macros::{entered_span, exit_span};
 
 pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &mut FieldType<E>) {
     match evals {
@@ -14,9 +13,9 @@ pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &
 }
 
 pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
-    // let timer = start_timer!(|| "interpolate_over_hypercube");
+    let timer = entered_span!("interpolate_over_hypercube");
     // iterate over array, replacing even indices with (evals[i] - evals[(i+1)])
-    let n = log2_strict(evals.len());
+    let n = log2_strict_usize(evals.len());
 
     evals.par_chunks_mut(2).for_each(|chunk| {
         chunk[1] -= chunk[0];
@@ -33,5 +32,5 @@ pub fn interpolate_over_boolean_hypercube<F: Field>(evals: &mut [F]) {
             }
         });
     }
-    // end_timer!(timer);
+    exit_span!(timer);
 }

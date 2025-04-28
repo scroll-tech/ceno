@@ -13,27 +13,29 @@ version = "0.1.0"
 default-run = "main"
 
 [dependencies]
-ark-crypto-primitives = { version = "0.5", features = ["merkle_tree"] }
-ark-ff = { version = "0.5", features = ["asm", "std"] }
-ark-poly = "0.5"
-ark-serialize = "0.5"
-ark-std = { version = "0.5", features = ["std"] }
-ark-test-curves = { version = "0.5", features = ["bls12_381_curve"] }
+bincode = "1.3.3"
 blake2 = "0.10"
 blake3 = "1.5.0"
 clap = { version = "4.4.17", features = ["derive"] }
 derivative = { version = "2", features = ["use_core"] }
+ff_ext = { path = "../ff_ext" }
 lazy_static = "1.4"
 nimue = { git = "https://github.com/arkworks-rs/nimue", features = ["ark"], rev="3a83250" }
 nimue-pow = { git = "https://github.com/arkworks-rs/nimue", rev="3a83250" }
-p3 = { path = "../p3" }
+multilinear_extensions = { path = "../multilinear_extensions" }
+p3.workspace = true
+poseidon = { path = "../poseidon" }
 rand = "0.8"
 rand_chacha = "0.3"
 rayon = { workspace = true, optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha3 = "0.10"
+sumcheck = { path = "../sumcheck" }
+tracing.workspace = true
+transcript = { path = "../transcript" }
 transpose = "0.2.3"
+witness = { path = "../witness" }
 
 derive_more = { version = "1.0.0", features = ["debug"] }
 goldilocks = { git = "https://github.com/scroll-tech/ceno-Goldilocks" }
@@ -45,13 +47,9 @@ debug = true
 
 [features]
 asm = []
-ceno = []
-default = ["parallel", "ceno"]
+default = ["parallel"]
 parallel = [
   "dep:rayon",
-  "ark-poly/parallel",
-  "ark-ff/parallel",
-  "ark-crypto-primitives/parallel",
 ]
-print-trace = ["ark-std/print-trace"]
+print-trace = ["tracing/log"]
 rayon = ["dep:rayon"]

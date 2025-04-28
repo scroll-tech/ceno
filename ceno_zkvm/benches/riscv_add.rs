@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use ceno_zkvm::{
     self,
@@ -10,7 +10,6 @@ use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
-use itertools::Itertools;
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
 
 use rand::rngs::OsRng;
@@ -52,14 +51,13 @@ fn bench_add(c: &mut Criterion) {
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
-    let circuit_pk = pk
+    let prover = ZKVMProver::new(pk);
+    let circuit_pk = prover
+        .pk
         .circuit_pks
         .get(&AddInstruction::<E>::name())
-        .unwrap()
-        .clone();
+        .unwrap();
     let num_witin = circuit_pk.get_cs().num_witin;
-
-    let prover = ZKVMProver::new(pk);
 
     for instance_num_vars in 20..22 {
         // expand more input size once runtime is acceptable
@@ -75,16 +73,18 @@ fn bench_add(c: &mut Criterion) {
                     for _ in 0..iters {
                         // generate mock witness
                         let num_instances = 1 << instance_num_vars;
-                        let rmm =
-                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin as usize);
-                        let polys = rmm.to_mles();
+                        let rmms = BTreeMap::from([(
+                            0,
+                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin as usize),
+                        )]);
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;
                         let mut transcript = BasicTranscript::new(b"riscv");
                         let commit =
-                            Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript)
+                            Pcs::batch_commit_and_write(&prover.pk.pp, rmms, &mut transcript)
                                 .unwrap();
+                        let polys = Pcs::get_arc_mle_witness_from_commitment(&commit);
                         let challenges = [
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,
@@ -93,10 +93,8 @@ fn bench_add(c: &mut Criterion) {
                         let _ = prover
                             .create_opcode_proof(
                                 "ADD",
-                                &prover.pk.pp,
-                                &circuit_pk,
-                                polys.into_iter().map(|mle| mle.into()).collect_vec(),
-                                commit,
+                                circuit_pk,
+                                polys,
                                 &[],
                                 num_instances,
                                 &mut transcript,

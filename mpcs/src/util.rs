@@ -2,15 +2,15 @@ pub mod arithmetic;
 pub mod expression;
 pub mod hash;
 pub mod parallel;
-pub mod plonky2_util;
+use std::collections::VecDeque;
+
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools, izip};
 use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 pub mod merkle_tree;
 use crate::{Error, util::parallel::parallelize};
 use p3::field::{PrimeCharacteristicRing, PrimeField};
-pub use plonky2_util::log2_strict;
 
 pub fn ext_to_usize<E: ExtensionField>(x: &E) -> usize {
     let bases = x.as_bases();
@@ -39,53 +39,6 @@ impl BitIndex for usize {
 pub fn num_of_bytes<F: PrimeField>(n: usize) -> usize {
     F::bits().next_power_of_two() * n / 8
 }
-
-macro_rules! impl_index {
-    (@ $name:ty, $field:tt, [$($range:ty => $output:ty),*$(,)?]) => {
-        $(
-            impl<E: ExtensionField> std::ops::Index<$range> for $name {
-                type Output = $output;
-
-                fn index(&self, index: $range) -> &$output {
-                    match &self.$field {
-                        FieldType::Ext(coeffs) => coeffs.index(index),
-                        FieldType::Base(_) => panic!("Cannot index base field"),
-                        _ => unreachable!()
-                    }
-                }
-            }
-
-            impl<E: ExtensionField> std::ops::IndexMut<$range> for $name {
-                fn index_mut(&mut self, index: $range) -> &mut $output {
-                    match &mut self.$field {
-                        FieldType::Ext(coeffs) => coeffs.index_mut(index),
-                        FieldType::Base(_) => panic!("Cannot index base field"),
-                        _ => unreachable!()
-                    }
-                }
-            }
-        )*
-    };
-    (@ $name:ty, $field:tt) => {
-        impl_index!(
-            @ $name, $field,
-            [
-                usize => E,
-                std::ops::Range<usize> => [E],
-                std::ops::RangeFrom<usize> => [E],
-                std::ops::RangeFull => [E],
-                std::ops::RangeInclusive<usize> => [E],
-                std::ops::RangeTo<usize> => [E],
-                std::ops::RangeToInclusive<usize> => [E],
-            ]
-        );
-    };
-    ($name:ident, $field:tt) => {
-        impl_index!(@ $name<E>, $field);
-    };
-}
-
-pub(crate) use impl_index;
 
 pub fn poly_index_ext<E: ExtensionField>(poly: &DenseMultilinearExtension<E>, index: usize) -> E {
     match &poly.evaluations {
@@ -313,6 +266,93 @@ pub fn ext_try_into_base<E: ExtensionField>(x: &E) -> Result<E::BaseField, Error
     } else {
         Ok(bases[0])
     }
+}
+
+/// splits a vector into multiple slices, where each slice length
+/// is specified by the corresponding element in the `sizes` slice.
+///
+/// # arguments
+///
+/// * `input` - the input vector to be split.
+/// * `sizes` - a slice of sizes indicating how to split the input vector.
+///
+/// # panics
+///
+/// panics if the sum of `sizes` does not equal the length of `input`.
+///
+/// # example
+///
+/// ```
+/// let input = vec![10, 20, 30, 40, 50, 60];
+/// let sizes = vec![2, 3, 1];
+/// let result = split_by_sizes(input, &sizes);
+///
+/// assert_eq!(result.len(), 3);
+/// assert_eq!(result[0], &[10, 20]);
+/// assert_eq!(result[1], &[30, 40, 50]);
+/// assert_eq!(result[2], &[60]);
+/// ```
+pub fn split_by_sizes<'a, T>(input: &'a [T], sizes: &[usize]) -> Vec<&'a [T]> {
+    let total_size: usize = sizes.iter().sum();
+
+    if total_size != input.len() {
+        panic!(
+            "total size of chunks ({}) doesn't match input length ({})",
+            total_size,
+            input.len()
+        );
+    }
+
+    // `scan` keeps track of the current start index and produces each slice
+    sizes
+        .iter()
+        .scan(0, |start, &size| {
+            let end = *start + size;
+            let slice = &input[*start..end];
+            *start = end;
+            Some(slice)
+        })
+        .collect()
+}
+
+/// removes and returns elements from the front of the deque
+/// as long as they satisfy the given predicate.
+///
+/// # arguments
+/// * `deque` - the mutable VecDeque to operate on.
+/// * `pred` - a predicate function that takes a reference to an element
+///            and returns `true` if the element should be removed.
+///
+/// # returns
+/// a `Vec<T>` containing all the elements that were removed.
+pub fn pop_front_while<T, F>(deque: &mut VecDeque<T>, mut pred: F) -> Vec<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    let mut result = Vec::new();
+    while let Some(front) = deque.front() {
+        if pred(front) {
+            result.push(deque.pop_front().unwrap());
+        } else {
+            break;
+        }
+    }
+    result
+}
+
+#[inline(always)]
+pub(crate) fn codeword_fold_with_challenge<E: ExtensionField>(
+    codeword: &[E],
+    challenge: E,
+    coeff: E::BaseField,
+    inv_2: E::BaseField,
+) -> E {
+    let (left, right) = (codeword[0], codeword[1]);
+    // original (left, right) = (lo + hi*x, lo - hi*x), lo, hi are codeword, but after times x it's not codeword
+    // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
+    let (lo, hi) = ((left + right) * inv_2, (left - right) * coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
+    // we do fold on (lo, hi) to get folded = (1-r) * lo + r * hi (with lo, hi are two codewords), as it match perfectly with raw message in lagrange domain fixed variable
+    lo + challenge * (hi - lo)
 }
 
 #[cfg(any(test, feature = "benchmark"))]

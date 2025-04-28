@@ -10,10 +10,9 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-ark-std.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
-p3 = { path = "../p3" }
+p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
@@ -26,6 +25,7 @@ transcript = { path = "../transcript" }
 [dev-dependencies]
 criterion.workspace = true
 poseidon.workspace = true
+rand.workspace = true
 
 [[bench]]
 harness = false
