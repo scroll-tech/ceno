@@ -369,10 +369,13 @@ impl Tracer {
     /// Return the completed step and advance to the next cycle.
     pub fn advance(&mut self) -> StepRecord {
         let next_cycle = self.record.cycle + Self::SUBCYCLES_PER_INSN;
-        mem::replace(&mut self.record, StepRecord {
-            cycle: next_cycle,
-            ..StepRecord::default()
-        })
+        mem::replace(
+            &mut self.record,
+            StepRecord {
+                cycle: next_cycle,
+                ..StepRecord::default()
+            },
+        )
     }
 
     pub fn store_pc(&mut self, pc: ByteAddr) {
@@ -476,6 +479,11 @@ impl Tracer {
     /// Return the cycle of the pending instruction (after the last completed step).
     pub fn cycle(&self) -> Cycle {
         self.record.cycle
+    }
+
+    /// Return the number of instruction executed til this moment
+    pub fn insts(&self) -> Cycle {
+        self.record.cycle / Self::SUBCYCLES_PER_INSN
     }
 
     /// giving a start address, return (min, max) accessed address within section

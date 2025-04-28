@@ -10,6 +10,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+once_cell = "1.21.3"
 p3.workspace = true
 rand_core.workspace = true
 serde.workspace = true

@@ -1,5 +1,4 @@
 pub mod impl_goldilocks {
-
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, SmallField,
         array_try_from_uniform_bytes, impl_from_uniform_bytes_for_binomial_extension,
@@ -20,6 +19,11 @@ pub mod impl_goldilocks {
         poseidon2::ExternalLayerConstants,
         symmetric::{PaddingFreeSponge, TruncatedPermutation},
     };
+
+    #[cfg(debug_assertions)]
+    use crate::poseidon::impl_instruments::*;
+    #[cfg(debug_assertions)]
+    use p3::symmetric::CryptographicPermutation;
 
     pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
 
@@ -44,12 +48,21 @@ pub mod impl_goldilocks {
     pub const POSEIDON2_GOLDILICK_WIDTH: usize = 8;
     pub const POSEIDON2_GOLDILICK_RATE: usize = 4;
 
+    #[cfg(debug_assertions)]
+    impl CryptographicPermutation<[Goldilocks; POSEIDON2_GOLDILICK_WIDTH]>
+        for Instrumented<Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>>
+    {
+    }
+
     impl PoseidonField for Goldilocks {
+        #[cfg(debug_assertions)]
+        type P = Instrumented<Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>>;
+        #[cfg(not(debug_assertions))]
         type P = Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>;
         type T =
             DuplexChallenger<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>;
-        type S = PaddingFreeSponge<Self::P, 8, 4, 4>;
-        type C = TruncatedPermutation<Self::P, 2, 4, 8>;
+        type S = PaddingFreeSponge<Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE, 4>;
+        type C = TruncatedPermutation<Self::P, 2, 4, POSEIDON2_GOLDILICK_WIDTH>;
         type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 4>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>::new(
@@ -57,6 +70,18 @@ pub mod impl_goldilocks {
             )
         }
 
+        #[cfg(debug_assertions)]
+        fn get_default_perm() -> Self::P {
+            Instrumented::new(Poseidon2GoldilocksHL::new(
+                ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(
+                    HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
+                    new_array,
+                ),
+                new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
+            ))
+        }
+
+        #[cfg(not(debug_assertions))]
         fn get_default_perm() -> Self::P {
             Poseidon2GoldilocksHL::new(
                 ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(

@@ -399,7 +399,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
-    pub fn get_vk(&self) -> ZKVMVerifyingKey<E, PCS> {
+    pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
             circuit_vks: self

@@ -2,6 +2,9 @@ use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
 
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
+
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -163,6 +166,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
             .map_err(ZKVMError::PCSError)?;
 
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "batch_commit",
+            );
+        }
+
         // alpha, beta
         let challenges = [
             transcript.read_challenge().elements,
@@ -266,6 +276,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 "logup_sum({:?}) != 0",
                 logup_sum
             )));
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
+                "tower_verify+main-sumcheck",
+            );
         }
 
         // verify mpcs
@@ -562,7 +579,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
-        let log2_num_instances = ceil_log2(num_instances);
+        let log2_num_instances = next_pow2_instance_padding(num_instances).ilog2() as usize;
 
         // in table proof, we always skip same point sumcheck for now
         // as tower sumcheck batch product argument/logup in same length

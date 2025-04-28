@@ -5,13 +5,11 @@
 
 pub mod basic;
 
-mod statistics;
 pub mod syncronized;
 pub use basic::BasicTranscript;
 use ff_ext::SmallField;
 use itertools::Itertools;
-use p3::field::PrimeCharacteristicRing;
-pub use statistics::{BasicTranscriptWithStat, StatisticRecorder};
+use p3::{challenger::GrindingChallenger, field::PrimeCharacteristicRing};
 pub use syncronized::TranscriptSyncronized;
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Challenge<F> {
@@ -20,7 +18,7 @@ pub struct Challenge<F> {
 
 use ff_ext::ExtensionField;
 /// The Transcript trait
-pub trait Transcript<E: ExtensionField> {
+pub trait Transcript<E: ExtensionField>: GrindingChallenger<Witness = E::BaseField> {
     /// Append a slice of base field elemets to the transcript.
     ///
     /// An implementation has to provide at least one of
@@ -101,8 +99,6 @@ pub trait Transcript<E: ExtensionField> {
     }
 
     fn sample_vec(&mut self, n: usize) -> Vec<E>;
-
-    fn sample_bits(&mut self, bits: usize) -> usize;
 
     fn sample_vec_bits(&mut self, n: usize, bits: usize) -> Vec<usize> {
         (0..n).map(|_| self.sample_bits(bits)).collect_vec()

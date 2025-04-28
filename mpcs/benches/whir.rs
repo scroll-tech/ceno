@@ -5,7 +5,7 @@ use ff_ext::GoldilocksExt2;
 
 use itertools::Itertools;
 use mpcs::{
-    PolynomialCommitmentScheme, WhirDefault,
+    PolynomialCommitmentScheme, SecurityLevel, WhirDefault,
     test_util::{get_point_from_challenge, setup_pcs},
 };
 
@@ -31,11 +31,11 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(c: &m
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
         let (pp, vp) = {
             let poly_size = 1 << num_vars;
-            let param = Pcs::setup(poly_size).unwrap();
+            let param = Pcs::setup(poly_size, SecurityLevel::default()).unwrap();
 
             group.bench_function(BenchmarkId::new("setup", format!("{}", num_vars)), |b| {
                 b.iter(|| {
-                    Pcs::setup(poly_size).unwrap();
+                    Pcs::setup(poly_size, SecurityLevel::default()).unwrap();
                 })
             });
             Pcs::trim(param, poly_size).unwrap()

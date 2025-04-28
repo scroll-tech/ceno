@@ -9,7 +9,7 @@ use ceno_zkvm::{
 };
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use mpcs::BasefoldDefault;
+use mpcs::{BasefoldDefault, SecurityLevel};
 
 criterion_group! {
   name = is_prime;
@@ -53,17 +53,18 @@ fn is_prime_1(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
 
                     for _ in 0..iters {
-                        let (_, prove) = run_e2e_with_checkpoint::<E, Pcs>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
                             hints.clone(),
                             vec![],
                             max_steps,
                             MAX_NUM_VARIABLES,
+                            SecurityLevel::default(),
                             Checkpoint::PrepE2EProving,
                         );
                         let instant = std::time::Instant::now();
-                        prove();
+                        result.next_step();
                         time += instant.elapsed();
                     }
                     time

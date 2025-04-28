@@ -70,6 +70,18 @@ where
     }
 }
 
+impl<F> GrindingChallenger for DefaultChallenger<F>
+where
+    F: PoseidonField,
+    F::T: GrindingChallenger,
+{
+    type Witness = <<F as PoseidonField>::T as GrindingChallenger>::Witness;
+
+    fn grind(&mut self, bits: usize) -> Self::Witness {
+        self.inner.grind(bits)
+    }
+}
+
 impl<F> FieldChallenger<F> for DefaultChallenger<F> where F: PoseidonField {}
 
 impl<F> FieldChallengerExt<F> for DefaultChallenger<F> where F: PoseidonField {}
