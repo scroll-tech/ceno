@@ -32,7 +32,7 @@ fn setup() -> (Program, Platform) {
     let pub_io_size = 16;
     let elf_bytes = fs::read(&file_path).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
-    let platform = setup_platform(Preset::Sp1, &program, stack_size, heap_size, pub_io_size);
+    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
     (program, platform)
 }
 
