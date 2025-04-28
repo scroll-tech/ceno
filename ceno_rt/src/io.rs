@@ -62,14 +62,14 @@ impl fmt::Write for &IOWriter {
 
 mod macros {
     #[macro_export]
-    macro_rules! print {
+    macro_rules! debug_print {
         ($($arg:tt)*) => {
             let _ = core::write!($crate::info_out(), $($arg)*);
         };
     }
 
     #[macro_export]
-    macro_rules! println {
+    macro_rules! debug_println {
         ($($arg:tt)*) => {
             let _ = core::writeln!($crate::info_out(), $($arg)*);
         };

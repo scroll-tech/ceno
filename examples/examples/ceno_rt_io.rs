@@ -1,8 +1,8 @@
 extern crate ceno_rt;
-use ceno_rt::println;
+use ceno_rt::debug_println;
 use core::fmt::Write;
 
 fn main() {
-    println!("📜📜📜 Hello, World!");
-    println!("🌏🌍🌎");
+    debug_println!("📜📜📜 Hello, World!");
+    debug_println!("🌏🌍🌎");
 }

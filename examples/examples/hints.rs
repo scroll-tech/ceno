@@ -1,5 +1,5 @@
 extern crate ceno_rt;
-use ceno_rt::println;
+use ceno_rt::debug_println;
 use core::fmt::Write;
 use rkyv::{Archived, string::ArchivedString};
 
@@ -13,6 +13,6 @@ fn main() {
     let product: u32 = a * b;
 
     assert_eq!(product, 3992003);
-    println!("{product}");
-    println!("This message is a hint: {msg}");
+    debug_println!("{product}");
+    debug_println!("This message is a hint: {msg}");
 }
