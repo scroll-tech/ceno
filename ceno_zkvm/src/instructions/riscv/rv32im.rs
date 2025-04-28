@@ -472,8 +472,8 @@ impl fmt::Debug for GroupedSteps {
         f.debug_list()
             .entries(
                 self.0.iter()
-                    // .filter(|(_, records)| !records.is_empty())
-                    .map(|(kind, records)| (kind, records.len(), records.capacity(), records.len() as f32 / records.capacity() as f32))
+                    .filter(|(_, records)| !records.is_empty())
+                    .map(|(kind, records)| (kind, records.len()))
             )
             .finish()
     }
