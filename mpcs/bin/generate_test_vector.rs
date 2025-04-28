@@ -1,6 +1,6 @@
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
 use mpcs::{
-    PolynomialCommitmentScheme, Whir, WhirDefaultSpec,
+    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec,
     test_util::{get_point_from_challenge, setup_pcs},
 };
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
@@ -8,8 +8,10 @@ use rand::{distributions::Standard, prelude::Distribution, thread_rng};
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 
-type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
-type PcsBabyBear = Whir<BabyBearExt4, WhirDefaultSpec>;
+type PcsWhirGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
+type PcsWhirBabyBear = Whir<BabyBearExt4, WhirDefaultSpec>;
+type PcsBasefoldGoldilocks = Basefold<GoldilocksExt2, BasefoldRSParams>;
+type PcsBasefoldBabyBear = Basefold<BabyBearExt4, BasefoldRSParams>;
 
 use clap::Parser;
 
@@ -17,38 +19,32 @@ use clap::Parser;
 struct Args {
     #[arg(short = 'f', long, default_value = "goldilocks")]
     field: String,
+    #[arg(short = 'p', long, default_value = "basefold")]
+    pcs: String,
 }
 
 fn main() {
     // pass the parameters to determine which field to use, using the clap::Parser
     let args = Args::parse();
-    match args.field.as_str() {
-        "goldilocks" => {
-            for num_var in 5..=10 {
-                let (vp, comm, eval, proof) =
-                    generate_test_vector::<GoldilocksExt2, PcsGoldilocks>(num_var);
-                println!("num_vars: {}", num_var);
-                println!("vp: {}", vp);
-                println!("comm: {}", comm);
-                println!("eval: {}", eval);
-                println!("proof: {}", proof);
+    for num_var in 5..=10 {
+        let (vp, comm, eval, proof) = match (args.field.as_str(), args.pcs.as_str()) {
+            ("goldilocks", "whir") => {
+                generate_test_vector::<GoldilocksExt2, PcsWhirGoldilocks>(num_var)
             }
-        }
-        "babybear" => {
-            for num_var in 5..=10 {
-                let (vp, comm, eval, proof) =
-                    generate_test_vector::<BabyBearExt4, PcsBabyBear>(num_var);
-                println!("num_vars: {}", num_var);
-                println!("vp: {}", vp);
-                println!("comm: {}", comm);
-                println!("eval: {}", eval);
-                println!("proof: {}", proof);
+            ("goldilocks", "basefold") => {
+                generate_test_vector::<GoldilocksExt2, PcsBasefoldGoldilocks>(num_var)
             }
-        }
-        _ => {
-            eprintln!("Unsupported field");
-            std::process::exit(1);
-        }
+            ("babybear", "whir") => generate_test_vector::<BabyBearExt4, PcsWhirBabyBear>(num_var),
+            ("babybear", "basefold") => {
+                generate_test_vector::<BabyBearExt4, PcsBasefoldBabyBear>(num_var)
+            }
+            _ => panic!("Invalid combination of field and PCS"),
+        };
+        println!("num_vars: {}", num_var);
+        println!("vp: {}", vp);
+        println!("comm: {}", comm);
+        println!("eval: {}", eval);
+        println!("proof: {}", proof);
     }
 }
 
