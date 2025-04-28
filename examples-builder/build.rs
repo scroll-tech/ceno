@@ -23,15 +23,20 @@ fn build_elfs() {
     let _ = remove_file(&dest_path);
     let mut dest = File::create(&dest_path).expect("failed to create vars.rs");
 
-    // TODO(Matthias): skip building the elfs if we are in clippy or check mode.
-    // See git history for an attempt to do this.
+    let is_release = std::env::var("PROFILE").unwrap() == "release";
+    let mut args = vec!["build", "--examples", "--target-dir", "target"];
+    if is_release {
+        args.insert(1, "--release"); // insert --release after "build"
+    }
+
     let output = Command::new("cargo")
-        .args(["build", "--release", "--examples", "--target-dir", "target"])
+        .args(args)
         .current_dir("../examples")
         .env_clear()
         .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
         .output()
         .expect("cargo command failed to run");
+
     if !output.status.success() {
         io::stdout().write_all(&output.stdout).unwrap();
         io::stderr().write_all(&output.stderr).unwrap();
