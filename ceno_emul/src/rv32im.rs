@@ -200,7 +200,7 @@ pub enum InsnKind {
 use InsnKind::*;
 
 impl InsnKind {
-    pub const KINDS: usize = 44;
+    pub const KINDS: usize = 45;
 }
 
 impl From<InsnKind> for InsnCategory {
