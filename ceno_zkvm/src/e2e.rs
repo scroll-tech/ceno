@@ -43,8 +43,8 @@ pub struct FullMemState<Record> {
     pub io: Vec<Record>,
     pub reg: Vec<Record>,
     pub hints: Vec<Record>,
-    stack: Vec<Record>,
-    heap: Vec<Record>,
+    pub stack: Vec<Record>,
+    pub heap: Vec<Record>,
 }
 
 pub type InitMemState = FullMemState<MemInitRecord>;
