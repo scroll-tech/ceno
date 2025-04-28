@@ -1,4 +1,7 @@
-use crate::{expression::Expression, structs::TowerProofs};
+use crate::{
+    expression::Expression,
+    structs::{ProofInput, TowerProofs},
+};
 use ff_ext::ExtensionField;
 use mpcs::Point;
 use transcript::Transcript;
@@ -25,10 +28,11 @@ pub trait TowerProver<PB: ProverBackend> {
     // and then build a complete binary tree to accumulate these records
     fn build_witness(
         &self,
-        polys: &[PB::MultilinearPoly],
+        input: ProofInput<PB::E>,
         read_exprs: &[Expression<PB::E>],
         write_exprs: &[Expression<PB::E>],
         lookup_exprs: &[Expression<PB::E>],
+        challenge: &[E; 2],
     ) -> (Vec<TowerProverSpec<PB>>, TowerProverSpec<PB>);
 
     fn prove(

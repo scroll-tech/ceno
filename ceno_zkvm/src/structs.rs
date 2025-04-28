@@ -11,6 +11,7 @@ use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
@@ -62,6 +63,12 @@ pub enum RAMType {
     GlobalState,
     Register,
     Memory,
+}
+
+pub struct ProofInput<E: ExtensionField> {
+    pub witness: Vec<ArcMultilinearExtension<E>>,
+    pub public_input: Vec<ArcMultilinearExtension<E>>,
+    pub num_instances: usize,
 }
 
 /// A point and the evaluation of this point.

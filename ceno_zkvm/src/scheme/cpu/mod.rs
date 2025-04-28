@@ -1,11 +1,17 @@
-use super::hal::ProverBackend;
+use super::hal::{MainSumcheckProver, ProverBackend};
 use crate::{
     expression::Expression,
-    scheme::{constants::NUM_FANIN, hal::{TowerProver, TowerProverSpec}, utils::{infer_tower_product_witness, interleaving_mles_to_mles}},
-    structs::TowerProofs,
+    scheme::{
+        constants::NUM_FANIN,
+        hal::{TowerProver, TowerProverSpec},
+        utils::{
+            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+            wit_infer_by_expr,
+        },
+    },
+    structs::{ProofInput, TowerProofs},
     utils::get_challenge_pows,
 };
-use crate::scheme::utils::wit_infer_by_expr;
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{enumerate, izip};
 use mpcs::Point;
@@ -22,6 +28,7 @@ use sumcheck::{
     util::{ceil_log2, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
+use witness::next_pow2_instance_padding;
 
 struct CpuBackend<E> {
     _marker: std::marker::PhantomData<E>,
@@ -42,16 +49,25 @@ struct CpuTowerProver {}
 impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
     fn build_witness(
         &self,
-        polys: &[<CpuBackend<E> as ProverBackend>::MultilinearPoly],
+        input: ProofInput<E>,
         read_exprs: &[Expression<E>],
         write_exprs: &[Expression<E>],
         lookup_exprs: &[Expression<E>],
+        challenges: &[E; 2],
     ) -> (
         Vec<TowerProverSpec<CpuBackend<E>>>,
         TowerProverSpec<CpuBackend<E>>,
     ) {
+        let polys = &input.witness;
+        let pi = &input.public_input;
+        let num_instances = input.num_instances;
+
+        let next_pow2_instances = next_pow2_instance_padding(num_instances);
+        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let (chip_record_alpha, _) = (challenges[0], challenges[1]);
+
         // main constraint: read/write record witness inference
-        let record_span = entered_span!("record");
+        let record_span = entered_span!("infer record");
         let records_wit: Vec<ArcMultilinearExtension<'_, E>> = read_exprs
             .par_iter()
             .chain(write_exprs.par_iter())
@@ -66,14 +82,11 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
         let (w_records_wit, lk_records_wit) = w_lk_records_wit.split_at(write_exprs.len());
         exit_span!(record_span);
 
-        let wit_inference_span = entered_span!("wit_inference", profiling_3 = true);
+        let wit_inference_span = entered_span!("infer tower witness", profiling_3 = true);
 
         // product constraint: tower witness inference
-        let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
-            read_exprs.len(),
-            write_exprs.len(),
-            lookup_exprs.len(),
-        );
+        let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) =
+            (read_exprs.len(), write_exprs.len(), lookup_exprs.len());
         let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
             ceil_log2(w_counts_per_instance),
@@ -111,6 +124,61 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
             NUM_FANIN,
         );
         exit_span!(span);
+
+        let span = entered_span!("tower_witness_lk_last_layer");
+        // TODO optimize last layer to avoid alloc new vector to save memory
+        let lk_records_last_layer =
+            interleaving_mles_to_mles(lk_records_wit, num_instances, NUM_FANIN, chip_record_alpha);
+        assert_eq!(lk_records_last_layer.len(), 2);
+        exit_span!(span);
+
+        let span = entered_span!("tower_witness_lk_layers");
+        let lk_wit_layers = infer_tower_logup_witness(None, lk_records_last_layer);
+        exit_span!(span);
+        exit_span!(wit_inference_span);
+
+        if cfg!(test) {
+            // sanity check
+            assert_eq!(lk_wit_layers.len(), log2_num_instances + log2_lk_count);
+            assert_eq!(r_wit_layers.len(), log2_num_instances + log2_r_count);
+            assert_eq!(w_wit_layers.len(), log2_num_instances + log2_w_count);
+            assert!(lk_wit_layers.iter().enumerate().all(|(i, w)| {
+                let expected_size = 1 << i;
+                let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
+                p1.evaluations().len() == expected_size
+                    && p2.evaluations().len() == expected_size
+                    && q1.evaluations().len() == expected_size
+                    && q2.evaluations().len() == expected_size
+            }));
+            assert!(r_wit_layers.iter().enumerate().all(|(i, r_wit_layer)| {
+                let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
+                r_wit_layer.len() == NUM_FANIN
+                    && r_wit_layer
+                        .iter()
+                        .all(|f| f.evaluations().len() == expected_size)
+            }));
+            assert!(w_wit_layers.iter().enumerate().all(|(i, w_wit_layer)| {
+                let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
+                w_wit_layer.len() == NUM_FANIN
+                    && w_wit_layer
+                        .iter()
+                        .all(|f| f.evaluations().len() == expected_size)
+            }));
+        }
+
+        let prod_specs = vec![
+            TowerProverSpec {
+                witness: r_wit_layers,
+            },
+            TowerProverSpec {
+                witness: w_wit_layers,
+            },
+        ];
+        let lookup_spec = TowerProverSpec {
+            witness: lk_wit_layers,
+        };
+
+        (prod_specs, lookup_spec)
     }
 
     fn prove(
@@ -120,6 +188,25 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
+        let sumcheck_span = entered_span!("SUMCHECK", profiling_3 = true);
+        // product constraint tower sumcheck
+        let tower_span = entered_span!("tower");
+        // final evals for verifier
+        let record_r_out_evals: Vec<E> = prod_specs[0].witness[0]
+            .iter()
+            .map(|w| w.get_ext_field_vec()[0])
+            .collect();
+        let record_w_out_evals: Vec<E> = prod_specs[1].witness[0]
+            .iter()
+            .map(|w| w.get_ext_field_vec()[0])
+            .collect();
+        let lk_wit_layers = &logup_specs[0].witness;
+        let lk_p1_out_eval = lk_wit_layers[0][0].get_ext_field_vec()[0];
+        let lk_p2_out_eval = lk_wit_layers[0][1].get_ext_field_vec()[0];
+        let lk_q1_out_eval = lk_wit_layers[0][2].get_ext_field_vec()[0];
+        let lk_q2_out_eval = lk_wit_layers[0][3].get_ext_field_vec()[0];
+        assert!(record_r_out_evals.len() == NUM_FANIN && record_w_out_evals.len() == NUM_FANIN);
+
         // in order to batch product argument with logup in one sumcheck, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
         assert_eq!(num_fanin, 2);
@@ -256,6 +343,141 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
                 (rt_prime, next_alpha_pows)
             });
 
+        assert_eq!(
+            next_rt.len(),
+            log2_num_instances
+                + [log2_r_count, log2_w_count, log2_lk_count]
+                    .iter()
+                    .max()
+                    .unwrap()
+        );
+
+        exit_span!(tower_span);
+
+        tracing::debug!("tower sumcheck finished");
+
         (next_rt, proofs)
+    }
+}
+
+impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuTowerProver {
+    fn prove_main_constraints(
+        &self,
+        polys: &[<CpuBackend<E> as ProverBackend>::MultilinearPoly],
+        transcript: &mut impl Transcript<<CpuBackend<E> as ProverBackend>::E>,
+    ) -> (
+        Point<<CpuBackend<E> as ProverBackend>::E>,
+        TowerProofs<<CpuBackend<E> as ProverBackend>::E>,
+    ) {
+        // batch sumcheck: selector + main degree > 1 constraints
+        let main_sel_span = entered_span!("main_sel");
+        let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
+            tower_proof.prod_specs_points[0]
+                .last()
+                .expect("error getting rt_r")
+                .to_vec(),
+            tower_proof.prod_specs_points[1]
+                .last()
+                .expect("error getting rt_w")
+                .to_vec(),
+            tower_proof.logup_specs_points[0]
+                .last()
+                .expect("error getting rt_lk")
+                .to_vec(),
+            rt_tower[..log2_num_instances].to_vec(),
+        );
+
+        let num_threads = optimal_sumcheck_threads(log2_num_instances);
+        let alpha_pow = get_challenge_pows(
+            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
+            transcript,
+        );
+        let mut alpha_pow_iter = alpha_pow.iter();
+        let (alpha_read, alpha_write, alpha_lk) = (
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+            alpha_pow_iter.next().unwrap(),
+        );
+        // create selector: all ONE, but padding ZERO to ceil_log2
+        let (sel_r, sel_w, sel_lk): (
+            ArcMultilinearExtension<E>,
+            ArcMultilinearExtension<E>,
+            ArcMultilinearExtension<E>,
+        ) = {
+            // TODO sel can be shared if expression count match
+            let mut sel_r = build_eq_x_r_vec(&rt_r[log2_r_count..]);
+            if num_instances < sel_r.len() {
+                sel_r.splice(
+                    num_instances..sel_r.len(),
+                    std::iter::repeat_n(E::ZERO, sel_r.len() - num_instances),
+                );
+            }
+
+            let mut sel_w = build_eq_x_r_vec(&rt_w[log2_w_count..]);
+            if num_instances < sel_w.len() {
+                sel_w.splice(
+                    num_instances..sel_w.len(),
+                    std::iter::repeat_n(E::ZERO, sel_w.len() - num_instances),
+                );
+            }
+
+            let mut sel_lk = build_eq_x_r_vec(&rt_lk[log2_lk_count..]);
+            if num_instances < sel_lk.len() {
+                sel_lk.splice(
+                    num_instances..sel_lk.len(),
+                    std::iter::repeat_n(E::ZERO, sel_lk.len() - num_instances),
+                );
+            }
+
+            (
+                sel_r.into_mle().into(),
+                sel_w.into_mle().into(),
+                sel_lk.into_mle().into(),
+            )
+        };
+
+        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
+
+        let eq_r = build_eq_x_r_vec(&rt_r[..log2_r_count]);
+        let eq_w = build_eq_x_r_vec(&rt_w[..log2_w_count]);
+        let eq_lk = build_eq_x_r_vec(&rt_lk[..log2_lk_count]);
+
+        // read
+        // rt_r := rt || rs
+        for i in 0..r_counts_per_instance {
+            // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t] ))
+            virtual_polys.add_mle_list(vec![&sel_r, &r_records_wit[i]], eq_r[i] * *alpha_read);
+        }
+        // \sum_t alpha_read * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
+        virtual_polys.add_mle_list(
+            vec![&sel_r],
+            *alpha_read * eq_r[r_counts_per_instance..].iter().copied().sum::<E>() - *alpha_read,
+        );
+
+        // write
+        // rt := rt || rs
+        for i in 0..w_counts_per_instance {
+            // \sum_t (sel(rt, t) * (\sum_i alpha_write * eq(rs, i) * record_w[i] ))
+            virtual_polys.add_mle_list(vec![&sel_w, &w_records_wit[i]], eq_w[i] * *alpha_write);
+        }
+        // \sum_t alpha_write * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
+        virtual_polys.add_mle_list(
+            vec![&sel_w],
+            *alpha_write * eq_w[w_counts_per_instance..].iter().copied().sum::<E>() - *alpha_write,
+        );
+
+        // lk denominator
+        // rt := rt || rs
+        for i in 0..lk_counts_per_instance {
+            // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i]))
+            virtual_polys.add_mle_list(vec![&sel_lk, &lk_records_wit[i]], eq_lk[i] * *alpha_lk);
+        }
+        // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
+        virtual_polys.add_mle_list(
+            vec![&sel_lk],
+            *alpha_lk
+                * chip_record_alpha
+                * (eq_lk[lk_counts_per_instance..].iter().copied().sum::<E>() - E::ONE),
+        );
     }
 }
