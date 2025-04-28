@@ -200,7 +200,33 @@ pub enum InsnKind {
 use InsnKind::*;
 
 impl InsnKind {
-    pub const KINDS: usize = 45;
+    pub const fn estimate_ratio(&self) -> f32 {
+        match self {
+            INVALID => 0.0,
+            ADD | SUB | XOR | OR | AND | SLL | SRL | SRA | SLT | SLTU => 1.0,
+            ADDI | XORI | ORI | ANDI | SLLI | SRLI | SRAI | SLTI | SLTIU => 1.0,
+            BEQ | BNE | BLT | BGE | BLTU | BGEU => 1.0,
+            JAL => 1.0,
+            JALR => 1.0,
+            MUL => 2.0,
+            MULH => 2.0,
+            MULHSU => 2.0,
+            MULHU => 2.0,
+            DIV => 4.0,
+            DIVU => 4.0,
+            REM => 4.0,
+            REMU => 4.0,
+            LB => 1.0,
+            LH => 1.0,
+            LW => 1.0,
+            LBU => 1.0,
+            LHU => 1.0,
+            SB => 1.0,
+            SH => 1.0,
+            SW => 1.0,
+            ECALL => 0.0,
+        }
+    }
 }
 
 impl From<InsnKind> for InsnCategory {

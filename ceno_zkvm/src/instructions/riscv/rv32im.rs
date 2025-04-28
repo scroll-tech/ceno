@@ -33,15 +33,11 @@ use ceno_emul::{
 use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip};
 use mul::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
-use std::{
-    cmp::Reverse,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::{cmp::Reverse, collections::BTreeSet, fmt};
 use strum::IntoEnumIterator;
 
 use super::{
@@ -325,15 +321,17 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness: &mut ZKVMWitnesses<E>,
         steps: Vec<StepRecord>,
     ) -> Result<GroupedSteps, ZKVMError> {
-        assert_eq!(InsnKind::iter().len(), InsnKind::KINDS);
-        let mut size_needs = [0usize; InsnKind::KINDS];
-        for step in steps.iter() {
-            size_needs[step.insn.kind as usize] += 1;
+        let insn_kinds = InsnKind::iter().len();
+        let total_steps = steps.len();
+        let mut all_records: Vec<(InsnKind, Vec<StepRecord>)> = Vec::with_capacity(insn_kinds);
+        // initialize all_records with empty vecs
+        for kind in InsnKind::iter() {
+            all_records.push((
+                kind,
+                Vec::with_capacity((total_steps as f32 * kind.estimate_ratio()) as usize),
+            ));
         }
-        let mut all_records: BTreeMap<InsnKind, Vec<StepRecord>> = InsnKind::iter()
-            .zip(size_needs)
-            .map(|(insn_kind, size_need)| (insn_kind, Vec::with_capacity(size_need)))
-            .collect();
+
         let mut halt_records = Vec::with_capacity(1);
         steps.into_iter().for_each(|record| {
             let insn_kind = record.insn.kind;
@@ -345,23 +343,31 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 // other type of ecalls are handled by dummy ecall instruction
                 _ => {
                     // it's safe to unwrap as all_records are initialized with Vec::new()
-                    all_records.get_mut(&insn_kind).unwrap().push(record);
+                    all_records[insn_kind as usize].1.push(record);
                 }
             }
         });
 
-        for (insn_kind, (_, records)) in
-            izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))
-        {
-            tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
+        if tracing::level_enabled!(tracing::Level::INFO) {
+            let mut records_count = all_records
+                .iter()
+                .map(|(kind, records)| (kind, records.len()))
+                .collect::<Vec<_>>();
+            records_count.sort_by_key(|(_, len)| Reverse(*len));
+            for (insn_kind, len) in records_count {
+                tracing::info!("tracer generated {:?} {} records", insn_kind, len);
+            }
         }
+
+        let mut all_records = GroupedSteps(all_records);
+        tracing::info!("{all_records:?}");
 
         macro_rules! assign_opcode {
             ($insn_kind:ident,$instruction:ty,$config:ident) => {
                 witness.assign_opcode_circuit::<$instruction>(
                     cs,
                     &self.$config,
-                    all_records.remove(&($insn_kind)).unwrap(),
+                    all_records.take($insn_kind),
                 )?;
             };
         }
@@ -418,11 +424,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
 
         assert_eq!(
-            all_records.keys().cloned().collect::<BTreeSet<_>>(),
+            all_records
+                .0
+                .iter()
+                .map(|(kind, _)| kind)
+                .copied()
+                .collect::<BTreeSet<_>>(),
             // these are opcodes that haven't been implemented
             [INVALID, ECALL].into_iter().collect::<BTreeSet<_>>(),
         );
-        Ok(GroupedSteps(all_records))
+        Ok(all_records)
     }
 
     pub fn assign_table_circuit(
@@ -445,7 +456,31 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 }
 
 /// Opaque type to pass unimplemented instructions from Rv32imConfig to DummyExtraConfig.
-pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
+pub struct GroupedSteps(Vec<(InsnKind, Vec<StepRecord>)>);
+
+impl GroupedSteps {
+    pub fn take(&mut self, insn_kind: InsnKind) -> Vec<StepRecord> {
+        let (kind, records) = &mut self.0[insn_kind as usize];
+        assert_eq!(insn_kind, *kind);
+        std::mem::replace(records, Vec::new())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.iter().all(|(_, records)| records.is_empty())
+    }
+}
+
+impl fmt::Debug for GroupedSteps {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(
+                self.0.iter()
+                    .filter(|(_, records)| !records.is_empty())
+                    .map(|(_, records)| (records.len(), records.capacity(), records.len() as f32 / records.capacity() as f32))
+            )
+            .finish()
+    }
+}
 
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
@@ -532,10 +567,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         &self,
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
-        steps: GroupedSteps,
+        mut steps: GroupedSteps,
     ) -> Result<(), ZKVMError> {
-        let mut steps = steps.0;
-
         let mut keccak_steps = Vec::new();
         let mut secp256k1_add_steps = Vec::new();
         let mut secp256k1_double_steps = Vec::new();
@@ -549,7 +582,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let mut bn254_fp2_mul_steps = Vec::new();
         let mut other_steps = Vec::new();
 
-        if let Some(ecall_steps) = steps.remove(&ECALL) {
+        let ecall_steps = steps.take(ECALL);
+        if !ecall_steps.is_empty() {
             for step in ecall_steps {
                 match step.rs1().unwrap().value {
                     KeccakSpec::CODE => keccak_steps.push(step),
@@ -625,9 +659,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         )?;
         witness.assign_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config, other_steps)?;
 
-        let _ = steps.remove(&INVALID);
-        let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();
-        assert!(steps.is_empty(), "unimplemented opcodes: {:?}", keys);
+        let _ = steps.take(INVALID);
+        assert!(steps.is_empty(), "unimplemented opcodes: {:?}", steps);
         Ok(())
     }
 }
