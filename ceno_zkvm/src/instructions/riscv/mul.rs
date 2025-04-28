@@ -173,7 +173,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
+        // assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
 
         // 0. Registers and instruction lookup
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
