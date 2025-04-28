@@ -481,6 +481,11 @@ impl Tracer {
         self.record.cycle
     }
 
+    /// Return the number of instruction executed til this moment
+    pub fn insts(&self) -> Cycle {
+        self.record.cycle / Self::SUBCYCLES_PER_INSN
+    }
+
     /// giving a start address, return (min, max) accessed address within section
     pub fn probe_min_max_address_by_start_addr(
         &self,
