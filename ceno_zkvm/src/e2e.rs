@@ -16,7 +16,7 @@ use crate::{
 };
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord,
-    Tracer, VMState, WORD_SIZE, WordAddr,
+    Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
@@ -118,6 +118,17 @@ fn emulate_program(
         .take(max_steps)
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
+
+    if cfg!(debug_assertions) {
+        // show io message if have
+        let all_messages = &read_all_messages(&vm)
+            .iter()
+            .map(|msg| String::from_utf8_lossy(msg).to_string())
+            .collect::<Vec<String>>();
+        for msg in all_messages {
+            tracing::info!("{}", msg);
+        }
+    }
 
     // Find the exit code from the HALT step, if halting at all.
     let exit_code = all_records
