@@ -17,6 +17,7 @@ pub struct Platform {
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
     pub hints: Range<Addr>,
+
     /// If true, ecall instructions are no-op instead of trap. Testing only.
     pub unsafe_ecall_nop: bool,
 }

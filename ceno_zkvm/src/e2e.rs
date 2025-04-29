@@ -190,6 +190,7 @@ fn emulate_program(
         })
         .collect_vec();
 
+    // Find the final hints IO cycles.
     let hints_final = hints_init
         .iter()
         .map(|rec| MemFinalRecord {
@@ -282,7 +283,14 @@ pub fn setup_platform(
     };
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
-    let stack = preset.stack.end - stack_size..preset.stack.end;
+
+    let stack = if cfg!(debug_assertions) {
+        // reserve some space at the begining of space for debug_print io
+        // thus memory consistent check could be satisfied
+        preset.stack.end - stack_size..(preset.stack.end + 0x400_0000)
+    } else {
+        preset.stack.end - stack_size..preset.stack.end
+    };
 
     let heap = {
         // Detect heap as starting after program data.
