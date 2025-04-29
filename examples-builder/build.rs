@@ -42,7 +42,7 @@ fn build_elfs() {
         io::stderr().write_all(&output.stderr).unwrap();
         panic!("cargo build of examples failed.");
     }
-    // Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
+
     for example in glob("../examples/examples/*.rs")
         .unwrap()
         .map(Result::unwrap)
@@ -52,8 +52,8 @@ fn build_elfs() {
             dest,
             r#"#[allow(non_upper_case_globals)]
             pub const {example}: &[u8] =
-                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
-        ).expect("failed to write vars.rs");
+                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/{}/examples/{example}");"#,
+        std::env::var("PROFILE").unwrap()).expect("failed to write vars.rs");
     }
     rerun_all_but_target(Path::new("../examples"));
     rerun_all_but_target(Path::new("../ceno_rt"));
