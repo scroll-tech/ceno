@@ -342,31 +342,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, P
                 .all(|v| { v.evaluations().len() == next_pow2_instances })
         );
 
-        let (prod_specs, logup_spec) = self.device.build_witness();
+        let (prod_specs, logup_spec) = self.device.build_tower_witness();
         let (rt_tower, tower_proof) = self
             .device
-            .prove(prod_specs, logup_spec, NUM_FANIN, transcript);
+            .prove_tower_relation(prod_specs, logup_spec, NUM_FANIN, transcript);
 
-        // only initialize when circuit got assert_zero_sumcheck_expressions
-        let sel_non_lc_zero_sumcheck = {
-            if !cs.assert_zero_sumcheck_expressions.is_empty() {
-                let mut sel_non_lc_zero_sumcheck = build_eq_x_r_vec(&rt_non_lc_sumcheck);
-                if num_instances < sel_non_lc_zero_sumcheck.len() {
-                    sel_non_lc_zero_sumcheck.splice(
-                        num_instances..sel_non_lc_zero_sumcheck.len(),
-                        std::iter::repeat_n(
-                            E::ZERO,
-                            sel_non_lc_zero_sumcheck.len() - num_instances,
-                        ),
-                    );
-                }
-                let sel_non_lc_zero_sumcheck: ArcMultilinearExtension<E> =
-                    sel_non_lc_zero_sumcheck.into_mle().into();
-                Some(sel_non_lc_zero_sumcheck)
-            } else {
-                None
-            }
-        };
+        
 
         let mut distrinct_zerocheck_terms_set = BTreeSet::new();
         // degree > 1 zero expression sumcheck

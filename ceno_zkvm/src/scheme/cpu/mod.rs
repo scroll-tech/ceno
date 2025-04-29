@@ -47,7 +47,7 @@ impl<E: ExtensionField> ProverBackend for CpuBackend<E> {
 struct CpuTowerProver {}
 
 impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
-    fn build_witness(
+    fn build_tower_witness(
         &self,
         input: ProofInput<E>,
         read_exprs: &[Expression<E>],
@@ -56,7 +56,7 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
         challenges: &[E; 2],
     ) -> (
         Vec<TowerProverSpec<CpuBackend<E>>>,
-        TowerProverSpec<CpuBackend<E>>,
+        Vec<TowerProverSpec<CpuBackend<E>>>,
     ) {
         let polys = &input.witness;
         let pi = &input.public_input;
@@ -174,14 +174,14 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
                 witness: w_wit_layers,
             },
         ];
-        let lookup_spec = TowerProverSpec {
+        let lookup_specs = vec![TowerProverSpec {
             witness: lk_wit_layers,
-        };
+        }];
 
-        (prod_specs, lookup_spec)
+        (prod_specs, lookup_specs)
     }
 
-    fn prove(
+    fn prove_tower_relation(
         &self,
         prod_specs: Vec<TowerProverSpec<CpuBackend<E>>>,
         logup_specs: Vec<TowerProverSpec<CpuBackend<E>>>,
@@ -369,6 +369,8 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuTowerProver {
         Point<<CpuBackend<E> as ProverBackend>::E>,
         TowerProofs<<CpuBackend<E> as ProverBackend>::E>,
     ) {
+        
+
         // batch sumcheck: selector + main degree > 1 constraints
         let main_sel_span = entered_span!("main_sel");
         let (rt_r, rt_w, rt_lk, rt_non_lc_sumcheck): (Vec<E>, Vec<E>, Vec<E>, Vec<E>) = (
@@ -479,5 +481,26 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuTowerProver {
                 * chip_record_alpha
                 * (eq_lk[lk_counts_per_instance..].iter().copied().sum::<E>() - E::ONE),
         );
+
+        // only initialize when circuit got assert_zero_sumcheck_expressions
+        let sel_non_lc_zero_sumcheck = {
+            if !cs.assert_zero_sumcheck_expressions.is_empty() {
+                let mut sel_non_lc_zero_sumcheck = build_eq_x_r_vec(&rt_non_lc_sumcheck);
+                if num_instances < sel_non_lc_zero_sumcheck.len() {
+                    sel_non_lc_zero_sumcheck.splice(
+                        num_instances..sel_non_lc_zero_sumcheck.len(),
+                        std::iter::repeat_n(
+                            E::ZERO,
+                            sel_non_lc_zero_sumcheck.len() - num_instances,
+                        ),
+                    );
+                }
+                let sel_non_lc_zero_sumcheck: ArcMultilinearExtension<E> =
+                    sel_non_lc_zero_sumcheck.into_mle().into();
+                Some(sel_non_lc_zero_sumcheck)
+            } else {
+                None
+            }
+        };
     }
 }

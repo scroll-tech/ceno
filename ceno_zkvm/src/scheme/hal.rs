@@ -26,16 +26,16 @@ pub struct TowerProverSpec<PB: ProverBackend> {
 pub trait TowerProver<PB: ProverBackend> {
     // infer read/write/logup records from the read/write/logup expressions
     // and then build a complete binary tree to accumulate these records
-    fn build_witness(
+    fn build_tower_witness(
         &self,
         input: ProofInput<PB::E>,
         read_exprs: &[Expression<PB::E>],
         write_exprs: &[Expression<PB::E>],
         lookup_exprs: &[Expression<PB::E>],
-        challenge: &[E; 2],
-    ) -> (Vec<TowerProverSpec<PB>>, TowerProverSpec<PB>);
+        challenge: &[PB::E; 2],
+    ) -> (Vec<TowerProverSpec<PB>>, Vec<TowerProverSpec<PB>>);
 
-    fn prove(
+    fn prove_tower_relation(
         &self,
         prod_specs: Vec<TowerProverSpec<PB>>,
         logup_specs: Vec<TowerProverSpec<PB>>,
