@@ -29,6 +29,9 @@ fn build_elfs() {
         args.insert(1, "--release"); // insert --release after "build"
     }
 
+    let command_str = format!("cargo {}", args.join(" "));
+    io::stdout().write_all(command_str.as_bytes()).unwrap();
+
     let output = Command::new("cargo")
         .args(args)
         .current_dir("../examples")

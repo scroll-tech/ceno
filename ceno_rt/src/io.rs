@@ -10,6 +10,7 @@ pub struct IOWriter {
 unsafe impl Sync for IOWriter {}
 
 impl IOWriter {
+    #[cfg(debug_assertions)]
     const fn new(addr: u32) -> Self {
         assert!(addr % WORD_SIZE as u32 == 0);
         IOWriter {
