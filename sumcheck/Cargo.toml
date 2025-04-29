@@ -27,6 +27,15 @@ criterion.workspace = true
 poseidon.workspace = true
 rand.workspace = true
 
+[features]
+nightly-features = [
+  "p3/nightly-features",
+  "ff_ext/nightly-features",
+  "multilinear_extensions/nightly-features",
+  "sumcheck_macro/nightly-features",
+  "transcript/nightly-features",
+]
+
 [[bench]]
 harness = false
 name = "devirgo_sumcheck"

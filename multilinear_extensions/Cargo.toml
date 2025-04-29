@@ -24,4 +24,5 @@ log = "0.4"
 
 [features]
 default = ["parallel"]
+nightly-features = ["p3/nightly-features", "ff_ext/nightly-features"]
 parallel = []
