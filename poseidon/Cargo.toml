@@ -18,3 +18,6 @@ unroll = "0.1"
 
 [dev-dependencies]
 rand.workspace = true
+
+[features]
+nightly-features = ["p3/nightly-features", "ff_ext/nightly-features"]

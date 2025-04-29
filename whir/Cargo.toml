@@ -46,6 +46,15 @@ debug = true
 [features]
 asm = []
 default = ["parallel"]
+nightly-features = [
+  "p3/nightly-features",
+  "ff_ext/nightly-features",
+  "multilinear_extensions/nightly-features",
+  "poseidon/nightly-features",
+  "sumcheck/nightly-features",
+  "transcript/nightly-features",
+  "witness/nightly-features",
+]
 parallel = [
   "dep:rayon",
 ]

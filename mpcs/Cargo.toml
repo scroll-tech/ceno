@@ -41,6 +41,15 @@ criterion.workspace = true
 [features]
 benchmark = ["parallel"]
 default = ["parallel"] # Add "sanity-check" to debug
+nightly-features = [
+  "p3/nightly-features",
+  "ff_ext/nightly-features",
+  "multilinear_extensions/nightly-features",
+  "sumcheck/nightly-features",
+  "transcript/nightly-features",
+  "whir/nightly-features",
+  "witness/nightly-features",
+]
 parallel = ["dep:rayon"]
 print-trace = ["whir/print-trace"]
 sanity-check = []

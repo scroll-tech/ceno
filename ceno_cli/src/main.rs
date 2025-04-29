@@ -39,6 +39,8 @@ pub enum VmCliCommands {
     RawRun(RawRunCmd),
     // Setup(EvmProvingSetupCmd),
     Verify(VerifyCmd),
+    
+    Info(InfoCmd),
 }
 
 fn main() {
@@ -78,6 +80,7 @@ fn main() {
             .context("could not run given elf due to previous error"),
         // VmCliCommands::Setup(cmd) => cmd.run().await,
         VmCliCommands::Verify(cmd) => cmd.run(),
+        VmCliCommands::Info(cmd) => cmd.run(),
     };
     if let Err(e) = result {
         print_error(e);
