@@ -65,12 +65,10 @@ fn main() {
 
 #[cfg(debug_assertions)]
 fn log_state(state: &[u32]) {
-    use ceno_rt::debug_println;
-    use core::fmt::Write;
-
-    for (i, word) in state.iter().enumerate() {
-        debug_println!("state[{:02}] = 0x{:08X}", i, word);
-    }
+    use ceno_rt::info_out;
+    info_out().write_frame(unsafe {
+        core::slice::from_raw_parts(state.as_ptr() as *const u8, state.len() * size_of::<u32>())
+    });
 }
 
 #[cfg(not(debug_assertions))]

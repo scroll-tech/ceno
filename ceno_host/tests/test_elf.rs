@@ -127,7 +127,7 @@ fn test_hints() -> Result<()> {
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
     }
-    assert_eq!(all_messages[0], "3992003");
+    assert_eq!(all_messages[3], "3992003");
     Ok(())
 }
 
