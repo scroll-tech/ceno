@@ -1,10 +1,6 @@
 // Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::{
-    debug_println,
-    syscalls::{syscall_bn254_add, syscall_bn254_double},
-};
-use core::fmt::Write;
+use ceno_rt::syscalls::{syscall_bn254_add, syscall_bn254_double};
 
 use substrate_bn::{AffineG1, Fr, G1, Group};
 fn bytes_to_words(bytes: [u8; 64]) -> [u32; 16] {
@@ -67,8 +63,15 @@ fn main() {
     assert_eq!(a, c);
 }
 
+#[cfg(debug_assertions)]
 fn log_state(state: &[u32]) {
+    use ceno_rt::debug_println;
+    use core::fmt::Write;
+
     for (i, word) in state.iter().enumerate() {
         debug_println!("state[{:02}] = 0x{:08X}", i, word);
     }
 }
+
+#[cfg(not(debug_assertions))]
+fn log_state(_state: &[u32]) {}

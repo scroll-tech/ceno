@@ -1,12 +1,8 @@
 extern crate ceno_rt;
-use ceno_rt::{
-    debug_println,
-    syscalls::{
-        syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
-        syscall_bn254_fp2_mulmod,
-    },
+use ceno_rt::syscalls::{
+    syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
+    syscall_bn254_fp2_mulmod,
 };
-use core::fmt::Write;
 use rand::{SeedableRng, rngs::StdRng};
 use substrate_bn::{Fq, Fq2};
 
@@ -90,8 +86,15 @@ fn main() {
     }
 }
 
+#[cfg(debug_assertions)]
 fn log_state(state: &[u32]) {
+    use ceno_rt::debug_println;
+    use core::fmt::Write;
+
     for (i, word) in state.iter().enumerate() {
         debug_println!("state[{:02}] = 0x{:08X}", i, word);
     }
 }
+
+#[cfg(not(debug_assertions))]
+fn log_state(_state: &[u32]) {}
