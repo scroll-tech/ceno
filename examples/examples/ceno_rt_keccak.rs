@@ -3,8 +3,8 @@
 //! Iterate multiple times and log the state after each iteration.
 
 extern crate ceno_rt;
-use ceno_rt::{info_out, syscalls::syscall_keccak_permute};
-use core::slice;
+use ceno_rt::{debug_println, syscalls::syscall_keccak_permute};
+use core::fmt::Write;
 
 const ITERATIONS: usize = 3;
 
@@ -18,8 +18,7 @@ fn main() {
 }
 
 fn log_state(state: &[u64; 25]) {
-    let out = unsafe {
-        slice::from_raw_parts(state.as_ptr() as *const u8, state.len() * size_of::<u64>())
-    };
-    info_out().write_frame(out);
+    for (i, word) in state.iter().enumerate() {
+        debug_println!("state[{:02}] = 0x{:016X}", i, word);
+    }
 }

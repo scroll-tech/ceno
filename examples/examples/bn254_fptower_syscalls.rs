@@ -1,13 +1,13 @@
 extern crate ceno_rt;
 use ceno_rt::{
-    info_out,
+    debug_println,
     syscalls::{
         syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
         syscall_bn254_fp2_mulmod,
     },
 };
+use core::fmt::Write;
 use rand::{SeedableRng, rngs::StdRng};
-use std::slice;
 use substrate_bn::{Fq, Fq2};
 
 fn bytes_to_words(bytes: [u8; 32]) -> [u32; 8] {
@@ -29,17 +29,6 @@ fn fq2_to_words(val: Fq2) -> [u32; 16] {
 }
 
 fn main() {
-    let log_flag = true;
-
-    let log_state = |state: &[u32]| {
-        if log_flag {
-            let out = unsafe {
-                slice::from_raw_parts(state.as_ptr() as *const u8, std::mem::size_of_val(state))
-            };
-            info_out().write_frame(out);
-        }
-    };
-
     let mut a = Fq::one();
     let mut b = Fq::one();
     let seed = [0u8; 32];
@@ -98,5 +87,11 @@ fn main() {
 
         a = Fq2::new(Fq::random(&mut rng), Fq::random(&mut rng));
         b = Fq2::new(Fq::random(&mut rng), Fq::random(&mut rng));
+    }
+}
+
+fn log_state(state: &[u32]) {
+    for (i, word) in state.iter().enumerate() {
+        debug_println!("state[{:02}] = 0x{:08X}", i, word);
     }
 }

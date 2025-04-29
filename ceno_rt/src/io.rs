@@ -1,11 +1,5 @@
-use crate::{INFO_OUT_ADDR, WORD_SIZE};
+use crate::WORD_SIZE;
 use core::{cell::Cell, fmt, mem::size_of, slice};
-
-static INFO_OUT: IOWriter = IOWriter::new(INFO_OUT_ADDR);
-
-pub fn info_out() -> &'static IOWriter {
-    &INFO_OUT
-}
 
 pub struct IOWriter {
     cursor: Cell<*mut u32>,
@@ -58,6 +52,16 @@ impl fmt::Write for &IOWriter {
         self.write_frame(s.as_bytes());
         Ok(())
     }
+}
+
+#[cfg(debug_assertions)]
+use crate::INFO_OUT_ADDR;
+#[cfg(debug_assertions)]
+static INFO_OUT: IOWriter = IOWriter::new(INFO_OUT_ADDR);
+
+#[cfg(debug_assertions)]
+pub fn info_out() -> &'static IOWriter {
+    &INFO_OUT
 }
 
 mod macros {
