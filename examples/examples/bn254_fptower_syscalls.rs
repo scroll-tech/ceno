@@ -90,7 +90,7 @@ fn main() {
 fn log_state(state: &[u32]) {
     use ceno_rt::info_out;
     info_out().write_frame(unsafe {
-        core::slice::from_raw_parts(state.as_ptr() as *const u8, state.len() * size_of::<u32>())
+        core::slice::from_raw_parts(state.as_ptr() as *const u8, size_of_val(state))
     });
 }
 

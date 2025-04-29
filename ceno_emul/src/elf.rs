@@ -104,6 +104,7 @@ impl Program {
         if segments.len() > 256 {
             bail!("Too many program headers");
         }
+        let symbols = collect_addr_symbols_mapping(&elf)?;
         for (idx, segment) in segments
             .iter()
             .filter(|x| x.p_type == elf::abi::PT_LOAD)
@@ -148,29 +149,48 @@ impl Program {
                 .p_offset
                 .try_into()
                 .map_err(|err| anyhow!("offset is larger than 32 bits. {err}"))?;
-            for i in (0..mem_size).step_by(WORD_SIZE) {
+
+            // process initialized data
+            (0..file_size).step_by(WORD_SIZE).try_for_each(|i| {
                 let addr = vaddr.checked_add(i).context("Invalid segment vaddr")?;
                 if addr >= max_mem {
-                    bail!(
-                        "Address [0x{addr:08x}] exceeds maximum address for guest programs [0x{max_mem:08x}]"
-                    );
+                    bail!("Address [0x{addr:x}] exceeds max [0x{max_mem:x}]");
                 }
-                if i >= file_size {
-                    // Past the file size and skip.
-                } else {
-                    let mut word = 0;
-                    // Don't read past the end of the file.
-                    let len = core::cmp::min(file_size - i, WORD_SIZE as u32);
-                    for j in 0..len {
-                        let offset = (offset + i + j) as usize;
-                        let byte = input.get(offset).context("Invalid segment offset")?;
-                        word |= (*byte as u32) << (j * 8);
-                    }
-                    image.insert(addr, word);
-                    if (segment.p_flags & PF_X) != 0 {
-                        instructions.push(word);
-                    }
+
+                let word = (0..WORD_SIZE as u32)
+                    .take((file_size - i) as usize)
+                    .enumerate()
+                    .fold(0u32, |acc, (j, _)| {
+                        let offset = (offset + i + j as u32) as usize;
+                        let byte = *input.get(offset).unwrap_or(&0);
+                        acc | ((byte as u32) << (j * 8))
+                    });
+
+                image.insert(addr, word);
+                if (segment.p_flags & PF_X) != 0 {
+                    instructions.push(word);
                 }
+
+                Ok(())
+            })?;
+
+            // only pad uninitialized region if a symbol exists in the range
+            if let Some((max_addr, _)) = find_max_symbol_in_range(
+                &symbols,
+                vaddr as u64,
+                vaddr.checked_add(mem_size).context("Invalid mem_size")? as u64,
+            ) {
+                let zero_upper = (*max_addr as u32).saturating_sub(vaddr);
+                (file_size..=zero_upper)
+                    .step_by(WORD_SIZE)
+                    .try_for_each(|i| {
+                        let addr = vaddr.checked_add(i).context("Invalid segment vaddr")?;
+                        if addr >= max_mem {
+                            bail!("zero-fill addr [0x{addr:x}] exceeds max [0x{max_mem:x}]");
+                        }
+                        image.insert(addr, 0);
+                        Ok(())
+                    })?;
             }
         }
 
@@ -220,17 +240,10 @@ impl Program {
         }
 
         // retrieve sheap from elf
-        let sheap = elf
-            .symbol_table()?
-            .and_then(|(symtab, strtab)| {
-                symtab.iter().find_map(|symbol| {
-                    strtab
-                        .get(symbol.st_name as usize)
-                        .ok()
-                        .filter(|&name| name == "_sheap")
-                        .map(|_| symbol.st_value)
-                })
-            })
+        let sheap = symbols
+            .iter()
+            .find(|(_, v)| *v == "_sheap")
+            .map(|(k, _)| *k)
             .ok_or_else(|| anyhow!("unable to find _sheap symbol"))? as u32;
 
         // there should be no
@@ -248,4 +261,30 @@ impl Program {
             instructions,
         })
     }
+}
+
+fn collect_addr_symbols_mapping<'data>(
+    elf: &ElfBytes<'data, LittleEndian>,
+) -> Result<BTreeMap<u64, String>> {
+    let mut symbols = BTreeMap::new();
+
+    if let Some((symtab, strtab)) = elf.symbol_table()? {
+        for symbol in symtab.iter() {
+            if let Ok(name) = strtab.get(symbol.st_name as usize) {
+                if !name.is_empty() && symbol.st_value != 0 {
+                    symbols.insert(symbol.st_value, name.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(symbols)
+}
+
+fn find_max_symbol_in_range(
+    symbols: &BTreeMap<u64, String>,
+    start: u64,
+    end: u64,
+) -> Option<(&u64, &String)> {
+    symbols.range(start..end).max_by_key(|(&addr, _)| addr)
 }
