@@ -132,7 +132,7 @@ fn emulate_program(
 
     let final_access = vm.tracer().final_accesses();
     let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
-    let insts: u32 = vm.tracer().insts().try_into().unwrap();
+    let insts = vm.tracer().executed_insts();
     tracing::debug!("program executed {insts} instructions in {end_cycle} cycles");
 
     let pi = PublicValues::new(
@@ -268,7 +268,6 @@ fn emulate_program(
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Preset {
     Ceno,
-    Sp1,
 }
 
 pub fn setup_platform(
@@ -280,12 +279,6 @@ pub fn setup_platform(
 ) -> Platform {
     let preset = match preset {
         Preset::Ceno => CENO_PLATFORM,
-        Preset::Sp1 => Platform {
-            // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
-            stack: 0x0020_0400..0x0020_0400,
-            unsafe_ecall_nop: true,
-            ..CENO_PLATFORM
-        },
     };
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();

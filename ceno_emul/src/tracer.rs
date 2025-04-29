@@ -482,8 +482,12 @@ impl Tracer {
     }
 
     /// Return the number of instruction executed til this moment
-    pub fn insts(&self) -> Cycle {
-        self.record.cycle / Self::SUBCYCLES_PER_INSN
+    /// minus 1 since cycle start from Self::SUBCYCLES_PER_INSN
+    pub fn executed_insts(&self) -> usize {
+        (self.record.cycle / Self::SUBCYCLES_PER_INSN)
+            .saturating_sub(1)
+            .try_into()
+            .unwrap()
     }
 
     /// giving a start address, return (min, max) accessed address within section
