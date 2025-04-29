@@ -18,3 +18,10 @@ rayon.workspace = true
 serde.workspace = true
 
 rand.workspace = true
+
+[features]
+nightly-features = [
+  "p3/nightly-features",
+  "ff_ext/nightly-features",
+  "multilinear_extensions/nightly-features",
+]
