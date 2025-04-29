@@ -23,7 +23,7 @@ use crate::{
     error::ZKVMError,
     expression::Instance,
     scheme::{
-        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP},
         hal::TowerProverSpec,
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
@@ -346,8 +346,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, P
         let (rt_tower, tower_proof) = self
             .device
             .prove_tower_relation(prod_specs, logup_spec, NUM_FANIN, transcript);
-
-        
 
         let mut distrinct_zerocheck_terms_set = BTreeSet::new();
         // degree > 1 zero expression sumcheck

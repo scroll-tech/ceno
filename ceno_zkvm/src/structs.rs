@@ -3,6 +3,7 @@ use crate::{
     error::ZKVMError,
     expression::Expression,
     instructions::Instruction,
+    scheme::hal::ProverBackend,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
@@ -15,7 +16,7 @@ use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
-use sumcheck::structs::IOPProverMessage;
+use sumcheck::{structs::IOPProverMessage, util::ceil_log2};
 use witness::RowMajorMatrix;
 
 pub struct TowerProver;
@@ -65,10 +66,17 @@ pub enum RAMType {
     Memory,
 }
 
-pub struct ProofInput<E: ExtensionField> {
-    pub witness: Vec<ArcMultilinearExtension<E>>,
-    pub public_input: Vec<ArcMultilinearExtension<E>>,
+pub struct ProofInput<PB: ProverBackend> {
+    pub witness: Vec<PB::MultilinearPoly>,
+    pub public_input: Vec<PB::MultilinearPoly>,
     pub num_instances: usize,
+}
+
+impl<E: ExtensionField> ProofInput<E> {
+    #[inline]
+    pub fn log2_num_instances(&self) -> usize {
+        ceil_log2(self.num_instances)
+    }
 }
 
 /// A point and the evaluation of this point.

@@ -1,4 +1,5 @@
 use crate::{
+    circuit_builder::ConstraintSystem,
     expression::Expression,
     structs::{ProofInput, TowerProofs},
 };
@@ -47,7 +48,9 @@ pub trait TowerProver<PB: ProverBackend> {
 pub trait MainSumcheckProver<PB: ProverBackend> {
     fn prove_main_constraints(
         &self,
-        polys: &[PB::MultilinearPoly],
+        input: ProofInput<PB>,
+        tower_proof: TowerProofs<PB::E>,
+        cs: ConstraintSystem<PB::E>,
         transcript: &mut impl Transcript<PB::E>,
     ) -> (Point<PB::E>, TowerProofs<PB::E>);
 }

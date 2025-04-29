@@ -1,8 +1,9 @@
 use super::hal::{MainSumcheckProver, ProverBackend};
 use crate::{
+    circuit_builder::ConstraintSystem,
     expression::Expression,
     scheme::{
-        constants::NUM_FANIN,
+        constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN},
         hal::{TowerProver, TowerProverSpec},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
@@ -29,7 +30,6 @@ use sumcheck::{
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
-
 struct CpuBackend<E> {
     _marker: std::marker::PhantomData<E>,
 }
@@ -44,9 +44,9 @@ impl<E: ExtensionField> ProverBackend for CpuBackend<E> {
 }
 
 /// tower prover for CPU backend
-struct CpuTowerProver {}
+struct CpuProver {}
 
-impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
+impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
     fn build_tower_witness(
         &self,
         input: ProofInput<E>,
@@ -343,15 +343,6 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
                 (rt_prime, next_alpha_pows)
             });
 
-        assert_eq!(
-            next_rt.len(),
-            log2_num_instances
-                + [log2_r_count, log2_w_count, log2_lk_count]
-                    .iter()
-                    .max()
-                    .unwrap()
-        );
-
         exit_span!(tower_span);
 
         tracing::debug!("tower sumcheck finished");
@@ -360,16 +351,33 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuTowerProver {
     }
 }
 
-impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuTowerProver {
+impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
     fn prove_main_constraints(
         &self,
-        polys: &[<CpuBackend<E> as ProverBackend>::MultilinearPoly],
+        input: ProofInput<CpuBackend<E>>,
+        rt_tower: Vec<E>,
+        tower_proof: TowerProofs<E>,
+        cs: ConstraintSystem<E>,
         transcript: &mut impl Transcript<<CpuBackend<E> as ProverBackend>::E>,
     ) -> (
         Point<<CpuBackend<E> as ProverBackend>::E>,
         TowerProofs<<CpuBackend<E> as ProverBackend>::E>,
     ) {
-        
+        let num_instances = input.num_instances;
+        let log2_num_instances = input.log2_num_instances();
+        let log2_r_count = ceil_log2(cs.r_expressions.len());
+        let log2_w_count = ceil_log2(cs.w_expressions.len());
+        let log2_lk_count = ceil_log2(cs.lk_expressions.len());
+
+        assert_eq!(
+            rt_tower.len(),
+            log2_num_instances
+                + [log2_r_count, log2_w_count, log2_lk_count]
+                    .iter()
+                    .max()
+                    .unwrap()
+        );
+        assert_eq!(tower_proof.prod_specs_points.len(), 2); // read/write
 
         // batch sumcheck: selector + main degree > 1 constraints
         let main_sel_span = entered_span!("main_sel");
@@ -389,6 +397,10 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuTowerProver {
             rt_tower[..log2_num_instances].to_vec(),
         );
 
+        assert_eq!(rt_r.len(), log2_num_instances + log2_r_count);
+        assert_eq!(rt_w.len(), log2_num_instances + log2_w_count);
+        assert_eq!(rt_lk.len(), log2_num_instances + log2_lk_count);
+
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let alpha_pow = get_challenge_pows(
             MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
@@ -400,6 +412,7 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuTowerProver {
             alpha_pow_iter.next().unwrap(),
             alpha_pow_iter.next().unwrap(),
         );
+
         // create selector: all ONE, but padding ZERO to ceil_log2
         let (sel_r, sel_w, sel_lk): (
             ArcMultilinearExtension<E>,
@@ -444,21 +457,24 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuTowerProver {
         let eq_w = build_eq_x_r_vec(&rt_w[..log2_w_count]);
         let eq_lk = build_eq_x_r_vec(&rt_lk[..log2_lk_count]);
 
+        let r_counts = cs.r_expressions.len();
+        let w_counts = cs.w_expressions.len();
+
         // read
-        // rt_r := rt || rs
-        for i in 0..r_counts_per_instance {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t] ))
+        // rt_r := rs || rt
+        for i in 0..r_counts {
+            // \sum_t sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t])
             virtual_polys.add_mle_list(vec![&sel_r, &r_records_wit[i]], eq_r[i] * *alpha_read);
         }
         // \sum_t alpha_read * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_r],
-            *alpha_read * eq_r[r_counts_per_instance..].iter().copied().sum::<E>() - *alpha_read,
+            *alpha_read * eq_r[r_counts..].iter().copied().sum::<E>() - *alpha_read,
         );
 
         // write
-        // rt := rt || rs
-        for i in 0..w_counts_per_instance {
+        // rt_w := rs || rt
+        for i in 0..cs.w_expressions.len() {
             // \sum_t (sel(rt, t) * (\sum_i alpha_write * eq(rs, i) * record_w[i] ))
             virtual_polys.add_mle_list(vec![&sel_w, &w_records_wit[i]], eq_w[i] * *alpha_write);
         }
