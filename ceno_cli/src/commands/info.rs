@@ -4,7 +4,6 @@ use clap::Parser;
 #[command(name = "info", about = "Show info of current ceno cli")]
 pub struct InfoCmd;
 
-
 impl InfoCmd {
     pub fn run(self) -> anyhow::Result<()> {
         eprintln!("OS: {}", std::env::consts::OS);
@@ -29,11 +28,11 @@ impl InfoCmd {
         if cfg!(target_feature = "avx512f") {
             enabled_features.push("avx512f");
         }
-        
+
         if cfg!(target_feature = "sha3") {
             enabled_features.push("sha3");
         }
-        
+
         eprintln!("Enabled features: {}", enabled_features.join(", "));
         Ok(())
     }

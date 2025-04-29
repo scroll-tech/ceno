@@ -39,7 +39,7 @@ pub enum VmCliCommands {
     RawRun(RawRunCmd),
     // Setup(EvmProvingSetupCmd),
     Verify(VerifyCmd),
-    
+
     Info(InfoCmd),
 }
 
