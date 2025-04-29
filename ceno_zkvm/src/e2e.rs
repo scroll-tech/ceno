@@ -201,11 +201,11 @@ fn emulate_program(
         .collect_vec();
 
     // get stack access by min/max range
-    let stack_final = if let Some((start, end)) = vm
+    let stack_final = if let Some((start, _)) = vm
         .tracer()
         .probe_min_max_address_by_start_addr(ByteAddr::from(platform.stack.start).waddr())
     {
-        (start..end)
+        (start..ByteAddr::from(platform.stack.end).waddr())
             // stack record collect in reverse order
             .rev()
             .map(|vma| {
@@ -226,6 +226,7 @@ fn emulate_program(
         .tracer()
         .probe_min_max_address_by_start_addr(ByteAddr::from(platform.heap.start).waddr())
     {
+        assert_eq!(start, ByteAddr::from(platform.heap.start).waddr());
         (start..end)
             .map(|vma| {
                 let byte_addr = vma.baddr();
@@ -285,9 +286,9 @@ pub fn setup_platform(
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
 
     let stack = if cfg!(debug_assertions) {
-        // reserve some space at the begining of space for io
+        // reserve some extra space for io
         // thus memory consistent check could be satisfied
-        preset.stack.end - stack_size..(preset.stack.end + 0x400_0000)
+        preset.stack.end - stack_size..(preset.stack.end + 0x4000)
     } else {
         preset.stack.end - stack_size..preset.stack.end
     };
