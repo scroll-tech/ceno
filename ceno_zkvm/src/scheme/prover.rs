@@ -610,12 +610,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // write
         // rt := rt || rs
-        // \sum_t alpha_write * sel(rt, t) * (\sum_i  * eq(rs, i) * (record_w[i] - 1))
+        // \sum_t alpha_write * sel(rt, t) * (\sum_{i < w_counts}  * eq(rs, i) * (record_w[i] - 1))
         virtual_polys.add_mle_list(vec![&sel_w, &w_records_combined], *alpha_write);
 
         // lk denominator
         // rt := rt || rs
-        // \sum_t alpha_lk * sel(rt, t) * (\sum_i eq(rs, i) * (record_lk[i] - chip_record_alpha))
+        // \sum_t alpha_lk * sel(rt, t) * (\sum_{i < lk_counts} eq(rs, i) * (record_lk[i] - chip_record_alpha))
         virtual_polys.add_mle_list(vec![&sel_lk, &lk_records_combined], *alpha_lk);
 
         let mut distrinct_zerocheck_terms_set = BTreeSet::new();

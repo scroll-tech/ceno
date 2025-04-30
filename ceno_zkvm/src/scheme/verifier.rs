@@ -499,27 +499,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             // read
             *alpha_read
                 * sel_r
-                * ((0..r_counts_per_instance)
-                    .map(|i| r_records_in_evals[i] * eq_r[i])
-                    .sum::<E>()
-                    + eq_r[r_counts_per_instance..].iter().copied().sum::<E>()
-                    - E::ONE),
+                * (0..r_counts_per_instance)
+                    .map(|i| (r_records_in_evals[i] - E::ONE) * eq_r[i])
+                    .sum::<E>(),
             // write
             *alpha_write
                 * sel_w
-                * ((0..w_counts_per_instance)
-                    .map(|i| w_records_in_evals[i] * eq_w[i])
-                    .sum::<E>()
-                    + eq_w[w_counts_per_instance..].iter().copied().sum::<E>()
-                    - E::ONE),
+                * (0..w_counts_per_instance)
+                    .map(|i| (w_records_in_evals[i] - E::ONE) * eq_w[i])
+                    .sum::<E>(),
             // lookup
             *alpha_lk
                 * sel_lk
-                * ((0..lk_counts_per_instance)
-                    .map(|i| lk_records_in_evals[i] * eq_lk[i])
-                    .sum::<E>()
-                    + chip_record_alpha
-                        * (eq_lk[lk_counts_per_instance..].iter().copied().sum::<E>() - E::ONE)),
+                * (0..lk_counts_per_instance)
+                    .map(|i| (lk_records_in_evals[i] - chip_record_alpha) * eq_lk[i])
+                    .sum::<E>(),
             // degree > 1 zero exp sumcheck
             {
                 // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
