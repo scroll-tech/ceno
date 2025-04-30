@@ -397,7 +397,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // TODO optimize last layer to avoid alloc new vector to save memory
         let lk_records_last_layer =
             interleaving_mles_to_mles(lk_records_wit, num_instances, NUM_FANIN, chip_record_alpha);
-        assert_eq!(lk_records_last_layer.len(), 2);
+        assert_eq!(lk_records_last_layer.len(), NUM_FANIN);
         exit_span!(span);
 
         let span = entered_span!("tower_witness_lk_layers");
@@ -405,18 +405,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(span);
         exit_span!(wit_inference_span);
 
-        if cfg!(test) {
+        if cfg!(debug_assertions) {
             // sanity check
-            assert_eq!(lk_wit_layers.len(), log2_num_instances + log2_lk_count);
-            assert_eq!(r_wit_layers.len(), log2_num_instances + log2_r_count);
-            assert_eq!(w_wit_layers.len(), log2_num_instances + log2_w_count);
+            assert_eq!(
+                lk_wit_layers.len(),
+                (log2_num_instances + log2_lk_count) / 2
+            );
+            assert_eq!(r_wit_layers.len(), (log2_num_instances + log2_r_count) / 2);
+            assert_eq!(w_wit_layers.len(), (log2_num_instances + log2_w_count) / 2);
             assert!(lk_wit_layers.iter().enumerate().all(|(i, w)| {
-                let expected_size = 1 << i;
-                let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
+                let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
+                let (p1, p2, p3, p4, q1, q2, q3, q4) =
+                    (&w[0], &w[1], &w[2], &w[3], &w[4], &w[5], &w[6], &w[7]);
                 p1.evaluations().len() == expected_size
                     && p2.evaluations().len() == expected_size
+                    && p3.evaluations().len() == expected_size
+                    && p4.evaluations().len() == expected_size
                     && q1.evaluations().len() == expected_size
                     && q2.evaluations().len() == expected_size
+                    && q3.evaluations().len() == expected_size
+                    && q4.evaluations().len() == expected_size
             }));
             assert!(r_wit_layers.iter().enumerate().all(|(i, r_wit_layer)| {
                 let expected_size = 1 << (ceil_log2(NUM_FANIN) * i);
@@ -1187,7 +1195,7 @@ impl TowerProver {
     ) -> (Point<E>, TowerProofs<E>) {
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
-        assert_eq!(num_fanin, 2);
+        assert_eq!(num_fanin, 4);
 
         let mut proofs = TowerProofs::new(prod_specs.len(), logup_specs.len());
         let log_num_fanin = ceil_log2(num_fanin);
@@ -1244,7 +1252,7 @@ impl TowerProver {
                     if round < s.witness.len() {
                         let layer_polys = &s.witness[round];
                         // sanity check
-                        assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
+                        assert_eq!(layer_polys.len(), 8); // p1, q1, p2, q2, p3, q3, p4, q4
                         assert!(
                             layer_polys
                                 .iter()
@@ -1253,19 +1261,30 @@ impl TowerProver {
 
                         let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
 
-                        let (q2, q1, p2, p1) = (
+                        let (q4, q3, q2, q1, p4, p3, p2, p1) = (
+                            &layer_polys[7],
+                            &layer_polys[6],
+                            &layer_polys[5],
+                            &layer_polys[4],
                             &layer_polys[3],
                             &layer_polys[2],
                             &layer_polys[1],
                             &layer_polys[0],
                         );
 
-                        // \sum_s eq(rt, s) * alpha_numerator^{i} * (p1 * q2 + p2 * q1)
-                        virtual_polys.add_mle_list(vec![&eq, &p1, &q2], *alpha_numerator);
-                        virtual_polys.add_mle_list(vec![&eq, &p2, &q1], *alpha_numerator);
+                        // \sum_s eq(rt, s) * alpha_numerator^{i} * (
+                        // p1 * q2 * q3 * q4
+                        // + p2 * q1 * q3 * q4
+                        // + p3 * q1 * q2 * q4
+                        // + p4 * q1 * q2 * q3
+                        // )
+                        virtual_polys.add_mle_list(vec![&eq, &q2, &q3, &q4, &p1], *alpha_numerator);
+                        virtual_polys.add_mle_list(vec![&eq, &q1, &q3, &q4, &p2], *alpha_numerator);
+                        virtual_polys.add_mle_list(vec![&eq, &q1, &q2, &q4, &p3], *alpha_numerator);
+                        virtual_polys.add_mle_list(vec![&eq, &q1, &q2, &q3, &p4], *alpha_numerator);
 
-                        // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2)
-                        virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
+                        // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2 * q3 * q4)
+                        virtual_polys.add_mle_list(vec![&eq, &q1, &q2, &q3, &q4], *alpha_denominator);
                     }
                 }
 
@@ -1308,12 +1327,15 @@ impl TowerProver {
                 for (i, s) in enumerate(&logup_specs) {
                     if round < s.witness.len() {
                         // collect evals belong to current spec
-                        // p1, q2, p2, q1
-                        let p1 = *evals_iter.next().expect("insufficient evals length");
                         let q2 = *evals_iter.next().expect("insufficient evals length");
-                        let p2 = *evals_iter.next().expect("insufficient evals length");
+                        let q3 = *evals_iter.next().expect("insufficient evals length");
+                        let q4 = *evals_iter.next().expect("insufficient evals length");
+                        let p1 = *evals_iter.next().expect("insufficient evals length");
                         let q1 = *evals_iter.next().expect("insufficient evals length");
-                        proofs.push_logup_evals_and_point(i, vec![p1, p2, q1, q2], rt_prime.clone());
+                        let p2 = *evals_iter.next().expect("insufficient evals length");
+                        let p3 = *evals_iter.next().expect("insufficient evals length");
+                        let p4 = *evals_iter.next().expect("insufficient evals length");
+                        proofs.push_logup_evals_and_point(i, vec![p1, p2, p3, p4, q1, q2, q3, q4], rt_prime.clone());
                     }
                 }
                 assert_eq!(evals_iter.next(), None);

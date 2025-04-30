@@ -86,16 +86,23 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
 }
 
 macro_rules! tower_mle_4 {
-    ($p1:ident, $p2:ident, $q1:ident, $q2:ident, $start_index:ident, $cur_len:ident) => {{
+    ($p1:ident, $p2:ident, $p3:ident, $p4:ident, $q1:ident, $q2:ident, $q3:ident, $q4:ident, $start_index:ident, $cur_len:ident) => {{
         let range = $start_index..($start_index + $cur_len);
         $q1[range.clone()]
             .par_iter()
             .zip(&$q2[range.clone()])
+            .zip(&$q3[range.clone()])
+            .zip(&$q4[range.clone()])
             .zip(&$p1[range.clone()])
-            .zip(&$p2[range])
-            .map(|(((q1, q2), p1), p2)| {
-                let p = *q1 * *p2 + *q2 * *p1;
-                let q = *q1 * *q2;
+            .zip(&$p2[range.clone()])
+            .zip(&$p3[range.clone()])
+            .zip(&$p4[range])
+            .map(|(((((((q1, q2), q3), q4), p1), p2), p3), p4)| {
+                let p = *q2 * *q3 * *q4 * *p1
+                    + *q1 * *q3 * *q4 * *p2
+                    + *q1 * *q2 * *q4 * *p3
+                    + *q1 * *q2 * *q3 * *p4;
+                let q = *q1 * *q2 * *q3 * *q4;
                 (p, q)
             })
             .unzip()
@@ -103,63 +110,89 @@ macro_rules! tower_mle_4 {
 }
 
 /// infer logup witness from last layer
-/// return is the ([p1,p2], [q1,q2]) for each layer
+/// return is the ([p1,p2,p3,p4], [q1,q2,q3,q4]) for each layer
 pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
     p_mles: Option<Vec<ArcMultilinearExtension<'a, E>>>,
     q_mles: Vec<ArcMultilinearExtension<'a, E>>,
 ) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
-    if cfg!(test) {
-        assert_eq!(q_mles.len(), 2);
+    if cfg!(debug_assertions) {
+        assert_eq!(q_mles.len(), 4);
         assert!(q_mles.iter().map(|q| q.evaluations().len()).all_equal());
     }
-    let num_vars = ceil_log2(q_mles[0].evaluations().len());
-    let mut wit_layers = (0..num_vars).fold(vec![(p_mles, q_mles)], |mut acc, _| {
+    let num_layers = q_mles[0].num_vars() / 2;
+    let mut wit_layers = (0..num_layers).fold(vec![(p_mles, q_mles)], |mut acc, _| {
         let (p, q): &(
             Option<Vec<ArcMultilinearExtension<E>>>,
             Vec<ArcMultilinearExtension<E>>,
         ) = acc.last().unwrap();
-        let (q1, q2) = (&q[0], &q[1]);
-        let cur_len = q1.evaluations().len() / 2;
+        let (q1, q2, q3, q4) = (&q[0], &q[1], &q[2], &q[3]);
+        let cur_len = q1.evaluations().len() / 4;
         let (next_p, next_q): (
             Vec<ArcMultilinearExtension<E>>,
             Vec<ArcMultilinearExtension<E>>,
-        ) = (0..2)
+        ) = (0..4)
             .map(|index| {
                 let start_index = cur_len * index;
                 let (p_evals, q_evals): (Vec<E>, Vec<E>) = if let Some(p) = p {
-                    let (p1, p2) = (&p[0], &p[1]);
+                    let (p1, p2, p3, p4) = (&p[0], &p[1], &p[2], &p[3]);
                     match (
                         p1.evaluations(),
                         p2.evaluations(),
+                        p3.evaluations(),
+                        p4.evaluations(),
                         q1.evaluations(),
                         q2.evaluations(),
+                        q3.evaluations(),
+                        q4.evaluations(),
                     ) {
                         (
                             FieldType::Ext(p1),
                             FieldType::Ext(p2),
+                            FieldType::Ext(p3),
+                            FieldType::Ext(p4),
                             FieldType::Ext(q1),
                             FieldType::Ext(q2),
-                        ) => tower_mle_4!(p1, p2, q1, q2, start_index, cur_len),
+                            FieldType::Ext(q3),
+                            FieldType::Ext(q4),
+                        ) => tower_mle_4!(p1, p2, p3, p4, q1, q2, q3, q4, start_index, cur_len),
                         (
                             FieldType::Base(p1),
                             FieldType::Base(p2),
+                            FieldType::Base(p3),
+                            FieldType::Base(p4),
                             FieldType::Ext(q1),
                             FieldType::Ext(q2),
-                        ) => tower_mle_4!(p1, p2, q1, q2, start_index, cur_len),
+                            FieldType::Ext(q3),
+                            FieldType::Ext(q4),
+                        ) => tower_mle_4!(p1, p2, p3, p4, q1, q2, q3, q4, start_index, cur_len),
                         _ => unreachable!(),
                     }
                 } else {
-                    match (q1.evaluations(), q2.evaluations()) {
-                        (FieldType::Ext(q1), FieldType::Ext(q2)) => {
+                    match (
+                        q1.evaluations(),
+                        q2.evaluations(),
+                        q3.evaluations(),
+                        q4.evaluations(),
+                    ) {
+                        (
+                            FieldType::Ext(q1),
+                            FieldType::Ext(q2),
+                            FieldType::Ext(q3),
+                            FieldType::Ext(q4),
+                        ) => {
                             let range = start_index..(start_index + cur_len);
                             q1[range.clone()]
                                 .par_iter()
-                                .zip(&q2[range])
-                                .map(|(q1, q2)| {
-                                    // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
-                                    // p is numerator and q is denominator
-                                    let p = *q1 + *q2;
-                                    let q = *q1 * *q2;
+                                .zip(&q2[range.clone()])
+                                .zip(&q3[range.clone()])
+                                .zip(&q4[range])
+                                .map(|(((q1, q2), q3), q4)| {
+                                    // 1 / q1 + 1 / q2 + 1 / q3 + 1 / q4
+                                    let p = *q2 * *q3 * *q4
+                                        + *q1 * *q3 * *q4
+                                        + *q1 * *q2 * *q4
+                                        + *q1 * *q2 * *q3;
+                                    let q = *q1 * *q2 * *q3 * *q4;
                                     (p, q)
                                 })
                                 .unzip()
@@ -183,6 +216,18 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
             } else {
                 let len = q[0].evaluations().len();
                 vec![
+                    (0..len)
+                        .into_par_iter()
+                        .map(|_| E::ONE)
+                        .collect::<Vec<_>>()
+                        .into_mle()
+                        .into(),
+                    (0..len)
+                        .into_par_iter()
+                        .map(|_| E::ONE)
+                        .collect::<Vec<_>>()
+                        .into_mle()
+                        .into(),
                     (0..len)
                         .into_par_iter()
                         .map(|_| E::ONE)
