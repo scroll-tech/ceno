@@ -44,9 +44,6 @@ pub struct ZKVMOpcodeProof<E: ExtensionField> {
 
     // main constraint and select sumcheck proof
     pub main_sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
-    pub r_records_in_evals: Vec<E>,
-    pub w_records_in_evals: Vec<E>,
-    pub lk_records_in_evals: Vec<E>,
 
     pub wits_in_evals: Vec<E>,
 }

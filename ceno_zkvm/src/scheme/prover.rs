@@ -1,16 +1,22 @@
 use ff_ext::ExtensionField;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    mem::MaybeUninit,
+};
 
 use itertools::{Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     mle::IntoMLE,
-    util::ceil_log2,
+    util::{ceil_log2, create_uninit_vec},
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,
 };
 use p3::field::PrimeCharacteristicRing;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::{
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -565,19 +571,64 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             }
         };
 
-        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
-
         let eq_r = build_eq_x_r_vec(&rt_r[..log2_r_count]);
         let eq_w = build_eq_x_r_vec(&rt_w[..log2_w_count]);
         let eq_lk = build_eq_x_r_vec(&rt_lk[..log2_lk_count]);
 
+        let linear_combine_mles = |coeffs: &[E], mles: &[ArcMultilinearExtension<E>]| {
+            assert!(!mles.is_empty());
+            assert_eq!(coeffs.len(), mles.len());
+
+            let n = mles[0].evaluations().len();
+            let mut v: Vec<MaybeUninit<E>> = create_uninit_vec(n);
+            let chunk_size = (n + num_threads - 1) / num_threads;
+
+            v.par_chunks_mut(chunk_size)
+                .enumerate()
+                .for_each(|(i, chunk)| {
+                    let start = i * chunk_size;
+
+                    // init with coeffs[0]*mles[0]
+                    chunk
+                        .iter_mut()
+                        .zip(mles[0].get_ext_field_vec().iter().skip(start))
+                        .for_each(|(acc, v)| {
+                            acc.write(*v * coeffs[0]);
+                        });
+
+                    for j in 1..mles.len() {
+                        // accumulate with coeffs[j] * mles[j]
+                        chunk
+                            .iter_mut()
+                            .zip(mles[j].get_ext_field_vec().iter().skip(start))
+                            .for_each(|(acc, v)| unsafe {
+                                *acc.assume_init_mut() += *v * coeffs[j];
+                            });
+                    }
+                });
+
+            v.into_iter()
+                .map(|v| unsafe { v.assume_init() })
+                .collect::<Vec<_>>()
+                .into_mle()
+                .into()
+        };
+        let r_records_combined: ArcMultilinearExtension<E> =
+            linear_combine_mles(&eq_r[0..r_counts_per_instance], r_records_wit);
+
+        let w_records_combined: ArcMultilinearExtension<E> =
+            linear_combine_mles(&eq_w[0..w_counts_per_instance], w_records_wit);
+
+        let lk_records_combined: ArcMultilinearExtension<E> =
+            linear_combine_mles(&eq_lk[0..lk_counts_per_instance], lk_records_wit);
+
+        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, log2_num_instances);
+
         // read
         // rt_r := rt || rs
-        for i in 0..r_counts_per_instance {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t] ))
-            virtual_polys.add_mle_list(vec![&sel_r, &r_records_wit[i]], eq_r[i] * *alpha_read);
-        }
-        // \sum_t alpha_read * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
+        // \sum_t alpha_read * sel(rt, t) * (\sum_{i < r_counts} eq(rs, i) * record_r[t])
+        virtual_polys.add_mle_list(vec![&sel_r, &r_records_combined], *alpha_read);
+        // \sum_t alpha_read * sel(rt, t) * ((\sum_i eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_r],
             *alpha_read * eq_r[r_counts_per_instance..].iter().copied().sum::<E>() - *alpha_read,
@@ -585,11 +636,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // write
         // rt := rt || rs
-        for i in 0..w_counts_per_instance {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_write * eq(rs, i) * record_w[i] ))
-            virtual_polys.add_mle_list(vec![&sel_w, &w_records_wit[i]], eq_w[i] * *alpha_write);
-        }
-        // \sum_t alpha_write * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
+        // \sum_t alpha_write * sel(rt, t) * (\sum_i  * eq(rs, i) * record_w[i])
+        virtual_polys.add_mle_list(vec![&sel_w, &w_records_combined], *alpha_write);
+        // \sum_t alpha_write * sel(rt, t) * ((\sum_i eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_w],
             *alpha_write * eq_w[w_counts_per_instance..].iter().copied().sum::<E>() - *alpha_write,
@@ -597,11 +646,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // lk denominator
         // rt := rt || rs
-        for i in 0..lk_counts_per_instance {
-            // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i]))
-            virtual_polys.add_mle_list(vec![&sel_lk, &lk_records_wit[i]], eq_lk[i] * *alpha_lk);
-        }
-        // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
+        // \sum_t alpha_lk * sel(rt, t) * (\sum_i eq(rs, i) * record_lk[i]))
+        virtual_polys.add_mle_list(vec![&sel_lk, &lk_records_combined], *alpha_lk);
+        // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * ((\sum_i eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_lk],
             *alpha_lk
@@ -658,9 +705,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let main_sel_evals = state.get_mle_flatten_final_evaluations();
         assert_eq!(
             main_sel_evals.len(),
-            r_counts_per_instance
-                + w_counts_per_instance
-                + lk_counts_per_instance
+            3 // 3 from [r_combined, w_combined, lk_combined]
                 + 3 // 3 from [sel_r, sel_w, sel_lk]
                 + if cs.assert_zero_sumcheck_expressions.is_empty() {
                     0
@@ -670,17 +715,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
         let mut main_sel_evals_iter = main_sel_evals.into_iter();
         main_sel_evals_iter.next(); // skip sel_r
-        let r_records_in_evals = (0..r_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
+        main_sel_evals_iter.next(); // skip r_records_combined
         main_sel_evals_iter.next(); // skip sel_w
-        let w_records_in_evals = (0..w_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
+        main_sel_evals_iter.next(); // skip w_records_combined
         main_sel_evals_iter.next(); // skip sel_lk
-        let lk_records_in_evals = (0..lk_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
+        main_sel_evals_iter.next(); // skip lk_records_combined
+
         assert!(
             // we can skip all the rest of degree > 1 monomial terms because all the witness evaluation will be evaluated at last step
             // and pass to verifier
@@ -726,9 +766,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 lk_q2_out_eval,
                 tower_proof,
                 main_sel_sumcheck_proofs: main_sel_sumcheck_proofs.proofs,
-                r_records_in_evals,
-                w_records_in_evals,
-                lk_records_in_evals,
                 wits_in_evals,
             },
             input_open_point,
