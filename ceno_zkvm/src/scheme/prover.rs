@@ -1,22 +1,16 @@
 use ff_ext::ExtensionField;
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    mem::MaybeUninit,
-};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use itertools::{Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     mle::IntoMLE,
-    util::{ceil_log2, create_uninit_vec},
+    util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,
 };
-use p3::field::PrimeCharacteristicRing;
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSliceMut,
-};
+use p3::field::{PrimeCharacteristicRing, dot_product};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -580,35 +574,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             assert_eq!(coeffs.len(), mles.len());
 
             let n = mles[0].evaluations().len();
-            let mut v: Vec<MaybeUninit<E>> = create_uninit_vec(n);
-            let chunk_size = (n + num_threads - 1) / num_threads;
-
-            v.par_chunks_mut(chunk_size)
-                .enumerate()
-                .for_each(|(i, chunk)| {
-                    let start = i * chunk_size;
-
-                    // init with coeffs[0]*mles[0]
-                    chunk
-                        .iter_mut()
-                        .zip(mles[0].get_ext_field_vec().iter().skip(start))
-                        .for_each(|(acc, v)| {
-                            acc.write(*v * coeffs[0]);
-                        });
-
-                    for j in 1..mles.len() {
-                        // accumulate with coeffs[j] * mles[j]
-                        chunk
-                            .iter_mut()
-                            .zip(mles[j].get_ext_field_vec().iter().skip(start))
-                            .for_each(|(acc, v)| unsafe {
-                                *acc.assume_init_mut() += *v * coeffs[j];
-                            });
-                    }
-                });
-
-            v.into_iter()
-                .map(|v| unsafe { v.assume_init() })
+            let mle_evals = mles.iter().map(|mle| mle.get_ext_field_vec()).collect_vec();
+            // combine into single mle by dot product with coeff
+            (0..n)
+                .into_par_iter()
+                .map(|j| {
+                    dot_product::<E, _, _>(
+                        mle_evals.iter().map(|mle_eval| mle_eval[j]),
+                        coeffs.iter().copied(),
+                    )
+                })
                 .collect::<Vec<_>>()
                 .into_mle()
                 .into()
