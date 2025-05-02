@@ -3518,6 +3518,7 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
+ "tracing",
 ]
 
 [[package]]
