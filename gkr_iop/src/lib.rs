@@ -9,6 +9,7 @@ pub mod chip;
 pub mod error;
 pub mod evaluation;
 pub mod gkr;
+pub mod precompiles;
 pub mod utils;
 
 pub trait ProtocolBuilder: Sized {
@@ -48,12 +49,14 @@ where
     fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>;
 }
 
-// TODO: the following trait consists of `commit_phase1`, `commit_phase2`, `gkr_phase` and `opening_phase`.
+// TODO: the following trait consists of `commit_phase1`, `commit_phase2`,
+// `gkr_phase` and `opening_phase`.
 pub struct ProtocolProver<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
 
-// TODO: the following trait consists of `commit_phase1`, `commit_phase2`, `gkr_phase` and `opening_phase`.
+// TODO: the following trait consists of `commit_phase1`, `commit_phase2`,
+// `gkr_phase` and `opening_phase`.
 pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );

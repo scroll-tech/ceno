@@ -63,6 +63,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer {
         let verifier_state = ZerocheckVerifierState::new(
             sigmas,
             self.exprs.clone(),
+            vec![],
             out_points,
             proof,
             challenges,

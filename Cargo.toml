@@ -36,6 +36,7 @@ cfg-if = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 itertools = "0.13"
+ndarray = "*"
 num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
@@ -60,7 +61,7 @@ rand_core = "0.6"
 rand_xorshift = "0.3"
 rayon = "1.10"
 secp = "0.4.1"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"

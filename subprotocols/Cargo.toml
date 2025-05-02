@@ -17,6 +17,7 @@ multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions"
 p3-field.workspace = true
 rand.workspace = true
 rayon.workspace = true
+serde.workspace = true
 thiserror = "1"
 transcript = { path = "../transcript" }
 

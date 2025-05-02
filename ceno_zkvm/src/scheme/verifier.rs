@@ -1,6 +1,7 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use ark_std::iterable::Iterable;
+use ceno_emul::{KeccakSpec, SyscallSpec};
 use ff_ext::ExtensionField;
 
 use itertools::{Itertools, chain, interleave, izip};
@@ -17,6 +18,7 @@ use witness::next_pow2_instance_padding;
 use crate::{
     error::ZKVMError,
     expression::{Instance, StructuralWitIn},
+    instructions::{GKRIOPInstruction, riscv::dummy::LargeEcallDummy},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
@@ -273,6 +275,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.w_expressions.len(),
             cs.lk_expressions.len(),
         );
+
         let (log2_r_count, log2_w_count, log2_lk_count) = (
             ceil_log2(r_counts_per_instance),
             ceil_log2(w_counts_per_instance),
@@ -307,6 +310,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             num_product_fanin,
             transcript,
         )?;
+
         assert!(record_evals.len() == 2, "[r_record, w_record]");
         assert!(logup_q_evals.len() == 1, "[lk_q_record]");
         assert!(logup_p_evals.len() == 1, "[lk_p_record]");
@@ -401,6 +405,43 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 },
             )
         };
+
+        if name == KeccakSpec::NAME {
+            // TODO: remove clone
+            let gkr_iop = proof
+                .gkr_opcode_proof
+                .clone()
+                .expect("Keccak syscall should contain GKR-IOP proof");
+
+            // Match output_evals with EcallDummy polynomials
+            for (i, gkr_out_eval) in gkr_iop.output_evals.iter().enumerate() {
+                assert_eq!(
+                    *gkr_out_eval,
+                    proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_evals_map(i)],
+                    "{i}"
+                );
+            }
+            // Verify GKR proof
+            let point = Arc::new(input_opening_point.clone());
+            let out_evals = gkr_iop
+                .output_evals
+                .iter()
+                .map(|eval| gkr_iop::evaluation::PointAndEval {
+                    point: point.clone(),
+                    eval: *eval,
+                })
+                .collect_vec();
+
+            gkr_iop
+                .circuit
+                .verify(
+                    gkr_iop.prover_output.gkr_proof.clone(),
+                    &out_evals,
+                    &[],
+                    transcript,
+                )
+                .expect("GKR-IOP verify failure");
+        }
 
         let computed_evals = [
             // read

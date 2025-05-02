@@ -80,7 +80,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer {
         transcript.append_field_element_exts(&ext_mle_evals);
         transcript.append_field_element_exts(&base_mle_evals);
 
-        for (sigma, expr) in izip!(sigmas, &self.exprs) {
+        for (sigma, expr, expr_name) in izip!(sigmas, &self.exprs, &self.expr_names) {
             let got = expr.evaluate(
                 &ext_mle_evals,
                 &base_mle_evals,
@@ -91,7 +91,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer {
             if *sigma != got {
                 return Err(BackendError::LayerVerificationFailed(
                     self.name.clone(),
-                    VerifierError::<E>::ClaimNotMatch(expr.clone(), *sigma, got),
+                    VerifierError::<E>::ClaimNotMatch(expr.clone(), *sigma, got, expr_name.clone()),
                 ));
             }
         }

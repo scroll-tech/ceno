@@ -66,6 +66,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer {
             proof,
             challenges,
             transcript,
+            vec![],
         );
 
         verifier_state

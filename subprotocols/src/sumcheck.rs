@@ -3,6 +3,7 @@ use std::{iter, mem, sync::Arc, vec};
 use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::chain;
+use serde::Serialize;
 use transcript::Transcript;
 
 use crate::{
@@ -40,6 +41,7 @@ where
     num_vars: usize,
 }
 
+#[derive(Clone, Serialize)]
 pub struct SumcheckProof<E: ExtensionField> {
     /// Messages for each round.
     pub univariate_polys: Vec<Vec<Vec<E>>>,
@@ -179,6 +181,7 @@ where
     sigma: E,
     expr: Expression,
     proof: SumcheckProof<E>,
+    expr_names: Vec<String>,
     challenges: &'a [E],
     transcript: &'a mut Trans,
     out_points: Vec<&'a [E]>,
@@ -202,7 +205,11 @@ where
         proof: SumcheckProof<E>,
         challenges: &'a [E],
         transcript: &'a mut Trans,
+        expr_names: Vec<String>,
     ) -> Self {
+        // Fill in missing debug data
+        let mut expr_names = expr_names;
+        expr_names.resize(1, "nothing".to_owned());
         Self {
             sigma,
             expr,
@@ -210,6 +217,7 @@ where
             challenges,
             transcript,
             out_points,
+            expr_names,
         }
     }
 
@@ -221,6 +229,7 @@ where
             challenges,
             transcript,
             out_points,
+            expr_names,
         } = self;
         let SumcheckProof {
             univariate_polys,
@@ -257,11 +266,13 @@ where
             &in_point,
             challenges,
         );
+
         if expected_claim != got_claim {
             return Err(VerifierError::ClaimNotMatch(
                 expr,
                 expected_claim,
                 got_claim,
+                expr_names[0].clone(),
             ));
         }
 
@@ -324,6 +335,7 @@ mod test {
             proof,
             &challenges,
             &mut verifier_transcript,
+            vec![],
         );
 
         verifier.verify().expect("verification failed");

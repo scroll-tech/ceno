@@ -139,6 +139,7 @@ fn test_rw_lk_expression_combination() {
                 name.as_str(),
                 &prover.pk.pp,
                 prover.pk.circuit_pks.get(&name).unwrap(),
+                None,
                 wits_in,
                 commit,
                 &[],

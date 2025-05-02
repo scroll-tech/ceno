@@ -35,7 +35,7 @@ pub enum MockProverError<F: ExtensionField> {
 
 impl<E: ExtensionField> MockProver<E> {
     pub fn check(
-        circuit: GKRCircuit<'_>,
+        circuit: GKRCircuit,
         circuit_wit: &GKRCircuitWitness<E>,
         mut evaluations: Vec<VectorType<E>>,
         mut challenges: Vec<E>,

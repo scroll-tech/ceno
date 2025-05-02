@@ -2,6 +2,7 @@ use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::{chain, izip};
 use linear_layer::LinearLayer;
+use serde::Serialize;
 use subprotocols::{
     expression::{Constant, Expression, Point},
     sumcheck::{SumcheckClaims, SumcheckProof, SumcheckProverOutput},
@@ -20,25 +21,26 @@ pub mod linear_layer;
 pub mod sumcheck_layer;
 pub mod zerocheck_layer;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum LayerType {
     Sumcheck,
     Zerocheck,
     Linear,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Layer {
     pub name: String,
     pub ty: LayerType,
     /// Challenges generated at the beginning of the layer protocol.
     pub challenges: Vec<Constant>,
-    /// Expressions to prove in this layer. For zerocheck and linear layers, each
-    /// expression corresponds to an output. While in sumcheck, there is only 1
-    /// expression, which corresponds to the sum of all outputs. This design is
-    /// for the convenience when building the following expression:
-    ///     `e_0 + beta * e_1 = sum_x (eq(p_0, x) + beta * eq(p_1, x)) expr(x)`.
-    /// where `vec![e_0, beta * e_1]` will be the output evaluation expressions.
+    /// Expressions to prove in this layer. For zerocheck and linear layers,
+    /// each expression corresponds to an output. While in sumcheck, there
+    /// is only 1 expression, which corresponds to the sum of all outputs.
+    /// This design is for the convenience when building the following
+    /// expression:     `e_0 + beta * e_1 = sum_x (eq(p_0, x) + beta *
+    /// eq(p_1, x)) expr(x)`. where `vec![e_0, beta * e_1]` will be the
+    /// output evaluation expressions.
     pub exprs: Vec<Expression>,
     /// Positions to place the evaluations of the base inputs of this layer.
     pub in_bases: Vec<EvalExpression>,
@@ -47,9 +49,12 @@ pub struct Layer {
     /// The expressions of the evaluations from the succeeding layers, which are
     /// connected to the outputs of this layer.
     pub outs: Vec<EvalExpression>,
+
+    // For debugging purposes
+    pub expr_names: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LayerWitness<E: ExtensionField> {
     pub bases: Vec<Vec<E::BaseField>>,
     pub exts: Vec<Vec<E>>,
@@ -66,7 +71,15 @@ impl Layer {
         in_bases: Vec<EvalExpression>,
         in_exts: Vec<EvalExpression>,
         outs: Vec<EvalExpression>,
+        expr_names: Vec<String>,
     ) -> Self {
+        let mut expr_names = expr_names;
+        if expr_names.len() < exprs.len() {
+            expr_names.extend(vec![
+                "unavailable".to_string();
+                exprs.len() - expr_names.len()
+            ]);
+        }
         Self {
             name,
             ty,
@@ -75,6 +88,7 @@ impl Layer {
             in_bases,
             in_exts,
             outs,
+            expr_names,
         }
     }
 

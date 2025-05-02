@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ff_ext::ExtensionField;
+use serde::Serialize;
 
 mod evaluate;
 mod op;
@@ -9,7 +10,7 @@ mod macros;
 
 pub type Point<E> = Arc<Vec<E>>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub enum Constant {
     /// Base field
     Base(i64),
@@ -31,7 +32,7 @@ impl Default for Constant {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub enum Witness {
     /// Base field polynomial (index).
     BasePoly(usize),
@@ -47,7 +48,7 @@ impl Default for Witness {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub enum Expression {
     /// Constant
     Const(Constant),
