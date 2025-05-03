@@ -277,9 +277,9 @@ where
 
 #[derive(Clone, Debug)]
 pub struct Evaluation<F> {
-    poly: usize,
-    point: usize,
-    value: F,
+    pub poly: usize,
+    pub point: usize,
+    pub value: F,
 }
 
 impl<F> Evaluation<F> {

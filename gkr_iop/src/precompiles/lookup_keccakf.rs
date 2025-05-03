@@ -310,6 +310,8 @@ pub const AND_LOOKUPS: usize = ROUNDS * AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = ROUNDS * XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = ROUNDS * RANGE_LOOKUPS_PER_ROUND;
 
+pub const KECCAK_WITNESS_SIZE: usize = 40144; // 200 (5 * 5 * 8, kecak input bytes) + 200 (keccak output bytes) + 24 * 1656 (round auxiliary witnesses)
+
 macro_rules! allocate_and_split {
         ($chip:expr, $total:expr, $( $size:expr ),* ) => {{
             let (witnesses, _) = $chip.allocate_wits_in_layer::<$total, 0>();

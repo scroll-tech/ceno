@@ -4,6 +4,7 @@ use ark_std::iterable::Iterable;
 use ceno_emul::{KeccakSpec, SyscallSpec};
 use ff_ext::ExtensionField;
 
+use gkr_iop::precompiles::KECCAK_WITNESS_SIZE;
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
@@ -23,7 +24,10 @@ use crate::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
     },
-    structs::{Point, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    structs::{
+        GKRIOPVerifyingKey, KeccakGKRIOP, Point, PointAndEval, TowerProofs, VerifyingKey,
+        ZKVMVerifyingKey,
+    },
     utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
 };
 
@@ -140,10 +144,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .circuit_vks
                 .get(&name)
                 .ok_or(ZKVMError::VKNotFound(name.clone()))?;
+            let keccak_vk = &self.vk.keccak_vk;
             let _rand_point = self.verify_opcode_proof(
                 &name,
                 &self.vk.vp,
                 circuit_vk,
+                keccak_vk,
                 &opcode_proof,
                 pi_evals,
                 transcript,
@@ -262,6 +268,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         name: &str,
         vp: &PCS::VerifierParam,
         circuit_vk: &VerifyingKey<E, PCS>,
+        gkr_iop_vk: &GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>,
         proof: &ZKVMOpcodeProof<E, PCS>,
         pi: &[E],
         transcript: &mut impl Transcript<E>,
@@ -413,33 +420,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .clone()
                 .expect("Keccak syscall should contain GKR-IOP proof");
 
-            // Match output_evals with EcallDummy polynomials
-            for (i, gkr_out_eval) in gkr_iop.output_evals.iter().enumerate() {
-                assert_eq!(
-                    *gkr_out_eval,
-                    proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_evals_map(i)],
-                    "{i}"
-                );
-            }
             // Verify GKR proof
             let point = Arc::new(input_opening_point.clone());
-            let out_evals = gkr_iop
-                .output_evals
-                .iter()
-                .map(|eval| gkr_iop::evaluation::PointAndEval {
-                    point: point.clone(),
-                    eval: *eval,
+            let out_evals = (0..KECCAK_WITNESS_SIZE)
+                .map(|i| {
+                    let eval =
+                        proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_evals_map(i)];
+                    gkr_iop::evaluation::PointAndEval {
+                        point: point.clone(),
+                        eval,
+                    }
                 })
                 .collect_vec();
 
-            gkr_iop
-                .circuit
-                .verify(
-                    gkr_iop.prover_output.gkr_proof.clone(),
-                    &out_evals,
-                    &[],
-                    transcript,
-                )
+            let gkr_circuit = gkr_iop_vk.get_state().chip.gkr_circuit();
+            gkr_circuit
+                .verify(gkr_iop.proof.clone(), &out_evals, &[], transcript)
                 .expect("GKR-IOP verify failure");
         }
 
@@ -475,7 +471,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     * cs.assert_zero_sumcheck_expressions
                         .iter()
                         .zip_eq(alpha_pow_iter)
-                        .map(|(expr, alpha)| {
+                        .map(|(expr, alpha): (&crate::expression::Expression<_>, _)| {
                             // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
                             *alpha
                                 * eval_by_expr_with_instance(
@@ -516,10 +512,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify zero expression (degree = 1) statement, thus no sumcheck
-        if cs.assert_zero_expressions.iter().any(|expr| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
-                != E::ZERO
-        }) {
+        if cs
+            .assert_zero_expressions
+            .iter()
+            .any(|expr: &crate::expression::Expression<_>| {
+                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                    != E::ZERO
+            })
+        {
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
 

@@ -166,6 +166,7 @@ fn test_rw_lk_expression_combination() {
                 name.as_str(),
                 &vk.vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
+                &verifier.vk.keccak_vk,
                 &proof,
                 &[],
                 &mut v_transcript,

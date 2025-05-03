@@ -1,6 +1,9 @@
 use ceno_emul::KeccakSpec;
 use ff_ext::ExtensionField;
-use gkr_iop::{evaluation::PointAndEval, gkr::GKRCircuitWitness};
+use gkr_iop::{
+    evaluation::PointAndEval,
+    gkr::{GKRCircuitWitness, GKRProverOutput},
+};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     marker::PhantomData,
@@ -665,13 +668,56 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             .collect();
         exit_span!(span);
 
+        let gkr_span = entered_span!("gkr", profiling_3 = true);
+        let input_open_point = Arc::new(input_open_point);
+        let (gkr_opcode_proof, mut opening_evaluations) =
+            if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
+                let gkr_iop_pk = gkr_iop_pk.clone();
+
+                let out_evals = gkr_wit
+                    .layers
+                    .last()
+                    .unwrap()
+                    .bases
+                    .iter()
+                    .map(|base| PointAndEval {
+                        point: input_open_point.clone(),
+                        eval: subprotocols::utils::evaluate_mle_ext(base, &input_open_point),
+                    })
+                    .collect_vec();
+
+                let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
+                let prover_output = gkr_circuit
+                    .prove(gkr_wit, &out_evals, &[], transcript)
+                    .expect("Failed to prove phase");
+                // unimplemented!("cannot fully handle GKRIOP component yet")
+
+                let GKRProverOutput {
+                    gkr_proof: proof,
+                    opening_evaluations,
+                } = prover_output;
+
+                (
+                    Some(GKROpcodeProof {
+                        proof,
+                        _marker: PhantomData,
+                    }),
+                    opening_evaluations,
+                )
+            } else {
+                (None, vec![])
+            };
+        exit_span!(gkr_span);
+
         let pcs_open_span = entered_span!("pcs_open", profiling_3 = true);
+
         let opening_dur = std::time::Instant::now();
         tracing::debug!(
             "[opcode {}]: build opening proof for {} polys",
             name,
             witnesses.len()
         );
+
         let wits_opening_proof = PCS::simple_batch_open(
             pp,
             &witnesses,
@@ -679,8 +725,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             &input_open_point,
             wits_in_evals.as_slice(),
             transcript,
-        )
-        .map_err(ZKVMError::PCSError)?;
+        ).map_err(ZKVMError::PCSError)?;
+
         tracing::info!(
             "[opcode {}] build opening proof took {:?}",
             name,
@@ -689,44 +735,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(pcs_open_span);
 
         let wits_commit = PCS::get_pure_commitment(&wits_commit);
-
-        let gkr_opcode_proof = if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
-            let gkr_iop_pk = gkr_iop_pk.clone();
-            let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
-
-            let point = Arc::new(input_open_point);
-
-            let out_evals = gkr_wit
-                .layers
-                .last()
-                .unwrap()
-                .bases
-                .iter()
-                .map(|base| PointAndEval {
-                    point: point.clone(),
-                    eval: subprotocols::utils::evaluate_mle_ext(base, &point),
-                })
-                .collect_vec();
-
-            let prover_output = gkr_circuit
-                .prove(gkr_wit, &out_evals, &[], transcript)
-                .expect("Failed to prove phase");
-            // unimplemented!("cannot fully handle GKRIOP component yet")
-
-            let _gkr_open_point = prover_output.opening_evaluations[0].point.clone();
-            // TODO: open polynomials for GKR proof
-
-            let output_evals = out_evals.into_iter().map(|pae| pae.eval).collect_vec();
-
-            Some(GKROpcodeProof {
-                output_evals,
-                prover_output,
-                circuit: gkr_circuit,
-                _marker: PhantomData,
-            })
-        } else {
-            None
-        };
 
         // extend with Optio(gkr evals (not combined))
         Ok(ZKVMOpcodeProof {
@@ -1400,4 +1408,33 @@ impl TowerProver {
 
         (next_rt, proofs)
     }
+}
+
+fn process_evaluations<E: ExtensionField>(
+    evaluations: Vec<gkr_iop::gkr::Evaluation<E>>,
+) -> (Vec<Vec<E>>, Vec<mpcs::Evaluation<E>>) {
+    let mut point_map: HashMap<Vec<E>, usize> = HashMap::new();
+    let mut point_vec: Vec<Vec<E>> = Vec::new();
+    let mut result: Vec<mpcs::Evaluation<E>> = Vec::new();
+
+    for eval in evaluations {
+        let point: &Vec<E> = &eval.point; // Arc<Vec<E>> -> &Vec<E>
+
+        let index = if let Some(&idx) = point_map.get(point) {
+            idx
+        } else {
+            let new_index = point_vec.len();
+            point_vec.push(point.clone()); // Clone Vec<E> (not Arc)
+            point_map.insert(point.clone(), new_index);
+            new_index
+        };
+
+        result.push(mpcs::Evaluation {
+            poly: eval.poly,
+            point: index,
+            value: eval.value,
+        });
+    }
+
+    (point_vec, result)
 }

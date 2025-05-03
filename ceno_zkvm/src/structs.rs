@@ -538,6 +538,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
+            keccak_vk: self.keccak_pk.vk.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
@@ -550,6 +551,7 @@ pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     pub vp: PCS::VerifierParam,
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E, PCS>>,
+    pub keccak_vk: GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,
