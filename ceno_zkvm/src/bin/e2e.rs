@@ -201,12 +201,12 @@ fn main() {
     let vk_bytes = bincode::serialize(&vk).unwrap();
     std::fs::write(&args.vk_file, vk_bytes).unwrap();
 
-    return; // early terminate
+    // return; // early terminate
 
     let verifier = ZKVMVerifier::new(vk);
     verify(&zkvm_proof, &verifier).expect("Verification failed");
     // FIXME: it is a bit wired, let us move it else where later.
-    soundness_test(zkvm_proof, &verifier);
+    // soundness_test(zkvm_proof, &verifier);
 }
 
 fn soundness_test(mut zkvm_proof: ZKVMProof<E, Pcs>, verifier: &ZKVMVerifier<E, Pcs>) {

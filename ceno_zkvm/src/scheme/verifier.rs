@@ -32,7 +32,7 @@ use super::{
 
 #[derive(Clone)]
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
+    pub vk: ZKVMVerifyingKey<E, PCS>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
