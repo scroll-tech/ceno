@@ -1,12 +1,7 @@
-use super::{
-    PublicValues,
-    utils::{eval_by_expr, wit_infer_by_expr},
-};
+use super::{PublicValues, utils::wit_infer_by_expr};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    expression::{Expression, fmt},
-    scheme::utils::{eval_by_expr_with_fixed, eval_by_expr_with_instance},
     state::{GlobalState, StateCircuit},
     structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
@@ -20,7 +15,12 @@ use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
-use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
+use multilinear_extensions::{
+    Expression, fmt,
+    mle::IntoMLEs,
+    utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
+    virtual_poly::ArcMultilinearExtension,
+};
 use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use std::{
@@ -1260,13 +1260,12 @@ mod tests {
     use crate::{
         ROMType::U5,
         error::ZKVMError,
-        expression::{ToExpr, WitIn},
         gadgets::{AssertLtConfig, IsLtConfig},
         set_val,
         witness::LkMultiplicity,
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
-    use multilinear_extensions::mle::IntoMLE;
+    use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
     use p3::goldilocks::Goldilocks;
     use witness::InstancePaddingStrategy;
 

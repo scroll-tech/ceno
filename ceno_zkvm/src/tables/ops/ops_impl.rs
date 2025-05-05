@@ -9,10 +9,10 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, ToExpr, WitIn},
     set_fixed_val, set_val,
     structs::ROMType,
 };
+use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {

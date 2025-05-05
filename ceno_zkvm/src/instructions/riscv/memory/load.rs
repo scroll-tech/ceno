@@ -3,7 +3,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::SignedExtendConfig,
     instructions::{
         Instruction,
@@ -19,6 +18,7 @@ use crate::{
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 

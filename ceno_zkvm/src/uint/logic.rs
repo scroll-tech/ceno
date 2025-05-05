@@ -3,9 +3,10 @@ use itertools::izip;
 
 use super::UIntLimbs;
 use crate::{
-    ROMType, circuit_builder::CircuitBuilder, error::ZKVMError, expression::ToExpr,
-    tables::OpsTable, witness::LkMultiplicity,
+    ROMType, circuit_builder::CircuitBuilder, error::ZKVMError, tables::OpsTable,
+    witness::LkMultiplicity,
 };
+use multilinear_extensions::ToExpr;
 
 // Only implemented for u8 limbs.
 impl<const M: usize, E: ExtensionField> UIntLimbs<M, 8, E> {

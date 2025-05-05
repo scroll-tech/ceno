@@ -5,11 +5,11 @@ use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::ToExpr,
     instructions::riscv::insn_base::{StateInOut, WriteRD},
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
+use multilinear_extensions::ToExpr;
 
 // Opcode: 1101111
 

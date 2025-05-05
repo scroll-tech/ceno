@@ -9,17 +9,11 @@ use super::super::{
     insn_base::{ReadMEM, ReadRS1, ReadRS2, StateInOut, WriteMEM, WriteRD},
 };
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{ToExpr, WitIn},
-    instructions::Instruction,
-    set_val,
-    tables::InsnRecord,
-    uint::Value,
-    utils::i64_to_base,
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, set_val,
+    tables::InsnRecord, uint::Value, utils::i64_to_base, witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{ToExpr, WitIn};
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
 pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);

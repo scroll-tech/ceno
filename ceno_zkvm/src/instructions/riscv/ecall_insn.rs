@@ -4,7 +4,6 @@ use crate::{
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLtConfig,
     set_val,
     tables::InsnRecord,
@@ -12,6 +11,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 
 pub struct EcallInstructionConfig {
