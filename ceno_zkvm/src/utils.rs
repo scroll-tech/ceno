@@ -9,12 +9,10 @@ use std::{
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+    Expression, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
 };
 use p3::field::Field;
 use transcript::Transcript;
-
-use crate::expression::Expression;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {

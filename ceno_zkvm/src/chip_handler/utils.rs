@@ -1,8 +1,8 @@
 use std::iter::successors;
 
-use crate::expression::Expression;
 use ff_ext::ExtensionField;
 use itertools::izip;
+use multilinear_extensions::Expression;
 use p3::field::PrimeCharacteristicRing;
 
 pub fn rlc_chip_record<E: ExtensionField>(

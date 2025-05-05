@@ -13,7 +13,6 @@ pub use utils::u64vec;
 mod chip_handler;
 pub mod circuit_builder;
 pub mod e2e;
-pub mod expression;
 pub mod gadgets;
 mod keygen;
 pub mod state;

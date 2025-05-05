@@ -20,14 +20,11 @@ use witness::next_pow2_instance_padding;
 
 use crate::{
     error::ZKVMError,
-    expression::{Instance, StructuralWitIn},
-    scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-        utils::eval_by_expr_with_instance,
-    },
+    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
     structs::{PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
 };
+use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
 
 use super::{
     ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
