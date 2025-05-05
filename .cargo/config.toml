@@ -9,3 +9,7 @@ rustflags = [
   "-C",
   "target-cpu=native",
 ]
+
+[build]
+incremental = true
+rust-analyzer = true

@@ -1,6 +1,6 @@
+use ceno_emul::KeccakSpec;
 use ff_ext::ExtensionField;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
+use gkr_iop::{evaluation::PointAndEval, gkr::GKRCircuitWitness};
 use itertools::{Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -11,6 +11,10 @@ use multilinear_extensions::{
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -22,7 +26,9 @@ use witness::{RowMajorMatrix, next_pow2_instance_padding};
 use crate::{
     error::ZKVMError,
     expression::Instance,
+    instructions::{Instruction, riscv::dummy::LargeEcallDummy},
     scheme::{
+        GKROpcodeProof,
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
@@ -30,7 +36,8 @@ use crate::{
         },
     },
     structs::{
-        ProvingKey, TowerProofs, TowerProver, TowerProverSpec, ZKVMProvingKey, ZKVMWitnesses,
+        GKRIOPProvingKey, KeccakGKRIOP, ProvingKey, TowerProofs, TowerProver, TowerProverSpec,
+        ZKVMProvingKey, ZKVMWitnesses,
     },
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
@@ -99,6 +106,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut wits_instances = BTreeMap::new();
         let mut wits_rmms = BTreeMap::new();
         let mut structural_wits = BTreeMap::new();
+        let mut keccak_gkr_wit = Some(witnesses.keccak_gkr_wit.clone());
 
         let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
         for (index, (circuit_name, _)) in self.pk.circuit_pks.iter().enumerate() {
@@ -215,9 +223,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     cs.w_expressions.len(),
                     cs.lk_expressions.len(),
                 );
+
+                // Only Keccak has non-empty GKR-IOP component
+                let gkr_iop_pk = if *circuit_name
+                    == <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::name()
+                {
+                    Some((&self.pk.keccak_pk, keccak_gkr_wit.take().unwrap()))
+                } else {
+                    None
+                };
+
                 let (opcode_proof, point) = self.create_opcode_proof(
                     circuit_name,
                     pk,
+                    gkr_iop_pk,
                     witness_mle,
                     &pi,
                     num_instances,
@@ -308,11 +327,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     /// 1: witness layer inferring from input -> output
     /// 2: proof (sumcheck reduce) from output to input
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(skip_all, name = "create_opcode_proof", fields(circuit_name=name,profiling_2), level="trace")]
     pub fn create_opcode_proof(
         &self,
         name: &str,
         circuit_pk: &ProvingKey<E>,
+        gkr_iop_pk: Option<(
+            &GKRIOPProvingKey<E, PCS, KeccakGKRIOP<E>>,
+            GKRCircuitWitness<E>,
+        )>,
         witnesses: Vec<ArcMultilinearExtension<'_, E>>,
         pi: &[ArcMultilinearExtension<'_, E>],
         num_instances: usize,
@@ -371,6 +395,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_r_layers");
+
         let r_wit_layers = infer_tower_product_witness(
             log2_num_instances + log2_r_count,
             r_records_last_layer,
@@ -691,6 +716,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     distrinct_zerocheck_terms_set.len() + 1 // +1 from sel_non_lc_zero_sumcheck
                 }
         );
+
         let mut main_sel_evals_iter = main_sel_evals.into_iter();
         main_sel_evals_iter.next(); // skip sel_r
         main_sel_evals_iter.next(); // skip r_records_combined
@@ -709,6 +735,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     distrinct_zerocheck_terms_set.len() + 1
                 }
         );
+
         let input_open_point = main_sel_sumcheck_proofs.point.clone();
         assert!(input_open_point.len() == log2_num_instances);
         exit_span!(main_sel_span);
@@ -734,6 +761,43 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             opening_dur.elapsed(),
         );
         exit_span!(pcs_open_span);
+
+        let input_open_point = Arc::new(input_open_point);
+        let gkr_opcode_proof = if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
+            let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
+
+            let out_evals = gkr_wit
+                .layers
+                .last()
+                .unwrap()
+                .bases
+                .iter()
+                .map(|base| PointAndEval {
+                    point: input_open_point.clone(),
+                    eval: subprotocols::utils::evaluate_mle_ext(base, &input_open_point),
+                })
+                .collect_vec();
+
+            let prover_output = gkr_circuit
+                .prove(gkr_wit, &out_evals, &[], transcript)
+                .expect("Failed to prove phase");
+            // unimplemented!("cannot fully handle GKRIOP component yet")
+
+            let _gkr_open_point = prover_output.opening_evaluations[0].point.clone();
+            // TODO: open polynomials for GKR proof
+
+            let output_evals = out_evals.into_iter().map(|pae| pae.eval).collect_vec();
+
+            Some(GKROpcodeProof {
+                output_evals,
+                prover_output,
+                circuit: gkr_circuit,
+            })
+        } else {
+            None
+        };
+
+        // extend with Optio(gkr evals (not combined))
         Ok((
             ZKVMOpcodeProof {
                 record_r_out_evals,
@@ -745,8 +809,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 tower_proof,
                 main_sel_sumcheck_proofs: main_sel_sumcheck_proofs.proofs,
                 wits_in_evals,
+                gkr_opcode_proof,
             },
-            input_open_point,
+            Arc::try_unwrap(input_open_point).unwrap(),
         ))
     }
 
@@ -994,10 +1059,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![
-                        TowerProverSpec { witness: r },
-                        TowerProverSpec { witness: w },
-                    ]
+                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
+                        witness: w,
+                    }]
                 })
                 .collect_vec(),
             lk_wit_layers

@@ -94,6 +94,7 @@ fn bench_add(c: &mut Criterion) {
                             .create_opcode_proof(
                                 "ADD",
                                 circuit_pk,
+                                None,
                                 polys,
                                 &[],
                                 num_instances,

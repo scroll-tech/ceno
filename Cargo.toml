@@ -11,6 +11,8 @@ members = [
   "multilinear_extensions",
   "sumcheck_macro",
   "poseidon",
+  "gkr_iop",
+  "subprotocols",
   "sumcheck",
   "transcript",
   "whir",
@@ -36,6 +38,7 @@ clap = { version = "4.5", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 itertools = "0.13"
+ndarray = "*"
 num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
@@ -67,10 +70,11 @@ rand_xorshift = "0.3"
 rayon = "1.10"
 rkyv = { version = "0.8", features = ["pointer_width_32"] }
 secp = "0.4.1"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"
+subprotocols = { path = "subprotocols" }
 substrate-bn = { version = "0.6.0" }
 sumcheck = { path = "sumcheck" }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }

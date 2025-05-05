@@ -149,6 +149,7 @@ fn test_rw_lk_expression_combination() {
             .create_opcode_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),
+                None,
                 wits_in,
                 &[],
                 num_instances,

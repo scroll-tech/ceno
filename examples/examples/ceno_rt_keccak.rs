@@ -6,17 +6,18 @@ extern crate ceno_rt;
 use ceno_rt::{info_out, syscalls::syscall_keccak_permute};
 use core::slice;
 
-const ITERATIONS: usize = 3;
+const ITERATIONS: usize = 4;
 
 fn main() {
     let mut state = [0_u64; 25];
 
     for _ in 0..ITERATIONS {
         syscall_keccak_permute(&mut state);
-        log_state(&state);
+        // log_state(&state);
     }
 }
 
+#[allow(dead_code)]
 fn log_state(state: &[u64; 25]) {
     let out = unsafe {
         slice::from_raw_parts(state.as_ptr() as *const u8, state.len() * size_of::<u64>())
