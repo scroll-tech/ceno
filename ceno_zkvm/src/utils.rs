@@ -288,13 +288,13 @@ mod tests {
     use ff_ext::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::{
-        mle::IntoMLE, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+        Expression, ToExpr, mle::IntoMLE, virtual_poly::ArcMultilinearExtension,
+        virtual_polys::VirtualPolynomials,
     };
     use p3::field::PrimeCharacteristicRing;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        expression::{Expression, ToExpr},
         utils::add_mle_list_by_expr,
     };
     use p3::goldilocks::Goldilocks;

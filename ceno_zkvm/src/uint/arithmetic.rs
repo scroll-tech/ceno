@@ -298,7 +298,7 @@ mod tests {
         };
         use ff_ext::{ExtensionField, FieldInto, GoldilocksExt2};
         use itertools::Itertools;
-        use multilinear_extensions::{ToExpr, utils::eval_by_expr};
+        use multilinear_extensions::{Expression, ToExpr, utils::eval_by_expr};
 
         type E = GoldilocksExt2;
         #[test]

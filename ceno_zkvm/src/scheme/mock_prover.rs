@@ -1260,13 +1260,12 @@ mod tests {
     use crate::{
         ROMType::U5,
         error::ZKVMError,
-        expression::{ToExpr, WitIn},
         gadgets::{AssertLtConfig, IsLtConfig},
         set_val,
         witness::LkMultiplicity,
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
-    use multilinear_extensions::mle::IntoMLE;
+    use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
     use p3::goldilocks::Goldilocks;
     use witness::InstancePaddingStrategy;
 
