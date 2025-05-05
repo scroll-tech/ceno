@@ -1,5 +1,5 @@
 use ff_ext::GoldilocksExt2;
-use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
+use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -22,7 +22,7 @@ fn test_multiple_opcode() {
         || "sub",
         |cs| SubInstruction::construct_circuit(&mut CircuitBuilder::<E>::new(cs)),
     );
-    let param = Pcs::setup(1 << 10).unwrap();
-    let (pp, _) = Pcs::trim(param, 1 << 10).unwrap();
-    cs.key_gen::<Pcs>(&pp, None);
+    let param = Pcs::setup(1 << 10, SecurityLevel::default()).unwrap();
+    let (_, _) = Pcs::trim(param, 1 << 10).unwrap();
+    cs.key_gen();
 }

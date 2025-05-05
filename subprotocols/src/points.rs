@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ff_ext::ExtensionField;
 use itertools::izip;
 
-type Point<E> = Arc<Vec<E>>;
+use crate::expression::Point;
 
 pub trait PointBeforeMerge<E: ExtensionField> {
     fn point_before_merge(&self, pos: &[usize]) -> Point<E>;

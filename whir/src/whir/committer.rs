@@ -1,128 +1,133 @@
-use super::parameters::WhirConfig;
+use super::{batch::Witnesses, parameters::WhirConfig};
 use crate::{
+    crypto::{DigestExt, write_digest_to_transcript},
+    error::Error,
     ntt::expand_from_coeff,
-    poly_utils::{MultilinearPoint, coeffs::CoefficientList, fold::restructure_evaluations},
-    utils,
+    utils::{self, interpolate_over_boolean_hypercube},
+    whir::{
+        fold::{expand_from_univariate, restructure_evaluations},
+        verifier::WhirCommitmentInTranscript,
+    },
 };
-use ark_crypto_primitives::merkle_tree::{Config, MerkleTree};
-use ark_ff::FftField;
-use ark_poly::EvaluationDomain;
-use ark_std::{end_timer, start_timer};
-use derive_more::Debug;
-use nimue::{
-    ByteWriter, ProofResult,
-    plugins::ark::{FieldChallenges, FieldWriter},
+use ff_ext::ExtensionField;
+use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use p3::{
+    field::{Field, PrimeCharacteristicRing},
+    matrix::dense::RowMajorMatrix,
 };
+use sumcheck::macros::{entered_span, exit_span};
+use transcript::{BasicTranscript, Transcript};
 
-use crate::whir::fs_utils::DigestWriter;
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
+pub struct Committer<E: ExtensionField>(pub(crate) WhirConfig<E>);
 
-#[derive(Clone, Debug)]
-pub struct Witness<F, MerkleConfig>
+impl<E: ExtensionField> Committer<E>
 where
-    MerkleConfig: Config,
+    DigestExt<E>: IntoIterator<Item = E::BaseField> + PartialEq,
 {
-    pub(crate) polynomial: CoefficientList<F>,
-    #[debug(skip)]
-    pub(crate) merkle_tree: MerkleTree<MerkleConfig>,
-    pub(crate) merkle_leaves: Vec<F>,
-    pub(crate) ood_points: Vec<F>,
-    pub(crate) ood_answers: Vec<F>,
-}
-
-pub struct Committer<F, MerkleConfig, PowStrategy>(
-    pub(crate) WhirConfig<F, MerkleConfig, PowStrategy>,
-)
-where
-    F: FftField,
-    MerkleConfig: Config;
-
-impl<F, MerkleConfig, PowStrategy> Committer<F, MerkleConfig, PowStrategy>
-where
-    F: FftField,
-    MerkleConfig: Config<Leaf = [F]>,
-{
-    pub fn new(config: WhirConfig<F, MerkleConfig, PowStrategy>) -> Self {
+    pub fn new(config: WhirConfig<E>) -> Self {
         Self(config)
     }
 
-    pub fn commit<Merlin>(
+    pub fn commit(
         &self,
-        merlin: &mut Merlin,
-        mut polynomial: CoefficientList<F::BasePrimeField>,
-    ) -> ProofResult<Witness<F, MerkleConfig>>
-    where
-        Merlin: FieldWriter<F> + FieldChallenges<F> + ByteWriter + DigestWriter<MerkleConfig>,
-    {
-        let timer = start_timer!(|| "Single Commit");
+        polynomial: DenseMultilinearExtension<E>,
+    ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
+        let timer = entered_span!("Single Commit");
+        let mut transcript = BasicTranscript::new(b"commitment");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
-        polynomial.pad_to_num_vars(self.0.folding_factor.at_round(0));
+        let mut evaluations: Vec<E::BaseField> = match polynomial.evaluations() {
+            #[cfg(feature = "parallel")]
+            FieldType::Base(evals) => evals.clone(),
+            #[cfg(not(feature = "parallel"))]
+            FieldType::Base(evals) => evals.iter().map(|x| E::from_base(x)).collect(),
+            FieldType::Ext(_) => panic!("Not supporting committing to ext polys"),
+            _ => panic!("Unsupported field type"),
+        };
 
-        let base_domain = self.0.starting_domain.base_domain.unwrap();
-        let expansion = base_domain.size() / polynomial.num_coeffs();
-        let evals = expand_from_coeff(polynomial.coeffs(), expansion);
+        let mut coeffs = evaluations.clone();
+        interpolate_over_boolean_hypercube(&mut coeffs);
+        // Resize the polynomial to at least the first folding factor number of
+        // variables. This is equivalent to repeating the evaluations over the
+        // hypercube, and extending zero to the coefficients.
+        if evaluations.len() < (1 << self.0.folding_factor.at_round(0)) {
+            let original_size = evaluations.len();
+            evaluations.resize(1 << self.0.folding_factor.at_round(0), E::BaseField::ZERO);
+            for i in original_size..evaluations.len() {
+                evaluations[i] = evaluations[i - original_size];
+            }
+            coeffs.extend(itertools::repeat_n(
+                E::BaseField::ZERO,
+                (1 << self.0.folding_factor.at_round(0)) - original_size,
+            ));
+        }
+
+        let expansion = self.0.starting_domain.size() / evaluations.len();
+        let evals = expand_from_coeff(&coeffs, expansion);
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
         // They also partially overlap and undo one another. We should merge them.
         let folded_evals = utils::stack_evaluations(evals, self.0.folding_factor.at_round(0));
         let folded_evals = restructure_evaluations(
             folded_evals,
             self.0.fold_optimisation,
-            base_domain.group_gen(),
-            base_domain.group_gen_inv(),
+            self.0.starting_domain.base_domain_group_gen().inverse(),
             self.0.folding_factor.at_round(0),
         );
 
-        // Convert to extension field.
-        // This is not necessary for the commit, but in further rounds
-        // we will need the extension field. For symplicity we do it here too.
-        // TODO: Commit to base field directly.
-        let folded_evals = folded_evals
-            .into_iter()
-            .map(F::from_base_prime_field)
-            .collect::<Vec<_>>();
-
         // Group folds together as a leaf.
         let fold_size = 1 << self.0.folding_factor.at_round(0);
-        #[cfg(not(feature = "parallel"))]
-        let leafs_iter = folded_evals.chunks_exact(fold_size);
-        #[cfg(feature = "parallel")]
-        let leafs_iter = folded_evals.par_chunks_exact(fold_size);
+        let merkle_build_timer = entered_span!("Single Merkle Tree Build");
+        let (root, merkle_tree) = self
+            .0
+            .hash_params
+            .commit_matrix_base(RowMajorMatrix::new(folded_evals, fold_size));
+        exit_span!(merkle_build_timer);
+        write_digest_to_transcript(&root, &mut transcript);
 
-        let merkle_build_timer = start_timer!(|| "Single Merkle Tree Build");
-        let merkle_tree = MerkleTree::<MerkleConfig>::new(
-            &self.0.leaf_hash_params,
-            &self.0.two_to_one_params,
-            leafs_iter,
-        )
-        .unwrap();
-        end_timer!(merkle_build_timer);
+        let (ood_points, ood_answers) = if self.0.committment_ood_samples > 0 {
+            let ood_points =
+                transcript.sample_and_append_vec(b"ood_points", self.0.committment_ood_samples);
+            let ood_answers = ood_points
+                .iter()
+                .map(|ood_point| {
+                    polynomial.evaluate(&expand_from_univariate(*ood_point, polynomial.num_vars()))
+                })
+                .collect::<Vec<_>>();
+            transcript.append_field_element_exts(&ood_answers);
+            (ood_points, ood_answers)
+        } else {
+            (
+                vec![E::ZERO; self.0.committment_ood_samples],
+                vec![E::ZERO; self.0.committment_ood_samples],
+            )
+        };
 
-        let root = merkle_tree.root();
+        exit_span!(timer);
 
-        merlin.add_digest(root)?;
+        let commitment = WhirCommitmentInTranscript {
+            root: root.clone(),
+            ood_points: ood_points.clone(),
+            ood_answers: ood_answers.clone(),
+        };
 
-        let mut ood_points = vec![F::ZERO; self.0.committment_ood_samples];
-        let mut ood_answers = Vec::with_capacity(self.0.committment_ood_samples);
-        if self.0.committment_ood_samples > 0 {
-            merlin.fill_challenge_scalars(&mut ood_points)?;
-            ood_answers.extend(ood_points.iter().map(|ood_point| {
-                polynomial.evaluate_at_extension(&MultilinearPoint::expand_from_univariate(
-                    *ood_point,
-                    self.0.mv_parameters.num_variables,
-                ))
-            }));
-            merlin.add_scalars(&ood_answers)?;
-        }
+        Ok((
+            Witnesses {
+                polys: vec![evaluations],
+                root,
+                merkle_tree,
+                ood_points,
+                ood_answers,
+            },
+            commitment,
+        ))
+    }
 
-        end_timer!(timer);
-
-        Ok(Witness {
-            polynomial: polynomial.to_extension(),
-            merkle_tree,
-            merkle_leaves: folded_evals,
-            ood_points,
-            ood_answers,
-        })
+    pub fn write_commitment_to_transcript<T: Transcript<E>>(
+        &self,
+        commitment: &WhirCommitmentInTranscript<E>,
+        transcript: &mut T,
+    ) {
+        write_digest_to_transcript(&commitment.root, transcript);
+        // No need to write the ood points and ood answers to transcript, because
+        // they are deterministic functions of the Merkle root.
     }
 }

@@ -708,9 +708,10 @@ mod tests {
                 self.iter()
                     .map(|a| {
                         let mle: ArcMultilinearExtension<E> =
-                            DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
-                                E::BaseField::from_u64(*a),
-                            ])
+                            DenseMultilinearExtension::from_evaluation_vec_smart(
+                                0,
+                                vec![E::BaseField::from_u64(*a)],
+                            )
                             .into();
                         mle
                     })

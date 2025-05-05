@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use layer::{Layer, LayerWitness};
-use serde::Serialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use subprotocols::{expression::Point, sumcheck::SumcheckProof};
 use transcript::Transcript;
 
@@ -13,7 +13,7 @@ use crate::{
 pub mod layer;
 pub mod mock;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GKRCircuit {
     pub layers: Vec<Layer>,
 
@@ -28,16 +28,28 @@ pub struct GKRCircuitWitness<E: ExtensionField> {
     pub layers: Vec<LayerWitness<E>>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize, Evaluation: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned, Evaluation: DeserializeOwned"
+))]
 pub struct GKRProverOutput<E: ExtensionField, Evaluation> {
     pub gkr_proof: GKRProof<E>,
     pub opening_evaluations: Vec<Evaluation>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct GKRProof<E: ExtensionField>(pub Vec<SumcheckProof<E>>);
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct Evaluation<E: ExtensionField> {
     pub value: E,
     pub point: Point<E>,

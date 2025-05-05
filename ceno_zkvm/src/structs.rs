@@ -10,8 +10,8 @@ use crate::{
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
 use ff_ext::ExtensionField;
 use gkr_iop::{gkr::GKRCircuitWitness, precompiles::KeccakLayout};
-use itertools::{Itertools, chain};
-use mpcs::PolynomialCommitmentScheme;
+use itertools::Itertools;
+use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
 };
@@ -49,7 +49,9 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
 pub type WitnessId = u32;
 pub type ChallengeId = u16;
 
-#[derive(Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash)]
+#[derive(
+    Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ROMType {
     U5 = 0,      // 2^5 = 32
     U8,          // 2^8 = 256
@@ -63,15 +65,12 @@ pub enum ROMType {
     Instruction, // Decoded instruction from the fixed program.
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RAMType {
     GlobalState,
     Register,
     Memory,
 }
-
-/// A point is a vector of num_var length
-pub type Point<F> = Vec<F>;
 
 /// A point and the evaluation of this point.
 #[derive(Clone, Debug, PartialEq)]
@@ -106,32 +105,30 @@ impl<F: Clone> PointAndEval<F> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
-    pub fixed_commit_wd: Option<PCS::CommitmentWithWitness>,
-    pub vk: VerifyingKey<E, PCS>,
+#[derive(Clone)]
+pub struct ProvingKey<E: ExtensionField> {
+    pub vk: VerifyingKey<E>,
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProvingKey<E, PCS> {
+impl<E: ExtensionField> ProvingKey<E> {
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         self.vk.get_cs()
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct VerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
+pub struct VerifyingKey<E: ExtensionField> {
     pub(crate) cs: ConstraintSystem<E>,
-    pub fixed_commit: Option<PCS::Commitment>,
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> VerifyingKey<E, PCS> {
+impl<E: ExtensionField> VerifyingKey<E> {
     pub fn get_cs(&self) -> &ConstraintSystem<E> {
         &self.cs
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GKRIOPProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
     pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
     pub fixed_commit_wd: Option<PCS::CommitmentWithWitness>,
@@ -190,7 +187,7 @@ impl<E: ExtensionField> KeccakGKRIOP<E> {
         // transpose from row-major to column-major
         let fixed_traces_polys = fixed_traces.as_ref().map(|rmm| rmm.to_mles());
 
-        let fixed_commit_wd = fixed_traces.map(|traces| PCS::batch_commit(pp, traces).unwrap());
+        let fixed_commit_wd = fixed_traces.map(|traces| PCS::commit(pp, traces).unwrap());
         let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
 
         GKRIOPProvingKey {
@@ -208,7 +205,7 @@ impl<E: ExtensionField> KeccakGKRIOP<E> {
 pub struct ProgramParams {
     pub platform: Platform,
     pub program_size: usize,
-    pub pub_io_len: usize,
+    pub pubio_len: usize,
     pub static_memory_len: usize,
 }
 
@@ -217,7 +214,7 @@ impl Default for ProgramParams {
         ProgramParams {
             platform: CENO_PLATFORM,
             program_size: (1 << 14),
-            pub_io_len: (1 << 2),
+            pubio_len: (1 << 2),
             static_memory_len: (1 << 16),
         }
     }
@@ -488,28 +485,30 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
-    /// Iterate opcode circuits, then table circuits, sorted by name.
+    /// Iterate opcode/table circuits, sorted by alphabetical order.
     pub fn into_iter_sorted(
         self,
     ) -> impl Iterator<Item = (String, Vec<RowMajorMatrix<E::BaseField>>)> {
-        chain(
-            self.witnesses_opcodes
-                .into_iter()
-                .map(|(name, witnesses)| (name, vec![witnesses])),
-            self.witnesses_tables
-                .into_iter()
-                .map(|(name, witnesses)| (name, witnesses.to_vec())),
-        )
+        self.witnesses_opcodes
+            .into_iter()
+            .map(|(name, witness)| (name, vec![witness]))
+            .chain(
+                self.witnesses_tables
+                    .into_iter()
+                    .map(|(name, witnesses)| (name, witnesses.into())),
+            )
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
     }
 }
-
-#[derive(Debug)]
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
-    pub circuit_pks: BTreeMap<String, ProvingKey<E, PCS>>,
+    pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
     pub keccak_pk: GKRIOPProvingKey<E, PCS, KeccakGKRIOP<E>>,
+    pub fixed_commit_wd: Option<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>,
+    pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
 
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
@@ -525,12 +524,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             keccak_pk: GKRIOPProvingKey::default(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
+            fixed_commit_wd: None,
+            fixed_commit: None,
         }
+    }
+
+    pub(crate) fn commit_fixed(
+        &mut self,
+        fixed_traces: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+    ) -> Result<(), ZKVMError> {
+        if !fixed_traces.is_empty() {
+            let fixed_commit_wd =
+                PCS::batch_commit(&self.pp, fixed_traces).map_err(ZKVMError::PCSError)?;
+            let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
+            self.fixed_commit_wd = Some(fixed_commit_wd);
+            self.fixed_commit = Some(fixed_commit);
+        } else {
+            self.fixed_commit_wd = None;
+            self.fixed_commit = None;
+        }
+        Ok(())
     }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
-    pub fn get_vk(&self) -> ZKVMVerifyingKey<E, PCS> {
+    pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
             circuit_vks: self
@@ -538,19 +556,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
+            fixed_commit: self.fixed_commit.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
+            circuit_num_polys: self
+                .circuit_pks
+                .values()
+                .map(|pk| (pk.vk.get_cs().num_witin as usize, pk.vk.get_cs().num_fixed))
+                .collect_vec(),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
     // vk for opcode and table circuits
-    pub circuit_vks: BTreeMap<String, VerifyingKey<E, PCS>>,
+    pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
+    pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,
+    // circuit index -> (witin num_polys, fixed_num_polys)
+    pub circuit_num_polys: Vec<(usize, usize)>,
 }

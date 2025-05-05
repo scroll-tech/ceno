@@ -2,7 +2,7 @@ use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::{chain, izip};
 use linear_layer::LinearLayer;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use subprotocols::{
     expression::{Constant, Expression, Point},
     sumcheck::{SumcheckClaims, SumcheckProof, SumcheckProverOutput},
@@ -21,14 +21,14 @@ pub mod linear_layer;
 pub mod sumcheck_layer;
 pub mod zerocheck_layer;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerType {
     Sumcheck,
     Zerocheck,
     Linear,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Layer {
     pub name: String,
     pub ty: LayerType,

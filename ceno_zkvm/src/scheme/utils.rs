@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use ark_std::iterable::Iterable;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -87,20 +86,20 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
 }
 
 macro_rules! tower_mle_4 {
-    ($p1:ident, $p2:ident, $q1:ident, $q2:ident, $acc_p:ident, $acc_q:ident, $start_index:ident, $cur_len:ident) => {
-        $q1[$start_index..][..$cur_len]
+    ($p1:ident, $p2:ident, $q1:ident, $q2:ident, $start_index:ident, $cur_len:ident) => {{
+        let range = $start_index..($start_index + $cur_len);
+        $q1[range.clone()]
             .par_iter()
-            .zip($q2[$start_index..][..$cur_len].par_iter())
-            .zip($p1[$start_index..][..$cur_len].par_iter())
-            .zip($p2[$start_index..][..$cur_len].par_iter())
-            .zip($acc_p.par_iter_mut())
-            .zip($acc_q.par_iter_mut())
-            .with_min_len(MIN_PAR_SIZE)
-            .for_each(|(((((q1, q2), p1), p2), p_eval), q_eval)| {
-                *p_eval = *q1 * *p2 + *q2 * *p1;
-                *q_eval = *q1 * *q2;
+            .zip(&$q2[range.clone()])
+            .zip(&$p1[range.clone()])
+            .zip(&$p2[range])
+            .map(|(((q1, q2), p1), p2)| {
+                let p = *q1 * *p2 + *q2 * *p1;
+                let q = *q1 * *q2;
+                (p, q)
             })
-    };
+            .unzip()
+    }};
 }
 
 /// infer logup witness from last layer
@@ -126,10 +125,8 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
             Vec<ArcMultilinearExtension<E>>,
         ) = (0..2)
             .map(|index| {
-                let mut p_evals = vec![E::ZERO; cur_len];
-                let mut q_evals = vec![E::ZERO; cur_len];
                 let start_index = cur_len * index;
-                if let Some(p) = p {
+                let (p_evals, q_evals): (Vec<E>, Vec<E>) = if let Some(p) = p {
                     let (p1, p2) = (&p[0], &p[1]);
                     match (
                         p1.evaluations(),
@@ -142,32 +139,34 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                             FieldType::Ext(p2),
                             FieldType::Ext(q1),
                             FieldType::Ext(q2),
-                        ) => tower_mle_4!(p1, p2, q1, q2, p_evals, q_evals, start_index, cur_len),
+                        ) => tower_mle_4!(p1, p2, q1, q2, start_index, cur_len),
                         (
                             FieldType::Base(p1),
                             FieldType::Base(p2),
                             FieldType::Ext(q1),
                             FieldType::Ext(q2),
-                        ) => tower_mle_4!(p1, p2, q1, q2, p_evals, q_evals, start_index, cur_len),
+                        ) => tower_mle_4!(p1, p2, q1, q2, start_index, cur_len),
                         _ => unreachable!(),
-                    };
+                    }
                 } else {
                     match (q1.evaluations(), q2.evaluations()) {
-                        (FieldType::Ext(q1), FieldType::Ext(q2)) => q1[start_index..][..cur_len]
-                            .par_iter()
-                            .zip(q2[start_index..][..cur_len].par_iter())
-                            .zip(p_evals.par_iter_mut())
-                            .zip(q_evals.par_iter_mut())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .for_each(|(((q1, q2), p_res), q_res)| {
-                                // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
-                                // p is numerator and q is denominator
-                                *p_res = *q1 + *q2;
-                                *q_res = *q1 * *q2;
-                            }),
+                        (FieldType::Ext(q1), FieldType::Ext(q2)) => {
+                            let range = start_index..(start_index + cur_len);
+                            q1[range.clone()]
+                                .par_iter()
+                                .zip(&q2[range])
+                                .map(|(q1, q2)| {
+                                    // 1 / q1 + 1 / q2 = (q1+q2) / q1*q2
+                                    // p is numerator and q is denominator
+                                    let p = *q1 + *q2;
+                                    let q = *q1 * *q2;
+                                    (p, q)
+                                })
+                                .unzip()
+                        }
                         _ => unreachable!(),
-                    };
-                }
+                    }
+                };
                 (p_evals.into_mle().into(), q_evals.into_mle().into())
             })
             .unzip(); // vec[vec[p1, p2], vec[q1, q2]]
@@ -184,8 +183,18 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
             } else {
                 let len = q[0].evaluations().len();
                 vec![
-                    vec![E::ONE; len].into_mle().into(),
-                    vec![E::ONE; len].into_mle().into(),
+                    (0..len)
+                        .into_par_iter()
+                        .map(|_| E::ONE)
+                        .collect::<Vec<_>>()
+                        .into_mle()
+                        .into(),
+                    (0..len)
+                        .into_par_iter()
+                        .map(|_| E::ONE)
+                        .collect::<Vec<_>>()
+                        .into_mle()
+                        .into(),
                 ]
                 .into_iter()
                 .chain(q)
@@ -202,6 +211,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     num_product_fanin: usize,
 ) -> Vec<Vec<ArcMultilinearExtension<'_, E>>> {
     assert!(last_layer.len() == num_product_fanin);
+    assert_eq!(num_product_fanin % 2, 0);
     let log2_num_product_fanin = ceil_log2(num_product_fanin);
     let mut wit_layers =
         (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
@@ -210,17 +220,21 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
             let cur_layer: Vec<ArcMultilinearExtension<E>> = (0..num_product_fanin)
                 .map(|index| {
                     let mut evaluations = vec![E::ONE; cur_len];
-                    next_layer.iter().for_each(|f| match f.evaluations() {
-                        FieldType::Ext(f) => {
-                            let start: usize = index * cur_len;
-                            f[start..][..cur_len]
-                                .par_iter()
-                                .zip(evaluations.par_iter_mut())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .map(|(v, evaluations)| *evaluations *= *v)
-                                .collect()
+                    next_layer.chunks_exact(2).for_each(|f| {
+                        match (f[0].evaluations(), f[1].evaluations()) {
+                            (FieldType::Ext(f1), FieldType::Ext(f2)) => {
+                                let start: usize = index * cur_len;
+                                (start..(start + cur_len))
+                                    .into_par_iter()
+                                    .zip(evaluations.par_iter_mut())
+                                    .with_min_len(MIN_PAR_SIZE)
+                                    .map(|(index, evaluations)| {
+                                        *evaluations *= f1[index] * f2[index]
+                                    })
+                                    .collect()
+                            }
+                            _ => unreachable!("must be extension field"),
                         }
-                        _ => unreachable!("must be extension field"),
                     });
                     evaluations.into_mle().into()
                 })
@@ -246,20 +260,19 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_vec(0, vec![
-                    scalar,
-                ]));
+            let scalar: ArcMultilinearExtension<E> = Arc::new(
+                DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),
+            );
             scalar
         },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_ext_vec(0, vec![
-                    challenge.exp_u64(pow as u64) * scalar + offset,
-                ]),
-            );
+            let challenge: ArcMultilinearExtension<E> =
+                Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
+                    0,
+                    vec![challenge.exp_u64(pow as u64) * scalar + offset],
+                ));
             challenge
         },
         &|a, b| {
@@ -473,18 +486,24 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ONE);
         // [[1, 3, 5, 7], [2, 4, 6, 8]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from_u64(3u64),
-            E::from_u64(5u64),
-            E::from_u64(7u64)
-        ],);
-        assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from_u64(2u64),
-            E::from_u64(4u64),
-            E::from_u64(6u64),
-            E::from_u64(8u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![
+                E::ONE,
+                E::from_u64(3u64),
+                E::from_u64(5u64),
+                E::from_u64(7u64)
+            ],
+        );
+        assert_eq!(
+            res[1].get_ext_field_vec(),
+            vec![
+                E::from_u64(2u64),
+                E::from_u64(4u64),
+                E::from_u64(6u64),
+                E::from_u64(8u64)
+            ],
+        );
     }
 
     #[test]
@@ -501,18 +520,24 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ZERO);
         // [[1, 3, 5, 0], [2, 4, 6, 0]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from_u64(3u64),
-            E::from_u64(5u64),
-            E::from_u64(0u64)
-        ],);
-        assert_eq!(res[1].get_ext_field_vec(), vec![
-            E::from_u64(2u64),
-            E::from_u64(4u64),
-            E::from_u64(6u64),
-            E::from_u64(0u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![
+                E::ONE,
+                E::from_u64(3u64),
+                E::from_u64(5u64),
+                E::from_u64(0u64)
+            ],
+        );
+        assert_eq!(
+            res[1].get_ext_field_vec(),
+            vec![
+                E::from_u64(2u64),
+                E::from_u64(4u64),
+                E::from_u64(6u64),
+                E::from_u64(0u64)
+            ],
+        );
 
         // case 2: test instance level padding
         // [[1,0],[3,0],[5,0]]]
@@ -523,12 +548,10 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[1, 3, 5, 1], [1, 1, 1, 1]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::ONE,
-            E::from_u64(3u64),
-            E::from_u64(5u64),
-            E::ONE
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::ONE, E::from_u64(3u64), E::from_u64(5u64), E::ONE],
+        );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE; 4],);
     }
 
@@ -543,10 +566,10 @@ mod tests {
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[2, 3], [1, 1]]
-        assert_eq!(res[0].get_ext_field_vec(), vec![
-            E::from_u64(2u64),
-            E::from_u64(3u64)
-        ],);
+        assert_eq!(
+            res[0].get_ext_field_vec(),
+            vec![E::from_u64(2u64), E::from_u64(3u64)],
+        );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE, E::ONE],);
     }
 
