@@ -13,7 +13,6 @@ use crate::{
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
-use ark_std::iterable::Iterable;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, enumerate};
 use p3::field::PrimeCharacteristicRing;
@@ -636,7 +635,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
 
     const C: usize = 16;
 
-    const LIMBS: usize = (Self::M + 15) / 16;
+    const LIMBS: usize = Self::M.div_ceil(16);
 
     pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
         let uint = Self::new_unchecked(val);

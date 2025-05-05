@@ -10,12 +10,11 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-ark-std.workspace = true
 crossbeam-channel.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
-p3 = { path = "../p3" }
+p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 sumcheck_macro = { path = "../sumcheck_macro" }
@@ -26,6 +25,16 @@ transcript = { path = "../transcript" }
 criterion.workspace = true
 p3-goldilocks.workspace = true
 poseidon.workspace = true
+rand.workspace = true
+
+[features]
+nightly-features = [
+  "p3/nightly-features",
+  "ff_ext/nightly-features",
+  "multilinear_extensions/nightly-features",
+  "sumcheck_macro/nightly-features",
+  "transcript/nightly-features",
+]
 
 [[bench]]
 harness = false

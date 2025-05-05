@@ -1,6 +1,6 @@
 use glob::glob;
 use std::{
-    fs::{File, read_dir},
+    fs::{File, read_dir, remove_file},
     io::{self, Write},
     path::Path,
     process::Command,
@@ -20,7 +20,8 @@ fn rerun_all_but_target(dir: &Path) {
 fn build_elfs() {
     let out_dir = std::env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("vars.rs");
-    let mut dest = File::create(dest_path).expect("failed to create vars.rs");
+    let _ = remove_file(&dest_path);
+    let mut dest = File::create(&dest_path).expect("failed to create vars.rs");
 
     // TODO(Matthias): skip building the elfs if we are in clippy or check mode.
     // See git history for an attempt to do this.

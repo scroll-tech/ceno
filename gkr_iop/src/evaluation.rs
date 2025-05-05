@@ -3,12 +3,12 @@ use std::sync::Arc;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec_sequential;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use subprotocols::expression::{Constant, Point};
 
 /// Evaluation expression for the gkr layer reduction and PCS opening
 /// preparation.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EvalExpression {
     /// Single entry in the evaluation vector.
     Single(usize),

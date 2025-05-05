@@ -11,6 +11,7 @@ use crate::{
     precompiles::utils::{MaskRepresentation, nest, not8_expr, zero_expr},
 };
 use ndarray::{ArrayView, Ix2, Ix3, s};
+use serde::{Deserialize, Serialize};
 
 use super::utils::{CenoLookup, u64s_to_felts, zero_eval};
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
@@ -24,10 +25,10 @@ use transcript::BasicTranscript;
 
 type E = BinomialExtensionField<Goldilocks, 2>;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct KeccakParams {}
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct KeccakLayout<E> {
     _params: KeccakParams,
     _input_columns: Vec<usize>,

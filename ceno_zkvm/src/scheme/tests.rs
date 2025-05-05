@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{collections::BTreeMap, marker::PhantomData};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -16,20 +16,24 @@ use crate::{
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
-use ark_std::test_rng;
 use ceno_emul::{
     CENO_PLATFORM,
     InsnKind::{ADD, ECALL},
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
+
 use itertools::Itertools;
-use mpcs::{PolynomialCommitmentScheme, WhirDefault};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
 use multilinear_extensions::{
     mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
 };
 use p3::field::PrimeCharacteristicRing;
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
+use rand::thread_rng;
+use transcript::{BasicTranscript, Transcript};
 
 use super::{
     PublicValues,
@@ -91,7 +95,7 @@ fn test_rw_lk_expression_combination() {
         type Pcs = WhirDefault<E>;
 
         // pcs setup
-        Pcs::setup(1 << 8).unwrap();
+        Pcs::setup(1 << 8, SecurityLevel::default()).unwrap();
         let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
 
         // configure
@@ -108,7 +112,7 @@ fn test_rw_lk_expression_combination() {
             .clone()
             .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
             .unwrap();
-        let vk = pk.get_vk();
+        let vk = pk.get_vk_slow();
 
         // generate mock witness
         let num_instances = 1 << 8;
@@ -127,21 +131,26 @@ fn test_rw_lk_expression_combination() {
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
         // commit to main traces
-        let commit = Pcs::batch_commit_and_write(&prover.pk.pp, rmm, &mut transcript).unwrap();
+        let commit_with_witness = Pcs::batch_commit_and_write(
+            &prover.pk.pp,
+            vec![(0, rmm)].into_iter().collect::<BTreeMap<_, _>>(),
+            &mut transcript,
+        )
+        .unwrap();
+        let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
+
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
         let prover_challenges = [
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
 
-        let proof = prover
+        let (proof, _) = prover
             .create_opcode_proof(
                 name.as_str(),
-                &prover.pk.pp,
                 prover.pk.circuit_pks.get(&name).unwrap(),
                 None,
                 wits_in,
-                commit,
                 &[],
                 num_instances,
                 &mut transcript,
@@ -150,24 +159,27 @@ fn test_rw_lk_expression_combination() {
             .expect("create_proof failed");
 
         // verify proof
-        let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
+        let mut v_transcript = BasicTranscript::new(b"test");
         // write commitment into transcript and derive challenges from it
-        Pcs::write_commitment(&proof.wits_commit, &mut v_transcript).unwrap();
+        Pcs::write_commitment(&witin_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
             v_transcript.read_challenge().elements,
             v_transcript.read_challenge().elements,
         ];
 
         assert_eq!(prover_challenges, verifier_challenges);
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+        }
         let _rt_input = verifier
             .verify_opcode_proof(
                 name.as_str(),
-                &vk.vp,
                 verifier.vk.circuit_vks.get(&name).unwrap(),
-                &verifier.vk.keccak_vk,
+                None,
                 &proof,
+                num_instances,
                 &[],
                 &mut v_transcript,
                 NUM_FANIN,
@@ -175,10 +187,14 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
-        println!(
-            "hashed fields {}",
-            stat_recorder.into_inner().field_appended_num
+        #[cfg(debug_assertions)]
+        {
+            println!(
+            "instrumented metrics {}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
         );
+        }
     }
 
     // <lookup count, rw count>
@@ -204,11 +220,12 @@ fn test_single_add_instance_e2e() {
     let program = Program::new(
         CENO_PLATFORM.pc_base(),
         CENO_PLATFORM.pc_base(),
+        CENO_PLATFORM.heap.start,
         PROGRAM_CODE.to_vec(),
         Default::default(),
     );
 
-    Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
@@ -238,7 +255,7 @@ fn test_single_add_instance_e2e() {
         .clone()
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
-    let vk = pk.get_vk();
+    let vk = pk.get_vk_slow();
 
     // single instance
     let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
@@ -291,19 +308,25 @@ fn test_single_add_instance_e2e() {
         .expect("create_proof failed");
 
     println!("encoded zkvm proof {}", &zkvm_proof,);
-    let stat_recorder = StatisticRecorder::default();
+
+    #[cfg(debug_assertions)]
     {
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
-        assert!(
-            verifier
-                .verify_proof(zkvm_proof, transcript)
-                .expect("verify proof return with error"),
+        Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+    }
+    let transcript = BasicTranscript::new(b"riscv");
+    assert!(
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect("verify proof return with error"),
+    );
+    #[cfg(debug_assertions)]
+    {
+        println!(
+            "instrumented metrics {}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
         );
     }
-    println!(
-        "hash_num: {}",
-        stat_recorder.into_inner().field_appended_num
-    );
 }
 
 /// test various product argument size, starting from minimal leaf size 2
@@ -311,7 +334,7 @@ fn test_single_add_instance_e2e() {
 fn test_tower_proof_various_prod_size() {
     fn _test_tower_proof_prod_size_2(leaf_layer_size: usize) {
         let num_vars = ceil_log2(leaf_layer_size);
-        let mut rng = test_rng();
+        let mut rng = thread_rng();
         type E = GoldilocksExt2;
         let mut transcript = BasicTranscript::new(b"test_tower_proof");
         let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)

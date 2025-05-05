@@ -1,18 +1,19 @@
-use ff_ext::{ExtensionField, PoseidonField};
-use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger, FieldChallengerExt};
+use ff_ext::{ExtensionField, FieldChallengerExt};
+use p3::challenger::{CanSampleBits, GrindingChallenger};
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 
 use crate::{Challenge, ForkableTranscript, Transcript};
 use ff_ext::SmallField;
 
 #[derive(Clone)]
 pub struct BasicTranscript<E: ExtensionField> {
-    challenger: DefaultChallenger<E::BaseField, <E::BaseField as PoseidonField>::T>,
+    challenger: DefaultChallenger<E::BaseField>,
 }
 
 impl<E: ExtensionField> BasicTranscript<E> {
     /// Create a new IOP transcript.
     pub fn new(label: &'static [u8]) -> Self {
-        let mut challenger = DefaultChallenger::<E::BaseField, <E::BaseField as PoseidonField>::T>::new_poseidon_default();
+        let mut challenger = DefaultChallenger::<E::BaseField>::new_poseidon_default();
         let label_f = E::BaseField::bytes_to_field_elements(label);
         challenger.observe_slice(label_f.as_slice());
         Self { challenger }
@@ -55,4 +56,27 @@ impl<E: ExtensionField> Transcript<E> for BasicTranscript<E> {
     }
 }
 
+impl<E: ExtensionField> CanObserve<E::BaseField> for BasicTranscript<E> {
+    fn observe(&mut self, value: E::BaseField) {
+        self.challenger.observe(value)
+    }
+}
+
+impl<E: ExtensionField> CanSampleBits<usize> for BasicTranscript<E> {
+    fn sample_bits(&mut self, bits: usize) -> usize {
+        self.challenger.sample_bits(bits)
+    }
+}
+
 impl<E: ExtensionField> ForkableTranscript<E> for BasicTranscript<E> {}
+
+impl<E: ExtensionField> GrindingChallenger for BasicTranscript<E> {
+    type Witness = E::BaseField;
+    fn grind(&mut self, bits: usize) -> E::BaseField {
+        self.challenger.grind(bits)
+    }
+
+    fn check_witness(&mut self, bits: usize, witness: E::BaseField) -> bool {
+        self.challenger.check_witness(bits, witness)
+    }
+}

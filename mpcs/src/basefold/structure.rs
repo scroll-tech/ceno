@@ -1,24 +1,28 @@
 use crate::{
-    sum_check::classic::{Coefficients, SumcheckProof},
-    util::{hash::Digest, merkle_tree::MerkleTree},
+    PCSFriParam, SecurityLevel,
+    basefold::log2_strict_usize,
+    util::merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
 };
 use core::fmt::Debug;
-use ff_ext::ExtensionField;
-
+use ff_ext::{ExtensionField, PoseidonField};
+use itertools::{Itertools, izip};
+use p3::{
+    commit::{ExtensionMmcs, Mmcs},
+    fri::{BatchOpening, CommitPhaseProofStep},
+    matrix::{Matrix, dense::DenseMatrix},
+};
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
+use sumcheck::structs::IOPProverMessage;
 
-use multilinear_extensions::mle::FieldType;
+use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
-use std::{marker::PhantomData, slice};
+use std::{collections::BTreeMap, marker::PhantomData};
+
+pub type Digest<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment;
+pub type MerkleTree<F> = <<F as PoseidonField>::MMCS as Mmcs<F>>::ProverData<DenseMatrix<F>>;
+pub type MerkleTreeExt<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::ProverData<DenseMatrix<E>>;
 
 pub use super::encoding::{EncodingProverParameters, EncodingScheme, RSCode, RSCodeDefaultSpec};
-use super::{
-    Basecode, BasecodeDefaultSpec,
-    query_phase::{
-        BatchedQueriesResultWithMerklePath, QueriesResultWithMerklePath,
-        SimpleBatchQueriesResultWithMerklePath,
-    },
-};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -30,6 +34,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(super) params: <Spec::EncodingScheme as EncodingScheme<E>>::PublicParameters,
+    pub(crate) security_level: SecurityLevel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,12 +44,32 @@ where
 ))]
 pub struct BasefoldProverParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
     pub encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    pub(super) security_level: SecurityLevel,
 }
 
 impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
     pub fn get_max_message_size_log(&self) -> usize {
         self.encoding_params.get_max_message_size_log()
     }
+}
+
+macro_rules! impl_pcs_fri_param {
+    ($type_name:ident) => {
+        impl<E: ExtensionField, Spec: BasefoldSpec<E>> PCSFriParam for $type_name<E, Spec> {
+            // refer security bit setting from https://github.com/openvm-org/stark-backend/blob/92171baab084b7aaeabc659d0e616cd93a3fdea4/crates/stark-sdk/src/config/fri_params.rs#L59
+            fn get_pow_bits_by_level(&self, pow_strategy: crate::PowStrategy) -> usize {
+                match (
+                    &self.security_level,
+                    pow_strategy,
+                    <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log(),
+                    <Spec::EncodingScheme as EncodingScheme<E>>::get_number_queries(),
+                ) {
+                    (SecurityLevel::Conjecture100bits, crate::PowStrategy::FriPow, 1, 100) => 16,
+                    _ => unimplemented!(),
+                }
+            }
+        }
+    };
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,112 +79,99 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> BasefoldProverParams<E, Spec> {
 ))]
 pub struct BasefoldVerifierParams<E: ExtensionField, Spec: BasefoldSpec<E>> {
     pub(super) encoding_params: <Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
+    pub(super) security_level: SecurityLevel,
 }
+
+impl_pcs_fri_param!(BasefoldProverParams);
+impl_pcs_fri_param!(BasefoldVerifierParams);
 
 /// A polynomial commitment together with all the data (e.g., the codeword, and Merkle tree)
 /// used to generate this commitment and for assistant in opening
-#[derive(Clone, Debug, Default)]
 pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) codeword_tree: MerkleTree<E>,
-    pub(crate) polynomials_bh_evals: Vec<FieldType<E>>,
-    pub(crate) num_vars: usize,
-    pub(crate) is_base: bool,
-    pub(crate) num_polys: usize,
+    pub(crate) commit: Digest<E>,
+    pub(crate) codeword: MerkleTree<E::BaseField>,
+
+    pub(crate) log2_max_codeword_size: usize,
+    // for small polynomials, the prover commits the entire polynomial as merkle leaves without encoding to codeword
+    // the verifier performs direct checks on these leaves without requiring a proximity test.
+    pub(crate) trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
+    // poly groups w.r.t circuit index
+    pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
+    // keep codeword index w.r.t circuit index
+    pub circuit_codeword_index: BTreeMap<usize, usize>,
 }
 
 impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
+    pub fn new(
+        commit: Digest<E>,
+        codeword: MerkleTree<E::BaseField>,
+        polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
+        trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
+        circuit_codeword_index: BTreeMap<usize, usize>,
+    ) -> Self {
+        let mmcs = poseidon2_merkle_tree::<E>();
+        // size = height * 2 because we split codeword leafs into left/right, concat and commit under same row index
+        let log2_max_codeword_size = log2_strict_usize(
+            mmcs.get_matrices(&codeword)
+                .iter()
+                .map(|m| m.height() * 2)
+                .max()
+                .unwrap(),
+        );
+        Self {
+            commit,
+            codeword,
+            polys,
+            trivial_proofdata,
+            circuit_codeword_index,
+            log2_max_codeword_size,
+        }
+    }
+
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
         BasefoldCommitment::new(
-            self.codeword_tree.root(),
-            self.num_vars,
-            self.is_base,
-            self.num_polys,
+            self.commit.clone(),
+            self.trivial_proofdata
+                .iter()
+                .map(|(_, (digest, _))| digest.clone())
+                .collect_vec(),
+            self.log2_max_codeword_size,
         )
     }
 
-    pub fn get_root_ref(&self) -> &Digest<E::BaseField> {
-        self.codeword_tree.root_ref()
-    }
+    // pub fn poly_size(&self) -> usize {
+    //     1 << self.num_vars
+    // }
 
-    pub fn get_root_as(&self) -> Digest<E::BaseField> {
-        Digest::<E::BaseField>(self.get_root_ref().0)
-    }
+    // pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
+    //     num_vars <= Spec::get_basecode_msg_size_log()
+    // }
 
-    pub fn get_codewords(&self) -> &Vec<FieldType<E>> {
-        self.codeword_tree.leaves()
-    }
+    // pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
+    //     Self::trivial_num_vars::<Spec>(self.num_vars)
+    // }
 
-    pub fn batch_codewords(&self, coeffs: &[E]) -> Vec<E> {
-        self.codeword_tree.batch_leaves(coeffs)
-    }
-
-    pub fn codeword_size(&self) -> usize {
-        self.codeword_tree.size().1
-    }
-
-    pub fn codeword_size_log(&self) -> usize {
-        self.codeword_tree.height()
-    }
-
-    pub fn poly_size(&self) -> usize {
-        1 << self.num_vars
-    }
-
-    pub fn get_codeword_entry_base(&self, index: usize) -> Vec<E::BaseField> {
-        self.codeword_tree.get_leaf_as_base(index)
-    }
-
-    pub fn get_codeword_entry_ext(&self, index: usize) -> Vec<E> {
-        self.codeword_tree.get_leaf_as_extension(index)
-    }
-
-    pub fn is_base(&self) -> bool {
-        self.is_base
-    }
-
-    pub fn trivial_num_vars<Spec: BasefoldSpec<E>>(num_vars: usize) -> bool {
-        num_vars <= Spec::get_basecode_msg_size_log()
-    }
-
-    pub fn is_trivial<Spec: BasefoldSpec<E>>(&self) -> bool {
-        Self::trivial_num_vars::<Spec>(self.num_vars)
+    pub fn get_codewords(&self) -> Vec<&DenseMatrix<E::BaseField>> {
+        let mmcs = poseidon2_merkle_tree::<E>();
+        mmcs.get_matrices(&self.codeword)
     }
 }
 
-impl<E: ExtensionField> From<BasefoldCommitmentWithWitness<E>> for Digest<E::BaseField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn from(val: BasefoldCommitmentWithWitness<E>) -> Self {
-        val.get_root_as()
-    }
-}
-
-impl<E: ExtensionField> From<&BasefoldCommitmentWithWitness<E>> for BasefoldCommitment<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn from(val: &BasefoldCommitmentWithWitness<E>) -> Self {
-        val.to_commitment()
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "", deserialize = ""))]
 pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) root: Digest<E::BaseField>,
-    pub(super) num_vars: Option<usize>,
-    pub(super) is_base: bool,
-    pub(super) num_polys: Option<usize>,
+    pub(super) commit: Digest<E>,
+    pub(crate) log2_max_codeword_size: usize,
+    pub(crate) trivial_commits: Vec<Digest<E>>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
@@ -167,29 +179,19 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub fn new(
-        root: Digest<E::BaseField>,
-        num_vars: usize,
-        is_base: bool,
-        num_polys: usize,
+        commit: Digest<E>,
+        trivial_commits: Vec<Digest<E>>,
+        log2_max_codeword_size: usize,
     ) -> Self {
         Self {
-            root,
-            num_vars: Some(num_vars),
-            is_base,
-            num_polys: Some(num_polys),
+            commit,
+            trivial_commits,
+            log2_max_codeword_size,
         }
     }
 
-    pub fn root(&self) -> Digest<E::BaseField> {
-        self.root.clone()
-    }
-
-    pub fn num_vars(&self) -> Option<usize> {
-        self.num_vars
-    }
-
-    pub fn is_base(&self) -> bool {
-        self.is_base
+    pub fn commit(&self) -> Digest<E> {
+        self.commit.clone()
     }
 }
 
@@ -198,8 +200,12 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.get_codewords().eq(other.get_codewords())
-            && self.polynomials_bh_evals.eq(&other.polynomials_bh_evals)
+        izip!(self.get_codewords(), other.get_codewords())
+            .all(|(codeword_a, codeword_b)| codeword_a.eq(codeword_b))
+            && izip!(self.polys.values(), other.polys.values()).all(|(evals_a, evals_b)| {
+                izip!(evals_a, evals_b)
+                    .all(|(evals_a, evals_b)| evals_a.evaluations() == evals_b.evaluations())
+            })
     }
 }
 
@@ -222,16 +228,6 @@ pub trait BasefoldSpec<E: ExtensionField>: Debug + Clone {
     fn get_basecode_msg_size_log() -> usize {
         Self::EncodingScheme::get_basecode_msg_size_log()
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct BasefoldBasecodeParams;
-
-impl<E: ExtensionField> BasefoldSpec<E> for BasefoldBasecodeParams
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    type EncodingScheme = Basecode<BasecodeDefaultSpec>;
 }
 
 #[derive(Debug, Clone)]
@@ -264,67 +260,37 @@ impl<E: ExtensionField, Spec: BasefoldSpec<E>> Clone for Basefold<E, Spec> {
     }
 }
 
-impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitment<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn as_ref(&self) -> &[Digest<E::BaseField>] {
-        let root = &self.root;
-        slice::from_ref(root)
-    }
-}
+pub type ExtMmcs<E> = ExtensionMmcs<
+    <E as ExtensionField>::BaseField,
+    E,
+    <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
+>;
 
-impl<E: ExtensionField> AsRef<[Digest<E::BaseField>]> for BasefoldCommitmentWithWitness<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    fn as_ref(&self) -> &[Digest<E::BaseField>] {
-        let root = self.get_root_ref();
-        slice::from_ref(root)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub enum ProofQueriesResultWithMerklePath<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    Single(QueriesResultWithMerklePath<E>),
-    Batched(BatchedQueriesResultWithMerklePath<E>),
-    SimpleBatched(SimpleBatchQueriesResultWithMerklePath<E>),
+pub struct QueryOpeningProof<E: ExtensionField> {
+    pub witin_base_proof: BatchOpening<
+        <E as ExtensionField>::BaseField,
+        <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
+    >,
+    pub fixed_base_proof: Option<
+        BatchOpening<
+            <E as ExtensionField>::BaseField,
+            <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
+        >,
+    >,
+    #[allow(clippy::type_complexity)]
+    pub commit_phase_openings: Vec<CommitPhaseProofStep<E, ExtMmcs<E>>>,
 }
 
-impl<E: ExtensionField> ProofQueriesResultWithMerklePath<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn as_single(&self) -> &QueriesResultWithMerklePath<E> {
-        match self {
-            Self::Single(x) => x,
-            _ => panic!("Not a single query result"),
-        }
-    }
+pub type QueryOpeningProofs<E> = Vec<QueryOpeningProof<E>>;
 
-    pub fn as_batched(&self) -> &BatchedQueriesResultWithMerklePath<E> {
-        match self {
-            Self::Batched(x) => x,
-            _ => panic!("Not a batched query result"),
-        }
-    }
+pub type TrivialProof<E> = Vec<Vec<DenseMatrix<<E as ExtensionField>::BaseField>>>;
 
-    pub fn as_simple_batched(&self) -> &SimpleBatchQueriesResultWithMerklePath<E> {
-        match self {
-            Self::SimpleBatched(x) => x,
-            _ => panic!("Not a simple batched query result"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -333,37 +299,16 @@ pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) sumcheck_messages: Vec<Vec<E>>,
-    pub(crate) roots: Vec<Digest<E::BaseField>>,
-    pub(crate) final_message: Vec<E>,
-    pub(crate) query_result_with_merkle_path: ProofQueriesResultWithMerklePath<E>,
-    pub(crate) sumcheck_proof: Option<SumcheckProof<E, Coefficients<E>>>,
-    pub(crate) trivial_proof: Vec<FieldType<E>>,
+    pub(crate) commits: Vec<Digest<E>>,
+    pub(crate) final_message: Vec<Vec<E>>,
+    pub(crate) query_opening_proof: QueryOpeningProofs<E>,
+    pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
+    // vec![witness, fixed], where fixed is optional
+    pub(crate) trivial_proof: Option<TrivialProof<E>>,
+    pub(crate) pow_witness: E::BaseField,
 }
 
-impl<E: ExtensionField> BasefoldProof<E>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    pub fn trivial(evals: Vec<FieldType<E>>) -> Self {
-        Self {
-            sumcheck_messages: vec![],
-            roots: vec![],
-            final_message: vec![],
-            query_result_with_merkle_path: ProofQueriesResultWithMerklePath::Single(
-                QueriesResultWithMerklePath::empty(),
-            ),
-            sumcheck_proof: None,
-            trivial_proof: evals,
-        }
-    }
-
-    pub fn is_trivial(&self) -> bool {
-        !self.trivial_proof.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -372,7 +317,15 @@ pub struct BasefoldCommitPhaseProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) sumcheck_messages: Vec<Vec<E>>,
-    pub(crate) roots: Vec<Digest<E::BaseField>>,
-    pub(crate) final_message: Vec<E>,
+    pub(crate) sumcheck_messages: Vec<IOPProverMessage<E>>,
+    pub(crate) commits: Vec<Digest<E>>,
+    pub(crate) final_message: Vec<Vec<E>>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct CircuitIndexMeta {
+    pub witin_num_vars: usize,
+    pub witin_num_polys: usize,
+    pub fixed_num_vars: usize,
+    pub fixed_num_polys: usize,
 }

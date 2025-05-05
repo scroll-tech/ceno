@@ -3,7 +3,7 @@ use std::{iter, mem, sync::Arc, vec};
 use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::chain;
-use serde::Serialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Transcript;
 
 use crate::{
@@ -41,7 +41,11 @@ where
     num_vars: usize,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct SumcheckProof<E: ExtensionField> {
     /// Messages for each round.
     pub univariate_polys: Vec<Vec<Vec<E>>>,

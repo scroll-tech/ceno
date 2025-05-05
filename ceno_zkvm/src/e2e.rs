@@ -1,15 +1,16 @@
 use crate::{
+    error::ZKVMError,
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
-        constants::MAX_NUM_VARIABLES,
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
         verifier::ZKVMVerifier,
     },
     state::GlobalState,
     structs::{
-        ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMWitnesses,
+        ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
+        ZKVMWitnesses,
     },
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
@@ -20,19 +21,65 @@ use ceno_emul::{
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::PolynomialCommitmentScheme;
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
-    iter::zip,
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
+
+/// The polynomial commitment scheme kind
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    strum_macros::AsRefStr,
+    strum_macros::Display,
+    strum_macros::IntoStaticStr,
+)]
+pub enum PcsKind {
+    #[default]
+    Basefold,
+    Whir,
+}
+
+/// The field type
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    strum_macros::AsRefStr,
+    strum_macros::Display,
+    strum_macros::IntoStaticStr,
+)]
+pub enum FieldType {
+    #[default]
+    Goldilocks,
+    BabyBear,
+}
 
 pub struct FullMemState<Record> {
     mem: Vec<Record>,
     io: Vec<Record>,
     reg: Vec<Record>,
-    priv_io: Vec<Record>,
+    hints: Vec<Record>,
+    stack: Vec<Record>,
+    heap: Vec<Record>,
 }
 
 type InitMemState = FullMemState<MemInitRecord>;
@@ -50,19 +97,20 @@ fn emulate_program(
     max_steps: usize,
     init_mem_state: InitMemState,
     platform: &Platform,
-    hints: Vec<u32>,
 ) -> EmulationResult {
     let InitMemState {
         mem: mem_init,
         io: io_init,
         reg: reg_init,
-        priv_io: _,
+        hints: hints_init,
+        stack: _,
+        heap: _,
     } = init_mem_state;
 
     let mut vm: VMState = VMState::new(platform.clone(), program);
 
-    for (addr, value) in zip(platform.hints.iter_addresses(), &hints) {
-        vm.init_memory(addr.into(), *value);
+    for record in chain!(&hints_init, &io_init) {
+        vm.init_memory(record.addr.into(), record.value);
     }
 
     let all_records = vm
@@ -84,6 +132,8 @@ fn emulate_program(
 
     let final_access = vm.tracer().final_accesses();
     let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
+    let insts = vm.tracer().executed_insts();
+    tracing::debug!("program executed {insts} instructions in {end_cycle} cycles");
 
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
@@ -129,7 +179,6 @@ fn emulate_program(
             }
         })
         .collect_vec();
-    debug_memory_ranges(&vm, &mem_final);
 
     // Find the final public IO cycles.
     let io_final = io_init
@@ -141,13 +190,65 @@ fn emulate_program(
         })
         .collect_vec();
 
-    let priv_io_final = zip(platform.hints.iter_addresses(), &hints)
-        .map(|(addr, &value)| MemFinalRecord {
-            addr,
-            value,
-            cycle: *final_access.get(&addr.into()).unwrap_or(&0),
+    let hints_final = hints_init
+        .iter()
+        .map(|rec| MemFinalRecord {
+            addr: rec.addr,
+            value: rec.value,
+            cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
         })
         .collect_vec();
+
+    // get stack access by min/max range
+    let stack_final = if let Some((start, end)) = vm
+        .tracer()
+        .probe_min_max_address_by_start_addr(ByteAddr::from(platform.stack.start).waddr())
+    {
+        (start..end)
+            // stack record collect in reverse order
+            .rev()
+            .map(|vma| {
+                let byte_addr = vma.baddr();
+                MemFinalRecord {
+                    addr: byte_addr.0,
+                    value: vm.peek_memory(vma),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec()
+    } else {
+        vec![]
+    };
+
+    // get heap access by min/max range
+    let heap_final = if let Some((start, end)) = vm
+        .tracer()
+        .probe_min_max_address_by_start_addr(ByteAddr::from(platform.heap.start).waddr())
+    {
+        (start..end)
+            .map(|vma| {
+                let byte_addr = vma.baddr();
+                MemFinalRecord {
+                    addr: byte_addr.0,
+                    value: vm.peek_memory(vma),
+                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                }
+            })
+            .collect_vec()
+    } else {
+        vec![]
+    };
+
+    debug_memory_ranges(
+        &vm,
+        chain!(
+            &mem_final,
+            &io_final,
+            &hints_final,
+            &stack_final,
+            &heap_final
+        ),
+    );
 
     EmulationResult {
         pi,
@@ -157,7 +258,9 @@ fn emulate_program(
             reg: reg_final,
             io: io_final,
             mem: mem_final,
-            priv_io: priv_io_final,
+            hints: hints_final,
+            stack: stack_final,
+            heap: heap_final,
         },
     }
 }
@@ -165,7 +268,6 @@ fn emulate_program(
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Preset {
     Ceno,
-    Sp1,
 }
 
 pub fn setup_platform(
@@ -177,22 +279,17 @@ pub fn setup_platform(
 ) -> Platform {
     let preset = match preset {
         Preset::Ceno => CENO_PLATFORM,
-        Preset::Sp1 => Platform {
-            // The stack section is not mentioned in ELF headers, so we repeat the constant STACK_TOP here.
-            stack: 0x0020_0400..0x0020_0400,
-            unsafe_ecall_nop: true,
-            ..CENO_PLATFORM
-        },
     };
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
     let stack = preset.stack.end - stack_size..preset.stack.end;
+
     let heap = {
         // Detect heap as starting after program data.
-        let heap_start = program.image.keys().max().unwrap() + WORD_SIZE as u32;
+        let heap_start = program.sheap;
         let heap = heap_start..heap_start + heap_size;
-        // Pad the total size to the next power of two.
-        let mem_size = prog_data.len() + stack.iter_addresses().len() + heap.iter_addresses().len();
+        // pad the total size to the next power of two.
+        let mem_size = heap.iter_addresses().len();
         let pad_size = mem_size.next_power_of_two() - mem_size;
         let heap_end = heap.end as usize + pad_size * WORD_SIZE;
         assert!(
@@ -202,7 +299,7 @@ pub fn setup_platform(
         heap.start..heap_end as u32
     };
 
-    Platform {
+    let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
@@ -210,31 +307,32 @@ pub fn setup_platform(
         heap,
         public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
         ..preset
-    }
+    };
+    assert!(
+        platform.validate(),
+        "invalid platform configuration: {platform}"
+    );
+
+    platform
 }
 
-fn init_mem(program: &Program, platform: &Platform) -> Vec<MemInitRecord> {
-    let program_addrs = program.image.iter().map(|(addr, value)| MemInitRecord {
-        addr: *addr,
-        value: *value,
-    });
-
-    let stack = platform
-        .stack
-        .iter_addresses()
-        .map(|addr| MemInitRecord { addr, value: 0 });
-
-    let heap = platform
-        .heap
-        .iter_addresses()
-        .map(|addr| MemInitRecord { addr, value: 0 });
-
-    let mem_init = chain!(program_addrs, stack, heap)
+fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
+    let program_addrs = program
+        .image
+        .iter()
+        .map(|(addr, value)| MemInitRecord {
+            addr: *addr,
+            value: *value,
+        })
         .sorted_by_key(|record| record.addr)
         .collect_vec();
 
-    assert!(mem_init.len().is_power_of_two());
-    mem_init
+    assert!(
+        program_addrs.len().is_power_of_two(),
+        "program_addrs.len {} is not pow2",
+        program_addrs.len(),
+    );
+    program_addrs
 }
 
 pub struct ConstraintSystemConfig<E: ExtensionField> {
@@ -334,7 +432,9 @@ pub fn generate_witness<E: ExtensionField>(
                 .iter()
                 .map(|rec| rec.cycle)
                 .collect_vec(),
-            &emul_result.final_mem_state.priv_io,
+            &emul_result.final_mem_state.hints,
+            &emul_result.final_mem_state.stack,
+            &emul_result.final_mem_state.heap,
         )
         .unwrap();
     // assign program circuit
@@ -350,16 +450,36 @@ pub fn generate_witness<E: ExtensionField>(
 }
 
 // Encodes useful early return points of the e2e pipeline
+#[derive(Default, Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum Checkpoint {
     PrepE2EProving,
     PrepWitnessGen,
-    PrepSanityCheck,
+    PrepVerify,
+    #[default]
     Complete,
 }
 
 // Currently handles state required by the sanity check in `bin/e2e.rs`
 // Future cases would require this to be an enum
-pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
+pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVerifyingKey<E, PCS>>);
+
+/// end-to-end pipeline result, stopping at a certain checkpoint
+pub struct E2ECheckpointResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    /// The proof generated by the pipeline, if any
+    pub proof: Option<ZKVMProof<E, PCS>>,
+    /// The verifying key generated by the pipeline, if any
+    pub vk: Option<ZKVMVerifyingKey<E, PCS>>,
+    /// The next step to run after the checkpoint
+    next_step: Option<Box<dyn FnOnce()>>,
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> E2ECheckpointResult<E, PCS> {
+    pub fn next_step(self) {
+        if let Some(next_step) = self.next_step {
+            next_step();
+        }
+    }
+}
 
 // Runs end-to-end pipeline, stopping at a certain checkpoint and yielding useful state.
 //
@@ -372,87 +492,107 @@ pub type IntermediateState<E, PCS> = (ZKVMProof<E, PCS>, ZKVMVerifier<E, PCS>);
 // (1.) is useful for exposing state which must be further combined with
 // state external to this pipeline (e.g, sanity check in bin/e2e.rs)
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_e2e_with_checkpoint<
-    E: ExtensionField + LkMultiplicityKey,
+    E: ExtensionField + LkMultiplicityKey + serde::de::DeserializeOwned,
     PCS: PolynomialCommitmentScheme<E> + 'static,
 >(
     program: Program,
     platform: Platform,
     hints: Vec<u32>,
+    public_io: Vec<u32>,
     max_steps: usize,
+    max_num_variables: usize,
+    security_level: SecurityLevel,
     checkpoint: Checkpoint,
-) -> (Option<IntermediateState<E, PCS>>, Box<dyn FnOnce()>) {
-    let mem_init = init_mem(&program, &platform);
+) -> E2ECheckpointResult<E, PCS> {
+    let static_addrs = init_static_addrs(&program);
 
-    let pub_io_len = platform.public_io.iter_addresses().len();
+    let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: program.instructions.len(),
-        static_memory_len: mem_init.len(),
-        pub_io_len,
+        static_memory_len: static_addrs.len(),
+        pubio_len,
     };
 
     let program = Arc::new(program);
     let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
 
-    // IO is not used in this program, but it must have a particular size at the moment.
-    let io_init = MemPadder::init_mem(platform.public_io.clone(), pub_io_len, &[]);
+    let io_init = MemPadder::init_mem(platform.public_io.clone(), pubio_len, &public_io);
+    let hint_init = MemPadder::init_mem(
+        platform.hints.clone(),
+        hints.len().next_power_of_two(),
+        &hints,
+    );
 
     let init_full_mem = InitMemState {
-        mem: mem_init,
+        mem: static_addrs,
         reg: reg_init,
         io: io_init,
-        priv_io: vec![],
+        hints: hint_init,
+        // stack/heap both init value 0 and range is dynamic
+        stack: vec![],
+        heap: vec![],
     };
 
     // Generate fixed traces
     let zkvm_fixed_traces = generate_fixed_traces(&system_config, &init_full_mem, &program);
 
     // Keygen
-    let pcs_param = PCS::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
-    let (pp, vp) = PCS::trim(pcs_param, 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let start = std::time::Instant::now();
+    let pcs_param = PCS::setup(1 << max_num_variables, security_level).expect("Basefold PCS setup");
+    let (pp, vp) = PCS::trim(pcs_param, 1 << max_num_variables).expect("Basefold trim");
     let pk = system_config
         .zkvm_cs
         .clone()
         .key_gen::<PCS>(pp.clone(), vp.clone(), zkvm_fixed_traces.clone())
         .expect("keygen failed");
-    let vk = pk.get_vk();
+    let vk = pk.get_vk_slow();
+    tracing::debug!("keygen done in {:?}", start.elapsed());
 
     // Generate witness
     let is_mock_proving = std::env::var("MOCK_PROVING").is_ok();
     if let Checkpoint::PrepE2EProving = checkpoint {
-        return (
-            None,
-            Box::new(move || {
+        return E2ECheckpointResult {
+            proof: None,
+            vk: Some(vk),
+            next_step: Some(Box::new(move || {
                 _ = run_e2e_proof::<E, _>(
                     program,
                     max_steps,
                     init_full_mem,
                     platform,
-                    hints,
                     &system_config,
                     pk,
                     zkvm_fixed_traces,
                     is_mock_proving,
                 )
-            }),
-        );
+            })),
+        };
     }
 
     // Emulate program
-    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
+    let start = std::time::Instant::now();
+    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform);
+    tracing::debug!("emulate done in {:?}", start.elapsed());
 
     // Clone some emul_result fields before consuming
     let pi = emul_result.pi.clone();
     let exit_code = emul_result.exit_code;
 
     if let Checkpoint::PrepWitnessGen = checkpoint {
-        return (
-            None,
-            Box::new(move || _ = generate_witness(&system_config, emul_result, &program, false)),
-        );
+        return E2ECheckpointResult {
+            proof: None,
+            vk: Some(vk),
+            next_step: Some(Box::new(move || {
+                // When we run e2e and halt before generate_witness, this implies we are going to
+                // benchmark generate_witness performance. So we skip mock proving check on
+                // `generate_witness` to avoid it affecting the benchmark result.
+                _ = generate_witness(&system_config, emul_result, &program, false)
+            })),
+        };
     }
 
     let zkvm_witness = generate_witness(&system_config, emul_result, &program, is_mock_proving);
@@ -473,19 +613,34 @@ pub fn run_e2e_with_checkpoint<
 
     // Run proof phase
     let transcript = Transcript::new(b"riscv");
+
+    let start = std::time::Instant::now();
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
+    tracing::debug!("proof created in {:?}", start.elapsed());
 
-    let verifier = ZKVMVerifier::new(vk);
+    let verifier = ZKVMVerifier::new(vk.clone());
 
-    run_e2e_verify::<E, _>(&verifier, zkvm_proof.clone(), exit_code, max_steps);
-
-    if let Checkpoint::PrepSanityCheck = checkpoint {
-        return (Some((zkvm_proof, verifier)), Box::new(|| ()));
+    if let Checkpoint::PrepVerify = checkpoint {
+        return E2ECheckpointResult {
+            proof: Some(zkvm_proof.clone()),
+            vk: Some(vk),
+            next_step: Some(Box::new(move || {
+                run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps)
+            })),
+        };
     }
 
-    (None, Box::new(|| ()))
+    let start = std::time::Instant::now();
+    run_e2e_verify(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+    tracing::debug!("verified in {:?}", start.elapsed());
+
+    E2ECheckpointResult {
+        proof: Some(zkvm_proof),
+        vk: Some(vk),
+        next_step: None,
+    }
 }
 
 // Runs program emulation + witness generation + proving
@@ -495,14 +650,13 @@ pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommi
     max_steps: usize,
     init_full_mem: InitMemState,
     platform: Platform,
-    hints: Vec<u32>,
     system_config: &ConstraintSystemConfig<E>,
     pk: ZKVMProvingKey<E, PCS>,
     zkvm_fixed_traces: ZKVMFixedTraces<E>,
     is_mock_proving: bool,
 ) -> ZKVMProof<E, PCS> {
     // Emulate program
-    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform, hints);
+    let emul_result = emulate_program(program.clone(), max_steps, init_full_mem, &platform);
 
     // clone pi before consuming
     let pi = emul_result.pi.clone();
@@ -549,7 +703,7 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     }
 }
 
-fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
+fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState, mem_final: I) {
     let accessed_addrs = vm
         .tracer()
         .final_accesses()
@@ -560,7 +714,6 @@ fn debug_memory_ranges(vm: &VMState, mem_final: &[MemFinalRecord]) {
         .collect_vec();
 
     let handled_addrs = mem_final
-        .iter()
         .filter(|rec| rec.cycle != 0)
         .map(|rec| ByteAddr(rec.addr))
         .collect::<HashSet<_>>();
@@ -594,4 +747,31 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
         if platform.can_read(addr) { "R" } else { "-" },
         if platform.can_write(addr) { "W" } else { "-" },
     )
+}
+
+pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Serialize>(
+    zkvm_proof: &ZKVMProof<E, PCS>,
+    verifier: &ZKVMVerifier<E, PCS>,
+) -> Result<(), ZKVMError> {
+    #[cfg(debug_assertions)]
+    {
+        Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+    }
+    let transcript = Transcript::new(b"riscv");
+    verifier.verify_proof_halt(
+        zkvm_proof.clone(),
+        transcript,
+        zkvm_proof.has_halt(&verifier.vk),
+    )?;
+    // print verification statistics like proof size and hash count
+    tracing::info!("e2e proof stat: {}", zkvm_proof);
+    #[cfg(debug_assertions)]
+    {
+        tracing::info!(
+            "instrumented metrics\n{}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
+        );
+    }
+    Ok(())
 }

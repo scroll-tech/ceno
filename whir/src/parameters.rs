@@ -1,7 +1,9 @@
 use std::{fmt::Display, marker::PhantomData, str::FromStr};
 
-use ark_crypto_primitives::merkle_tree::{Config, LeafParam, TwoToOneParam};
+use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize};
+
+use crate::crypto::Poseidon2MerkleMmcs;
 
 pub fn default_max_pow(num_variables: usize, log_inv_rate: usize) -> usize {
     num_variables + log_inv_rate - 3
@@ -16,11 +18,15 @@ pub enum SoundnessType {
 
 impl Display for SoundnessType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match &self {
-            SoundnessType::ProvableList => "ProvableList",
-            SoundnessType::ConjectureList => "ConjectureList",
-            SoundnessType::UniqueDecoding => "UniqueDecoding",
-        })
+        write!(
+            f,
+            "{}",
+            match &self {
+                SoundnessType::ProvableList => "ProvableList",
+                SoundnessType::ConjectureList => "ConjectureList",
+                SoundnessType::UniqueDecoding => "UniqueDecoding",
+            }
+        )
     }
 }
 
@@ -81,10 +87,14 @@ impl FromStr for FoldType {
 
 impl Display for FoldType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            FoldType::Naive => "Naive",
-            FoldType::ProverHelps => "ProverHelps",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                FoldType::Naive => "Naive",
+                FoldType::ProverHelps => "ProverHelps",
+            }
+        )
     }
 }
 
@@ -173,10 +183,7 @@ impl FoldingFactor {
 }
 
 #[derive(Clone)]
-pub struct WhirParameters<MerkleConfig, PowStrategy>
-where
-    MerkleConfig: Config,
-{
+pub struct WhirParameters<E: ExtensionField> {
     pub initial_statement: bool,
     pub starting_log_inv_rate: usize,
     pub folding_factor: FoldingFactor,
@@ -185,19 +192,11 @@ where
     pub pow_bits: usize,
 
     pub fold_optimisation: FoldType,
-
-    // PoW parameters
-    pub _pow_parameters: PhantomData<PowStrategy>,
-
     // Merkle tree parameters
-    pub leaf_hash_params: LeafParam<MerkleConfig>,
-    pub two_to_one_params: TwoToOneParam<MerkleConfig>,
+    pub hash_params: Poseidon2MerkleMmcs<E>,
 }
 
-impl<MerkleConfig, PowStrategy> Display for WhirParameters<MerkleConfig, PowStrategy>
-where
-    MerkleConfig: Config,
-{
+impl<E: ExtensionField> Display for WhirParameters<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,

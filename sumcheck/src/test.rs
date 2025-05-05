@@ -1,29 +1,29 @@
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
-    util::interpolate_uni_poly,
+    util::{ceil_log2, interpolate_uni_poly},
 };
-use ark_std::{rand::RngCore, test_rng};
-use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
+use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
 use multilinear_extensions::{
     util::max_usable_threads,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
 use p3::field::PrimeCharacteristicRing;
+use rand::{Rng, thread_rng};
 use transcript::{BasicTranscript, Transcript};
 
+// test polynomial mixed with different num_var
 #[test]
 fn test_sumcheck_with_different_degree() {
-    // test polynomial mixed with different num_var
-    let nv = vec![3, 4, 5];
-    let num_polys = nv.len();
-    for num_threads in 1..num_polys.min(max_usable_threads()) {
-        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(num_threads, &nv);
+    let log_max_thread = ceil_log2(max_usable_threads());
+    let nv = vec![1, 2, 3, 4];
+    for num_threads in 1..log_max_thread {
+        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << num_threads, &nv);
     }
 }
 
 fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     let degree = 2;
     let num_multiplicands_range = (degree, degree + 1);
     let num_products = 1;
@@ -52,9 +52,7 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
                 )
             });
 
-    let batch_poly = poly.get_batched_polys();
-    let (proof, _) =
-        IOPProverState::<E>::prove_batch_polys(num_threads, batch_poly.clone(), &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove(poly, &mut transcript);
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(
         asserted_sum,
@@ -88,7 +86,7 @@ fn test_sumcheck<E: ExtensionField>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     let mut transcript = BasicTranscript::new(b"test");
 
     let (poly, asserted_sum) =
@@ -117,7 +115,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     num_multiplicands_range: (usize, usize),
     num_products: usize,
 ) {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     let (poly, asserted_sum) =
         VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
     let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.max_num_variables);
@@ -163,6 +161,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
 #[test]
 fn test_trivial_polynomial() {
     test_trivial_polynomial_helper::<GoldilocksExt2>();
+    test_trivial_polynomial_helper::<BabyBearExt4>();
 }
 
 fn test_trivial_polynomial_helper<E: ExtensionField>() {
@@ -177,6 +176,7 @@ fn test_trivial_polynomial_helper<E: ExtensionField>() {
 #[test]
 fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
+    test_normal_polynomial_helper::<BabyBearExt4>();
 }
 
 fn test_normal_polynomial_helper<E: ExtensionField>() {
@@ -191,10 +191,11 @@ fn test_normal_polynomial_helper<E: ExtensionField>() {
 #[test]
 fn test_extract_sum() {
     test_extract_sum_helper::<GoldilocksExt2>();
+    test_extract_sum_helper::<BabyBearExt4>();
 }
 
 fn test_extract_sum_helper<E: ExtensionField>() {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     let mut transcript = BasicTranscript::new(b"test");
     let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
     #[allow(deprecated)]
@@ -205,10 +206,10 @@ fn test_extract_sum_helper<E: ExtensionField>() {
 struct DensePolynomial(Vec<GoldilocksExt2>);
 
 impl DensePolynomial {
-    fn rand(degree: usize, mut rng: &mut impl RngCore) -> Self {
+    fn rand<R: Rng>(degree: usize, rng: &mut R) -> Self {
         Self(
             (0..degree)
-                .map(|_| GoldilocksExt2::random(&mut rng))
+                .map(|_| GoldilocksExt2::random(&mut *rng))
                 .collect(),
         )
     }
@@ -226,7 +227,7 @@ impl DensePolynomial {
 
 #[test]
 fn test_interpolation() {
-    let mut prng = ark_std::test_rng();
+    let mut prng = rand::thread_rng();
 
     // test a polynomial with 20 known points, i.e., with degree 19
     let poly = DensePolynomial::rand(20 - 1, &mut prng);

@@ -1,8 +1,8 @@
 use itertools::{Itertools, chain};
+use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
-use mpcs::PolynomialCommitmentScheme;
 
 use crate::{
     ROMType,
@@ -13,10 +13,8 @@ use crate::{
 };
 use p3::field::PrimeCharacteristicRing;
 
-use witness::RowMajorMatrix;
-
 /// namespace used for annotation, preserve meta info during circuit construction
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct NameSpace {
     namespace: Vec<String>,
 }
@@ -53,20 +51,22 @@ impl NameSpace {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
     pub table_spec: SetTableSpec,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SetTableSpec {
     pub len: Option<usize>,
     pub structural_witins: Vec<StructuralWitIn>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct SetTableExpression<E: ExtensionField> {
     /// table expression
     pub expr: Expression<E>,
@@ -76,7 +76,8 @@ pub struct SetTableExpression<E: ExtensionField> {
     pub table_spec: SetTableSpec,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct ConstraintSystem<E: ExtensionField> {
     pub(crate) ns: NameSpace,
 
@@ -175,24 +176,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         }
     }
 
-    pub fn key_gen<PCS: PolynomialCommitmentScheme<E>>(
-        self,
-        pp: &PCS::ProverParam,
-        fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
-    ) -> ProvingKey<E, PCS> {
-        // transpose from row-major to column-major
-        let fixed_traces_polys = fixed_traces.as_ref().map(|rmm| rmm.to_mles());
-
-        let fixed_commit_wd = fixed_traces.map(|traces| PCS::batch_commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
-
+    pub fn key_gen(self) -> ProvingKey<E> {
         ProvingKey {
-            fixed_traces: fixed_traces_polys,
-            fixed_commit_wd,
-            vk: VerifyingKey {
-                cs: self,
-                fixed_commit,
-            },
+            vk: VerifyingKey { cs: self },
         }
     }
 
@@ -212,12 +198,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         max_len: usize,
         offset: u32,
         multi_factor: usize,
+        descending: bool,
     ) -> StructuralWitIn {
         let wit_in = StructuralWitIn {
             id: self.num_structural_witin,
             max_len,
             offset,
             multi_factor,
+            descending,
         };
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 

@@ -1,9 +1,9 @@
-use ark_std::test_rng;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::{
     field::{PrimeCharacteristicRing, extension::BinomialExtensionField},
     goldilocks::Goldilocks,
 };
+use rand::thread_rng;
 
 type F = Goldilocks;
 type E = BinomialExtensionField<F, 2>;
@@ -16,7 +16,7 @@ use crate::{
 
 #[test]
 fn test_virtual_polynomial_additions() {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     for nv in 2..5 {
         for num_products in 2..5 {
             let base: Vec<E> = (0..nv).map(|_| E::random(&mut rng)).collect();
@@ -36,7 +36,7 @@ fn test_virtual_polynomial_additions() {
 
 #[test]
 fn test_eq_xr() {
-    let mut rng = test_rng();
+    let mut rng = thread_rng();
     for nv in 4..10 {
         let r: Vec<_> = (0..nv).map(|_| E::random(&mut rng)).collect();
         let eq_x_r = build_eq_x_r(r.as_ref());
@@ -47,8 +47,9 @@ fn test_eq_xr() {
 
 #[test]
 fn test_fix_high_variables() {
-    let poly: DenseMultilinearExtension<E> =
-        DenseMultilinearExtension::from_evaluations_vec(3, vec![
+    let poly: DenseMultilinearExtension<E> = DenseMultilinearExtension::from_evaluations_vec(
+        3,
+        vec![
             F::from_u64(13),
             F::from_u64(97),
             F::from_u64(11),
@@ -57,23 +58,27 @@ fn test_fix_high_variables() {
             F::from_u64(103),
             F::from_u64(5),
             F::from_u64(107),
-        ]);
+        ],
+    );
 
     let partial_point = vec![E::from_u64(3), E::from_u64(5)];
 
-    let expected1 = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
-        -E::from_u64(17),
-        E::from_u64(127),
-        -E::from_u64(19),
-        E::from_u64(131),
-    ]);
+    let expected1 = DenseMultilinearExtension::from_evaluations_ext_vec(
+        2,
+        vec![
+            -E::from_u64(17),
+            E::from_u64(127),
+            -E::from_u64(19),
+            E::from_u64(131),
+        ],
+    );
     let result1 = poly.fix_high_variables(&partial_point[1..]);
     assert_eq!(result1, expected1);
 
-    let expected2 = DenseMultilinearExtension::from_evaluations_ext_vec(1, vec![
-        -E::from_u64(23),
-        E::from_u64(139),
-    ]);
+    let expected2 = DenseMultilinearExtension::from_evaluations_ext_vec(
+        1,
+        vec![-E::from_u64(23), E::from_u64(139)],
+    );
     let result2 = poly.fix_high_variables(&partial_point);
     assert_eq!(result2, expected2);
 }

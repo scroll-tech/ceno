@@ -13,6 +13,13 @@ version.workspace = true
 crossbeam-channel.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
-p3 = { path = "../p3" }
+p3.workspace = true
 poseidon.workspace = true
 serde.workspace = true
+
+[features]
+nightly-features = [
+  "p3/nightly-features",
+  "ff_ext/nightly-features",
+  "poseidon/nightly-features",
+]

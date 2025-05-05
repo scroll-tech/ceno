@@ -1,11 +1,12 @@
 use std::iter::from_fn;
 
+use ceno_rt::INFO_OUT_ADDR as CENO_RT_INFO_OUT_ADDR;
 use itertools::Itertools;
 
 use crate::{ByteAddr, EmuContext, VMState, Word, WordAddr};
 
 const WORD_SIZE: usize = 4;
-const INFO_OUT_ADDR: WordAddr = ByteAddr(0xC000_0000).waddr();
+const INFO_OUT_ADDR: WordAddr = ByteAddr(CENO_RT_INFO_OUT_ADDR).waddr();
 
 pub fn read_all_messages(state: &VMState) -> Vec<Vec<u8>> {
     let mut offset: WordAddr = WordAddr::from(0);
