@@ -1382,7 +1382,7 @@ mod tests {
                             GoldilocksExt2::ONE,
                             GoldilocksExt2::ZERO,
                         )),
-                        Box::new(Expression::Constant(Goldilocks::from_u64(U5 as u64))),
+                        Box::new(Goldilocks::from_u64(U5 as u64).expr()),
                     )),
                     Box::new(Expression::Challenge(
                         0,

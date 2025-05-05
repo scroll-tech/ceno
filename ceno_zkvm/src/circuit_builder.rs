@@ -1,5 +1,7 @@
 use itertools::{Itertools, chain};
-use multilinear_extensions::{Expression, Fixed, Instance, StructuralWitIn, WitIn, WitnessId};
+use multilinear_extensions::{
+    Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId,
+};
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -256,11 +258,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
-            std::iter::once(Expression::Constant(E::BaseField::from_u64(
-                rom_type as u64,
-            )))
-            .chain(record.clone())
-            .collect(),
+            std::iter::once(E::BaseField::from_u64(rom_type as u64).expr())
+                .chain(record.clone())
+                .collect(),
         );
         assert_eq!(
             rlc_record.degree(),
@@ -432,7 +432,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             let assert_zero_expr = if assert_zero_expr.is_monomial_form() {
                 assert_zero_expr
             } else {
-                let e = assert_zero_expr.to_monomial_form();
+                let e = assert_zero_expr.get_monomial_form();
                 assert!(e.is_monomial_form(), "failed to put into monomial form");
                 e
             };

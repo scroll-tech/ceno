@@ -6,23 +6,23 @@ use Expression::*;
 use std::iter::Sum;
 
 impl<E: ExtensionField> Expression<E> {
-    pub(super) fn to_monomial_form_inner(&self) -> Self {
-        Self::combine(self.distribute()).into_iter().sum()
+    pub fn get_monomial_terms(&self) -> Vec<Term<E>> {
+        Self::combine(self.distribute())
     }
 
     fn distribute(&self) -> Vec<Term<E>> {
         match self {
             Constant(_) => {
                 vec![Term {
-                    coeff: self.clone(),
-                    vars: vec![],
+                    scalar: self.clone(),
+                    product: vec![],
                 }]
             }
 
             Fixed(_) | WitIn(_) | StructuralWitIn(..) | Instance(_) | Challenge(..) => {
                 vec![Term {
-                    coeff: Expression::ONE,
-                    vars: vec![self.clone()],
+                    scalar: Expression::ONE,
+                    product: vec![self.clone()],
                 }]
             }
 
@@ -30,16 +30,16 @@ impl<E: ExtensionField> Expression<E> {
 
             Product(a, b) => iproduct!(a.distribute(), b.distribute())
                 .map(|(a, b)| Term {
-                    coeff: &a.coeff * &b.coeff,
-                    vars: chain!(&a.vars, &b.vars).cloned().collect(),
+                    scalar: &a.scalar * &b.scalar,
+                    product: chain!(&a.product, &b.product).cloned().collect(),
                 })
                 .collect(),
 
             ScaledSum(x, a, b) => chain!(
                 b.distribute(),
                 iproduct!(x.distribute(), a.distribute()).map(|(x, a)| Term {
-                    coeff: &x.coeff * &a.coeff,
-                    vars: chain!(&x.vars, &a.vars).cloned().collect(),
+                    scalar: &x.scalar * &a.scalar,
+                    product: chain!(&x.product, &a.product).cloned().collect(),
                 })
             )
             .collect(),
@@ -47,17 +47,17 @@ impl<E: ExtensionField> Expression<E> {
     }
 
     fn combine(mut terms: Vec<Term<E>>) -> Vec<Term<E>> {
-        for Term { vars, .. } in &mut terms {
-            vars.sort();
+        for Term { product, .. } in &mut terms {
+            product.sort();
         }
         terms
             .into_iter()
-            .map(|Term { coeff, vars }| (vars, coeff))
+            .map(|Term { scalar, product }| (product, scalar))
             .into_group_map()
             .into_iter()
-            .map(|(vars, coeffs)| Term {
-                coeff: coeffs.into_iter().sum(),
-                vars,
+            .map(|(product, scalar)| Term {
+                scalar: scalar.into_iter().sum(),
+                product,
             })
             .collect()
     }
@@ -65,15 +65,15 @@ impl<E: ExtensionField> Expression<E> {
 
 impl<E: ExtensionField> Sum<Term<E>> for Expression<E> {
     fn sum<I: Iterator<Item = Term<E>>>(iter: I) -> Self {
-        iter.map(|term| term.coeff * term.vars.into_iter().product::<Expression<_>>())
+        iter.map(|term| term.scalar * term.product.into_iter().product::<Expression<_>>())
             .sum()
     }
 }
 
 #[derive(Clone, Debug)]
-struct Term<E: ExtensionField> {
-    coeff: Expression<E>,
-    vars: Vec<Expression<E>>,
+pub struct Term<E: ExtensionField> {
+    pub scalar: Expression<E>,
+    pub product: Vec<Expression<E>>,
 }
 
 #[cfg(test)]
@@ -81,6 +81,7 @@ mod tests {
     use crate::expression::{Fixed as FixedS, utils::eval_by_expr_with_fixed};
 
     use super::*;
+    use either::Either;
     use ff_ext::{FieldInto, FromUniformBytes, GoldilocksExt2 as E};
     use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
     use rand::thread_rng;
@@ -97,8 +98,8 @@ mod tests {
         let x = || WitIn(0);
         let y = || WitIn(1);
         let z = || WitIn(2);
-        let n = || Constant(104u64.into_f());
-        let m = || Constant(-F::from_u64(599));
+        let n = || Constant(Either::Left(104u64.into_f()));
+        let m = || Constant(Either::Left(-F::from_u64(599)));
         let r = || Challenge(0, 1, E::ONE, E::ZERO);
 
         let test_exprs: &[Expression<E>] = &[
@@ -117,7 +118,10 @@ mod tests {
         ];
 
         for factored in test_exprs {
-            let monomials = factored.to_monomial_form_inner();
+            let monomials = factored
+                .get_monomial_terms()
+                .into_iter()
+                .sum::<Expression<E>>();
             assert!(monomials.is_monomial_form());
 
             // Check that the two forms are equivalent (Schwartz-Zippel test).

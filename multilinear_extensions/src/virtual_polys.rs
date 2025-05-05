@@ -1,10 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    marker::PhantomData,
     sync::Arc,
 };
 
 use crate::{
+    Expression, WitnessId,
+    expression::monomial::Term,
     util::ceil_log2,
+    utils::eval_by_expr_with_instance,
     virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
 };
 use ff_ext::ExtensionField;
@@ -18,6 +22,65 @@ pub enum PolyMeta {
     #[default]
     Normal,
     Phase2Only,
+}
+
+/// a builder for constructing expressive polynomial formulas represented as expression,
+/// primarily used in the sumcheck protocol.
+///
+/// this struct manages witness identifiers and multilinear extensions (mles),
+/// enabling reuse and deduplication of polynomial
+#[derive(Default)]
+pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
+    num_witin: WitnessId,
+    mles_storage: BTreeMap<usize, (usize, &'a ArcMultilinearExtension<'a, E>)>,
+    _phantom: PhantomData<E>,
+}
+
+impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
+    pub fn lift(&mut self, mle: &'a ArcMultilinearExtension<'a, E>) -> Expression<E> {
+        let mle_ptr: usize = Arc::as_ptr(mle) as *const () as usize;
+        let (witin_id, _) = self.mles_storage.entry(mle_ptr).or_insert_with(|| {
+            let witin_id = self.num_witin;
+            self.num_witin = self.num_witin.strict_add(1);
+            (witin_id as usize, mle)
+        });
+
+        Expression::WitIn(*witin_id as u16)
+    }
+
+    pub fn to_virtual_polys(
+        self,
+        num_threads: usize,
+        max_num_variables: usize,
+        expression: &Expression<E>,
+        challenges: &[E],
+    ) -> VirtualPolynomials<'a, E> {
+        let mles_storage = self
+            .mles_storage
+            .values()
+            .map(|(id, mle)| (*id, *mle))
+            .collect::<BTreeMap<_, _>>();
+        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, max_num_variables);
+        for Term {
+            scalar: scalar_expr,
+            product,
+        } in expression.get_monomial_terms()
+        {
+            let product_mle = product
+                .into_iter()
+                .map(|expr| match expr {
+                    Expression::WitIn(witin_id) => mles_storage
+                        .get(&(witin_id as usize))
+                        .cloned()
+                        .expect("invalid witin id"),
+                    other => unimplemented!("un supported expression: {:?}", other),
+                })
+                .collect_vec();
+            let scalar = eval_by_expr_with_instance(&[], &[], &[], &[], challenges, &scalar_expr);
+            virtual_polys.add_mle_list(product_mle, scalar);
+        }
+        virtual_polys
+    }
 }
 
 pub struct VirtualPolynomials<'a, E: ExtensionField> {

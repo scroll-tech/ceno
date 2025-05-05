@@ -224,7 +224,11 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         &|_| unreachable!(),
         &|witness_id| vec![(E::ONE, { vec![witness_id] })],
         &|structural_witness_id, _, _, _| vec![(E::ONE, { vec![structural_witness_id] })],
-        &|scalar| vec![(E::from(scalar), { vec![] })],
+        &|scalar| {
+            vec![(scalar.map_either(E::from, |scalar| scalar).into_inner(), {
+                vec![]
+            })]
+        },
         &|challenge_id, pow, scalar, offset| {
             let challenge = challenges[challenge_id as usize];
             vec![(challenge.exp_u64(pow as u64) * scalar + offset, vec![])]

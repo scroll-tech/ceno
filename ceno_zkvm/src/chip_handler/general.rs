@@ -264,7 +264,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "require_equal",
             |cb| {
                 cb.cs
-                    .require_zero(name_fn, a.to_monomial_form() - b.to_monomial_form())
+                    .require_zero(name_fn, a.get_monomial_form() - b.get_monomial_form())
             },
         )
     }

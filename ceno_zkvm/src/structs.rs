@@ -8,7 +8,7 @@ use crate::{
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::{ExtensionField, SmallField};
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, impl_expr_from_unsigned, virtual_poly::ArcMultilinearExtension,

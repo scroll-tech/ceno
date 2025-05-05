@@ -34,7 +34,11 @@ pub fn eval_by_expr_with_fixed<E: ExtensionField>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
         &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
-        &|scalar| scalar.into(),
+        &|scalar| {
+            scalar
+                .map_either(|scalar| E::from(scalar), |scalar| scalar)
+                .into_inner()
+        },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
@@ -59,7 +63,11 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
         &|witness_id| witnesses[witness_id as usize],
         &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
         &|i| instance[i.0],
-        &|scalar| scalar.into(),
+        &|scalar| {
+            scalar
+                .map_either(|scalar| E::from(scalar), |scalar| scalar)
+                .into_inner()
+        },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];

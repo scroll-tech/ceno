@@ -1,13 +1,14 @@
 use ff_ext::ExtensionField;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use itertools::{Itertools, enumerate, izip};
+use itertools::{Either, Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
+    Expression,
     mle::IntoMLE,
     util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
-    virtual_polys::VirtualPolynomials,
+    virtual_polys::{VirtualPolynomials, VirtualPolynomialsBuilder},
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -1051,8 +1052,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
                 let (eq_rw, eq_lk) = eq.split_at(cs.r_table_expressions.len());
 
-                let mut virtual_polys =
-                    VirtualPolynomials::<E>::new(num_threads, max_log2_num_instance);
+                let mut expr_builder = VirtualPolynomialsBuilder::default();
+                let mut exprs =
+                    Vec::<Expression<E>>::with_capacity(r_set_wit.len() + lk_n_wit.len());
 
                 // alpha_r{i} * eq(rt_{i}, s) * r(s) + alpha_w{i} * eq(rt_{i}, s) * w(s)
                 for ((r_set_wit, w_set_wit), eq) in r_set_wit
@@ -1060,24 +1062,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .zip_eq(w_set_wit.iter())
                     .zip_eq(eq_rw.iter())
                 {
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, r_set_wit], *alpha);
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, w_set_wit], *alpha);
+                    let r_set_wit = expr_builder.lift(r_set_wit);
+                    let w_set_wit = expr_builder.lift(w_set_wit);
+                    let eq = expr_builder.lift(eq);
+                    let alpha_r =
+                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
+                    let alpha_w =
+                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
+                    exprs.push(eq * (alpha_r * r_set_wit + alpha_w * w_set_wit));
                 }
 
                 // alpha_lkn{i} * eq(rt_{i}, s) * lk_n(s) + alpha_lkd{i} * eq(rt_{i}, s) * lk_d(s)
                 for ((lk_n_wit, lk_d_wit), eq) in
                     lk_n_wit.iter().zip_eq(lk_d_wit.iter()).zip_eq(eq_lk.iter())
                 {
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, lk_n_wit], *alpha);
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
+                    let lk_n_wit = expr_builder.lift(lk_n_wit);
+                    let lk_d_wit = expr_builder.lift(lk_d_wit);
+                    let eq = expr_builder.lift(eq);
+                    let alpha_lkn =
+                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
+                    let alpha_lkd =
+                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
+                    exprs.push(eq * (alpha_lkn * lk_n_wit + alpha_lkd * lk_d_wit));
                 }
 
-                let (same_r_sumcheck_proofs, state) =
-                    IOPProverState::prove(virtual_polys, transcript);
+                let (same_r_sumcheck_proofs, state) = IOPProverState::prove(
+                    expr_builder.to_virtual_polys(
+                        num_threads,
+                        max_log2_num_instance,
+                        &exprs.into_iter().sum::<Expression<E>>(),
+                        challenges,
+                    ),
+                    transcript,
+                );
                 let evals = state.get_mle_flatten_final_evaluations();
                 let mut evals_iter = evals.into_iter();
                 let rw_in_evals = cs

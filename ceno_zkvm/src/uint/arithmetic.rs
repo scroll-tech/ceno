@@ -76,15 +76,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             let Expression::Constant(c) = constant else {
                 panic!("addend is not a constant type");
             };
-            let b = c.to_canonical_u64();
+            let b = c
+                .left()
+                .expect("do not support extension field here")
+                .to_canonical_u64();
 
             // convert Expression::Constant to limbs
             let b_limbs = (0..Self::NUM_LIMBS)
-                .map(|i| {
-                    Expression::Constant(E::BaseField::from_u64(
-                        (b >> (C * i)) & Self::LIMB_BIT_MASK,
-                    ))
-                })
+                .map(|i| E::BaseField::from_u64((b >> (C * i)) & Self::LIMB_BIT_MASK).expr())
                 .collect_vec();
 
             self.internal_add(cb, &b_limbs, with_overflow)
@@ -296,9 +295,10 @@ mod tests {
             circuit_builder::{CircuitBuilder, ConstraintSystem},
             uint::UIntLimbs,
         };
-        use ff_ext::{ExtensionField, FieldInto, GoldilocksExt2};
+        use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
-        use multilinear_extensions::{Expression, ToExpr, utils::eval_by_expr};
+        use multilinear_extensions::{ToExpr, utils::eval_by_expr};
+        use p3::field::PrimeCharacteristicRing;
 
         type E = GoldilocksExt2;
         #[test]
@@ -430,7 +430,7 @@ mod tests {
                 let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
                 uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
-                let const_b = Expression::Constant(const_b.unwrap().into_f());
+                let const_b = E::BaseField::from_u64(const_b.unwrap()).expr();
                 uint_a
                     .add_const(|| "uint_c", &mut cb, const_b, overflow)
                     .unwrap()
