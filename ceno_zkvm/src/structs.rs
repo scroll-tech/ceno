@@ -1,17 +1,18 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::Expression,
     instructions::Instruction,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+use multilinear_extensions::{
+    Expression, impl_expr_from_unsigned, virtual_poly::ArcMultilinearExtension,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
@@ -43,9 +44,6 @@ pub struct TowerProverSpec<'a, E: ExtensionField> {
     pub witness: Vec<Vec<ArcMultilinearExtension<'a, E>>>,
 }
 
-pub type WitnessId = u16;
-pub type ChallengeId = u16;
-
 #[derive(
     Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -68,6 +66,8 @@ pub enum RAMType {
     Register,
     Memory,
 }
+
+impl_expr_from_unsigned!(RAMType);
 
 /// A point and the evaluation of this point.
 #[derive(Clone, Debug, PartialEq)]

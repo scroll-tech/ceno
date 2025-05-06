@@ -1,4 +1,5 @@
 use itertools::{Itertools, chain};
+use multilinear_extensions::{Expression, Fixed, Instance, StructuralWitIn, WitIn, WitnessId};
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -8,8 +9,7 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
-    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
+    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey},
 };
 use p3::field::PrimeCharacteristicRing;
 

@@ -1,11 +1,7 @@
 use ff_ext::ExtensionField;
 
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr},
-    structs::RAMType,
-};
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::RAMType};
+use multilinear_extensions::{Expression, ToExpr};
 use p3::field::PrimeCharacteristicRing;
 
 pub trait StateCircuit<E: ExtensionField> {
@@ -34,7 +30,7 @@ impl<E: ExtensionField> StateCircuit<E> for GlobalState {
 
     fn finalize_global_state(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
-    ) -> Result<crate::expression::Expression<E>, crate::error::ZKVMError> {
+    ) -> Result<Expression<E>, ZKVMError> {
         let states: Vec<Expression<E>> = vec![
             Expression::Constant(E::BaseField::from_u64(RAMType::GlobalState as u64)),
             circuit_builder.query_end_pc()?.expr(),

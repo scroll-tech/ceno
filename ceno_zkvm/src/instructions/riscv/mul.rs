@@ -87,7 +87,6 @@ use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
     gadgets::{IsEqualConfig, Signed},
     instructions::{
         Instruction,
@@ -101,6 +100,7 @@ use crate::{
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
+use multilinear_extensions::Expression;
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 

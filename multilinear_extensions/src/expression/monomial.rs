@@ -78,12 +78,12 @@ struct Term<E: ExtensionField> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{expression::Fixed as FixedS, scheme::utils::eval_by_expr_with_fixed};
+    use crate::expression::{Fixed as FixedS, utils::eval_by_expr_with_fixed};
 
     use super::*;
     use ff_ext::{FieldInto, FromUniformBytes, GoldilocksExt2 as E};
     use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
-    use rand_chacha::{ChaChaRng, rand_core::SeedableRng};
+    use rand::thread_rng;
 
     #[test]
     fn test_to_monomial_form() {
@@ -130,7 +130,7 @@ mod tests {
     /// Create an evaluator of expressions. Fixed, witness, and challenge values are pseudo-random.
     fn make_eval() -> impl Fn(&Expression<E>) -> E {
         // Create a deterministic RNG from a seed.
-        let mut rng = ChaChaRng::from_seed([12u8; 32]);
+        let mut rng = thread_rng();
         let fixed = vec![
             E::random(&mut rng),
             E::random(&mut rng),

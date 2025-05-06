@@ -21,7 +21,6 @@ use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
     error::ZKVMError,
-    expression::Instance,
     scheme::{
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
         utils::{
@@ -34,6 +33,7 @@ use crate::{
     },
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
+use multilinear_extensions::Instance;
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 

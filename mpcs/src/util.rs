@@ -1,15 +1,13 @@
 pub mod arithmetic;
-pub mod expression;
 pub mod hash;
 use std::collections::VecDeque;
 
 use ff_ext::{ExtensionField, SmallField};
-use itertools::{Either, Itertools, izip};
+use itertools::Either;
 use multilinear_extensions::{
     mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
     op_mle,
 };
-use serde::{Deserialize, Serialize};
 pub mod merkle_tree;
 use crate::Error;
 use p3::{

@@ -7,7 +7,6 @@ use crate::{
     chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
-    expression::{Expression, ToExpr, WitIn},
     gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::riscv::constants::UInt,
     utils::add_one_to_big_num,
@@ -15,6 +14,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, enumerate};
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 use std::{
     borrow::Cow,

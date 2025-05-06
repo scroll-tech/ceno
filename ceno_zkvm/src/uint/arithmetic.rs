@@ -3,12 +3,10 @@ use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLtConfig,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::AssertLtConfig,
     instructions::riscv::config::IsEqualConfig,
 };
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
@@ -278,7 +276,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         let sum_expr = is_equal_per_limb.iter().map(ToExpr::expr).sum();
 
-        let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
+        let sum_flag = circuit_builder.create_witin_from_exprs(|| "sum_flag", sum_expr, false)?;
         let (is_equal, diff_inv) =
             circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
         Ok(IsEqualConfig {
@@ -296,12 +294,11 @@ mod tests {
     mod add {
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            expression::{Expression, ToExpr},
-            scheme::utils::eval_by_expr,
             uint::UIntLimbs,
         };
         use ff_ext::{ExtensionField, FieldInto, GoldilocksExt2};
         use itertools::Itertools;
+        use multilinear_extensions::{Expression, ToExpr, utils::eval_by_expr};
 
         type E = GoldilocksExt2;
         #[test]
@@ -506,12 +503,11 @@ mod tests {
     mod mul {
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            expression::ToExpr,
-            scheme::utils::eval_by_expr,
             uint::UIntLimbs,
         };
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
+        use multilinear_extensions::{ToExpr, utils::eval_by_expr};
 
         type E = GoldilocksExt2; // 18446744069414584321
         #[test]

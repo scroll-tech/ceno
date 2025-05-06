@@ -1,9 +1,8 @@
 use ff_ext::ExtensionField;
 
 use super::GlobalStateRegisterMachineChipOperations;
-use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression, structs::RAMType,
-};
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::RAMType};
+use multilinear_extensions::Expression;
 use p3::field::PrimeCharacteristicRing;
 
 impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'_, E> {

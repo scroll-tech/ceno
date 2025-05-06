@@ -1,4 +1,5 @@
 mod monomial;
+pub mod utils;
 
 use std::{
     cmp::max,
@@ -9,17 +10,11 @@ use std::{
 
 use serde::de::DeserializeOwned;
 
-use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, SmallField};
 use p3::field::PrimeCharacteristicRing;
 
-use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
-
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    structs::{ChallengeId, RAMType, WitnessId},
-};
+pub type WitnessId = u16;
+pub type ChallengeId = u16;
 
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -807,41 +802,6 @@ pub struct Fixed(pub usize);
 )]
 pub struct Instance(pub usize);
 
-impl WitIn {
-    pub fn from_expr<E: ExtensionField, N, NR>(
-        name: N,
-        circuit_builder: &mut CircuitBuilder<E>,
-        input: Expression<E>,
-        debug: bool,
-    ) -> Result<Self, ZKVMError>
-    where
-        NR: Into<String> + Clone,
-        N: FnOnce() -> NR,
-    {
-        circuit_builder.namespace(
-            || "from_expr",
-            |cb| {
-                let name = name().into();
-                let wit = cb.create_witin(|| name.clone());
-                if !debug {
-                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
-                }
-                Ok(wit)
-            },
-        )
-    }
-
-    pub fn assign<E: ExtensionField>(&self, instance: &mut [E::BaseField], value: E::BaseField) {
-        instance[self.id as usize] = value;
-    }
-}
-
-impl StructuralWitIn {
-    pub fn assign<E: ExtensionField>(&self, instance: &mut [E::BaseField], value: E::BaseField) {
-        instance[self.id as usize] = value;
-    }
-}
-
 pub trait ToExpr<E: ExtensionField> {
     type Output;
     fn expr(&self) -> Self::Output;
@@ -918,7 +878,8 @@ impl_from_via_ToExpr!(WitIn, Fixed, StructuralWitIn, Instance);
 impl_from_via_ToExpr!(&WitIn, &Fixed, &StructuralWitIn, &Instance);
 
 // Implement From trait for unsigned types of at most 64 bits
-macro_rules! impl_from_unsigned {
+#[macro_export]
+macro_rules! impl_expr_from_unsigned {
     ($($t:ty),*) => {
         $(
             impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
@@ -929,7 +890,7 @@ macro_rules! impl_from_unsigned {
         )*
     };
 }
-impl_from_unsigned!(u8, u16, u32, u64, usize, RAMType, InsnKind);
+impl_expr_from_unsigned!(u8, u16, u32, u64, usize);
 
 // Implement From trait for signed types
 macro_rules! impl_from_signed {
@@ -954,6 +915,8 @@ impl<E: ExtensionField> Display for Expression<E> {
 }
 
 pub mod fmt {
+    use crate::virtual_poly::ArcMultilinearExtension;
+
     use super::*;
     use std::fmt::Write;
 
@@ -1073,8 +1036,8 @@ pub mod fmt {
         inst_id: usize,
         wits_in_name: &[String],
     ) -> String {
+        use crate::mle::FieldType;
         use itertools::Itertools;
-        use multilinear_extensions::mle::FieldType;
 
         wtns.iter()
             .sorted()
@@ -1095,17 +1058,16 @@ pub mod fmt {
 #[cfg(test)]
 mod tests {
 
+    use crate::expression::WitIn;
+
     use super::{Expression, ToExpr, fmt};
-    use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
     use ff_ext::{FieldInto, GoldilocksExt2};
     use p3::field::PrimeCharacteristicRing;
 
     #[test]
     fn test_expression_arithmetics() {
         type E = GoldilocksExt2;
-        let mut cs = ConstraintSystem::new(|| "test_root");
-        let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
+        let x = WitIn { id: 0 };
 
         // scaledsum * challenge
         // 3 * x + 2
@@ -1171,11 +1133,9 @@ mod tests {
     #[test]
     fn test_is_monomial_form() {
         type E = GoldilocksExt2;
-        let mut cs = ConstraintSystem::new(|| "test_root");
-        let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
-        let y = cb.create_witin(|| "y");
-        let z = cb.create_witin(|| "z");
+        let x = WitIn { id: 0 };
+        let y = WitIn { id: 1 };
+        let z = WitIn { id: 2 };
         // scaledsum * challenge
         // 3 * x + 2
         let expr: Expression<E> = 3 * x.expr() + 2;
@@ -1208,10 +1168,8 @@ mod tests {
     #[test]
     fn test_not_monomial_form() {
         type E = GoldilocksExt2;
-        let mut cs = ConstraintSystem::new(|| "test_root");
-        let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
-        let y = cb.create_witin(|| "y");
+        let x = WitIn { id: 0 };
+        let y = WitIn { id: 1 };
         // scaledsum * challenge
         // (x + 1) * (y + 1)
         let expr: Expression<E> = (1 + x.expr()) * (2 + y.expr());
