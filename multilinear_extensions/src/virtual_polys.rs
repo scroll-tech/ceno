@@ -154,7 +154,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 let product_per_threads: Vec<Vec<ArcMultilinearExtension<E>>> = product
                     .into_iter()
                     .map(|p| {
-                        let mle_ptr: usize = Arc::as_ptr(&p) as *const () as usize;
+                        let mle_ptr: usize = Arc::as_ptr(p) as *const () as usize;
                         let mles_cloned =
                             if let Some(mles) = self.thread_based_mles_storage.get(&mle_ptr) {
                                 mles.clone()

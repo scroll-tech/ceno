@@ -171,7 +171,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     ) -> &MonomialTerms<E> {
         self.add_monomial_terms(vec![Term {
             scalar: Either::Right(scalar),
-            product: product,
+            product,
         }])
     }
 
@@ -182,7 +182,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
             let new_monomial_term = terms
                 .iter()
                 .map(|Term { scalar, product }| Term {
-                    scalar: scalar.clone(),
+                    scalar: *scalar,
                     product: product
                         .iter()
                         .map(|&x| other.flattened_ml_extensions[x].clone())
