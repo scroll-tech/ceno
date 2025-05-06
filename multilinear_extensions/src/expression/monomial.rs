@@ -6,11 +6,11 @@ use Expression::*;
 use std::iter::Sum;
 
 impl<E: ExtensionField> Expression<E> {
-    pub fn get_monomial_terms(&self) -> Vec<Term<E>> {
+    pub fn get_monomial_terms(&self) -> Vec<Term<Expression<E>, Expression<E>>> {
         Self::combine(self.distribute())
     }
 
-    fn distribute(&self) -> Vec<Term<E>> {
+    fn distribute(&self) -> Vec<Term<Expression<E>, Expression<E>>> {
         match self {
             Constant(_) => {
                 vec![Term {
@@ -46,7 +46,9 @@ impl<E: ExtensionField> Expression<E> {
         }
     }
 
-    fn combine(mut terms: Vec<Term<E>>) -> Vec<Term<E>> {
+    fn combine(
+        mut terms: Vec<Term<Expression<E>, Expression<E>>>,
+    ) -> Vec<Term<Expression<E>, Expression<E>>> {
         for Term { product, .. } in &mut terms {
             product.sort();
         }
@@ -63,17 +65,17 @@ impl<E: ExtensionField> Expression<E> {
     }
 }
 
-impl<E: ExtensionField> Sum<Term<E>> for Expression<E> {
-    fn sum<I: Iterator<Item = Term<E>>>(iter: I) -> Self {
+impl<E: ExtensionField> Sum<Term<Expression<E>, Expression<E>>> for Expression<E> {
+    fn sum<I: Iterator<Item = Term<Expression<E>, Expression<E>>>>(iter: I) -> Self {
         iter.map(|term| term.scalar * term.product.into_iter().product::<Expression<_>>())
             .sum()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Term<E: ExtensionField> {
-    pub scalar: Expression<E>,
-    pub product: Vec<Expression<E>>,
+pub struct Term<S, P> {
+    pub scalar: S,
+    pub product: Vec<P>,
 }
 
 #[cfg(test)]
