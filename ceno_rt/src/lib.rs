@@ -99,6 +99,7 @@ pub fn halt(exit_code: u32) -> ! {
     );
 }
 
+// Look in the linker scripts `ceno_link.x` and `memory.x` for symbols like `_stack_start`.
 #[cfg(target_arch = "riscv32")]
 global_asm!(
     "
@@ -129,8 +130,3 @@ _start:
     ecall
     ",
 );
-
-extern "C" {
-    // The address of this variable is the start of the stack (growing downwards).
-    static _stack_start: u8;
-}
