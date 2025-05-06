@@ -408,7 +408,13 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .zip(final_mem)
             .enumerate()
             .for_each(|(i, ((row, structural_row), rec))| {
-                assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
+                assert_eq!(
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                    "rec.addr {:x} != expected {:x}",
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                );
 
                 if self.final_v.len() == 1 {
                     // Assign value directly.

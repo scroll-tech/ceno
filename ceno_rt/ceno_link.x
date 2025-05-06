@@ -1,5 +1,5 @@
 
-_stack_start = ORIGIN(REGION_STACK) + LENGTH(REGION_STACK);
+_stack_start = ORIGIN(REGION_STACK) + 1024M;
 _hints_start = ORIGIN(REGION_HINTS);
 _hints_length = LENGTH(REGION_HINTS);
 _lengths_of_hints_start = ORIGIN(REGION_HINTS);

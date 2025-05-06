@@ -1,11 +1,5 @@
-use crate::{INFO_OUT_ADDR, WORD_SIZE};
+use crate::WORD_SIZE;
 use core::{cell::Cell, fmt, mem::size_of, slice};
-
-static INFO_OUT: IOWriter = IOWriter::new(INFO_OUT_ADDR);
-
-pub fn info_out() -> &'static IOWriter {
-    &INFO_OUT
-}
 
 pub struct IOWriter {
     cursor: Cell<*mut u32>,
@@ -16,6 +10,7 @@ pub struct IOWriter {
 unsafe impl Sync for IOWriter {}
 
 impl IOWriter {
+    #[cfg(debug_assertions)]
     const fn new(addr: u32) -> Self {
         assert!(addr % WORD_SIZE as u32 == 0);
         IOWriter {
@@ -60,18 +55,34 @@ impl fmt::Write for &IOWriter {
     }
 }
 
+#[cfg(debug_assertions)]
+use crate::INFO_OUT_ADDR;
+#[cfg(debug_assertions)]
+static INFO_OUT: IOWriter = IOWriter::new(INFO_OUT_ADDR);
+
+#[cfg(debug_assertions)]
+pub fn info_out() -> &'static IOWriter {
+    &INFO_OUT
+}
+
 mod macros {
     #[macro_export]
-    macro_rules! print {
+    macro_rules! debug_print {
         ($($arg:tt)*) => {
-            let _ = core::write!($crate::info_out(), $($arg)*);
+            #[cfg(debug_assertions)]
+            {
+                let _ = core::write!($crate::info_out(), $($arg)*);
+            }
         };
     }
 
     #[macro_export]
-    macro_rules! println {
+    macro_rules! debug_println {
         ($($arg:tt)*) => {
-            let _ = core::writeln!($crate::info_out(), $($arg)*);
+            #[cfg(debug_assertions)]
+            {
+                let _ = core::writeln!($crate::info_out(), $($arg)*);
+            }
         };
     }
 }
