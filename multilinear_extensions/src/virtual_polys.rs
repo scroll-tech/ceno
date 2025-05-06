@@ -84,7 +84,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                     let scalar =
                         eval_by_expr_with_instance(&[], &[], &[], &[], challenges, &scalar_expr);
                     Term {
-                        scalar: Either::Right(scalar),
+                        scalar,
                         product: product_mle,
                     }
                 })

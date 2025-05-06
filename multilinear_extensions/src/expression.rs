@@ -52,6 +52,18 @@ enum MonomialState {
     ProductTerm,
 }
 
+#[macro_export]
+macro_rules! combine_cumulative_either {
+    ($a:expr, $b:expr, $op:expr) => {
+        match ($a, $b) {
+            (Either::Left(c1), Either::Left(c2)) => Either::Left($op(c1, c2)),
+            (Either::Left(c1), Either::Right(c2)) => Either::Right($op(c2, c1)),
+            (Either::Right(c1), Either::Left(c2)) => Either::Right($op(c1, c2)),
+            (Either::Right(c1), Either::Right(c2)) => Either::Right($op(c2, c1)),
+        }
+    };
+}
+
 impl<E: ExtensionField> Expression<E> {
     pub const ZERO: Expression<E> = Expression::Constant(Either::Left(E::BaseField::ZERO));
     pub const ONE: Expression<E> = Expression::Constant(Either::Left(E::BaseField::ONE));
@@ -387,12 +399,7 @@ impl<E: ExtensionField> Add for Expression<E> {
 
             // constant + constant
             (Expression::Constant(c1), Expression::Constant(c2)) => {
-                Expression::Constant(match (c1, c2) {
-                    (Either::Left(c1), Either::Left(c2)) => Either::Left(*c1 + *c2),
-                    (Either::Left(c1), Either::Right(c2)) => Either::Right(*c2 + *c1),
-                    (Either::Right(c1), Either::Left(c2)) => Either::Right(*c1 + *c2),
-                    (Either::Right(c1), Either::Right(c2)) => Either::Right(*c2 + *c1),
-                })
+                Expression::Constant(combine_cumulative_either!(*c1, *c2, |c1, c2| c1 + c2))
             }
 
             // constant + scaled sum
@@ -794,12 +801,7 @@ impl<E: ExtensionField> Mul for Expression<E> {
 
             // constant * constant
             (Expression::Constant(c1), Expression::Constant(c2)) => {
-                Expression::Constant(match (c1, c2) {
-                    (Either::Left(c1), Either::Left(c2)) => Either::Left(*c1 * *c2),
-                    (Either::Left(c1), Either::Right(c2)) => Either::Right(*c2 * *c1),
-                    (Either::Right(c1), Either::Left(c2)) => Either::Right(*c1 * *c2),
-                    (Either::Right(c1), Either::Right(c2)) => Either::Right(*c2 * *c1),
-                })
+                Expression::Constant(combine_cumulative_either!(*c1, *c2, |c1, c2| c1 * c2))
             }
             // scaledsum * constant
             (Expression::ScaledSum(x, a, b), c2 @ Expression::Constant(_))
