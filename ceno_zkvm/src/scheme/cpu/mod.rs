@@ -11,10 +11,10 @@ use crate::{
         },
     },
     structs::{ProofInput, TowerProofs},
-    utils::get_challenge_pows,
+    utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use itertools::{enumerate, izip};
+use itertools::{Itertools, enumerate, izip};
 use mpcs::Point;
 use multilinear_extensions::{
     mle::IntoMLE,
@@ -23,6 +23,7 @@ use multilinear_extensions::{
 };
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use std::collections::BTreeSet;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverState,
@@ -188,7 +189,6 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
-        let sumcheck_span = entered_span!("SUMCHECK", profiling_3 = true);
         // product constraint tower sumcheck
         let tower_span = entered_span!("tower");
         // final evals for verifier
@@ -354,15 +354,15 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
 impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
     fn prove_main_constraints(
         &self,
-        input: ProofInput<CpuBackend<E>>,
         rt_tower: Vec<E>,
-        tower_proof: TowerProofs<E>,
+        tower_proof: &TowerProofs<E>,
+        r_records: Vec<ArcMultilinearExtension<E>>,
+        w_records: Vec<ArcMultilinearExtension<E>>,
+        lk_records: Vec<ArcMultilinearExtension<E>>,
+        input: ProofInput<CpuBackend<E>>,
         cs: ConstraintSystem<E>,
         transcript: &mut impl Transcript<<CpuBackend<E> as ProverBackend>::E>,
-    ) -> (
-        Point<<CpuBackend<E> as ProverBackend>::E>,
-        TowerProofs<<CpuBackend<E> as ProverBackend>::E>,
-    ) {
+    ) -> Point<E> {
         let num_instances = input.num_instances;
         let log2_num_instances = input.log2_num_instances();
         let log2_r_count = ceil_log2(cs.r_expressions.len());
@@ -459,12 +459,13 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
 
         let r_counts = cs.r_expressions.len();
         let w_counts = cs.w_expressions.len();
+        let lk_counts = cs.lk_expressions.len();
 
         // read
         // rt_r := rs || rt
         for i in 0..r_counts {
             // \sum_t sel(rt, t) * (\sum_i alpha_read * eq(rs, i) * record_r[t])
-            virtual_polys.add_mle_list(vec![&sel_r, &r_records_wit[i]], eq_r[i] * *alpha_read);
+            virtual_polys.add_mle_list(vec![&sel_r, &r_records[i]], eq_r[i] * *alpha_read);
         }
         // \sum_t alpha_read * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
@@ -476,26 +477,26 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
         // rt_w := rs || rt
         for i in 0..cs.w_expressions.len() {
             // \sum_t (sel(rt, t) * (\sum_i alpha_write * eq(rs, i) * record_w[i] ))
-            virtual_polys.add_mle_list(vec![&sel_w, &w_records_wit[i]], eq_w[i] * *alpha_write);
+            virtual_polys.add_mle_list(vec![&sel_w, &w_records[i]], eq_w[i] * *alpha_write);
         }
         // \sum_t alpha_write * sel(rt, t) * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_w],
-            *alpha_write * eq_w[w_counts_per_instance..].iter().copied().sum::<E>() - *alpha_write,
+            *alpha_write * eq_w[w_counts..].iter().copied().sum::<E>() - *alpha_write,
         );
 
         // lk denominator
         // rt := rt || rs
-        for i in 0..lk_counts_per_instance {
+        for i in 0..lk_counts {
             // \sum_t (sel(rt, t) * (\sum_i alpha_lk* eq(rs, i) * record_w[i]))
-            virtual_polys.add_mle_list(vec![&sel_lk, &lk_records_wit[i]], eq_lk[i] * *alpha_lk);
+            virtual_polys.add_mle_list(vec![&sel_lk, &lk_records[i]], eq_lk[i] * *alpha_lk);
         }
         // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_lk],
             *alpha_lk
                 * chip_record_alpha
-                * (eq_lk[lk_counts_per_instance..].iter().copied().sum::<E>() - E::ONE),
+                * (eq_lk[lk_counts..].iter().copied().sum::<E>() - E::ONE),
         );
 
         // only initialize when circuit got assert_zero_sumcheck_expressions
@@ -518,5 +519,93 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
                 None
             }
         };
+
+        let mut distrinct_zerocheck_terms_set = BTreeSet::new();
+        // degree > 1 zero expression sumcheck
+        if !cs.assert_zero_sumcheck_expressions.is_empty() {
+            assert!(sel_non_lc_zero_sumcheck.is_some());
+
+            // \sum_t (sel(rt, t) * (\sum_j alpha_{j} * all_monomial_terms(t) ))
+            for ((expr, name), alpha) in cs
+                .assert_zero_sumcheck_expressions
+                .iter()
+                .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
+                .zip_eq(alpha_pow_iter)
+            {
+                // sanity check in debug build and output != instance index for zero check sumcheck poly
+                if cfg!(debug_assertions) {
+                    let expected_zero_poly =
+                        wit_infer_by_expr(&[], &input.witness, &[], pi, challenges, expr);
+                    let top_100_errors = expected_zero_poly
+                        .get_base_field_vec()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, v)| **v != E::BaseField::ZERO)
+                        .take(100)
+                        .collect_vec();
+                    if !top_100_errors.is_empty() {
+                        // return Err(ZKVMError::InvalidWitness(format!(
+                        //     "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
+                        //     top_100_errors.into_iter().map(|(i, _)| i).join(",")
+                        // )));
+                    }
+                }
+
+                distrinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
+                    &mut virtual_polys,
+                    sel_non_lc_zero_sumcheck.as_ref(),
+                    input.witness.iter().collect_vec(),
+                    expr,
+                    challenges,
+                    *alpha,
+                ));
+            }
+        }
+
+        tracing::debug!("main sel sumcheck start");
+        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(virtual_polys, transcript);
+        tracing::debug!("main sel sumcheck end");
+
+        let main_sel_evals = state.get_mle_flatten_final_evaluations();
+        assert_eq!(
+            main_sel_evals.len(),
+            r_counts
+                + w_counts
+                + lk_counts
+                + 3 // 3 from [sel_r, sel_w, sel_lk]
+                + if cs.assert_zero_sumcheck_expressions.is_empty() {
+                    0
+                } else {
+                    distrinct_zerocheck_terms_set.len() + 1 // +1 from sel_non_lc_zero_sumcheck
+                }
+        );
+        let mut main_sel_evals_iter = main_sel_evals.into_iter();
+        main_sel_evals_iter.next(); // skip sel_r
+        let r_records_in_evals = (0..r_counts)
+            .map(|_| main_sel_evals_iter.next().unwrap())
+            .collect_vec();
+        main_sel_evals_iter.next(); // skip sel_w
+        let w_records_in_evals = (0..w_counts)
+            .map(|_| main_sel_evals_iter.next().unwrap())
+            .collect_vec();
+        main_sel_evals_iter.next(); // skip sel_lk
+        let lk_records_in_evals = (0..lk_counts)
+            .map(|_| main_sel_evals_iter.next().unwrap())
+            .collect_vec();
+        assert!(
+            // we can skip all the rest of degree > 1 monomial terms because all the witness evaluation will be evaluated at last step
+            // and pass to verifier
+            main_sel_evals_iter.count()
+                == if cs.assert_zero_sumcheck_expressions.is_empty() {
+                    0
+                } else {
+                    distrinct_zerocheck_terms_set.len() + 1
+                }
+        );
+        let input_open_point = main_sel_sumcheck_proofs.point.clone();
+        assert!(input_open_point.len() == log2_num_instances);
+        exit_span!(main_sel_span);
+
+        input_open_point
     }
 }

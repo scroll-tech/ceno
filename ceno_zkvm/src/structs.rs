@@ -72,7 +72,7 @@ pub struct ProofInput<PB: ProverBackend> {
     pub num_instances: usize,
 }
 
-impl<E: ExtensionField> ProofInput<E> {
+impl<PB: ProverBackend> ProofInput<PB> {
     #[inline]
     pub fn log2_num_instances(&self) -> usize {
         ceil_log2(self.num_instances)

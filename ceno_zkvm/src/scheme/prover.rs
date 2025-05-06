@@ -347,97 +347,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, P
             .device
             .prove_tower_relation(prod_specs, logup_spec, NUM_FANIN, transcript);
 
-        let mut distrinct_zerocheck_terms_set = BTreeSet::new();
-        // degree > 1 zero expression sumcheck
-        if !cs.assert_zero_sumcheck_expressions.is_empty() {
-            assert!(sel_non_lc_zero_sumcheck.is_some());
-
-            // \sum_t (sel(rt, t) * (\sum_j alpha_{j} * all_monomial_terms(t) ))
-            for ((expr, name), alpha) in cs
-                .assert_zero_sumcheck_expressions
-                .iter()
-                .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
-                .zip_eq(alpha_pow_iter)
-            {
-                // sanity check in debug build and output != instance index for zero check sumcheck poly
-                if cfg!(debug_assertions) {
-                    let expected_zero_poly =
-                        wit_infer_by_expr(&[], &witnesses, &[], pi, challenges, expr);
-                    let top_100_errors = expected_zero_poly
-                        .get_base_field_vec()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, v)| **v != E::BaseField::ZERO)
-                        .take(100)
-                        .collect_vec();
-                    if !top_100_errors.is_empty() {
-                        return Err(ZKVMError::InvalidWitness(format!(
-                            "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
-                            top_100_errors.into_iter().map(|(i, _)| i).join(",")
-                        )));
-                    }
-                }
-
-                distrinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
-                    &mut virtual_polys,
-                    sel_non_lc_zero_sumcheck.as_ref(),
-                    witnesses.iter().collect_vec(),
-                    expr,
-                    challenges,
-                    *alpha,
-                ));
-            }
-        }
-
-        tracing::debug!("main sel sumcheck start");
-        let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(virtual_polys, transcript);
-        tracing::debug!("main sel sumcheck end");
-
-        let main_sel_evals = state.get_mle_flatten_final_evaluations();
-        assert_eq!(
-            main_sel_evals.len(),
-            r_counts_per_instance
-                + w_counts_per_instance
-                + lk_counts_per_instance
-                + 3 // 3 from [sel_r, sel_w, sel_lk]
-                + if cs.assert_zero_sumcheck_expressions.is_empty() {
-                    0
-                } else {
-                    distrinct_zerocheck_terms_set.len() + 1 // +1 from sel_non_lc_zero_sumcheck
-                }
+        let input_opening_point = self.device.prove_main_constraints(
+            rt_tower.clone(),
+            &tower_proof,
+            witnesses.clone(),
+            pi.to_vec(),
+            circuit_pk,
+            transcript,
         );
-        let mut main_sel_evals_iter = main_sel_evals.into_iter();
-        main_sel_evals_iter.next(); // skip sel_r
-        let r_records_in_evals = (0..r_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
-        main_sel_evals_iter.next(); // skip sel_w
-        let w_records_in_evals = (0..w_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
-        main_sel_evals_iter.next(); // skip sel_lk
-        let lk_records_in_evals = (0..lk_counts_per_instance)
-            .map(|_| main_sel_evals_iter.next().unwrap())
-            .collect_vec();
-        assert!(
-            // we can skip all the rest of degree > 1 monomial terms because all the witness evaluation will be evaluated at last step
-            // and pass to verifier
-            main_sel_evals_iter.count()
-                == if cs.assert_zero_sumcheck_expressions.is_empty() {
-                    0
-                } else {
-                    distrinct_zerocheck_terms_set.len() + 1
-                }
-        );
-        let input_open_point = main_sel_sumcheck_proofs.point.clone();
-        assert!(input_open_point.len() == log2_num_instances);
-        exit_span!(main_sel_span);
-        exit_span!(sumcheck_span);
-
         let span = entered_span!("witin::evals", profiling_3 = true);
         let wits_in_evals: Vec<E> = witnesses
             .par_iter()
-            .map(|poly| poly.evaluate(&input_open_point))
+            .map(|poly| poly.evaluate(&input_opening_point))
             .collect();
         exit_span!(span);
 
