@@ -1,13 +1,9 @@
 extern crate ceno_rt;
-use ceno_rt::{
-    info_out,
-    syscalls::{
-        syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
-        syscall_bn254_fp2_mulmod,
-    },
+use ceno_rt::syscalls::{
+    syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
+    syscall_bn254_fp2_mulmod,
 };
 use rand::{SeedableRng, rngs::StdRng};
-use std::slice;
 use substrate_bn::{Fq, Fq2};
 
 fn bytes_to_words(bytes: [u8; 32]) -> [u32; 8] {
@@ -29,17 +25,6 @@ fn fq2_to_words(val: Fq2) -> [u32; 16] {
 }
 
 fn main() {
-    let log_flag = true;
-
-    let log_state = |state: &[u32]| {
-        if log_flag {
-            let out = unsafe {
-                slice::from_raw_parts(state.as_ptr() as *const u8, std::mem::size_of_val(state))
-            };
-            info_out().write_frame(out);
-        }
-    };
-
     let mut a = Fq::one();
     let mut b = Fq::one();
     let seed = [0u8; 32];
@@ -100,3 +85,14 @@ fn main() {
         b = Fq2::new(Fq::random(&mut rng), Fq::random(&mut rng));
     }
 }
+
+#[cfg(debug_assertions)]
+fn log_state(state: &[u32]) {
+    use ceno_rt::info_out;
+    info_out().write_frame(unsafe {
+        core::slice::from_raw_parts(state.as_ptr() as *const u8, size_of_val(state))
+    });
+}
+
+#[cfg(not(debug_assertions))]
+fn log_state(_state: &[u32]) {}

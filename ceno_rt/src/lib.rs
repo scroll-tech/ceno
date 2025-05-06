@@ -17,6 +17,7 @@ mod mmio;
 pub use mmio::{commit, read, read_slice};
 
 mod io;
+#[cfg(debug_assertions)]
 pub use io::info_out;
 
 mod params;
