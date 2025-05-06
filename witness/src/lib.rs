@@ -15,7 +15,7 @@ use std::{
 };
 
 // for witness we reserve some space for value vector to extend to avoid allocated + full clone
-const SPACE_RESERVED_FACTOR: usize = 2;
+const CAPACITY_RESERVED_FACTOR: usize = 2;
 
 /// get next power of 2 instance with minimal size 2
 pub fn next_pow2_instance_padding(num_instance: usize) -> usize {
@@ -68,22 +68,22 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 
     /// convert into the p3 RowMajorMatrix, with padded to next power of 2 height filling with T::default value
-    /// padding its height to the next power of two (optionally multiplied by a `blow_factor`)
+    /// padding its height to the next power of two (optionally multiplied by a `blowup_factor`)
     /// padding is filled with `T::default()`, and the transformation consumes `self`
     pub fn into_default_padded_p3_rmm(
         mut self,
-        blow_factor: Option<usize>,
+        blowup_factor: Option<usize>,
     ) -> p3::matrix::dense::RowMajorMatrix<T> {
         let padded_height = next_pow2_instance_padding(self.num_instances());
-        if let Some(blow_factor) = blow_factor {
-            if blow_factor != SPACE_RESERVED_FACTOR {
+        if let Some(blowup_factor) = blowup_factor {
+            if blowup_factor != CAPACITY_RESERVED_FACTOR {
                 tracing::warn!(
-                    "blow_factor {blow_factor} != SPACE_RESERVED_FACTOR {SPACE_RESERVED_FACTOR}, \
-                     consider updating the default SPACE_RESERVED_FACTOR accordingly"
+                    "blowup_factor {blowup_factor} != CAPACITY_RESERVED_FACTOR {CAPACITY_RESERVED_FACTOR}, \
+                     consider updating the default CAPACITY_RESERVED_FACTOR accordingly"
                 );
             }
         }
-        self.pad_to_height(padded_height * blow_factor.unwrap_or(1), T::default());
+        self.pad_to_height(padded_height * blowup_factor.unwrap_or(1), T::default());
         self.inner
     }
 
@@ -102,7 +102,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     ) -> Self {
         let num_row_padded = next_pow2_instance_padding(num_rows);
 
-        let mut value = Vec::with_capacity(SPACE_RESERVED_FACTOR * num_row_padded * num_cols);
+        let mut value = Vec::with_capacity(CAPACITY_RESERVED_FACTOR * num_row_padded * num_cols);
         value.par_extend(
             (0..num_row_padded * num_cols)
                 .into_par_iter()
