@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -30,7 +30,7 @@ use crate::{
             wit_infer_by_expr,
         },
     },
-    structs::{ProvingKey, TowerProofs, TowerProver, ZKVMProvingKey, ZKVMWitnesses},
+    structs::{ProofInput, ProvingKey, TowerProofs, TowerProver, ZKVMProvingKey, ZKVMWitnesses},
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 
@@ -47,8 +47,12 @@ pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB,
     _marker: std::marker::PhantomData<PB>,
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, PD: ProverDevice<PB>>
-    ZKVMProver<E, PCS, PB, PD>
+impl<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E>,
+    PD: ProverDevice<PB>,
+> ZKVMProver<E, PCS, PB, PD>
 {
     pub fn new(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
         ZKVMProver {
@@ -342,12 +346,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, P
                 .all(|v| { v.evaluations().len() == next_pow2_instances })
         );
 
-        let (prod_specs, logup_spec) = self.device.build_tower_witness();
+        let input = ProofInput {
+            witness: witnesses,
+            public_input: pi.to_vec(),
+            num_instances,
+        };
+        let (prod_specs, logup_spec) = self.device.build_tower_witness(
+            input,
+            cs.r_expressions.as_slice(),
+            cs.w_expressions.as_slice(),
+            cs.lk_expressions.as_slice(),
+            challenges,
+        );
         let (rt_tower, tower_proof) = self
             .device
             .prove_tower_relation(prod_specs, logup_spec, NUM_FANIN, transcript);
 
-        let input_opening_point = self.device.prove_main_constraints(
+        let (input_opening_point, main_sumcheck_proof) = self.device.prove_main_constraints(
             rt_tower.clone(),
             &tower_proof,
             witnesses.clone(),
@@ -375,6 +390,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, P
             opening_dur.elapsed(),
         );
         exit_span!(pcs_open_span);
+
+        let record_r_out_evals = tower_proof.prod_specs_eval[0][0].clone();
+        let record_w_out_evals = tower_proof.prod_specs_eval[1][0].clone();
+        let lk_out_evals = tower_proof.logup_specs_eval[0][0].clone();
+        let (lk_p1_out_eval, lk_p2_out_eval) =
+            (lk_out_evals.pop().unwrap(), lk_out_evals.pop().unwrap());
+        let (lk_q1_out_eval, lk_q2_out_eval) =
+            (lk_out_evals.pop().unwrap(), lk_out_evals.pop().unwrap());
+
         Ok((
             ZKVMOpcodeProof {
                 record_r_out_evals,
@@ -384,13 +408,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, P
                 lk_q1_out_eval,
                 lk_q2_out_eval,
                 tower_proof,
-                main_sel_sumcheck_proofs: main_sel_sumcheck_proofs.proofs,
-                r_records_in_evals,
-                w_records_in_evals,
-                lk_records_in_evals,
+                main_sel_sumcheck_proofs: main_sumcheck_proof,
                 wits_in_evals,
             },
-            input_open_point,
+            input_opening_point,
         ))
     }
 

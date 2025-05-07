@@ -5,8 +5,8 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use mpcs::Point;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
+use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -14,7 +14,7 @@ pub trait ProverBackend {
     type E: ExtensionField;
     type PcsOpeningProof: Clone + Serialize + DeserializeOwned;
     type Matrix: Send + Sync + Clone;
-    type MmcsProverData;
+    type PcsData;
     type MultilinearPoly: Send + Sync;
 }
 
@@ -29,12 +29,12 @@ pub struct TowerProverSpec<PB: ProverBackend> {
 }
 
 pub trait TraceCommitter<PB: ProverBackend> {
-    // commit to the traces using merkle tree and return 
+    // commit to the traces using merkle tree and return
     // the traces in the form of multilinear polynomials
     fn commit_trace(
         &self,
         traces: Vec<RowMajorMatrix<PB::E>>,
-    ) -> (Vec<Vec<PB::MultilinearPoly>>, PB::MmcsProverData);
+    ) -> (Vec<Vec<PB::MultilinearPoly>>, PB::PcsData);
 }
 
 pub trait TowerProver<PB: ProverBackend> {
@@ -76,7 +76,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
         input: ProofInput<PB>,
         cs: ConstraintSystem<PB::E>,
         transcript: &mut impl Transcript<PB::E>,
-    ) -> Point<PB::E>;
+    ) -> (Point<PB::E>, Vec<IOPProverMessage<PB::E>>);
 }
 
 pub trait OpeningProver<PB: ProverBackend> {

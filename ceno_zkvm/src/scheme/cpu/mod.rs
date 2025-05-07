@@ -1,4 +1,4 @@
-use super::hal::{MainSumcheckProver, ProverBackend};
+use super::hal::{MainSumcheckProver, ProverBackend, TraceCommitter};
 use crate::{
     circuit_builder::ConstraintSystem,
     expression::Expression,
@@ -15,15 +15,15 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Itertools, enumerate, izip};
-use mpcs::Point;
+use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    mle::IntoMLE,
+    mle::{DenseMultilinearExtension, IntoMLE, MultilinearExtension},
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,
 };
-use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
+use p3::{commit::Mmcs, field::PrimeCharacteristicRing};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverState,
@@ -31,33 +31,48 @@ use sumcheck::{
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
-struct CpuBackend<E> {
-    _marker: std::marker::PhantomData<E>,
+struct CpuBackend<E, PCS> {
+    _marker: std::marker::PhantomData<(E, PCS)>,
 }
 
-impl<E: ExtensionField> ProverBackend for CpuBackend<E> {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for CpuBackend<E, PCS> {
     type E = E;
-    type Matrix = RowMajorMatrix<E::BaseField>;
+    type PcsOpeningProof = PCS::Proof;
     type MultilinearPoly = ArcMultilinearExtension<E>;
-    type MmcsProverData = <<<E as ExtensionField>::BaseField as PoseidonField>::MMCS as Mmcs<
-        E::BaseField,
-    >>::ProverData<Self::Matrix>;
+    type Matrix = p3::matrix::dense::RowMajorMatrix<E::BaseField>;
+    type PcsData = PCS::CommitmentWithWitness;
 }
 
-/// tower prover for CPU backend
+/// CPU prover for CPU backend
 struct CpuProver {}
 
-impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBackend<E, PCS>>
+    for CpuProver
+{
+    fn commit_trace(
+        &self,
+        _traces: Vec<witness::RowMajorMatrix<E>>,
+    ) -> (
+        Vec<Vec<ArcMultilinearExtension<E>>>,
+        PCS::CommitmentWithWitness,
+    ) {
+        todo!()
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBackend<E, PCS>>
+    for CpuProver
+{
     fn build_tower_witness(
         &self,
-        input: ProofInput<E>,
+        input: ProofInput<CpuBackend<E, PCS>>,
         read_exprs: &[Expression<E>],
         write_exprs: &[Expression<E>],
         lookup_exprs: &[Expression<E>],
         challenges: &[E; 2],
     ) -> (
-        Vec<TowerProverSpec<CpuBackend<E>>>,
-        Vec<TowerProverSpec<CpuBackend<E>>>,
+        Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
+        Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
     ) {
         let polys = &input.witness;
         let pi = &input.public_input;
@@ -75,7 +90,8 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
             .chain(lookup_exprs.par_iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(&[], &polys, &[], pi, challenges, expr)
+                let polys: &[ArcMultilinearExtension<'_, E>] = polys.as_slice();
+                wit_infer_by_expr(&[], polys, &[], pi, challenges, expr)
             })
             .collect();
 
@@ -184,8 +200,8 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
 
     fn prove_tower_relation(
         &self,
-        prod_specs: Vec<TowerProverSpec<CpuBackend<E>>>,
-        logup_specs: Vec<TowerProverSpec<CpuBackend<E>>>,
+        prod_specs: Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
+        logup_specs: Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
@@ -194,11 +210,11 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
         // final evals for verifier
         let record_r_out_evals: Vec<E> = prod_specs[0].witness[0]
             .iter()
-            .map(|w| w.get_ext_field_vec()[0])
+            .map(|w: &ArcMultilinearExtension<E>| w.get_ext_field_vec()[0])
             .collect();
         let record_w_out_evals: Vec<E> = prod_specs[1].witness[0]
             .iter()
-            .map(|w| w.get_ext_field_vec()[0])
+            .map(|w: &ArcMultilinearExtension<E>| w.get_ext_field_vec()[0])
             .collect();
         let lk_wit_layers = &logup_specs[0].witness;
         let lk_p1_out_eval = lk_wit_layers[0][0].get_ext_field_vec()[0];
@@ -351,7 +367,9 @@ impl<E: ExtensionField> TowerProver<CpuBackend<E>> for CpuProver {
     }
 }
 
-impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
+    for CpuProver
+{
     fn prove_main_constraints(
         &self,
         rt_tower: Vec<E>,
@@ -359,9 +377,9 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
         r_records: Vec<ArcMultilinearExtension<E>>,
         w_records: Vec<ArcMultilinearExtension<E>>,
         lk_records: Vec<ArcMultilinearExtension<E>>,
-        input: ProofInput<CpuBackend<E>>,
+        input: ProofInput<CpuBackend<E, PCS>>,
         cs: ConstraintSystem<E>,
-        transcript: &mut impl Transcript<<CpuBackend<E> as ProverBackend>::E>,
+        transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> Point<E> {
         let num_instances = input.num_instances;
         let log2_num_instances = input.log2_num_instances();
@@ -535,7 +553,7 @@ impl<E: ExtensionField> MainSumcheckProver<CpuBackend<E>> for CpuProver {
                 // sanity check in debug build and output != instance index for zero check sumcheck poly
                 if cfg!(debug_assertions) {
                     let expected_zero_poly =
-                        wit_infer_by_expr(&[], &input.witness, &[], pi, challenges, expr);
+                        wit_infer_by_expr(&[], input.witness.as_slice(), &[], pi, challenges, expr);
                     let top_100_errors = expected_zero_poly
                         .get_base_field_vec()
                         .iter()

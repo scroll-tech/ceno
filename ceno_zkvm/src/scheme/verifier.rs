@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use itertools::{Itertools, chain, interleave, izip};
+use itertools::{Itertools, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -473,12 +473,35 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             )
         };
 
+        // derive r_records, w_records, lk_records from witness's evaluations
+        let r_records_in_evals: Vec<_> = cs
+            .r_expressions
+            .iter()
+            .map(|expr| {
+                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+            })
+            .collect();
+        let w_records_in_evals: Vec<_> = cs
+            .w_expressions
+            .iter()
+            .map(|expr| {
+                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+            })
+            .collect();
+        let lk_records_in_evals: Vec<_> = cs
+            .lk_expressions
+            .iter()
+            .map(|expr| {
+                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+            })
+            .collect();
+
         let computed_evals = [
             // read
             *alpha_read
                 * sel_r
                 * ((0..r_counts_per_instance)
-                    .map(|i| proof.r_records_in_evals[i] * eq_r[i])
+                    .map(|i| r_records_in_evals[i] * eq_r[i])
                     .sum::<E>()
                     + eq_r[r_counts_per_instance..].iter().copied().sum::<E>()
                     - E::ONE),
@@ -486,7 +509,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             *alpha_write
                 * sel_w
                 * ((0..w_counts_per_instance)
-                    .map(|i| proof.w_records_in_evals[i] * eq_w[i])
+                    .map(|i| w_records_in_evals[i] * eq_w[i])
                     .sum::<E>()
                     + eq_w[w_counts_per_instance..].iter().copied().sum::<E>()
                     - E::ONE),
@@ -494,7 +517,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             *alpha_lk
                 * sel_lk
                 * ((0..lk_counts_per_instance)
-                    .map(|i| proof.lk_records_in_evals[i] * eq_lk[i])
+                    .map(|i| lk_records_in_evals[i] * eq_lk[i])
                     .sum::<E>()
                     + chip_record_alpha
                         * (eq_lk[lk_counts_per_instance..].iter().copied().sum::<E>() - E::ONE)),
@@ -526,23 +549,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if computed_evals != expected_evaluation {
             return Err(ZKVMError::VerifyError(
                 "main + sel evaluation verify failed".into(),
-            ));
-        }
-        // verify records (degree = 1) statement, thus no sumcheck
-        if izip!(
-            chain!(&cs.r_expressions, &cs.w_expressions, &cs.lk_expressions),
-            chain!(
-                &proof.r_records_in_evals[..r_counts_per_instance],
-                &proof.w_records_in_evals[..w_counts_per_instance],
-                &proof.lk_records_in_evals[..lk_counts_per_instance]
-            )
-        )
-        .any(|(expr, expected_evals)| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
-                != *expected_evals
-        }) {
-            return Err(ZKVMError::VerifyError(
-                "record evaluate != expected_evals".into(),
             ));
         }
 
