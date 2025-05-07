@@ -64,8 +64,8 @@ pub struct MonomialTerms<E: ExtensionField> {
 pub struct VirtualPolynomial<'a, E: ExtensionField> {
     /// Aux information about the multilinear polynomial
     pub aux_info: VPAuxInfo<E>,
-    // first tuple argument is half_eq
-    pub products: Vec<(Option<ArcMultilinearExtension<'a, E>>, MonomialTerms<E>)>,
+    // format (eq, monomial_form_formula)
+    pub products: Vec<(Option<usize>, MonomialTerms<E>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
     pub flattened_ml_extensions: Vec<ArcMultilinearExtension<'a, E>>,
@@ -134,7 +134,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         &mut self,
         zero_check_half_eq: Option<ArcMultilinearExtension<'a, E>>,
         monomial_terms: MonomialTermsType<'a, E>,
-    ) -> &MonomialTerms<E> {
+    ) -> (Option<usize>, &MonomialTerms<E>) {
         // TODO probably need to add sanity check for all monomial_terms poly equals to eq num_vars + 1
 
         let terms = monomial_terms
@@ -165,12 +165,25 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
                 }
             })
             .collect_vec();
-        self.products
-            .push((zero_check_half_eq, MonomialTerms { terms }));
-        self.products
-            .last()
-            .map(|(_, monomial_terms)| monomial_terms)
-            .unwrap()
+
+        let eq_index = if let Some(zero_check_half_eq) = zero_check_half_eq {
+            let eq_ptr: usize = Arc::as_ptr(&zero_check_half_eq) as *const () as usize;
+            let curr_index = self.flattened_ml_extensions.len();
+            self.flattened_ml_extensions.push(zero_check_half_eq);
+            self.raw_pointers_lookup_table.insert(eq_ptr, curr_index);
+            Some(curr_index)
+        } else {
+            None
+        };
+
+        self.products.push((eq_index, MonomialTerms { terms }));
+        (
+            eq_index,
+            self.products
+                .last()
+                .map(|(_, monomial_terms)| monomial_terms)
+                .unwrap(),
+        )
     }
 
     /// Add a product of list of multilinear extensions to self
@@ -186,19 +199,20 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         product: Vec<ArcMultilinearExtension<'a, E>>,
         scalar: E,
     ) -> &MonomialTerms<E> {
-        self.add_monomial_terms(
+        let (_, monomial_terms) = self.add_monomial_terms(
             None,
             vec![Term {
                 scalar: Either::Right(scalar),
                 product,
             }],
-        )
+        );
+        monomial_terms
     }
 
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &VirtualPolynomial<'a, E>) {
         let start = entered_span!("virtual poly add");
-        for (zero_check_eq, MonomialTerms { terms }) in other.products.iter() {
+        for (zero_check_half_eq_index, MonomialTerms { terms }) in other.products.iter() {
             let new_monomial_term = terms
                 .iter()
                 .map(|Term { scalar, product }| Term {
@@ -209,7 +223,10 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
                         .collect(),
                 })
                 .collect_vec();
-            self.add_monomial_terms(zero_check_eq.clone(), new_monomial_term);
+            let zero_check_eq = zero_check_half_eq_index.map(|zero_check_half_eq_index| {
+                other.flattened_ml_extensions[zero_check_half_eq_index].clone()
+            });
+            self.add_monomial_terms(zero_check_eq, new_monomial_term);
         }
         exit_span!(start);
     }
@@ -237,8 +254,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
             .products
             .iter()
             .map(|(zero_check_half_eq, MonomialTerms { terms })| {
-                let zero_check_half_eq_eval = zero_check_half_eq.as_ref().map(|zero_check_half_eq|zero_check_half_eq.get_ext_field_vec());
-                assert!(zero_check_half_eq_eval.is_none(), "do not support evaluate with eq");
+                assert!(zero_check_half_eq.is_none(), "do not support evaluate with eq");
                 terms
                     .iter()
                     .map(|Term { scalar, product }| {

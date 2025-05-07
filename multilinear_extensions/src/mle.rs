@@ -898,31 +898,8 @@ impl<'a, E: ExtensionField> MultilinearExtension<E> for RangedMultilinearExtensi
         unimplemented!()
     }
 
-    fn fix_high_variables(&self, partial_point: &[E]) -> Self::Output {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        if !partial_point.is_empty() {
-            let last = partial_point.last().unwrap();
-            let inner = self.inner;
-            let half_size = self.offset >> 1;
-            let mut mle = op_mle!(inner, |evaluations| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(self.num_vars() - 1, {
-                    let (lo, hi) = evaluations[self.start..][..self.offset].split_at(half_size);
-                    lo.par_iter()
-                        .zip(hi)
-                        .with_min_len(64)
-                        .map(|(lo, hi)| *last * (*hi - *lo) + *lo)
-                        .collect()
-                })
-            });
-            mle.fix_high_variables_in_place(&partial_point[..partial_point.len() - 1]);
-            mle
-        } else {
-            self.inner.clone()
-        }
+    fn fix_high_variables(&self, _partial_point: &[E]) -> Self::Output {
+        unimplemented!()
     }
 
     fn fix_high_variables_in_place(&mut self, _partial_point: &[E]) {
@@ -937,8 +914,8 @@ impl<'a, E: ExtensionField> MultilinearExtension<E> for RangedMultilinearExtensi
         self.num_vars
     }
 
-    fn fix_variables_parallel(&self, partial_point: &[E]) -> Self::Output {
-        self.inner.fix_variables_parallel(partial_point)
+    fn fix_variables_parallel(&self, _partial_point: &[E]) -> Self::Output {
+        unimplemented!()
     }
 
     fn fix_variables_in_place_parallel(&mut self, _partial_point: &[E]) {

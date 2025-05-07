@@ -173,20 +173,18 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         let log2_num_threads = log2_strict_usize(self.num_threads);
 
         // process eq and separate to thread
+        // NOTE: for zero_check_half_eq we didn't check its uniqueness
         let zero_check_half_eq_per_threads = if let Some(zero_check_half_eq) = zero_check_half_eq {
-            let poly_meta = if zero_check_half_eq.num_vars() + 1 > log2_num_threads {
-                PolyMeta::Normal
-            } else {
-                // polynomial is too small
-                PolyMeta::Phase2Only
-            };
             Some(
                 (0..self.num_threads)
-                    .map(|thread_id| match poly_meta {
-                        PolyMeta::Normal => self
-                            .get_range_polys_by_thread_id(thread_id, vec![zero_check_half_eq])
-                            .remove(0),
-                        PolyMeta::Phase2Only => Arc::new(zero_check_half_eq.get_ranged_mle(1, 0)),
+                    .map(|thread_id| {
+                        if zero_check_half_eq.num_vars() > log2_num_threads {
+                            self.get_range_polys_by_thread_id(thread_id, vec![zero_check_half_eq])
+                                .remove(0)
+                        } else {
+                            // polynomial is too small
+                            Arc::new(zero_check_half_eq.get_ranged_mle(1, 0))
+                        }
                     })
                     .collect_vec(),
             )
@@ -247,23 +245,33 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         let momomial_terms_threads = transpose(momomial_terms);
         assert_eq!(momomial_terms_threads.len(), self.num_threads);
 
-        let monomial_term_product_index: Vec<&MonomialTerms<E>> = momomial_terms_threads
-            .into_iter()
-            .zip_eq(self.polys.iter_mut())
-            .enumerate()
-            .map(|(thread_id, (momomial_terms, virtual_poly))| {
-                let zero_check_half_eq = zero_check_half_eq_per_threads
-                    .as_ref()
-                    .and_then(|zero_check_half_eq| zero_check_half_eq.get(thread_id).cloned());
-                virtual_poly.add_monomial_terms(zero_check_half_eq, momomial_terms)
-            })
-            .collect_vec();
+        let (hald_eq_index, monomial_term_product_index): (Option<usize>, &MonomialTerms<E>) =
+            *momomial_terms_threads
+                .into_iter()
+                .zip_eq(self.polys.iter_mut())
+                .enumerate()
+                .map(|(thread_id, (momomial_terms, virtual_poly))| {
+                    let zero_check_half_eq = zero_check_half_eq_per_threads
+                        .as_ref()
+                        .and_then(|zero_check_half_eq| zero_check_half_eq.get(thread_id).cloned());
+                    virtual_poly.add_monomial_terms(zero_check_half_eq, momomial_terms)
+                })
+                .collect_vec()
+                .first()
+                .expect("");
 
         // update poly_meta w.r.t index
-        for (poly_meta, term) in poly_meta
-            .iter()
-            .zip_eq(&monomial_term_product_index.first().expect("").terms)
+        if let Some((index, half_eq_mle)) = hald_eq_index.as_ref().zip(zero_check_half_eq.as_ref())
         {
+            let poly_meta = if half_eq_mle.num_vars() + 1 > log2_num_threads {
+                PolyMeta::Normal
+            } else {
+                // polynomial is too small
+                PolyMeta::Phase2Only
+            };
+            self.poly_meta.insert(*index, poly_meta);
+        }
+        for (poly_meta, term) in poly_meta.iter().zip_eq(&monomial_term_product_index.terms) {
             for index in &term.product {
                 self.poly_meta.insert(*index, *poly_meta);
             }
@@ -300,7 +308,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &'a VirtualPolynomial<'a, E>) {
-        for (zero_check_eq, MonomialTerms { terms }) in other.products.iter() {
+        for (zero_check_half_eq_index, MonomialTerms { terms }) in other.products.iter() {
             let new_monomial_term = terms
                 .iter()
                 .map(|Term { scalar, product }| Term {
@@ -311,7 +319,10 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                         .collect(),
                 })
                 .collect_vec();
-            self.add_monomial_terms(zero_check_eq.as_ref(), new_monomial_term);
+            let zero_check_half_eq = zero_check_half_eq_index.map(|zero_check_half_eq_index| {
+                &other.flattened_ml_extensions[zero_check_half_eq_index]
+            });
+            self.add_monomial_terms(zero_check_half_eq, new_monomial_term);
         }
     }
 }
