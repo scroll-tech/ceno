@@ -3,7 +3,7 @@ use std::{marker::PhantomData, sync::Arc};
 use ceno_emul::{KeccakSpec, SyscallSpec};
 use ff_ext::ExtensionField;
 
-use gkr_iop::precompiles::KECCAK_WITNESS_SIZE;
+use gkr_iop::precompiles::KECCAK_OUT_EVAL_SIZE;
 use itertools::{Itertools, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -500,7 +500,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
             // Verify GKR proof
             let point = Arc::new(input_opening_point.clone());
-            let out_evals = (0..KECCAK_WITNESS_SIZE)
+            let out_evals = (0..KECCAK_OUT_EVAL_SIZE)
                 .map(|i| {
                     let eval =
                         proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_evals_map(i)];

@@ -262,7 +262,7 @@ where
             base_mle_evals,
         } = proof;
 
-        let (in_point, expected_claims) = univariate_polys.into_iter().enumerate().fold(
+        let (in_point, expected_claims) = univariate_polys.into_iter().enumerate().fold(  
             (vec![], sigmas),
             |(mut last_point, last_sigmas), (round, round_msg)| {
                 round_msg

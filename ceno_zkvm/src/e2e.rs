@@ -16,7 +16,7 @@ use crate::{
 };
 use ceno_emul::{
     ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program, StepRecord,
-    Tracer, VMState, WORD_SIZE, WordAddr,
+    Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
@@ -119,6 +119,17 @@ fn emulate_program(
         .collect::<Result<Vec<StepRecord>, _>>()
         .expect("vm exec failed");
 
+    if cfg!(debug_assertions) {
+        // show io message if have
+        let all_messages = &read_all_messages(&vm)
+            .iter()
+            .map(|msg| String::from_utf8_lossy(msg).to_string())
+            .collect::<Vec<String>>();
+        for msg in all_messages {
+            tracing::info!("{}", msg);
+        }
+    }
+
     // Find the exit code from the HALT step, if halting at all.
     let exit_code = all_records
         .iter()
@@ -190,6 +201,7 @@ fn emulate_program(
         })
         .collect_vec();
 
+    // Find the final hints IO cycles.
     let hints_final = hints_init
         .iter()
         .map(|rec| MemFinalRecord {
@@ -200,11 +212,11 @@ fn emulate_program(
         .collect_vec();
 
     // get stack access by min/max range
-    let stack_final = if let Some((start, end)) = vm
+    let stack_final = if let Some((start, _)) = vm
         .tracer()
         .probe_min_max_address_by_start_addr(ByteAddr::from(platform.stack.start).waddr())
     {
-        (start..end)
+        (start..ByteAddr::from(platform.stack.end).waddr())
             // stack record collect in reverse order
             .rev()
             .map(|vma| {
@@ -225,6 +237,7 @@ fn emulate_program(
         .tracer()
         .probe_min_max_address_by_start_addr(ByteAddr::from(platform.heap.start).waddr())
     {
+        assert_eq!(start, ByteAddr::from(platform.heap.start).waddr());
         (start..end)
             .map(|vma| {
                 let byte_addr = vma.baddr();
@@ -282,7 +295,14 @@ pub fn setup_platform(
     };
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
-    let stack = preset.stack.end - stack_size..preset.stack.end;
+
+    let stack = if cfg!(debug_assertions) {
+        // reserve some extra space for io
+        // thus memory consistent check could be satisfied
+        preset.stack.end - stack_size..(preset.stack.end + 0x4000)
+    } else {
+        preset.stack.end - stack_size..preset.stack.end
+    };
 
     let heap = {
         // Detect heap as starting after program data.
