@@ -66,9 +66,9 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
             .map(|(id, mle)| (*id, *mle))
             .collect::<BTreeMap<_, _>>();
 
+        // when half_eq is provided, then all monomial term need to be in same num_vars
         let expected_num_vars_per_expr = if let Some(half_eq_mles) = half_eq_mles.as_ref() {
             assert_eq!(half_eq_mles.len(), expressions.len());
-            // if half eq is provided, then all monomial term need to be in same num_vars
             Some(
                 half_eq_mles
                     .iter()
@@ -83,40 +83,45 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
             let monomial_terms = expression
                 .get_monomial_terms()
                 .into_iter()
-                .map(|term| {
-                    let Term {
-                        scalar: scalar_expr,
-                        product,
-                    } = term;
+                .map(
+                    |Term {
+                         scalar: scalar_expr,
+                         product,
+                     }| {
+                        let expected_num_vars = expected_num_vars_per_expr.as_ref().and_then(
+                            |expected_num_vars_per_expr| expected_num_vars_per_expr.get(i),
+                        );
 
-                    // if half_eq is provided, all monomial term need to be in same num_vars
-                    let expected_num_vars = expected_num_vars_per_expr
-                        .as_ref()
-                        .and_then(|expected_num_vars_per_expr| expected_num_vars_per_expr.get(i));
-
-                    let product_mle = product
-                        .into_iter()
-                        .map(|expr| match expr {
-                            Expression::WitIn(witin_id) => {
-                                let mle = mles_storage
-                                    .get(&(witin_id as usize))
-                                    .cloned()
-                                    .expect("invalid witin id");
-                                if let Some(expected_num_vars) = expected_num_vars {
-                                    assert_eq!(*expected_num_vars, mle.num_vars());
+                        let product_mle = product
+                            .into_iter()
+                            .map(|expr| match expr {
+                                Expression::WitIn(witin_id) => {
+                                    let mle = mles_storage
+                                        .get(&(witin_id as usize))
+                                        .cloned()
+                                        .expect("invalid witin id");
+                                    if let Some(expected_num_vars) = expected_num_vars {
+                                        assert_eq!(*expected_num_vars, mle.num_vars());
+                                    }
+                                    mle
                                 }
-                                mle
-                            }
-                            other => unimplemented!("un supported expression: {:?}", other),
-                        })
-                        .collect_vec();
-                    let scalar =
-                        eval_by_expr_with_instance(&[], &[], &[], &[], challenges, &scalar_expr);
-                    Term {
-                        scalar,
-                        product: product_mle,
-                    }
-                })
+                                other => unimplemented!("un supported expression: {:?}", other),
+                            })
+                            .collect_vec();
+                        let scalar = eval_by_expr_with_instance(
+                            &[],
+                            &[],
+                            &[],
+                            &[],
+                            challenges,
+                            &scalar_expr,
+                        );
+                        Term {
+                            scalar,
+                            product: product_mle,
+                        }
+                    },
+                )
                 .collect_vec();
             virtual_polys.add_monomial_terms(
                 half_eq_mles
@@ -165,6 +170,12 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .collect_vec()
     }
 
+    /// Adds a group of monomial terms to the current expression set.
+    ///
+    /// NOTE: When `zero_check_half_eq` is provided, no deduplication of equality constraints
+    /// is performed internally. It is the caller’s responsibility to ensure that
+    /// `zero_check_half_eq` contains only equality constraints unique to this `monomial_terms` group,
+    /// as reusing the same equality across different groups is semantically invalid.
     pub fn add_monomial_terms(
         &mut self,
         zero_check_half_eq: Option<&'a ArcMultilinearExtension<'a, E>>,
@@ -173,7 +184,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         let log2_num_threads = log2_strict_usize(self.num_threads);
 
         // process eq and separate to thread
-        // NOTE: for zero_check_half_eq we didn't check its uniqueness
         let zero_check_half_eq_per_threads = if let Some(zero_check_half_eq) = zero_check_half_eq {
             Some(
                 (0..self.num_threads)
@@ -245,6 +255,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         let momomial_terms_threads = transpose(momomial_terms);
         assert_eq!(momomial_terms_threads.len(), self.num_threads);
 
+        // collect per thread momomial_terms and add to thread-based virtual_poly
         let (hald_eq_index, monomial_term_product_index): (Option<usize>, &MonomialTerms<E>) =
             *momomial_terms_threads
                 .into_iter()
@@ -260,7 +271,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 .first()
                 .expect("");
 
-        // update poly_meta w.r.t index
+        // update poly_meta w.r.t index, optionally record index for eq
         if let Some((index, half_eq_mle)) = hald_eq_index.as_ref().zip(zero_check_half_eq.as_ref())
         {
             let poly_meta = if half_eq_mle.num_vars() + 1 > log2_num_threads {

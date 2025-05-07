@@ -1052,6 +1052,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
                 let (eq_rw, eq_lk) = eq.split_at(cs.r_table_expressions.len());
 
+                // Experimenting with expr_builder, although It's not that nessesary to apply expr_builder in structural circuit
                 let mut expr_builder = VirtualPolynomialsBuilder::default();
                 let mut exprs =
                     Vec::<Expression<E>>::with_capacity(r_set_wit.len() + lk_n_wit.len());

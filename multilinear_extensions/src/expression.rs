@@ -239,8 +239,7 @@ impl<E: ExtensionField> Expression<E> {
             Expression::StructuralWitIn(..) => false,
             Expression::Instance(_) => false,
             Expression::Constant(c) => c
-                .map_left(|c| c == E::BaseField::ZERO)
-                .map_right(|c| c == E::ZERO)
+                .map_either(|c| c == E::BaseField::ZERO, |c| c == E::ZERO)
                 .into_inner(),
             Expression::Sum(a, b) => Self::is_zero_expr(a) && Self::is_zero_expr(b),
             Expression::Product(a, b) => Self::is_zero_expr(a) || Self::is_zero_expr(b),
