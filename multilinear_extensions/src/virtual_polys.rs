@@ -18,6 +18,9 @@ use p3::util::log2_strict_usize;
 
 use crate::util::transpose;
 
+pub type MonomialTermsType<'a, E> =
+    Vec<Term<Either<<E as ExtensionField>::BaseField, E>, &'a ArcMultilinearExtension<'a, E>>>;
+
 #[derive(Debug, Default, Clone, Copy)]
 pub enum PolyMeta {
     #[default]
@@ -165,7 +168,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     pub fn add_monomial_terms(
         &mut self,
         zero_check_half_eq: Option<&'a ArcMultilinearExtension<'a, E>>,
-        monomial_terms: Vec<Term<Either<E::BaseField, E>, &'a ArcMultilinearExtension<'a, E>>>,
+        monomial_terms: MonomialTermsType<'a, E>,
     ) {
         let log2_num_threads = log2_strict_usize(self.num_threads);
 
@@ -293,5 +296,22 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .first()
             .map(|p| p.aux_info.max_degree)
             .unwrap_or_default()
+    }
+
+    /// in-place merge with another virtual polynomial
+    pub fn merge(&mut self, other: &'a VirtualPolynomial<'a, E>) {
+        for (zero_check_eq, MonomialTerms { terms }) in other.products.iter() {
+            let new_monomial_term = terms
+                .iter()
+                .map(|Term { scalar, product }| Term {
+                    scalar: *scalar,
+                    product: product
+                        .iter()
+                        .map(|&x| &other.flattened_ml_extensions[x])
+                        .collect(),
+                })
+                .collect_vec();
+            self.add_monomial_terms(zero_check_eq.as_ref(), new_monomial_term);
+        }
     }
 }

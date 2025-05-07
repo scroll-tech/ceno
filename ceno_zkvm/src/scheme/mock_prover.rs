@@ -1147,22 +1147,16 @@ Hints:
 
         let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
-        gs_rs.insert(eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            &instance,
-            &challenges,
-            &gs_final,
-        ));
-        gs_ws.insert(eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            &instance,
-            &challenges,
-            &gs_init,
-        ));
+        gs_rs.insert(
+            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_final)
+                .right()
+                .unwrap(),
+        );
+        gs_ws.insert(
+            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_init)
+                .right()
+                .unwrap(),
+        );
 
         // gs stores { (pc, timestamp) }
         find_rw_mismatch!(

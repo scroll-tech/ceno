@@ -1,5 +1,6 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct};
+use serde::{Deserialize, Serialize};
 
 use super::Expression;
 use Expression::*;
@@ -72,7 +73,7 @@ impl<E: ExtensionField> Sum<Term<Expression<E>, Expression<E>>> for Expression<E
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Term<S, P> {
     pub scalar: S,
     pub product: Vec<P>,

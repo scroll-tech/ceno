@@ -1,4 +1,4 @@
-pub(crate) mod monomial;
+pub mod monomial;
 pub mod utils;
 
 use std::{

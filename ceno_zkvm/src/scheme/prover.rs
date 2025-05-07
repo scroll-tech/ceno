@@ -1090,7 +1090,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     expr_builder.to_virtual_polys(
                         num_threads,
                         max_log2_num_instance,
-                        &exprs.into_iter().sum::<Expression<E>>(),
+                        None,
+                        &[exprs.into_iter().sum::<Expression<E>>()],
                         challenges,
                     ),
                     transcript,

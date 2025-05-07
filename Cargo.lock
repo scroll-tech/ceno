@@ -2764,6 +2764,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "crossbeam-channel",
+ "either",
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",

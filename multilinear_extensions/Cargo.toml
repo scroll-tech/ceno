@@ -10,7 +10,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-either = { version = "1.15.*", features = ["serde"] }
+either.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 p3.workspace = true

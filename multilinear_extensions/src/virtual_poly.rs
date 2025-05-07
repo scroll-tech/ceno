@@ -17,12 +17,18 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub type ArcMultilinearExtension<'a, E> =
     Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a>;
+pub type MonomialTermsType<'a, E> =
+    Vec<Term<Either<<E as ExtensionField>::BaseField, E>, ArcMultilinearExtension<'a, E>>>;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct MonomialTerms<E: ExtensionField> {
     pub terms: Vec<Term<Either<E::BaseField, E>, usize>>,
 }
@@ -127,7 +133,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     pub fn add_monomial_terms(
         &mut self,
         zero_check_half_eq: Option<ArcMultilinearExtension<'a, E>>,
-        monomial_terms: Vec<Term<Either<E::BaseField, E>, ArcMultilinearExtension<'a, E>>>,
+        monomial_terms: MonomialTermsType<'a, E>,
     ) -> &MonomialTerms<E> {
         // TODO probably need to add sanity check for all monomial_terms poly equals to eq num_vars + 1
 
