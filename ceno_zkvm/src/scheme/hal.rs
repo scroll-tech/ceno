@@ -4,10 +4,11 @@ use crate::{
     structs::{ProofInput, TowerProofs},
 };
 use ff_ext::ExtensionField;
-use mpcs::{Point, PolynomialCommitmentScheme};
-use rkyv::Serialize;
+use mpcs::Point;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use transcript::Transcript;
+use witness::RowMajorMatrix;
 
 pub trait ProverBackend {
     type E: ExtensionField;
@@ -25,6 +26,15 @@ where
 
 pub struct TowerProverSpec<PB: ProverBackend> {
     pub witness: Vec<Vec<PB::MultilinearPoly>>,
+}
+
+pub trait TraceCommitter<PB: ProverBackend> {
+    // commit to the traces using merkle tree and return 
+    // the traces in the form of multilinear polynomials
+    fn commit_trace(
+        &self,
+        traces: Vec<RowMajorMatrix<PB::E>>,
+    ) -> (Vec<Vec<PB::MultilinearPoly>>, PB::MmcsProverData);
 }
 
 pub trait TowerProver<PB: ProverBackend> {
@@ -72,8 +82,10 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
 pub trait OpeningProver<PB: ProverBackend> {
     fn open(
         &self,
-        inputs: Vec<ProofInput<PB>>,
+        witness_data: PB::MmcsProverData,
+        fixed_data: Option<PB::MmcsProverData>,
         points: Vec<Point<PB::E>>,
+        evals: Vec<PB::E>,
         transcript: &mut impl Transcript<PB::E>,
     ) -> PB::PcsOpeningProof;
 }
