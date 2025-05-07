@@ -15,6 +15,9 @@ use rayon::iter::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 
+/// A point is a vector of num_var length
+pub type Point<F> = Vec<F>;
+
 pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
     type Output;
     fn fix_variables(&self, partial_point: &[E]) -> Self::Output;

@@ -53,6 +53,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         self,
         num_threads: usize,
         max_num_variables: usize,
+        half_eq_mles: Option<Vec<&'a ArcMultilinearExtension<'a, E>>>,
         expressions: &[Expression<E>],
         challenges: &[E],
     ) -> VirtualPolynomials<'a, E> {
@@ -61,8 +62,21 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
             .values()
             .map(|(id, mle)| (*id, *mle))
             .collect::<BTreeMap<_, _>>();
+
+        let expected_num_vars_per_expr = if let Some(half_eq_mles) = half_eq_mles.as_ref() {
+            assert_eq!(half_eq_mles.len(), expressions.len());
+            // if half eq is provided, then all monomial term need to be in same num_vars
+            Some(
+                half_eq_mles
+                    .iter()
+                    .map(|half_eq| half_eq.num_vars() + 1) // half_eq
+                    .collect_vec(),
+            )
+        } else {
+            None
+        };
         let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, max_num_variables);
-        for expression in expressions {
+        for (i, expression) in expressions.iter().enumerate() {
             let monomial_terms = expression
                 .get_monomial_terms()
                 .into_iter()
@@ -71,13 +85,25 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                         scalar: scalar_expr,
                         product,
                     } = term;
+
+                    // if half_eq is provided, all monomial term need to be in same num_vars
+                    let expected_num_vars = expected_num_vars_per_expr
+                        .as_ref()
+                        .and_then(|expected_num_vars_per_expr| expected_num_vars_per_expr.get(i));
+
                     let product_mle = product
                         .into_iter()
                         .map(|expr| match expr {
-                            Expression::WitIn(witin_id) => mles_storage
-                                .get(&(witin_id as usize))
-                                .cloned()
-                                .expect("invalid witin id"),
+                            Expression::WitIn(witin_id) => {
+                                let mle = mles_storage
+                                    .get(&(witin_id as usize))
+                                    .cloned()
+                                    .expect("invalid witin id");
+                                if let Some(expected_num_vars) = expected_num_vars {
+                                    assert_eq!(*expected_num_vars, mle.num_vars());
+                                }
+                                mle
+                            }
                             other => unimplemented!("un supported expression: {:?}", other),
                         })
                         .collect_vec();
@@ -89,7 +115,12 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                     }
                 })
                 .collect_vec();
-            virtual_polys.add_monomial_terms(monomial_terms);
+            virtual_polys.add_monomial_terms(
+                half_eq_mles
+                    .as_ref()
+                    .and_then(|half_eq_mles| half_eq_mles.get(i).cloned()),
+                monomial_terms,
+            );
         }
         virtual_polys
     }
@@ -133,15 +164,38 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 
     pub fn add_monomial_terms(
         &mut self,
+        zero_check_half_eq: Option<&'a ArcMultilinearExtension<'a, E>>,
         monomial_terms: Vec<Term<Either<E::BaseField, E>, &'a ArcMultilinearExtension<'a, E>>>,
     ) {
         let log2_num_threads = log2_strict_usize(self.num_threads);
+
+        // process eq and separate to thread
+        let zero_check_half_eq_per_threads = if let Some(zero_check_half_eq) = zero_check_half_eq {
+            let poly_meta = if zero_check_half_eq.num_vars() + 1 > log2_num_threads {
+                PolyMeta::Normal
+            } else {
+                // polynomial is too small
+                PolyMeta::Phase2Only
+            };
+            Some(
+                (0..self.num_threads)
+                    .map(|thread_id| match poly_meta {
+                        PolyMeta::Normal => self
+                            .get_range_polys_by_thread_id(thread_id, vec![zero_check_half_eq])
+                            .remove(0),
+                        PolyMeta::Phase2Only => Arc::new(zero_check_half_eq.get_ranged_mle(1, 0)),
+                    })
+                    .collect_vec(),
+            )
+        } else {
+            None
+        };
+
         let (poly_meta, momomial_terms): (Vec<_>, Vec<_>) = monomial_terms
             .into_iter()
-            .map(|term| {
-                let Term { scalar, product } = term;
+            .map(|Term { scalar, product }| {
                 assert!(!product.is_empty(), "some term product is empty");
-                // sanity check: all mle in product must have same num_vars()
+                // all mle in product must have same num_vars()
                 assert!(product.iter().map(|m| { m.num_vars() }).all_equal());
 
                 let poly_meta = if product.first().unwrap().num_vars() > log2_num_threads {
@@ -186,12 +240,20 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 )
             })
             .unzip();
+
         let momomial_terms_threads = transpose(momomial_terms);
         assert_eq!(momomial_terms_threads.len(), self.num_threads);
+
         let monomial_term_product_index: Vec<&MonomialTerms<E>> = momomial_terms_threads
             .into_iter()
             .zip_eq(self.polys.iter_mut())
-            .map(|(momomial_terms, virtual_poly)| virtual_poly.add_monomial_terms(momomial_terms))
+            .enumerate()
+            .map(|(thread_id, (momomial_terms, virtual_poly))| {
+                let zero_check_half_eq = zero_check_half_eq_per_threads
+                    .as_ref()
+                    .and_then(|zero_check_half_eq| zero_check_half_eq.get(thread_id).cloned());
+                virtual_poly.add_monomial_terms(zero_check_half_eq, momomial_terms)
+            })
             .collect_vec();
 
         // update poly_meta w.r.t index
@@ -207,10 +269,13 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
 
     // add with only single monomial term
     pub fn add_mle_list(&mut self, polys: Vec<&'a ArcMultilinearExtension<'a, E>>, scalar: E) {
-        self.add_monomial_terms(vec![Term {
-            scalar: Either::Right(scalar),
-            product: polys,
-        }]);
+        self.add_monomial_terms(
+            None,
+            vec![Term {
+                scalar: Either::Right(scalar),
+                product: polys,
+            }],
+        );
     }
 
     /// return thread_based polynomial with its polynomial type
