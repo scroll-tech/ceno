@@ -25,13 +25,10 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
         hal::TowerProverSpec,
-        utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-            wit_infer_by_expr,
-        },
+        utils::{infer_tower_logup_witness, infer_tower_product_witness, wit_infer_by_expr},
     },
     structs::{ProofInput, ProvingKey, TowerProofs, TowerProver, ZKVMProvingKey, ZKVMWitnesses},
-    utils::{add_mle_list_by_expr, get_challenge_pows},
+    utils::get_challenge_pows,
 };
 
 use super::{
@@ -351,13 +348,20 @@ impl<
             public_input: pi.to_vec(),
             num_instances,
         };
-        let (prod_specs, logup_spec) = self.device.build_tower_witness(
+
+        let (records, prod_specs, logup_spec) = self.device.build_tower_witness(
             input,
             cs.r_expressions.as_slice(),
             cs.w_expressions.as_slice(),
             cs.lk_expressions.as_slice(),
             challenges,
         );
+
+        let lk_records = records.pop().unwrap();
+        let w_records = records.pop().unwrap();
+        let r_records = records.pop().unwrap();
+        assert!(records.is_empty());
+
         let (rt_tower, tower_proof) = self
             .device
             .prove_tower_relation(prod_specs, logup_spec, NUM_FANIN, transcript);
@@ -365,9 +369,12 @@ impl<
         let (input_opening_point, main_sumcheck_proof) = self.device.prove_main_constraints(
             rt_tower.clone(),
             &tower_proof,
-            witnesses.clone(),
-            pi.to_vec(),
-            circuit_pk,
+            r_records,
+            w_records,
+            lk_records,
+            input,
+            &cs,
+            challenges,
             transcript,
         );
         let span = entered_span!("witin::evals", profiling_3 = true);
@@ -394,9 +401,9 @@ impl<
         let record_r_out_evals = tower_proof.prod_specs_eval[0][0].clone();
         let record_w_out_evals = tower_proof.prod_specs_eval[1][0].clone();
         let lk_out_evals = tower_proof.logup_specs_eval[0][0].clone();
-        let (lk_p1_out_eval, lk_p2_out_eval) =
+        let (lk_q2_out_eval, lk_q1_out_eval) =
             (lk_out_evals.pop().unwrap(), lk_out_evals.pop().unwrap());
-        let (lk_q1_out_eval, lk_q2_out_eval) =
+        let (lk_p2_out_eval, lk_p1_out_eval) =
             (lk_out_evals.pop().unwrap(), lk_out_evals.pop().unwrap());
 
         Ok((

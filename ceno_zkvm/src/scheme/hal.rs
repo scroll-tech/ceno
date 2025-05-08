@@ -47,7 +47,11 @@ pub trait TowerProver<PB: ProverBackend> {
         write_exprs: &[Expression<PB::E>],
         lookup_exprs: &[Expression<PB::E>],
         challenge: &[PB::E; 2],
-    ) -> (Vec<TowerProverSpec<PB>>, Vec<TowerProverSpec<PB>>);
+    ) -> (
+        Vec<Vec<PB::MultilinearPoly>>,
+        Vec<TowerProverSpec<PB>>,
+        Vec<TowerProverSpec<PB>>,
+    );
 
     // the validity of value of first layer in the tower tree is reduced to
     // the validity of value of last layer in the tower tree through sumchecks
@@ -74,7 +78,8 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
         w_records: Vec<PB::MultilinearPoly>,
         lk_records: Vec<PB::MultilinearPoly>,
         input: ProofInput<PB>,
-        cs: ConstraintSystem<PB::E>,
+        cs: &ConstraintSystem<PB::E>,
+        challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
     ) -> (Point<PB::E>, Vec<IOPProverMessage<PB::E>>);
 }
@@ -82,8 +87,8 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
 pub trait OpeningProver<PB: ProverBackend> {
     fn open(
         &self,
-        witness_data: PB::MmcsProverData,
-        fixed_data: Option<PB::MmcsProverData>,
+        witness_data: PB::PcsData,
+        fixed_data: Option<PB::PcsData>,
         points: Vec<Point<PB::E>>,
         evals: Vec<PB::E>,
         transcript: &mut impl Transcript<PB::E>,

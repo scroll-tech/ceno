@@ -13,17 +13,17 @@ use crate::{
     structs::{ProofInput, TowerProofs},
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use itertools::{Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE, MultilinearExtension},
+    mle::{IntoMLE, MultilinearExtension},
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::VirtualPolynomials,
 };
-use p3::{commit::Mmcs, field::PrimeCharacteristicRing};
+use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverState,
@@ -71,6 +71,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         lookup_exprs: &[Expression<E>],
         challenges: &[E; 2],
     ) -> (
+        Vec<Vec<ArcMultilinearExtension<E>>>,
         Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
         Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
     ) {
@@ -195,7 +196,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             witness: lk_wit_layers,
         }];
 
-        (prod_specs, lookup_specs)
+        let r_records = (0..r_counts_per_instance)
+            .into_iter()
+            .map(|_| records_wit.pop().unwrap())
+            .collect_vec();
+        let w_records = (0..w_counts_per_instance)
+            .into_iter()
+            .map(|_| records_wit.pop().unwrap())
+            .collect_vec();
+        let lk_records = (0..lk_counts_per_instance)
+            .into_iter()
+            .map(|_| records_wit.pop().unwrap())
+            .collect_vec();
+        assert!(records_wit.is_empty());
+
+        let records = vec![r_records];
+
+        (records, prod_specs, lookup_specs)
     }
 
     fn prove_tower_relation(
@@ -379,6 +396,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         lk_records: Vec<ArcMultilinearExtension<E>>,
         input: ProofInput<CpuBackend<E, PCS>>,
         cs: ConstraintSystem<E>,
+        challenges: &[E; 2],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> Point<E> {
         let num_instances = input.num_instances;
@@ -512,9 +530,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         // \sum_t alpha_lk * sel(rt, t) * chip_record_alpha * (\sum_i (eq(rs, i)) - 1)
         virtual_polys.add_mle_list(
             vec![&sel_lk],
-            *alpha_lk
-                * chip_record_alpha
-                * (eq_lk[lk_counts..].iter().copied().sum::<E>() - E::ONE),
+            *alpha_lk * challenges[0] * (eq_lk[lk_counts..].iter().copied().sum::<E>() - E::ONE),
         );
 
         // only initialize when circuit got assert_zero_sumcheck_expressions
@@ -552,8 +568,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             {
                 // sanity check in debug build and output != instance index for zero check sumcheck poly
                 if cfg!(debug_assertions) {
-                    let expected_zero_poly =
-                        wit_infer_by_expr(&[], input.witness.as_slice(), &[], pi, challenges, expr);
+                    let expected_zero_poly = wit_infer_by_expr(
+                        &[],
+                        input.witness.as_slice(),
+                        &[],
+                        &input.public_input,
+                        challenges,
+                        expr,
+                    );
                     let top_100_errors = expected_zero_poly
                         .get_base_field_vec()
                         .iter()
