@@ -3,9 +3,7 @@ use std::{marker::PhantomData, sync::Arc};
 use ceno_emul::{KeccakSpec, SyscallSpec};
 use ff_ext::ExtensionField;
 
-#[cfg(debug_assertions)]
-use ff_ext::{Instrumented, PoseidonField};
-
+use gkr_iop::precompiles::KECCAK_OUT_EVAL_SIZE;
 use itertools::{Itertools, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -22,14 +20,19 @@ use witness::next_pow2_instance_padding;
 use crate::{
     error::ZKVMError,
     expression::{Instance, StructuralWitIn},
-    instructions::{GKRIOPInstruction, riscv::dummy::LargeEcallDummy},
+    instructions::{GKRIOPInstruction, Instruction, riscv::dummy::LargeEcallDummy},
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
         utils::eval_by_expr_with_instance,
     },
-    structs::{PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    structs::{
+        GKRIOPVerifyingKey, KeccakGKRIOP, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey,
+    },
     utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
 };
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
 
 use super::{
     ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
@@ -190,11 +193,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         for (index, num_instances) in &vm_proof.num_instances {
             let circuit_vk = circuit_vks[*index];
             let name = circuit_names[*index];
+
+            // Only Keccak has non-empty GKR-IOP component
+            let gkr_iop_vk = if *name == LargeEcallDummy::<E, KeccakSpec>::name() {
+                Some(&self.vk.keccak_vk)
+            } else {
+                None
+            };
+
             if let Some(opcode_proof) = vm_proof.opcode_proofs.get(index) {
                 transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
                 rt_points.push(self.verify_opcode_proof(
                     name,
                     circuit_vk,
+                    gkr_iop_vk,
                     opcode_proof,
                     *num_instances,
                     pi_evals,
@@ -214,6 +226,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 dummy_table_item_multiplicity += num_padded_lks_per_instance * num_instances
                     + num_lks.next_power_of_two() * num_padded_instance;
 
+                tracing::info!("verified proof for opcode {}", name);
                 prod_r *= opcode_proof
                     .record_r_out_evals
                     .iter()
@@ -333,6 +346,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         name: &str,
         circuit_vk: &VerifyingKey<E>,
+        gkr_iop_vk: Option<&GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>>,
         proof: &ZKVMOpcodeProof<E>,
         num_instances: usize,
         pi: &[E],
@@ -484,34 +498,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .clone()
                 .expect("Keccak syscall should contain GKR-IOP proof");
 
-            // Match output_evals with EcallDummy polynomials
-            for (i, gkr_out_eval) in gkr_iop.output_evals.iter().enumerate() {
-                assert_eq!(
-                    *gkr_out_eval,
-                    proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_evals_map(i)],
-                    "{i}"
-                );
-            }
             // Verify GKR proof
             let point = Arc::new(input_opening_point.clone());
-            let out_evals = gkr_iop
-                .output_evals
-                .iter()
-                .map(|eval| gkr_iop::evaluation::PointAndEval {
-                    point: point.clone(),
-                    eval: *eval,
+            let out_evals = (0..KECCAK_OUT_EVAL_SIZE)
+                .map(|i| {
+                    let eval =
+                        proof.wits_in_evals[LargeEcallDummy::<E, KeccakSpec>::output_evals_map(i)];
+                    gkr_iop::evaluation::PointAndEval {
+                        point: point.clone(),
+                        eval,
+                    }
                 })
                 .collect_vec();
 
-            gkr_iop
-                .circuit
-                .verify(
-                    gkr_iop.prover_output.gkr_proof.clone(),
-                    &out_evals,
-                    &[],
-                    transcript,
-                )
-                .expect("GKR-IOP verify failure");
+            if let Some(gkr_iop_vk) = gkr_iop_vk {
+                let gkr_circuit = gkr_iop_vk.get_state().chip.gkr_circuit();
+                gkr_circuit
+                    .verify(gkr_iop.0.clone(), &out_evals, &[], transcript)
+                    .expect("GKR-IOP verify failure");
+            }
         }
 
         // derive r_records, w_records, lk_records from witness's evaluations

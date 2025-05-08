@@ -147,7 +147,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State: Default> Defa
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GKRIOPVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
     pub(crate) state: State,
     pub fixed_commit: Option<PCS::Commitment>,
@@ -172,7 +172,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State>
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct KeccakGKRIOP<E> {
     pub chip: gkr_iop::chip::Chip,
     pub layout: KeccakLayout<E>,
@@ -556,6 +556,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
+            keccak_vk: self.keccak_pk.vk.clone(),
             fixed_commit: self.fixed_commit.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
@@ -569,12 +570,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(bound = "E: ExtensionField + DeserializeOwned")]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize, GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned, GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>: DeserializeOwned",
+))]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
+    pub keccak_vk: GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,

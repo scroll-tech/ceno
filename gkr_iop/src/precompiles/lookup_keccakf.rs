@@ -11,6 +11,7 @@ use crate::{
     precompiles::utils::{MaskRepresentation, nest, not8_expr, zero_expr},
 };
 use ndarray::{ArrayView, Ix2, Ix3, s};
+use serde::{Deserialize, Serialize};
 
 use super::utils::{CenoLookup, u64s_to_felts, zero_eval};
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
@@ -24,10 +25,10 @@ use transcript::BasicTranscript;
 
 type E = BinomialExtensionField<Goldilocks, 2>;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct KeccakParams {}
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct KeccakLayout<E> {
     _params: KeccakParams,
     _input_columns: Vec<usize>,
@@ -309,6 +310,9 @@ pub const LOOKUP_FELTS_PER_ROUND: usize =
 pub const AND_LOOKUPS: usize = ROUNDS * AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = ROUNDS * XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = ROUNDS * RANGE_LOOKUPS_PER_ROUND;
+
+pub const KECCAK_OUT_EVAL_SIZE: usize =
+    KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS; // 200 (5 * 5 * 8, kecak input bytes) + 200 (keccak output bytes) + 24 * 1656 (round auxiliary witnesses)
 
 macro_rules! allocate_and_split {
         ($chip:expr, $total:expr, $( $size:expr ),* ) => {{
@@ -1135,10 +1139,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
             })
             .collect_vec();
 
-        assert_eq!(
-            out_evals.len(),
-            KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS
-        );
+        assert_eq!(out_evals.len(), KECCAK_OUT_EVAL_SIZE);
 
         out_evals
     };
