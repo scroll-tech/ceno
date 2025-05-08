@@ -1039,9 +1039,6 @@ pub mod fmt {
     }
 
     pub fn field<E: ExtensionField>(field: &E) -> String {
-        let name = format!("{:?}", field);
-        let name = name.split('(').next().unwrap_or("ExtensionField");
-
         let data = field
             .as_bases()
             .iter()
@@ -1054,7 +1051,7 @@ pub mod fmt {
         if only_one_limb {
             data[0].to_string()
         } else {
-            format!("{name}[{}]", data.join(","))
+            format!("[{}]", data.join(","))
         }
     }
 
@@ -1069,9 +1066,9 @@ pub mod fmt {
         } else {
             // hex
             if value > F::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
-                parens(format!("-{:#x}", F::MODULUS_U64 - value), add_parens)
+                parens(format!("-{}", F::MODULUS_U64 - value), add_parens)
             } else {
-                format!("{value:#x}")
+                format!("{value}")
             }
         }
     }

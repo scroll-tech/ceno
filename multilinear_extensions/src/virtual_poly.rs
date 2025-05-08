@@ -130,6 +130,20 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         }
     }
 
+    /// registers a multilinear extension (MLE) in flat storage and tracks its pointer to ensure uniqueness.
+    ///
+    /// assigns a unique index to the given `mle` and asserts that it hasn't been registered before
+    /// by checking its raw pointer.
+    ///
+    /// panics if the same MLE (by pointer) is registered more than once.
+    pub fn register_mle(&mut self, mle: ArcMultilinearExtension<'a, E>) {
+        let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
+        let curr_index = self.flattened_ml_extensions.len();
+        self.flattened_ml_extensions.push(mle);
+        let prev = self.raw_pointers_lookup_table.insert(mle_ptr, curr_index);
+        assert!(prev.is_none(), "duplicate mle_ptr: {}", mle_ptr);
+    }
+
     pub fn add_monomial_terms(
         &mut self,
         zero_check_half_eq: Option<ArcMultilinearExtension<'a, E>>,

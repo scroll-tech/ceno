@@ -63,8 +63,11 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         let mles_storage = self
             .mles_storage
             .values()
-            .map(|(id, mle)| (*id, *mle))
-            .collect::<BTreeMap<_, _>>();
+            .collect::<Vec<_>>() // collect into Vec<&(usize, &ArcMultilinearExtension)>
+            .into_iter()
+            .sorted_by_key(|(witin_id, _)| *witin_id) // sort by witin_id
+            .map(|(_, mle)| *mle) // extract &ArcMultilinearExtension
+            .collect::<Vec<_>>();
 
         // when half_eq is provided, then all monomial term need to be in same num_vars
         let expected_num_vars_per_expr = if let Some(half_eq_mles) = half_eq_mles.as_ref() {
@@ -78,10 +81,15 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         } else {
             None
         };
+
         let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, max_num_variables);
+        // register mles to assure index matching the arc_poly order
+        virtual_polys.register_mles(mles_storage.clone());
+
+        // convert expression into monomial_terms and add to virtual_polys
         for (i, expression) in expressions.iter().enumerate() {
-            let monomial_terms = expression
-                .get_monomial_terms()
+            let monomial_terms_expr = expression.get_monomial_terms();
+            let monomial_terms = monomial_terms_expr
                 .into_iter()
                 .map(
                     |Term {
@@ -96,10 +104,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                             .into_iter()
                             .map(|expr| match expr {
                                 Expression::WitIn(witin_id) => {
-                                    let mle = mles_storage
-                                        .get(&(witin_id as usize))
-                                        .cloned()
-                                        .expect("invalid witin id");
+                                    let mle = mles_storage[witin_id as usize];
                                     if let Some(expected_num_vars) = expected_num_vars {
                                         assert_eq!(*expected_num_vars, mle.num_vars());
                                     }
@@ -168,6 +173,36 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 range_poly
             })
             .collect_vec()
+    }
+
+    /// registers a batch of multilinear extensions (MLEs) across all threads,
+    /// distributing each based on num_vars.
+    ///
+    /// for each input `mle`, if it is large enough (i.e., has more variables than `log2(num_threads)`),
+    /// it is split and assigned to the corresponding thread using `get_range_polys_by_thread_id`.
+    /// otherwise, the full polynomial is duplicated across all threads.
+    ///
+    /// the per-thread instances are registered locally and stored in `thread_based_mles_storage`
+    /// using the MLE’s raw pointer as the key to ensure uniqueness and reference consistency.
+    pub fn register_mles(&mut self, mles: Vec<&'a ArcMultilinearExtension<'a, E>>) {
+        let log2_num_threads = log2_strict_usize(self.num_threads);
+        for mle in mles {
+            let mle_ptr: usize = Arc::as_ptr(mle) as *const () as usize;
+            let mles = (0..self.num_threads)
+                .map(|thread_id| {
+                    let mle_thread_based = if mle.num_vars() > log2_num_threads {
+                        self.get_range_polys_by_thread_id(thread_id, vec![mle])
+                            .remove(0)
+                    } else {
+                        // polynomial is too small
+                        Arc::new(mle.get_ranged_mle(1, 0))
+                    };
+                    self.polys[thread_id].register_mle(mle_thread_based.clone());
+                    mle_thread_based
+                })
+                .collect_vec();
+            self.thread_based_mles_storage.insert(mle_ptr, mles);
+        }
     }
 
     /// Adds a group of monomial terms to the current expression set.

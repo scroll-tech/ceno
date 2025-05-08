@@ -12,6 +12,7 @@ use multilinear_extensions::{
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -1052,10 +1053,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
                 let (eq_rw, eq_lk) = eq.split_at(cs.r_table_expressions.len());
 
-                // Experimenting with expr_builder, although It's not that nessesary to apply expr_builder in structural circuit
-                let mut expr_builder = VirtualPolynomialsBuilder::default();
-                let mut exprs =
-                    Vec::<Expression<E>>::with_capacity(r_set_wit.len() + lk_n_wit.len());
+                let mut virtual_polys =
+                    VirtualPolynomials::<E>::new(num_threads, max_log2_num_instance);
 
                 // alpha_r{i} * eq(rt_{i}, s) * r(s) + alpha_w{i} * eq(rt_{i}, s) * w(s)
                 for ((r_set_wit, w_set_wit), eq) in r_set_wit
@@ -1063,40 +1062,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .zip_eq(w_set_wit.iter())
                     .zip_eq(eq_rw.iter())
                 {
-                    let r_set_wit = expr_builder.lift(r_set_wit);
-                    let w_set_wit = expr_builder.lift(w_set_wit);
-                    let eq = expr_builder.lift(eq);
-                    let alpha_r =
-                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    let alpha_w =
-                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    exprs.push(eq * (alpha_r * r_set_wit + alpha_w * w_set_wit));
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, r_set_wit], *alpha);
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, w_set_wit], *alpha);
                 }
 
                 // alpha_lkn{i} * eq(rt_{i}, s) * lk_n(s) + alpha_lkd{i} * eq(rt_{i}, s) * lk_d(s)
                 for ((lk_n_wit, lk_d_wit), eq) in
                     lk_n_wit.iter().zip_eq(lk_d_wit.iter()).zip_eq(eq_lk.iter())
                 {
-                    let lk_n_wit = expr_builder.lift(lk_n_wit);
-                    let lk_d_wit = expr_builder.lift(lk_d_wit);
-                    let eq = expr_builder.lift(eq);
-                    let alpha_lkn =
-                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    let alpha_lkd =
-                        Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    exprs.push(eq * (alpha_lkn * lk_n_wit + alpha_lkd * lk_d_wit));
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, lk_n_wit], *alpha);
+                    let alpha = alpha_pow_iter.next().unwrap();
+                    virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
                 }
 
-                let (same_r_sumcheck_proofs, state) = IOPProverState::prove(
-                    expr_builder.to_virtual_polys(
-                        num_threads,
-                        max_log2_num_instance,
-                        None,
-                        &[exprs.into_iter().sum::<Expression<E>>()],
-                        challenges,
-                    ),
-                    transcript,
-                );
+                let (same_r_sumcheck_proofs, state) =
+                    IOPProverState::prove(virtual_polys, transcript);
                 let evals = state.get_mle_flatten_final_evaluations();
                 let mut evals_iter = evals.into_iter();
                 let rw_in_evals = cs
@@ -1249,10 +1232,15 @@ impl TowerProver {
                 let num_threads = optimal_sumcheck_threads(out_rt.len());
 
                 let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
-                let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, out_rt.len());
+
+                let mut expr_builder = VirtualPolynomialsBuilder::default();
+                let mut exprs =
+                    Vec::<Expression<E>>::with_capacity(prod_specs.len() + logup_specs.len());
+                let eq_expr = expr_builder.lift(&eq);
 
                 for (s, alpha) in izip!(&prod_specs, &alpha_pows) {
                     if round < s.witness.len() {
+                        let alpha_expr = Expression::Constant(Either::Right(*alpha));
                         let layer_polys = &s.witness[round];
 
                         // sanity check
@@ -1265,11 +1253,9 @@ impl TowerProver {
                                 })
                         );
 
+                        let layer_polys_product = layer_polys.iter().map(|layer_poly| expr_builder.lift(layer_poly)).product::<Expression<E>>();
                         // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
-                        virtual_polys.add_mle_list(
-                            [vec![&eq], layer_polys.iter().collect()].concat(),
-                            *alpha,
-                        )
+                        exprs.push(eq_expr.clone() * alpha_expr *layer_polys_product);
                     }
                 }
 
@@ -1278,37 +1264,36 @@ impl TowerProver {
                     if round < s.witness.len() {
                         let layer_polys = &s.witness[round];
                         // sanity check
-                        assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
+                        assert_eq!(layer_polys.len(), 4); // p1, p2, q1, q2
                         assert!(
                             layer_polys
                                 .iter()
                                 .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
                         );
 
-                        let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
+                        let (alpha_numerator, alpha_denominator) = (Expression::Constant(Either::Right(alpha[0])), Expression::Constant(Either::Right(alpha[1])));
 
-                        let (q2, q1, p2, p1) = (
-                            &layer_polys[3],
-                            &layer_polys[2],
-                            &layer_polys[1],
-                            &layer_polys[0],
+                        let (p1, p2, q1, q2) = (
+                            expr_builder.lift(&layer_polys[0]),
+                            expr_builder.lift(&layer_polys[1]),
+                            expr_builder.lift(&layer_polys[2]),
+                            expr_builder.lift(&layer_polys[3]),
                         );
 
-                        // \sum_s eq(rt, s) * alpha_numerator^{i} * (p1 * q2 + p2 * q1)
-                        virtual_polys.add_mle_list(vec![&eq, &p1, &q2], *alpha_numerator);
-                        virtual_polys.add_mle_list(vec![&eq, &p2, &q1], *alpha_numerator);
-
-                        // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2)
-                        virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
+                        // \sum_s eq(rt, s) * (alpha_numerator^{i} * (p1 * q2 + p2 * q1) + alpha_denominator^{i} * q1 * q2)
+                        exprs.push(eq_expr.clone() * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())  + alpha_denominator * q1 * q2));
                     }
                 }
 
                 let wrap_batch_span = entered_span!("wrap_batch");
-                // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
-                // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
-                // This is likely a bug in the tracing-flame crate.
                 let (sumcheck_proofs, state) = IOPProverState::prove(
-                    virtual_polys,
+                    expr_builder.to_virtual_polys(
+                        num_threads,
+                        out_rt.len(),
+                        None,
+                        &[exprs.into_iter().sum::<Expression<E>>()],
+                        &[],
+                    ),
                     transcript,
                 );
                 exit_span!(wrap_batch_span);
@@ -1342,11 +1327,10 @@ impl TowerProver {
                 for (i, s) in enumerate(&logup_specs) {
                     if round < s.witness.len() {
                         // collect evals belong to current spec
-                        // p1, q2, p2, q1
                         let p1 = *evals_iter.next().expect("insufficient evals length");
-                        let q2 = *evals_iter.next().expect("insufficient evals length");
                         let p2 = *evals_iter.next().expect("insufficient evals length");
                         let q1 = *evals_iter.next().expect("insufficient evals length");
+                        let q2 = *evals_iter.next().expect("insufficient evals length");
                         proofs.push_logup_evals_and_point(i, vec![p1, p2, q1, q2], rt_prime.clone());
                     }
                 }

@@ -3,12 +3,18 @@ use itertools::{Itertools, chain, iproduct};
 use serde::{Deserialize, Serialize};
 
 use super::Expression;
+use crate::expression::ToExpr;
 use Expression::*;
-use std::iter::Sum;
+use p3::field::PrimeCharacteristicRing;
+use std::{fmt::Display, iter::Sum};
 
 impl<E: ExtensionField> Expression<E> {
     pub fn get_monomial_terms(&self) -> Vec<Term<Expression<E>, Expression<E>>> {
         Self::combine(self.distribute())
+            .into_iter()
+            // filter coeff = 0 monimial terms
+            .filter(|Term { scalar, .. }| *scalar != E::BaseField::ZERO.expr())
+            .collect_vec()
     }
 
     fn distribute(&self) -> Vec<Term<Expression<E>, Expression<E>>> {
@@ -79,6 +85,20 @@ pub struct Term<S, P> {
     pub product: Vec<P>,
 }
 
+impl<E: ExtensionField> Display for Term<Expression<E>, Expression<E>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // join the product terms with " * "
+        let product_str = self
+            .product
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(" * ");
+        // format as: scalar * (a * b * c)
+        write!(f, "{} * ({})", self.scalar, product_str)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::expression::{Fixed as FixedS, utils::eval_by_expr_with_fixed};
@@ -98,26 +118,33 @@ mod tests {
         let a = || Fixed(FixedS(0));
         let b = || Fixed(FixedS(1));
         let c = || Fixed(FixedS(2));
-        let x = || WitIn(0);
-        let y = || WitIn(1);
-        let z = || WitIn(2);
-        let n = || Constant(Either::Left(104u64.into_f()));
+        let x1 = || WitIn(0);
+        let x2 = || WitIn(1);
+        let x3 = || WitIn(2);
+        let x4 = || WitIn(3);
+        let x5 = || WitIn(4);
+        let x6 = || WitIn(5);
+        let x7 = || WitIn(6);
+
+        let n1 = || Constant(Either::Left(103u64.into_f()));
+        let n2 = || Constant(Either::Left(101u64.into_f()));
         let m = || Constant(Either::Left(-F::from_u64(599)));
         let r = || Challenge(0, 1, E::ONE, E::ZERO);
 
         let test_exprs: &[Expression<E>] = &[
-            a() * x() * x(),
+            a() * x1() * x2(),
             a(),
-            x(),
-            n(),
+            x1(),
+            n1(),
             r(),
-            a() + b() + x() + y() + n() + m() + r(),
-            a() * x() * n() * r(),
-            x() * y() * z(),
-            (x() + y() + a()) * b() * (y() + z()) + c(),
-            (r() * x() + n() + z()) * m() * y(),
-            (b() + y() + m() * z()) * (x() + y() + c()),
-            a() * r() * x(),
+            a() + b() + x1() + x2() + n1() + m() + r(),
+            a() * x1() * n1() * r(),
+            x1() * x2() * x3(),
+            (x1() + x2() + a()) * b() * (x2() + x3()) + c(),
+            (r() * x1() + n1() + x3()) * m() * x2(),
+            (b() + x2() + m() * x3()) * (x1() + x2() + c()),
+            a() * r() * x1(),
+            x1() * (n1() * (x2() * x3() + x4() * x5())) + n2() * x2() * x4() + x1() * x6() * x7(),
         ];
 
         for factored in test_exprs {
@@ -144,6 +171,10 @@ mod tests {
             E::random(&mut rng),
         ];
         let witnesses = vec![
+            E::random(&mut rng),
+            E::random(&mut rng),
+            E::random(&mut rng),
+            E::random(&mut rng),
             E::random(&mut rng),
             E::random(&mut rng),
             E::random(&mut rng),
