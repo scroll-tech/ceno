@@ -13,12 +13,14 @@ use witness::RowMajorMatrix;
 pub trait ProverBackend {
     type E: ExtensionField;
     type PcsOpeningProof: Clone + Serialize + DeserializeOwned;
+
+    type MultilinearPoly: Send + Sync;
     type Matrix: Send + Sync + Clone;
     type PcsData;
-    type MultilinearPoly: Send + Sync;
 }
 
-pub trait ProverDevice<PB>: TowerProver<PB> + MainSumcheckProver<PB> + OpeningProver<PB>
+pub trait ProverDevice<PB>:
+    TraceCommitter<PB> + TowerProver<PB> + MainSumcheckProver<PB> + OpeningProver<PB>
 where
     PB: ProverBackend,
 {

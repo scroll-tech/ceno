@@ -377,26 +377,13 @@ impl<
             challenges,
             transcript,
         );
+
         let span = entered_span!("witin::evals", profiling_3 = true);
         let wits_in_evals: Vec<E> = witnesses
             .par_iter()
             .map(|poly| poly.evaluate(&input_opening_point))
             .collect();
         exit_span!(span);
-
-        let pcs_open_span = entered_span!("pcs_open", profiling_3 = true);
-        let opening_dur = std::time::Instant::now();
-        tracing::debug!(
-            "[opcode {}]: build opening proof for {} polys",
-            name,
-            witnesses.len()
-        );
-        tracing::info!(
-            "[opcode {}] build opening proof took {:?}",
-            name,
-            opening_dur.elapsed(),
-        );
-        exit_span!(pcs_open_span);
 
         let record_r_out_evals = tower_proof.prod_specs_eval[0][0].clone();
         let record_w_out_evals = tower_proof.prod_specs_eval[1][0].clone();

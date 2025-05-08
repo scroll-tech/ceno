@@ -1,4 +1,4 @@
-use super::hal::{MainSumcheckProver, ProverBackend, TraceCommitter};
+use super::hal::{MainSumcheckProver, OpeningProver, ProverBackend, TraceCommitter};
 use crate::{
     circuit_builder::ConstraintSystem,
     expression::Expression,
@@ -647,5 +647,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         exit_span!(main_sel_span);
 
         input_open_point
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBackend<E, PCS>>
+    for CpuProver
+{
+    fn open(
+        &self,
+        _witness_data: PCS::CommitmentWithWitness,
+        _fixed_data: Option<PCS::CommitmentWithWitness>,
+        _points: Vec<Point<E>>,
+        _evals: Vec<E>,
+        _transcript: &mut impl Transcript<E>,
+    ) -> PCS::Proof {
+        todo!()
     }
 }
