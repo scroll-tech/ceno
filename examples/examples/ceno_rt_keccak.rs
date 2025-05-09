@@ -12,11 +12,10 @@ fn main() {
 
     for _ in 0..ITERATIONS {
         syscall_keccak_permute(&mut state);
-        // log_state(&state);
+        log_state(&state);
     }
 }
 
-#[allow(dead_code)]
 #[cfg(debug_assertions)]
 fn log_state(state: &[u64; 25]) {
     use ceno_rt::info_out;

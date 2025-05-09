@@ -2,7 +2,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{
@@ -17,6 +16,7 @@ use crate::{
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
+use multilinear_extensions::{ToExpr, WitIn};
 use std::marker::PhantomData;
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {

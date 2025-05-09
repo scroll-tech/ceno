@@ -11,13 +11,13 @@ use crate::{
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLtConfig,
     set_val,
     uint::Value,
     witness::LkMultiplicity,
 };
 use ceno_emul::Tracer;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::{iter, marker::PhantomData};
 
 #[derive(Debug)]

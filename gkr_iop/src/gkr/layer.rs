@@ -222,10 +222,10 @@ impl Layer {
         ext_mle_evals: &[E],
         point: &Point<E>,
     ) {
-        for (value, pos) in izip!(chain![base_mle_evals, ext_mle_evals], chain![
-            &self.in_bases,
-            &self.in_exts
-        ]) {
+        for (value, pos) in izip!(
+            chain![base_mle_evals, ext_mle_evals],
+            chain![&self.in_bases, &self.in_exts]
+        ) {
             *(pos.entry_mut(claims)) = PointAndEval {
                 point: point.clone(),
                 eval: *value,

@@ -248,7 +248,7 @@ where
 
                 // for smaller polys, we commit it separately as prover will send it as a whole without blowing factor
                 if rmm.num_vars() <= Spec::get_basecode_msg_size_log() {
-                    let rmm = rmm.into_default_padded_p3_rmm();
+                    let rmm = rmm.into_default_padded_p3_rmm(None);
                     trivial_proofdata.insert(index, mmcs.commit_matrix(rmm));
                 } else {
                     rmm_to_batch_commit.push(rmm);

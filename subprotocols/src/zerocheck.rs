@@ -69,10 +69,10 @@ where
 
         // For each point, compute eq(point[1..], b) for b in [0, 2^{num_vars - 1}).
         let (exprs, grand_prod_of_not_inv) = if num_vars > 0 {
-            let half_eq_evals = eq_vecs(points.iter().map(|point| &point[1..]), &vec![
-                E::ONE;
-                exprs.len()
-            ]);
+            let half_eq_evals = eq_vecs(
+                points.iter().map(|point| &point[1..]),
+                &vec![E::ONE; exprs.len()],
+            );
             let exprs = zip_eq(exprs, half_eq_evals).collect_vec();
             let grand_prod_of_not_inv = points
                 .iter()
@@ -483,8 +483,13 @@ mod test {
         let exprs = vec![d0.clone() * d1.clone(), d0 * n1, d1 * n0];
 
         let base_mle_refs = base_mles.iter().map(|v| v.as_slice()).collect_vec();
-        run(point_refs, exprs, vec![], base_mle_refs, vec![], vec![
-            ans_0, ans_1, ans_2,
-        ]);
+        run(
+            point_refs,
+            exprs,
+            vec![],
+            base_mle_refs,
+            vec![],
+            vec![ans_0, ans_1, ans_2],
+        );
     }
 }

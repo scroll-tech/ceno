@@ -9,12 +9,12 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     set_fixed_val, set_val,
     structs::ProgramParams,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
 
 use super::{
     MemInitRecord,

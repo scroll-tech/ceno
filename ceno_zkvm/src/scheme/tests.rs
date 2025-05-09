@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
@@ -22,6 +21,7 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+use multilinear_extensions::{ToExpr, WitIn};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};

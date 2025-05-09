@@ -5,8 +5,10 @@ use std::{
 use crate::{
     macros::{entered_span, exit_span},
     mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
+    monomial::Term,
     util::{bit_decompose, create_uninit_vec, max_usable_threads},
 };
+use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use p3::field::Field;
@@ -15,10 +17,21 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub type ArcMultilinearExtension<'a, E> =
     Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a>;
+pub type MonomialTermsType<'a, E> =
+    Vec<Term<Either<<E as ExtensionField>::BaseField, E>, ArcMultilinearExtension<'a, E>>>;
+
+#[derive(Default, Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct MonomialTerms<E: ExtensionField> {
+    pub terms: Vec<Term<Either<E::BaseField, E>, usize>>,
+}
 
 #[rustfmt::skip]
 /// A virtual polynomial is a sum of products of multilinear polynomials;
@@ -51,13 +64,15 @@ pub type ArcMultilinearExtension<'a, E> =
 pub struct VirtualPolynomial<'a, E: ExtensionField> {
     /// Aux information about the multilinear polynomial
     pub aux_info: VPAuxInfo<E>,
-    /// list of reference to products (as usize) of multilinear extension
-    pub products: Vec<(E, Vec<usize>)>,
+    // format (eq, monomial_form_formula)
+    pub products: Vec<(Option<usize>, MonomialTerms<E>)>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
     pub flattened_ml_extensions: Vec<ArcMultilinearExtension<'a, E>>,
     /// Pointers to the above poly extensions
     raw_pointers_lookup_table: HashMap<usize, usize>,
+
+
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,59 +116,131 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
                 phantom: PhantomData,
             },
             // here `0` points to the first polynomial of `flattened_ml_extensions`
-            products: vec![(coefficient, vec![0])],
+            products: vec![(
+                None,
+                MonomialTerms {
+                    terms: vec![Term {
+                        scalar: Either::Right(coefficient),
+                        product: vec![0],
+                    }],
+                },
+            )],
             flattened_ml_extensions: vec![mle],
             raw_pointers_lookup_table: hm,
         }
     }
 
+    /// registers a multilinear extension (MLE) in flat storage and tracks its pointer to ensure uniqueness.
+    ///
+    /// assigns a unique index to the given `mle` and asserts that it hasn't been registered before
+    /// by checking its raw pointer.
+    ///
+    /// panics if the same MLE (by pointer) is registered more than once.
+    pub fn register_mle(&mut self, mle: ArcMultilinearExtension<'a, E>) {
+        let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
+        let curr_index = self.flattened_ml_extensions.len();
+        self.flattened_ml_extensions.push(mle);
+        let prev = self.raw_pointers_lookup_table.insert(mle_ptr, curr_index);
+        assert!(prev.is_none(), "duplicate mle_ptr: {}", mle_ptr);
+    }
+
+    pub fn add_monomial_terms(
+        &mut self,
+        zero_check_half_eq: Option<ArcMultilinearExtension<'a, E>>,
+        monomial_terms: MonomialTermsType<'a, E>,
+    ) -> (Option<usize>, &MonomialTerms<E>) {
+        // TODO probably need to add sanity check for all monomial_terms poly equals to eq num_vars + 1
+
+        let terms = monomial_terms
+            .into_iter()
+            .map(|term| {
+                let Term { scalar, product } = term;
+                assert!(!product.is_empty(), "some term product is empty");
+                // sanity check: all mle in product must have same num_vars()
+                assert!(product.iter().map(|m| { m.num_vars() }).all_equal());
+
+                self.aux_info.max_degree = max(self.aux_info.max_degree, product.len());
+                let mut indexed_product = Vec::with_capacity(product.len());
+
+                for mle in product {
+                    let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
+                    if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
+                        indexed_product.push(*index)
+                    } else {
+                        let curr_index = self.flattened_ml_extensions.len();
+                        self.flattened_ml_extensions.push(mle);
+                        self.raw_pointers_lookup_table.insert(mle_ptr, curr_index);
+                        indexed_product.push(curr_index);
+                    }
+                }
+                Term {
+                    scalar,
+                    product: indexed_product,
+                }
+            })
+            .collect_vec();
+
+        let eq_index = if let Some(zero_check_half_eq) = zero_check_half_eq {
+            let eq_ptr: usize = Arc::as_ptr(&zero_check_half_eq) as *const () as usize;
+            let curr_index = self.flattened_ml_extensions.len();
+            self.flattened_ml_extensions.push(zero_check_half_eq);
+            self.raw_pointers_lookup_table.insert(eq_ptr, curr_index);
+            Some(curr_index)
+        } else {
+            None
+        };
+
+        self.products.push((eq_index, MonomialTerms { terms }));
+        (
+            eq_index,
+            self.products
+                .last()
+                .map(|(_, monomial_terms)| monomial_terms)
+                .unwrap(),
+        )
+    }
+
     /// Add a product of list of multilinear extensions to self
     /// Returns an error if the list is empty.
     ///
-    /// mle in mle_list must be in same num_vars() in same product,
+    /// mle in product must be in same num_vars() in same product,
     /// while different product can have different num_vars()
     ///
     /// The MLEs will be multiplied together, and then multiplied by the scalar
-    /// `coefficient`.
+    /// `scalar`.
     pub fn add_mle_list(
         &mut self,
-        mle_list: Vec<ArcMultilinearExtension<'a, E>>,
-        coefficient: E,
-    ) -> &[usize] {
-        let mle_list: Vec<ArcMultilinearExtension<E>> = mle_list.into_iter().collect();
-        let mut indexed_product = Vec::with_capacity(mle_list.len());
-
-        assert!(!mle_list.is_empty(), "input mle_list is empty");
-        // sanity check: all mle in mle_list must have same num_vars()
-        assert!(mle_list.iter().map(|m| { m.num_vars() }).all_equal());
-
-        self.aux_info.max_degree = max(self.aux_info.max_degree, mle_list.len());
-
-        for mle in mle_list {
-            let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
-            if let Some(index) = self.raw_pointers_lookup_table.get(&mle_ptr) {
-                indexed_product.push(*index)
-            } else {
-                let curr_index = self.flattened_ml_extensions.len();
-                self.flattened_ml_extensions.push(mle);
-                self.raw_pointers_lookup_table.insert(mle_ptr, curr_index);
-                indexed_product.push(curr_index);
-            }
-        }
-        self.products.push((coefficient, indexed_product));
-        &self.products.last().unwrap().1
+        product: Vec<ArcMultilinearExtension<'a, E>>,
+        scalar: E,
+    ) -> &MonomialTerms<E> {
+        let (_, monomial_terms) = self.add_monomial_terms(
+            None,
+            vec![Term {
+                scalar: Either::Right(scalar),
+                product,
+            }],
+        );
+        monomial_terms
     }
 
     /// in-place merge with another virtual polynomial
     pub fn merge(&mut self, other: &VirtualPolynomial<'a, E>) {
         let start = entered_span!("virtual poly add");
-        for (coeffient, products) in other.products.iter() {
-            let cur: Vec<_> = products
+        for (zero_check_half_eq_index, MonomialTerms { terms }) in other.products.iter() {
+            let new_monomial_term = terms
                 .iter()
-                .map(|&x| other.flattened_ml_extensions[x].clone())
-                .collect();
-
-            self.add_mle_list(cur, *coeffient);
+                .map(|Term { scalar, product }| Term {
+                    scalar: *scalar,
+                    product: product
+                        .iter()
+                        .map(|&x| other.flattened_ml_extensions[x].clone())
+                        .collect(),
+                })
+                .collect_vec();
+            let zero_check_eq = zero_check_half_eq_index.map(|zero_check_half_eq_index| {
+                other.flattened_ml_extensions[zero_check_half_eq_index].clone()
+            });
+            self.add_monomial_terms(zero_check_eq, new_monomial_term);
         }
         exit_span!(start);
     }
@@ -180,7 +267,15 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         let res = self
             .products
             .iter()
-            .map(|(c, p)| p.iter().map(|&i| evals[i]).product::<E>() * *c)
+            .map(|(zero_check_half_eq, MonomialTerms { terms })| {
+                assert!(zero_check_half_eq.is_none(), "do not support evaluate with eq");
+                terms
+                    .iter()
+                    .map(|Term { scalar, product }| {
+                        either::for_both!(scalar, c => product.iter().map(|&i| evals[i]).product::<E>() * *c)
+                    })
+                    .sum()
+            })
             .sum();
 
         exit_span!(start);

@@ -5,7 +5,7 @@ use p3::{
 };
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use std::{
@@ -13,6 +13,9 @@ use std::{
     slice::{Chunks, ChunksMut},
     sync::Arc,
 };
+
+// for witness we reserve some space for value vector to extend to avoid allocated + full clone
+const CAPACITY_RESERVED_FACTOR: usize = 2;
 
 /// get next power of 2 instance with minimal size 2
 pub fn next_pow2_instance_padding(num_instance: usize) -> usize {
@@ -63,18 +66,25 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
             padding_strategy: InstancePaddingStrategy::Default,
         }
     }
-    /// convert into the p3 RowMajorMatrix, with padded to next power of 2 height filling with T::default value
-    pub fn into_default_padded_p3_rmm(self) -> p3::matrix::dense::RowMajorMatrix<T> {
-        let padded_height = next_pow2_instance_padding(self.num_instances());
-        let mut inner = self.inner;
-        inner.pad_to_height(padded_height, T::default());
-        inner
-    }
 
-    pub fn set_num_rows_to_height(&mut self, new_height: usize, fill: T) {
-        assert!(new_height >= self.height());
-        self.inner.pad_to_height(new_height, fill);
-        self.num_rows = new_height;
+    /// convert into the p3 RowMajorMatrix, with padded to next power of 2 height filling with T::default value
+    /// padding its height to the next power of two (optionally multiplied by a `blowup_factor`)
+    /// padding is filled with `T::default()`, and the transformation consumes `self`
+    pub fn into_default_padded_p3_rmm(
+        mut self,
+        blowup_factor: Option<usize>,
+    ) -> p3::matrix::dense::RowMajorMatrix<T> {
+        let padded_height = next_pow2_instance_padding(self.num_instances());
+        if let Some(blowup_factor) = blowup_factor {
+            if blowup_factor != CAPACITY_RESERVED_FACTOR {
+                tracing::warn!(
+                    "blowup_factor {blowup_factor} != CAPACITY_RESERVED_FACTOR {CAPACITY_RESERVED_FACTOR}, \
+                     consider updating the default CAPACITY_RESERVED_FACTOR accordingly"
+                );
+            }
+        }
+        self.pad_to_height(padded_height * blowup_factor.unwrap_or(1), T::default());
+        self.inner
     }
 
     pub fn n_col(&self) -> usize {
@@ -91,10 +101,13 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         padding_strategy: InstancePaddingStrategy,
     ) -> Self {
         let num_row_padded = next_pow2_instance_padding(num_rows);
-        let value = (0..num_row_padded * num_cols)
-            .into_par_iter()
-            .map(|_| T::default())
-            .collect();
+
+        let mut value = Vec::with_capacity(CAPACITY_RESERVED_FACTOR * num_row_padded * num_cols);
+        value.par_extend(
+            (0..num_row_padded * num_cols)
+                .into_par_iter()
+                .map(|_| T::default()),
+        );
         RowMajorMatrix {
             inner: p3::matrix::dense::RowMajorMatrix::new(value, num_cols),
             num_rows,
@@ -173,6 +186,16 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
 
     pub fn into_inner(self) -> p3::matrix::dense::RowMajorMatrix<T> {
         self.inner
+    }
+
+    pub fn pad_to_height(&mut self, new_height: usize, fill: T) {
+        let (cur_height, n_cols) = (self.height(), self.n_col());
+        assert!(new_height >= cur_height);
+        self.values.par_extend(
+            (0..(new_height - cur_height) * n_cols)
+                .into_par_iter()
+                .map(|_| fill),
+        );
     }
 }
 

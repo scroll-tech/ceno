@@ -74,13 +74,13 @@ use super::{
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
     set_val,
     uint::Value,
     witness::LkMultiplicity,
 };
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::marker::PhantomData;
 
 pub struct DivRemConfig<E: ExtensionField> {

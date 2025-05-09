@@ -3,9 +3,10 @@ use std::fmt::Display;
 use ff_ext::ExtensionField;
 
 use crate::{
-    Value, circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression,
-    instructions::riscv::constants::UInt, witness::LkMultiplicity,
+    Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::riscv::constants::UInt,
+    witness::LkMultiplicity,
 };
+use multilinear_extensions::Expression;
 
 use super::SignedExtendConfig;
 

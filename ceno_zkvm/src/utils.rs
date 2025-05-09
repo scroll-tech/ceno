@@ -9,12 +9,10 @@ use std::{
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+    Expression, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
 };
 use p3::field::Field;
 use transcript::Transcript;
-
-use crate::expression::Expression;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
@@ -226,7 +224,11 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         &|_| unreachable!(),
         &|witness_id| vec![(E::ONE, { vec![witness_id] })],
         &|structural_witness_id, _, _, _| vec![(E::ONE, { vec![structural_witness_id] })],
-        &|scalar| vec![(E::from(scalar), { vec![] })],
+        &|scalar| {
+            vec![(scalar.map_either(E::from, |scalar| scalar).into_inner(), {
+                vec![]
+            })]
+        },
         &|challenge_id, pow, scalar, offset| {
             let challenge = challenges[challenge_id as usize];
             vec![(challenge.exp_u64(pow as u64) * scalar + offset, vec![])]
@@ -290,13 +292,13 @@ mod tests {
     use ff_ext::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::{
-        mle::IntoMLE, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+        Expression, ToExpr, mle::IntoMLE, virtual_poly::ArcMultilinearExtension,
+        virtual_polys::VirtualPolynomials,
     };
     use p3::field::PrimeCharacteristicRing;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        expression::{Expression, ToExpr},
         utils::add_mle_list_by_expr,
     };
     use p3::goldilocks::Goldilocks;

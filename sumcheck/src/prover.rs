@@ -5,9 +5,10 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     mle::FieldType,
+    monomial::Term,
     op_mle,
     util::largest_even_below,
-    virtual_poly::VirtualPolynomial,
+    virtual_poly::{MonomialTerms, VirtualPolynomial},
     virtual_polys::{PolyMeta, VirtualPolynomials},
 };
 use rayon::{
@@ -400,40 +401,47 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
-        let span = entered_span!("products_sum");
-        let AdditiveVec(products_sum) = self.poly.products.iter().fold(
+        let span = entered_span!("build_uni_poly");
+        let AdditiveVec(uni_polys) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-            |mut products_sum, (coefficient, prod)| {
-                let span = entered_span!("sum");
-                let f = &self.poly.flattened_ml_extensions;
-                let f_type = &self.poly_meta;
-                let get_poly_meta = || f_type[prod[0]];
-                let mut sum: Vec<E> = match prod.len() {
-                    1 => sumcheck_code_gen!(1, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
-                    2 => sumcheck_code_gen!(2, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
-                    3 => sumcheck_code_gen!(3, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
-                    4 => sumcheck_code_gen!(4, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
-                    5 => sumcheck_code_gen!(5, false, |i| &f[prod[i]], || get_poly_meta()).to_vec(),
-                    _ => unimplemented!("do not support degree {} > 5", prod.len()),
-                };
-                exit_span!(span);
+            |mut uni_polys, (_half_eq_opt, MonomialTerms { terms })| {
+                for Term {
+                    scalar,
+                    product: prod,
+                } in terms
+                {
+                    let f = &self.poly.flattened_ml_extensions;
+                    let f_type = &self.poly_meta;
+                    let get_poly_meta = || f_type[prod[0]];
+                    let mut uni_variate: Vec<E> = match prod.len() {
+                        1 => sumcheck_code_gen!(1, false, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        2 => sumcheck_code_gen!(2, false, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        3 => sumcheck_code_gen!(3, false, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        4 => sumcheck_code_gen!(4, false, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        5 => sumcheck_code_gen!(5, false, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        _ => unimplemented!("do not support degree {} > 5", prod.len()),
+                    };
 
-                sum.iter_mut().for_each(|sum| *sum *= *coefficient);
+                    uni_variate
+                        .iter_mut()
+                        .for_each(|sum| either::for_both!(scalar, scalar => *sum *= *scalar));
 
-                let span = entered_span!("extrapolation");
-                let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
-                    .map(|i| {
-                        let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
-                        let at = E::from_u64((prod.len() + 1 + i) as u64);
-                        serial_extrapolate(points, weights, &sum, &at)
-                    })
-                    .collect::<Vec<_>>();
-                sum.extend(extrapolation);
-                exit_span!(span);
-                let span = entered_span!("extend_extrapolate");
-                products_sum += AdditiveVec(sum);
-                exit_span!(span);
-                products_sum
+                    let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
+                        .map(|i| {
+                            let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
+                            let at = E::from_u64((prod.len() + 1 + i) as u64);
+                            serial_extrapolate(points, weights, &uni_variate, &at)
+                        })
+                        .collect::<Vec<_>>();
+                    uni_variate.extend(extrapolation);
+                    uni_polys += AdditiveVec(uni_variate);
+                }
+                uni_polys
             },
         );
         exit_span!(span);
@@ -441,7 +449,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         exit_span!(start);
 
         IOPProverMessage {
-            evaluations: products_sum,
+            evaluations: uni_polys,
         }
     }
 
@@ -660,50 +668,50 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
-        let span = entered_span!("products_sum");
-        let AdditiveVec(products_sum) = self
+        let span = entered_span!("build_uni_poly");
+        let AdditiveVec(uni_polys) = self
             .poly
             .products
             .par_iter()
             .fold_with(
                 AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-                |mut products_sum, (coefficient, prod)| {
-                    let span = entered_span!("sum");
+                |mut uni_polys, (_half_eq_opt, MonomialTerms { terms })| {
+                    for Term {
+                        scalar,
+                        product: prod,
+                    } in terms
+                    {
+                        let f = &self.poly.flattened_ml_extensions;
+                        let f_type = &self.poly_meta;
+                        let get_poly_meta = || f_type[prod[0]];
+                        let mut sum: Vec<E> = match prod.len() {
+                            1 => sumcheck_code_gen!(1, true, |i| &f[prod[i]], || get_poly_meta())
+                                .to_vec(),
+                            2 => sumcheck_code_gen!(2, true, |i| &f[prod[i]], || get_poly_meta())
+                                .to_vec(),
+                            3 => sumcheck_code_gen!(3, true, |i| &f[prod[i]], || get_poly_meta())
+                                .to_vec(),
+                            4 => sumcheck_code_gen!(4, true, |i| &f[prod[i]], || get_poly_meta())
+                                .to_vec(),
+                            5 => sumcheck_code_gen!(5, true, |i| &f[prod[i]], || get_poly_meta())
+                                .to_vec(),
+                            _ => unimplemented!("do not support degree {} > 5", prod.len()),
+                        };
+                        sum.iter_mut()
+                            .for_each(|sum| either::for_both!(*scalar, scalar => *sum *= scalar));
 
-                    let f = &self.poly.flattened_ml_extensions;
-                    let f_type = &self.poly_meta;
-                    let get_poly_meta = || f_type[prod[0]];
-                    let mut sum: Vec<E> = match prod.len() {
-                        1 => sumcheck_code_gen!(1, true, |i| &f[prod[i]], || get_poly_meta())
-                            .to_vec(),
-                        2 => sumcheck_code_gen!(2, true, |i| &f[prod[i]], || get_poly_meta())
-                            .to_vec(),
-                        3 => sumcheck_code_gen!(3, true, |i| &f[prod[i]], || get_poly_meta())
-                            .to_vec(),
-                        4 => sumcheck_code_gen!(4, true, |i| &f[prod[i]], || get_poly_meta())
-                            .to_vec(),
-                        5 => sumcheck_code_gen!(5, true, |i| &f[prod[i]], || get_poly_meta())
-                            .to_vec(),
-                        _ => unimplemented!("do not support degree {} > 5", prod.len()),
-                    };
-                    exit_span!(span);
-                    sum.iter_mut().for_each(|sum| *sum *= *coefficient);
-
-                    let span = entered_span!("extrapolation");
-                    let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
-                        .into_par_iter()
-                        .map(|i| {
-                            let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
-                            let at = E::from_u64((prod.len() + 1 + i) as u64);
-                            extrapolate(points, weights, &sum, &at)
-                        })
-                        .collect::<Vec<_>>();
-                    sum.extend(extrapolation);
-                    exit_span!(span);
-                    let span = entered_span!("extend_extrapolate");
-                    products_sum += AdditiveVec(sum);
-                    exit_span!(span);
-                    products_sum
+                        let extrapolation = (0..self.poly.aux_info.max_degree - prod.len())
+                            .into_par_iter()
+                            .map(|i| {
+                                let (points, weights) = &self.extrapolation_aux[prod.len() - 1];
+                                let at = E::from_u64((prod.len() + 1 + i) as u64);
+                                extrapolate(points, weights, &sum, &at)
+                            })
+                            .collect::<Vec<_>>();
+                        sum.extend(extrapolation);
+                        uni_polys += AdditiveVec(sum);
+                    }
+                    uni_polys
                 },
             )
             .reduce_with(|acc, item| acc + item)
@@ -713,7 +721,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         exit_span!(start);
 
         IOPProverMessage {
-            evaluations: products_sum,
+            evaluations: uni_polys,
         }
     }
 

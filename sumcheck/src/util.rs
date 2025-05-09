@@ -284,14 +284,14 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
             PolyMeta::Phase2Only => {
                 let poly = &virtual_polys[0].flattened_ml_extensions[i];
                 assert!(poly.num_vars() <= log2_poly_len);
-                let blow_factor = 1 << (merged_num_vars - poly.num_vars());
+                let blowup_factor = 1 << (merged_num_vars - poly.num_vars());
                 DenseMultilinearExtension::from_evaluations_ext_vec(
                     merged_num_vars,
                     op_mle!(
                         poly,
                         |poly| {
                             poly.iter()
-                                .flat_map(|e| std::iter::repeat_n(*e, blow_factor))
+                                .flat_map(|e| std::iter::repeat_n(*e, blowup_factor))
                                 .collect_vec()
                         },
                         |base_poly| base_poly.iter().map(|e| E::from(*e)).collect_vec()
