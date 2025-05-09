@@ -657,6 +657,49 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
             num_vars: self.num_vars,
         }
     }
+
+    /// split the MLE into `num_chunks` parts, each with disjoint ownership of the evaluation data
+    /// panics if `num_chunks` is zero, not divisible, or if the data is not owned
+    pub fn split_mle_into_chunks(self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+        assert!(num_chunks > 0, "num_chunks must be > 0");
+        let len = self.evaluations.len();
+        assert_eq!(
+            len % num_chunks,
+            0,
+            "Evaluation length must be divisible by num_chunks"
+        );
+        let chunk_size = len / num_chunks;
+        let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
+
+        match self.evaluations {
+            FieldType::Base(Cow::Owned(mut vec)) => {
+                let mut result = Vec::with_capacity(num_chunks);
+                for _ in 0..num_chunks {
+                    let chunk: Vec<_> = vec.drain(..chunk_size).collect();
+                    result.push(MultilinearExtension {
+                        evaluations: FieldType::Base(Cow::Owned(chunk)),
+                        num_vars: num_vars_per_chunk,
+                    });
+                }
+                result
+            }
+
+            FieldType::Ext(Cow::Owned(mut vec)) => {
+                let mut result = Vec::with_capacity(num_chunks);
+                for _ in 0..num_chunks {
+                    let chunk: Vec<_> = vec.drain(..chunk_size).collect();
+                    result.push(MultilinearExtension {
+                        evaluations: FieldType::Ext(Cow::Owned(chunk)),
+                        num_vars: num_vars_per_chunk,
+                    });
+                }
+                result
+            }
+            _ => {
+                panic!("Can only split when evaluations are owned");
+            }
+        }
+    }
 }
 
 #[allow(clippy::wrong_self_convention)]
