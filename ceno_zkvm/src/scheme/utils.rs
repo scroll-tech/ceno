@@ -21,6 +21,38 @@ use witness::next_pow2_instance_padding;
 use crate::scheme::constants::MIN_PAR_SIZE;
 use multilinear_extensions::Expression;
 
+// first computes the masked mle'[j] = mle[j] if j < num_instance, else default
+// then split it into `num_parts` smaller mles
+pub(crate) fn masked_mle_split_to_parts<'a, E: ExtensionField>(
+    mle: &ArcMultilinearExtension<'a, E>,
+    num_instance: usize,
+    num_parts: usize,
+    default: E,
+) -> Vec<ArcMultilinearExtension<'a, E>> {
+    assert!(num_parts.is_power_of_two());
+    assert!(num_instance <= mle.evaluations().len());
+
+    let evals = mle.evaluations();
+    (0..num_parts)
+        .into_par_iter()
+        .map(|part_idx| {
+            let n = mle.evaluations().len() / num_parts;
+            let mut evaluations = vec![default; n];
+
+            (part_idx * n..(part_idx + 1) * n)
+                .into_iter()
+                .map(|i| {
+                    if i < num_instance {
+                        mle.evaluations()[i]
+                    } else {
+                        default
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into_mle()
+        })
+        .collect::<Vec<_>>()
+}
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
 /// output [[1,3,5,7,0,0,0,0],[2,4,6,8,0,0,0,0]]
