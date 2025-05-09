@@ -11,7 +11,6 @@ use super::{
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     gadgets::{IsLtConfig, SignedExtendConfig},
     instructions::Instruction,
     set_val,
@@ -21,6 +20,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{ToExpr, WitIn};
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {

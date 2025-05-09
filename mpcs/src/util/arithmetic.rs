@@ -4,9 +4,7 @@ use num_integer::Integer;
 use p3::field::Field;
 use std::{borrow::Borrow, iter};
 
-mod bh;
 mod hypercube;
-pub use bh::BooleanHypercube;
 pub use hypercube::{
     interpolate_field_type_over_boolean_hypercube, interpolate_over_boolean_hypercube,
 };

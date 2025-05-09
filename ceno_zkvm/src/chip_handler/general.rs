@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn},
     instructions::riscv::constants::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
         UINT_LIMBS,
@@ -11,6 +10,7 @@ use crate::{
     structs::{ProgramParams, RAMType, ROMType},
     tables::InsnRecord,
 };
+use multilinear_extensions::{Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn};
 
 impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn new(cs: &'a mut ConstraintSystem<E>) -> Self {
@@ -26,6 +26,29 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_witin(name_fn)
+    }
+
+    pub fn create_witin_from_exprs<NR, N>(
+        &mut self,
+        name_fn: N,
+        input: Expression<E>,
+        debug: bool,
+    ) -> Result<WitIn, ZKVMError>
+    where
+        NR: Into<String> + Clone,
+        N: FnOnce() -> NR,
+    {
+        self.namespace(
+            || "witin_from_expr",
+            |cb| {
+                let name = name_fn().into();
+                let wit = cb.create_witin(|| name.clone());
+                if !debug {
+                    cb.require_zero(|| name.clone(), wit.expr() - input)?;
+                }
+                Ok(wit)
+            },
+        )
     }
 
     pub fn create_structural_witin<NR, N>(
@@ -241,7 +264,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "require_equal",
             |cb| {
                 cb.cs
-                    .require_zero(name_fn, a.to_monomial_form() - b.to_monomial_form())
+                    .require_zero(name_fn, a.get_monomial_form() - b.get_monomial_form())
             },
         )
     }

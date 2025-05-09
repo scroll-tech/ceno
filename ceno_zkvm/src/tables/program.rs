@@ -4,7 +4,6 @@ use super::RMMCollections;
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, ToExpr, WitIn},
     set_fixed_val, set_val,
     structs::ROMType,
     tables::TableCircuit,
@@ -15,6 +14,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
+use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};

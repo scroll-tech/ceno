@@ -1,20 +1,24 @@
 use ceno_emul::KeccakSpec;
+use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{evaluation::PointAndEval, gkr::GKRCircuitWitness};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+use crate::scheme::utils::{
+    infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+};
 use itertools::{Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
+    Expression,
     mle::IntoMLE,
     util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
-    virtual_polys::VirtualPolynomials,
+    virtual_polys::{VirtualPolynomials, VirtualPolynomialsBuilder},
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    sync::Arc,
-};
+use std::{iter::Iterator, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -25,22 +29,19 @@ use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
     error::ZKVMError,
-    expression::Instance,
     instructions::{Instruction, riscv::dummy::LargeEcallDummy},
     scheme::{
-        GKROpcodeProof,
+        GKROpcodeProof, TowerProofs,
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
-        utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-            wit_infer_by_expr,
-        },
+        utils::wit_infer_by_expr,
     },
     structs::{
-        GKRIOPProvingKey, KeccakGKRIOP, ProvingKey, TowerProofs, TowerProver, TowerProverSpec,
-        ZKVMProvingKey, ZKVMWitnesses,
+        GKRIOPProvingKey, KeccakGKRIOP, ProvingKey, TowerProver, TowerProverSpec, ZKVMProvingKey,
+        ZKVMWitnesses,
     },
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
+use multilinear_extensions::Instance;
 
 use super::{PublicValues, ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof};
 
@@ -1059,9 +1060,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
-                        witness: w,
-                    }]
+                    vec![
+                        TowerProverSpec { witness: r },
+                        TowerProverSpec { witness: w },
+                    ]
                 })
                 .collect_vec(),
             lk_wit_layers
@@ -1294,10 +1296,15 @@ impl TowerProver {
                 let num_threads = optimal_sumcheck_threads(out_rt.len());
 
                 let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
-                let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, out_rt.len());
+
+                let mut expr_builder = VirtualPolynomialsBuilder::default();
+                let mut exprs =
+                    Vec::<Expression<E>>::with_capacity(prod_specs.len() + logup_specs.len());
+                let eq_expr = expr_builder.lift(&eq);
 
                 for (s, alpha) in izip!(&prod_specs, &alpha_pows) {
                     if round < s.witness.len() {
+                        let alpha_expr = Expression::Constant(Either::Right(*alpha));
                         let layer_polys = &s.witness[round];
 
                         // sanity check
@@ -1310,11 +1317,9 @@ impl TowerProver {
                                 })
                         );
 
+                        let layer_polys_product = layer_polys.iter().map(|layer_poly| expr_builder.lift(layer_poly)).product::<Expression<E>>();
                         // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
-                        virtual_polys.add_mle_list(
-                            [vec![&eq], layer_polys.iter().collect()].concat(),
-                            *alpha,
-                        )
+                        exprs.push(eq_expr.clone() * alpha_expr *layer_polys_product);
                     }
                 }
 
@@ -1323,37 +1328,36 @@ impl TowerProver {
                     if round < s.witness.len() {
                         let layer_polys = &s.witness[round];
                         // sanity check
-                        assert_eq!(layer_polys.len(), 4); // p1, q1, p2, q2
+                        assert_eq!(layer_polys.len(), 4); // p1, p2, q1, q2
                         assert!(
                             layer_polys
                                 .iter()
                                 .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
                         );
 
-                        let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
+                        let (alpha_numerator, alpha_denominator) = (Expression::Constant(Either::Right(alpha[0])), Expression::Constant(Either::Right(alpha[1])));
 
-                        let (q2, q1, p2, p1) = (
-                            &layer_polys[3],
-                            &layer_polys[2],
-                            &layer_polys[1],
-                            &layer_polys[0],
+                        let (p1, p2, q1, q2) = (
+                            expr_builder.lift(&layer_polys[0]),
+                            expr_builder.lift(&layer_polys[1]),
+                            expr_builder.lift(&layer_polys[2]),
+                            expr_builder.lift(&layer_polys[3]),
                         );
 
-                        // \sum_s eq(rt, s) * alpha_numerator^{i} * (p1 * q2 + p2 * q1)
-                        virtual_polys.add_mle_list(vec![&eq, &p1, &q2], *alpha_numerator);
-                        virtual_polys.add_mle_list(vec![&eq, &p2, &q1], *alpha_numerator);
-
-                        // \sum_s eq(rt, s) * alpha_denominator^{i} * (q1 * q2)
-                        virtual_polys.add_mle_list(vec![&eq, &q1, &q2], *alpha_denominator);
+                        // \sum_s eq(rt, s) * (alpha_numerator^{i} * (p1 * q2 + p2 * q1) + alpha_denominator^{i} * q1 * q2)
+                        exprs.push(eq_expr.clone() * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())  + alpha_denominator * q1 * q2));
                     }
                 }
 
                 let wrap_batch_span = entered_span!("wrap_batch");
-                // NOTE: at the time of adding this span, visualizing it with the flamegraph layer
-                // shows it to be (inexplicably) much more time-consuming than the call to `prove_batch_polys`
-                // This is likely a bug in the tracing-flame crate.
                 let (sumcheck_proofs, state) = IOPProverState::prove(
-                    virtual_polys,
+                    expr_builder.to_virtual_polys(
+                        num_threads,
+                        out_rt.len(),
+                        None,
+                        &[exprs.into_iter().sum::<Expression<E>>()],
+                        &[],
+                    ),
                     transcript,
                 );
                 exit_span!(wrap_batch_span);
@@ -1387,11 +1391,10 @@ impl TowerProver {
                 for (i, s) in enumerate(&logup_specs) {
                     if round < s.witness.len() {
                         // collect evals belong to current spec
-                        // p1, q2, p2, q1
                         let p1 = *evals_iter.next().expect("insufficient evals length");
-                        let q2 = *evals_iter.next().expect("insufficient evals length");
                         let p2 = *evals_iter.next().expect("insufficient evals length");
                         let q1 = *evals_iter.next().expect("insufficient evals length");
+                        let q2 = *evals_iter.next().expect("insufficient evals length");
                         proofs.push_logup_evals_and_point(i, vec![p1, p2, q1, q2], rt_prime.clone());
                     }
                 }

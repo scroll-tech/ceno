@@ -21,15 +21,12 @@ use witness::next_pow2_instance_padding;
 
 use crate::{
     error::ZKVMError,
-    expression::{Instance, StructuralWitIn},
     instructions::{GKRIOPInstruction, riscv::dummy::LargeEcallDummy},
-    scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-        utils::eval_by_expr_with_instance,
-    },
+    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
     structs::{PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
 };
+use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
 
 use super::{
     ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
@@ -308,7 +305,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
-        );
+        )
+        .right()
+        .unwrap();
         prod_w *= initial_global_state;
         let finalize_global_state = eval_by_expr_with_instance(
             &[],
@@ -317,7 +316,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             pi_evals,
             &challenges,
             &self.vk.finalize_global_state_expr,
-        );
+        )
+        .right()
+        .unwrap();
         prod_r *= finalize_global_state;
         // check rw_set equality across all proofs
         if prod_r != prod_w {
@@ -518,22 +519,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let r_records_in_evals: Vec<_> = cs
             .r_expressions
             .iter()
-            .map(|expr: &crate::expression::Expression<E>| {
+            .map(|expr: &multilinear_extensions::Expression<E>| {
                 eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                    .right()
+                    .unwrap()
             })
             .collect();
         let w_records_in_evals: Vec<_> = cs
             .w_expressions
             .iter()
-            .map(|expr: &crate::expression::Expression<E>| {
+            .map(|expr: &multilinear_extensions::Expression<E>| {
                 eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                    .right()
+                    .unwrap()
             })
             .collect();
         let lk_records_in_evals: Vec<_> = cs
             .lk_expressions
             .iter()
-            .map(|expr: &crate::expression::Expression<E>| {
+            .map(|expr: &multilinear_extensions::Expression<E>| {
                 eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                    .right()
+                    .unwrap()
             })
             .collect();
         let computed_evals = [
@@ -562,18 +569,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     * cs.assert_zero_sumcheck_expressions
                         .iter()
                         .zip_eq(alpha_pow_iter)
-                        .map(|(expr, alpha): (&crate::expression::Expression<E>, _)| {
-                            // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
-                            *alpha
-                                * eval_by_expr_with_instance(
-                                    &[],
-                                    &proof.wits_in_evals,
-                                    &[],
-                                    pi,
-                                    challenges,
-                                    expr,
-                                )
-                        })
+                        .map(
+                            |(expr, alpha): (&multilinear_extensions::Expression<E>, _)| {
+                                // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
+                                *alpha
+                                    * eval_by_expr_with_instance(
+                                        &[],
+                                        &proof.wits_in_evals,
+                                        &[],
+                                        pi,
+                                        challenges,
+                                        expr,
+                                    )
+                                    .right()
+                                    .unwrap()
+                            },
+                        )
                         .sum::<E>()
             },
         ]
@@ -590,8 +601,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if cs
             .assert_zero_expressions
             .iter()
-            .any(|expr: &crate::expression::Expression<E>| {
+            .any(|expr: &multilinear_extensions::Expression<E>| {
                 eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                    .right()
+                    .unwrap()
                     != E::ZERO
             })
         {
@@ -861,7 +874,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 pi,
                 challenges,
                 expr,
-            ) != expected_evals
+            )
+            .right()
+            .unwrap()
+                != expected_evals
         }) {
             return Err(ZKVMError::VerifyError(
                 "record evaluate != expected_evals".into(),

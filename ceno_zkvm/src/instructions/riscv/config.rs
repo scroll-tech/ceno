@@ -1,6 +1,7 @@
-use crate::{expression::WitIn, set_val, utils::i64_to_base, witness::LkMultiplicity};
+use crate::{set_val, utils::i64_to_base, witness::LkMultiplicity};
 use ff_ext::{FieldInto, SmallField};
 use itertools::Itertools;
+use multilinear_extensions::WitIn;
 
 #[derive(Clone)]
 pub struct IsEqualConfig {
