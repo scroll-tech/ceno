@@ -156,7 +156,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 limbs
                     .into_iter()
                     .take(Self::NUM_LIMBS)
-                    .map(|limb| Expression::Constant(E::BaseField::from_u64(limb.into())))
+                    .map(|limb| E::BaseField::from_u64(limb.into()).expr())
                     .collect::<Vec<Expression<E>>>(),
             ),
             carries: None,
@@ -300,7 +300,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let k = C / 8;
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
-            shift_pows.push(Expression::Constant(E::BaseField::ONE));
+            shift_pows.push(E::BaseField::ONE.expr());
             (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
@@ -330,7 +330,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let k = C / 8;
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
-            shift_pows.push(Expression::Constant(E::BaseField::ONE));
+            shift_pows.push(E::BaseField::ONE.expr());
             (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };

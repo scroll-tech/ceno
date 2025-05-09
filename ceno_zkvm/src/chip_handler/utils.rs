@@ -2,7 +2,7 @@ use std::iter::successors;
 
 use ff_ext::ExtensionField;
 use itertools::izip;
-use multilinear_extensions::Expression;
+use multilinear_extensions::{Expression, ToExpr};
 use p3::field::PrimeCharacteristicRing;
 
 pub fn rlc_chip_record<E: ExtensionField>(
@@ -31,7 +31,7 @@ pub fn power_sequence<E: ExtensionField>(
         ),
         "expression must be constant or challenge"
     );
-    successors(Some(Expression::Constant(E::BaseField::ONE)), move |prev| {
+    successors(Some(E::BaseField::ONE.expr()), move |prev| {
         Some(prev.clone() * base.clone())
     })
 }

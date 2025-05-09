@@ -1147,22 +1147,16 @@ Hints:
 
         let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
-        gs_rs.insert(eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            &instance,
-            &challenges,
-            &gs_final,
-        ));
-        gs_ws.insert(eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            &instance,
-            &challenges,
-            &gs_init,
-        ));
+        gs_rs.insert(
+            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_final)
+                .right()
+                .unwrap(),
+        );
+        gs_ws.insert(
+            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_init)
+                .right()
+                .unwrap(),
+        );
 
         // gs stores { (pc, timestamp) }
         find_rw_mismatch!(
@@ -1382,7 +1376,7 @@ mod tests {
                             GoldilocksExt2::ONE,
                             GoldilocksExt2::ZERO,
                         )),
-                        Box::new(Expression::Constant(Goldilocks::from_u64(U5 as u64))),
+                        Box::new(Goldilocks::from_u64(U5 as u64).expr()),
                     )),
                     Box::new(Expression::Challenge(
                         0,

@@ -261,9 +261,11 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> = Arc::new(
-                DenseMultilinearExtension::from_evaluations_vec(0, vec![scalar]),
-            );
+            let scalar: ArcMultilinearExtension<E> =
+                Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+                    0,
+                    vec![scalar.left().expect("do not support extension field")],
+                ));
             scalar
         },
         &|challenge_id, pow, scalar, offset| {

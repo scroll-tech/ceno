@@ -17,8 +17,7 @@ pub type Param<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::Param;
 pub type ProverParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::ProverParam;
 pub type VerifierParam<E, Pcs> = <Pcs as PolynomialCommitmentScheme<E>>::VerifierParam;
 
-/// A point is a vector of num_var length
-pub type Point<F> = Vec<F>;
+pub type Point<E> = multilinear_extensions::mle::Point<E>;
 
 pub fn pcs_setup<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     poly_size: usize,

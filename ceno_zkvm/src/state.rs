@@ -20,7 +20,7 @@ impl<E: ExtensionField> StateCircuit<E> for GlobalState {
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Expression<E>, ZKVMError> {
         let states: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from_u64(RAMType::GlobalState as u64)),
+            E::BaseField::from_u64(RAMType::GlobalState as u64).expr(),
             circuit_builder.query_init_pc()?.expr(),
             circuit_builder.query_init_cycle()?.expr(),
         ];
@@ -32,7 +32,7 @@ impl<E: ExtensionField> StateCircuit<E> for GlobalState {
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
     ) -> Result<Expression<E>, ZKVMError> {
         let states: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from_u64(RAMType::GlobalState as u64)),
+            E::BaseField::from_u64(RAMType::GlobalState as u64).expr(),
             circuit_builder.query_end_pc()?.expr(),
             circuit_builder.query_end_cycle()?.expr(),
         ];
