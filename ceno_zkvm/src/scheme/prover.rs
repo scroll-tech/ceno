@@ -5,9 +5,9 @@ use itertools::{Either, Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression,
-    mle::IntoMLE,
+    mle::{ArcMultilinearExtension, IntoMLE},
     util::ceil_log2,
-    virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
+    virtual_poly::build_eq_x_r_vec,
     virtual_polys::{VirtualPolynomials, VirtualPolynomialsBuilder},
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};

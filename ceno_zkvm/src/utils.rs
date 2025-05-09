@@ -9,7 +9,7 @@ use std::{
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
 };
 use p3::field::Field;
 use transcript::Transcript;
@@ -292,7 +292,8 @@ mod tests {
     use ff_ext::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::{
-        Expression, ToExpr, mle::IntoMLE, virtual_poly::ArcMultilinearExtension,
+        Expression, ToExpr,
+        mle::{ArcMultilinearExtension, IntoMLE},
         virtual_polys::VirtualPolynomials,
     };
     use p3::field::PrimeCharacteristicRing;

@@ -9,7 +9,7 @@ type F = Goldilocks;
 type E = BinomialExtensionField<F, 2>;
 
 use crate::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
+    mle::{ArcMultilinearExtension, MultilinearExtension},
     util::bit_decompose,
     virtual_poly::{VirtualPolynomial, build_eq_x_r},
 };
@@ -47,7 +47,7 @@ fn test_eq_xr() {
 
 #[test]
 fn test_fix_high_variables() {
-    let poly: DenseMultilinearExtension<E> = DenseMultilinearExtension::from_evaluations_vec(
+    let poly: MultilinearExtension<E> = MultilinearExtension::from_evaluations_vec(
         3,
         vec![
             F::from_u64(13),
@@ -63,7 +63,7 @@ fn test_fix_high_variables() {
 
     let partial_point = vec![E::from_u64(3), E::from_u64(5)];
 
-    let expected1 = DenseMultilinearExtension::from_evaluations_ext_vec(
+    let expected1 = MultilinearExtension::from_evaluations_ext_vec(
         2,
         vec![
             -E::from_u64(17),
@@ -75,10 +75,8 @@ fn test_fix_high_variables() {
     let result1 = poly.fix_high_variables(&partial_point[1..]);
     assert_eq!(result1, expected1);
 
-    let expected2 = DenseMultilinearExtension::from_evaluations_ext_vec(
-        1,
-        vec![-E::from_u64(23), E::from_u64(139)],
-    );
+    let expected2 =
+        MultilinearExtension::from_evaluations_ext_vec(1, vec![-E::from_u64(23), E::from_u64(139)]);
     let result2 = poly.fix_high_variables(&partial_point);
     assert_eq!(result2, expected2);
 }
@@ -89,7 +87,7 @@ fn test_fix_high_variables() {
 //      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 // over r, which is
 //      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
+fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcMultilinearExtension<E> {
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
     // for example, with num_vars = 4, x is a binary vector of 4, then
@@ -118,7 +116,7 @@ fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExten
         eval.push(current_eval);
     }
 
-    let mle = DenseMultilinearExtension::from_evaluations_ext_vec(num_var, eval);
+    let mle = MultilinearExtension::from_evaluations_ext_vec(num_var, eval);
 
     mle.into()
 }

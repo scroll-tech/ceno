@@ -5,8 +5,8 @@ use sumcheck::macros::{entered_span, exit_span};
 
 pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &mut FieldType<E>) {
     match evals {
-        FieldType::Ext(evals) => interpolate_over_boolean_hypercube(evals),
-        FieldType::Base(evals) => interpolate_over_boolean_hypercube(evals),
+        FieldType::Ext(evals) => interpolate_over_boolean_hypercube(evals.to_mut()),
+        FieldType::Base(evals) => interpolate_over_boolean_hypercube(evals.to_mut()),
         _ => unreachable!(),
     };
 }

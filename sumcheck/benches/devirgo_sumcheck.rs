@@ -11,10 +11,10 @@ use rand::thread_rng;
 use sumcheck::structs::IOPProverState;
 
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
     op_mle,
     util::max_usable_threads,
-    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
+    virtual_poly::VirtualPolynomial,
     virtual_polys::VirtualPolynomials,
 };
 use transcript::BasicTranscript as Transcript;
@@ -46,7 +46,7 @@ fn prepare_input<'a, E: ExtensionField>(nv: usize) -> (E, Vec<ArcMultilinearExte
     let fs = (0..NUM_DEGREE)
         .map(|_| {
             let mle: ArcMultilinearExtension<'a, E> =
-                DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
+                MultilinearExtension::<E>::random(nv, &mut rng).into();
             mle
         })
         .collect_vec();

@@ -10,9 +10,7 @@ use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools};
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    Expression, impl_expr_from_unsigned, virtual_poly::ArcMultilinearExtension,
-};
+use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;

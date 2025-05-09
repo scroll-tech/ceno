@@ -7,9 +7,10 @@ use std::{
 use crate::{
     Expression, WitnessId,
     expression::monomial::Term,
+    mle::ArcMultilinearExtension,
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
-    virtual_poly::{ArcMultilinearExtension, MonomialTerms, VirtualPolynomial},
+    virtual_poly::{MonomialTerms, VirtualPolynomial},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -160,7 +161,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         }
     }
 
-    fn get_range_polys_by_thread_id(
+    fn get_subslice_polys_by_thread_id(
         &self,
         thread_id: usize,
         polys: Vec<&'a ArcMultilinearExtension<'a, E>>,
@@ -169,7 +170,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .into_iter()
             .map(|poly| {
                 let range_poly: ArcMultilinearExtension<E> =
-                    Arc::new(poly.get_ranged_mle(self.num_threads, thread_id));
+                    Arc::new(poly.as_subslice_mle(self.num_threads, thread_id));
                 range_poly
             })
             .collect_vec()
@@ -191,11 +192,11 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             let mles = (0..self.num_threads)
                 .map(|thread_id| {
                     let mle_thread_based = if mle.num_vars() > log2_num_threads {
-                        self.get_range_polys_by_thread_id(thread_id, vec![mle])
+                        self.get_subslice_polys_by_thread_id(thread_id, vec![mle])
                             .remove(0)
                     } else {
                         // polynomial is too small
-                        Arc::new(mle.get_ranged_mle(1, 0))
+                        Arc::new(mle.as_subslice_mle(1, 0))
                     };
                     self.polys[thread_id].register_mle(mle_thread_based.clone());
                     mle_thread_based
@@ -224,11 +225,14 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 (0..self.num_threads)
                     .map(|thread_id| {
                         if zero_check_half_eq.num_vars() > log2_num_threads {
-                            self.get_range_polys_by_thread_id(thread_id, vec![zero_check_half_eq])
-                                .remove(0)
+                            self.get_subslice_polys_by_thread_id(
+                                thread_id,
+                                vec![zero_check_half_eq],
+                            )
+                            .remove(0)
                         } else {
                             // polynomial is too small
-                            Arc::new(zero_check_half_eq.get_ranged_mle(1, 0))
+                            Arc::new(zero_check_half_eq.as_subslice_mle(1, 0))
                         }
                     })
                     .collect_vec(),
@@ -262,9 +266,9 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                                 let mles = (0..self.num_threads)
                                     .map(|thread_id| match poly_meta {
                                         PolyMeta::Normal => self
-                                            .get_range_polys_by_thread_id(thread_id, vec![p])
+                                            .get_subslice_polys_by_thread_id(thread_id, vec![p])
                                             .remove(0),
-                                        PolyMeta::Phase2Only => Arc::new(p.get_ranged_mle(1, 0)),
+                                        PolyMeta::Phase2Only => Arc::new(p.as_subslice_mle(1, 0)),
                                     })
                                     .collect_vec();
                                 let mles_cloned = mles.clone();

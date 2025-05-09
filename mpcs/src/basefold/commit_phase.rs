@@ -15,6 +15,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Itertools, izip};
+use multilinear_extensions::mle::ArcMultilinearExtension;
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::{Field, PrimeCharacteristicRing, dot_product},
@@ -34,8 +35,8 @@ use sumcheck::{
 use transcript::{Challenge, Transcript};
 
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE},
-    virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
+    mle::{IntoMLE, MultilinearExtension},
+    virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomials,
 };
 use rayon::{
@@ -183,7 +184,7 @@ where
                 .map(|mle| mle.get_base_field_vec())
                 .collect_vec();
             let running_evals: ArcMultilinearExtension<_> =
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                     num_vars,
                     (0..witin_fixed_mle[0].evaluations().len())
                         .into_par_iter()

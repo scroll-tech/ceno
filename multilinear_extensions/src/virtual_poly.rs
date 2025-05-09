@@ -4,7 +4,7 @@ use std::{
 
 use crate::{
     macros::{entered_span, exit_span},
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
+    mle::{ArcMultilinearExtension, MultilinearExtension},
     monomial::Term,
     util::{bit_decompose, create_uninit_vec, max_usable_threads},
 };
@@ -19,8 +19,6 @@ use rayon::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-pub type ArcMultilinearExtension<'a, E> =
-    Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> + 'a>;
 pub type MonomialTermsType<'a, E> =
     Vec<Term<Either<<E as ExtensionField>::BaseField, E>, ArcMultilinearExtension<'a, E>>>;
 
@@ -36,7 +34,7 @@ pub struct MonomialTerms<E: ExtensionField> {
 #[rustfmt::skip]
 /// A virtual polynomial is a sum of products of multilinear polynomials;
 /// where the multilinear polynomials are stored via their multilinear
-/// extensions:  `(coefficient, DenseMultilinearExtension)`
+/// extensions:  `(coefficient, MultilinearExtension)`
 ///
 /// * Number of products n = `polynomial.products.len()`,
 /// * Number of multiplicands of ith product m_i =
@@ -297,7 +295,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
             let num_multiplicands =
                 rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
             let (product, product_sum) =
-                DenseMultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
+                MultilinearExtension::random_mle_list(nv, num_multiplicands, rng);
             let product: Vec<ArcMultilinearExtension<E>> =
                 product.into_iter().map(|mle| mle as _).collect_vec();
             let coefficient = E::random(&mut *rng);
@@ -343,9 +341,9 @@ pub fn eq_eval<F: Field>(x: &[F], y: &[F]) -> F {
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-pub fn build_eq_x_r_sequential<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
+pub fn build_eq_x_r_sequential<E: ExtensionField>(r: &[E]) -> ArcMultilinearExtension<E> {
     let evals = build_eq_x_r_vec_sequential(r);
-    let mle = DenseMultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
+    let mle = MultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
 
     mle.into()
 }
@@ -407,9 +405,9 @@ fn build_eq_x_r_helper_sequential<E: ExtensionField>(r: &[E], buf: &mut [MaybeUn
 ///      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 /// over r, which is
 ///      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-pub fn build_eq_x_r<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
+pub fn build_eq_x_r<E: ExtensionField>(r: &[E]) -> ArcMultilinearExtension<E> {
     let evals = build_eq_x_r_vec(r);
-    let mle = DenseMultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
+    let mle = MultilinearExtension::from_evaluations_ext_vec(r.len(), evals);
 
     mle.into()
 }
