@@ -347,7 +347,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             extrapolation_aux,
             poly_meta: poly_meta.unwrap_or_else(|| vec![PolyMeta::Normal; num_polys]),
             phase2_numvar,
-            poly_index_fixvar_in_place: vec![false; num_polys],
         }
     }
 
@@ -486,13 +485,13 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// fix_var
     pub fn fix_var(&mut self, r: E) {
         let expected_numvars_at_round = self.expected_numvars_at_round();
-        self.poly_index_fixvar_in_place
+        self.poly
+            .flattened_ml_extensions
             .iter_mut()
-            .zip_eq(self.poly.flattened_ml_extensions.iter_mut())
             .zip_eq(&self.poly_meta)
-            .for_each(|((can_fixvar_in_place, poly), poly_type)| {
+            .for_each(|(poly, poly_type)| {
                 debug_assert!(poly.num_vars() > 0);
-                if *can_fixvar_in_place {
+                if poly.is_owned() {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
@@ -506,7 +505,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                         && matches!(poly_type, PolyMeta::Normal)
                     {
                         *poly = Arc::new(poly.fix_variables(&[r]));
-                        *can_fixvar_in_place = true;
                     }
                 } else {
                     panic!("calling sumcheck on constant")
@@ -615,7 +613,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 .collect(),
             poly_meta,
             phase2_numvar: None,
-            poly_index_fixvar_in_place: vec![false; num_polys],
         };
 
         exit_span!(start);
@@ -728,11 +725,11 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// fix_var
     pub fn fix_var_parallel(&mut self, r: E) {
         let expected_numvars_at_round = self.expected_numvars_at_round();
-        self.poly_index_fixvar_in_place
+        self.poly
+            .flattened_ml_extensions
             .par_iter_mut()
-            .zip_eq(self.poly.flattened_ml_extensions.par_iter_mut())
-            .for_each(|(can_fixvar_in_place, poly)| {
-                if *can_fixvar_in_place {
+            .for_each(|poly| {
+                if poly.is_owned() {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
@@ -743,7 +740,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 } else if poly.num_vars() > 0 {
                     if expected_numvars_at_round == poly.num_vars() {
                         *poly = Arc::new(poly.fix_variables_parallel(&[r]));
-                        *can_fixvar_in_place = true;
                     }
                 } else {
                     panic!("calling sumcheck on constant")

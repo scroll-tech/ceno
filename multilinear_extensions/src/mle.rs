@@ -145,6 +145,15 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
 }
 
 impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
+    /// Returns true if the evaluations are owned (not borrowed)
+    pub fn is_owned(&self) -> bool {
+        match &self.evaluations {
+            FieldType::Base(cow) => matches!(cow, Cow::Owned(_)),
+            FieldType::Ext(cow) => matches!(cow, Cow::Owned(_)),
+            FieldType::Unreachable => false,
+        }
+    }
+
     /// This function can tell T being Field or ExtensionField and invoke respective function
     pub fn from_evaluation_vec_smart<T: Clone + 'static>(
         num_vars: usize,
