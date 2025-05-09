@@ -331,7 +331,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` in place
     pub fn fix_variables_in_place(&mut self, partial_point: &[E]) {
-        // TODO: return error.
+        assert!(self.is_owned());
         assert!(
             partial_point.len() <= self.num_vars(),
             "partial point len {} >= num_vars {}",
@@ -409,7 +409,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` from high position in place
     pub fn fix_high_variables_in_place(&mut self, partial_point: &[E]) {
-        // TODO: return error.
+        assert!(self.is_owned());
         assert!(
             partial_point.len() <= self.num_vars(),
             "invalid size of partial point"
@@ -512,7 +512,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` in place
     pub fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]) {
-        // TODO: return error.
+        assert!(self.is_owned());
         assert!(
             partial_point.len() <= self.num_vars(),
             "partial point len {} >= num_vars {}",
