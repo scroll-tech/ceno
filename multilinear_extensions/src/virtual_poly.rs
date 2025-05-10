@@ -143,9 +143,11 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
     pub(crate) fn add_monomial_terms(&mut self, monomial_terms: MonomialTermsType<'a, E>) {
         let terms = monomial_terms
             .into_iter()
-            .map(|term| {
-                let Term { scalar, product } = term;
-                assert!(!product.is_empty(), "some term product is empty");
+            .map(|Term { scalar, product }| {
+                assert!(
+                    !product.is_empty(),
+                    "some term product is empty scalar {scalar}, product {product:?}",
+                );
                 // sanity check: all mle in product must have same num_vars()
                 assert!(
                     product

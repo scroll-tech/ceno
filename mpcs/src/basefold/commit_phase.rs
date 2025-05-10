@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
 use super::{
     encoding::EncodingScheme,
@@ -14,8 +14,10 @@ use crate::{
     },
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use itertools::{Itertools, izip};
-use multilinear_extensions::mle::ArcMultilinearExtension;
+use itertools::Itertools;
+use multilinear_extensions::{
+    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
+};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::{Field, PrimeCharacteristicRing, dot_product},
@@ -37,7 +39,6 @@ use transcript::{Challenge, Transcript};
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     virtual_poly::build_eq_x_r_vec,
-    virtual_polys::VirtualPolynomials,
 };
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
@@ -213,11 +214,26 @@ where
     let num_threads = optimal_sumcheck_threads(max_num_vars);
     let log2_num_threads = log2_strict_usize(num_threads);
 
-    // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
-    let mut polys = VirtualPolynomials::new(num_threads, max_num_vars);
-
-    izip!(&eq, &initial_rlc_evals)
-        .for_each(|(eq, running_evals)| polys.add_mle_list(vec![&eq, &running_evals], E::ONE));
+    let mut expr_builder = VirtualPolynomialsBuilder::default();
+    let eq_expr = eq
+        .into_iter()
+        .map(|eq| expr_builder.lift(Cow::Owned(eq)))
+        .collect_vec();
+    let initial_rlc_evals_expr = initial_rlc_evals
+        .into_iter()
+        .map(|initial_rlc_evals| expr_builder.lift(Cow::Owned(initial_rlc_evals)))
+        .collect_vec();
+    let polys = expr_builder.to_virtual_polys(
+        num_threads,
+        max_num_vars,
+        // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
+        &[eq_expr
+            .into_iter()
+            .zip(initial_rlc_evals_expr.clone())
+            .map(|(eq, initial_rlc_evals)| eq * initial_rlc_evals)
+            .sum::<Expression<E>>()],
+        &[],
+    );
 
     let (batched_polys, poly_meta) = polys.get_batched_polys();
 
@@ -304,10 +320,17 @@ where
 
     let final_message = prover_states[0].get_mle_final_evaluations();
     // skip even index which is eq evaluations
+    let final_message_indexes = initial_rlc_evals_expr
+        .iter()
+        .map(|expr| match expr {
+            Expression::WitIn(index) => *index as usize,
+            _ => unreachable!(),
+        })
+        .collect::<HashSet<usize>>();
     let final_message = final_message
         .into_iter()
         .enumerate()
-        .filter(|(i, _)| i % 2 == 1)
+        .filter(|(i, _)| final_message_indexes.contains(i))
         .map(|(_, m)| m)
         .collect_vec();
 

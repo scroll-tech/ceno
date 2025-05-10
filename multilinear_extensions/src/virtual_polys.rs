@@ -184,7 +184,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             // let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
             let mles = match mle {
                 Cow::Borrowed(mle) => {
-                    assert!(!mle.is_self_owned());
+                    // it's possible that mle is_self_owned == true but we dont want it to be in-place change
                     (0..self.num_threads)
                         .map(|thread_id| {
                             let mle_thread_based = if mle.num_vars() > log2_num_threads {

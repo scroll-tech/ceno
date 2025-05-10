@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeSet, HashMap},
     fmt::Display,
     hash::Hash,
@@ -6,10 +7,11 @@ use std::{
     panic::{self, PanicHookInfo},
 };
 
+use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::Field;
 use transcript::Transcript;
@@ -211,7 +213,8 @@ where
 /// add mle terms into virtual poly by expression
 /// return distinct witin in set
 pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
-    virtual_polys: &mut VirtualPolynomials<'a, E>,
+    expr_builder: &mut VirtualPolynomialsBuilder<'a, E>,
+    exprs: &mut Vec<Expression<E>>,
     selector: Option<&'a ArcMultilinearExtension<'a, E>>,
     wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
     expr: &Expression<E>,
@@ -272,13 +275,17 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         if *constant != E::ZERO && monomial_term.is_empty() && selector.is_none() {
             todo!("make virtual poly support pure constant")
         }
-        let sel = selector.map(|sel| vec![sel]).unwrap_or_default();
+        let sel = selector.map(|sel| expr_builder.lift(Cow::Borrowed(sel)));
         let terms_polys = monomial_term
             .iter()
-            .map(|wit_id| wit_ins[*wit_id as usize])
+            .map(|wit_id| expr_builder.lift(Cow::Borrowed(wit_ins[*wit_id as usize])))
             .collect_vec();
-
-        virtual_polys.add_mle_list([sel, terms_polys].concat(), *constant * alpha);
+        exprs.push(
+            sel.into_iter()
+                .chain(terms_polys)
+                .product::<Expression<E>>()
+                * Expression::Constant(Either::Right(*constant * alpha)),
+        );
     }
 
     monomial_terms

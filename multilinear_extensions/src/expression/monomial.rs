@@ -3,7 +3,6 @@ use itertools::{Itertools, chain, iproduct};
 use serde::{Deserialize, Serialize};
 
 use super::Expression;
-use crate::expression::ToExpr;
 use Expression::*;
 use p3::field::PrimeCharacteristicRing;
 use std::{fmt::Display, iter::Sum};
@@ -13,7 +12,16 @@ impl<E: ExtensionField> Expression<E> {
         Self::combine(self.distribute())
             .into_iter()
             // filter coeff = 0 monimial terms
-            .filter(|Term { scalar, .. }| *scalar != E::BaseField::ZERO.expr())
+            .filter(|Term { scalar, .. }| match scalar {
+                // filter term with scalar != zero
+                Constant(scalar) => scalar
+                    .map_either(
+                        |scalar| scalar != E::BaseField::ZERO,
+                        |scalar| scalar != E::ZERO,
+                    )
+                    .into_inner(),
+                _ => true,
+            })
             .collect_vec()
     }
 
