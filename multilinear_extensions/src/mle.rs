@@ -146,7 +146,8 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
 
 impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Returns true if the evaluations are owned (not borrowed)
-    pub fn is_owned(&self) -> bool {
+    /// avoid is_owned to conflict with std api
+    pub fn is_self_owned(&self) -> bool {
         match &self.evaluations {
             FieldType::Base(cow) => matches!(cow, Cow::Owned(_)),
             FieldType::Ext(cow) => matches!(cow, Cow::Owned(_)),
@@ -331,7 +332,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` in place
     pub fn fix_variables_in_place(&mut self, partial_point: &[E]) {
-        assert!(self.is_owned());
+        assert!(self.is_self_owned());
         assert!(
             partial_point.len() <= self.num_vars(),
             "partial point len {} >= num_vars {}",
@@ -409,7 +410,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` from high position in place
     pub fn fix_high_variables_in_place(&mut self, partial_point: &[E]) {
-        assert!(self.is_owned());
+        assert!(self.is_self_owned());
         assert!(
             partial_point.len() <= self.num_vars(),
             "invalid size of partial point"
@@ -512,7 +513,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` in place
     pub fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]) {
-        assert!(self.is_owned());
+        assert!(self.is_self_owned());
         assert!(
             partial_point.len() <= self.num_vars(),
             "partial point len {} >= num_vars {}",

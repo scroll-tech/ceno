@@ -403,7 +403,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let span = entered_span!("build_uni_poly");
         let AdditiveVec(uni_polys) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-            |mut uni_polys, (_half_eq_opt, MonomialTerms { terms })| {
+            |mut uni_polys, MonomialTerms { terms }| {
                 for Term {
                     scalar,
                     product: prod,
@@ -491,7 +491,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .zip_eq(&self.poly_meta)
             .for_each(|(poly, poly_type)| {
                 debug_assert!(poly.num_vars() > 0);
-                if poly.is_owned() {
+                if poly.is_self_owned() {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
@@ -672,7 +672,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .par_iter()
             .fold_with(
                 AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-                |mut uni_polys, (_half_eq_opt, MonomialTerms { terms })| {
+                |mut uni_polys, MonomialTerms { terms }| {
                     for Term {
                         scalar,
                         product: prod,
@@ -729,7 +729,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .flattened_ml_extensions
             .par_iter_mut()
             .for_each(|poly| {
-                if poly.is_owned() {
+                if poly.is_self_owned() {
                     // in place
                     let poly = Arc::get_mut(poly);
                     if let Some(f) = poly {
