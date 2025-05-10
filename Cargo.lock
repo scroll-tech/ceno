@@ -442,6 +442,7 @@ dependencies = [
  "cfg-if",
  "clap",
  "criterion",
+ "either",
  "ff_ext",
  "generic_static",
  "glob",

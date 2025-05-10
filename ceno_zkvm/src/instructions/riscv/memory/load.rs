@@ -1,4 +1,3 @@
-// will remove #[allow(dead_code)] when we finished fibonacci integration test
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
@@ -49,28 +48,24 @@ pub struct LhOp;
 impl RIVInstruction for LhOp {
     const INST_KIND: InsnKind = InsnKind::LH;
 }
-#[allow(dead_code)]
 pub type LhInstruction<E> = LoadInstruction<E, LhOp>;
 
 pub struct LhuOp;
 impl RIVInstruction for LhuOp {
     const INST_KIND: InsnKind = InsnKind::LHU;
 }
-#[allow(dead_code)]
 pub type LhuInstruction<E> = LoadInstruction<E, LhuOp>;
 
 pub struct LbOp;
 impl RIVInstruction for LbOp {
     const INST_KIND: InsnKind = InsnKind::LB;
 }
-#[allow(dead_code)]
 pub type LbInstruction<E> = LoadInstruction<E, LbOp>;
 
 pub struct LbuOp;
 impl RIVInstruction for LbuOp {
     const INST_KIND: InsnKind = InsnKind::LBU;
 }
-#[allow(dead_code)]
 pub type LbuInstruction<E> = LoadInstruction<E, LbuOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {

@@ -29,7 +29,8 @@ use ff_ext::{Instrumented, PoseidonField};
 use itertools::Itertools;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
 use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
+    mle::{ArcMultilinearExtension, IntoMLE},
+    util::ceil_log2,
 };
 use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;

@@ -1,25 +1,22 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{borrow::Cow, collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 use crate::{
     Expression, WitnessId,
     expression::monomial::Term,
+    macros::{entered_span, exit_span},
+    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
-    virtual_poly::{ArcMultilinearExtension, MonomialTerms, VirtualPolynomial},
+    virtual_poly::{MonomialTerms, VirtualPolynomial},
 };
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use p3::util::log2_strict_usize;
-
-use crate::util::transpose;
+use rand::Rng;
 
 pub type MonomialTermsType<'a, E> =
-    Vec<Term<Either<<E as ExtensionField>::BaseField, E>, &'a ArcMultilinearExtension<'a, E>>>;
+    Vec<Term<Either<<E as ExtensionField>::BaseField, E>, Expression<E>>>;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub enum PolyMeta {
@@ -36,13 +33,13 @@ pub enum PolyMeta {
 #[derive(Default)]
 pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
     num_witin: WitnessId,
-    mles_storage: BTreeMap<usize, (usize, &'a ArcMultilinearExtension<'a, E>)>,
+    mles_storage: BTreeMap<usize, (usize, Cow<'a, ArcMultilinearExtension<'a, E>>)>,
     _phantom: PhantomData<E>,
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
-    pub fn lift(&mut self, mle: &'a ArcMultilinearExtension<'a, E>) -> Expression<E> {
-        let mle_ptr: usize = Arc::as_ptr(mle) as *const () as usize;
+    pub fn lift(&mut self, mle: Cow<'a, ArcMultilinearExtension<'a, E>>) -> Expression<E> {
+        let mle_ptr: usize = Arc::as_ptr(mle.as_ref()) as *const () as usize;
         let (witin_id, _) = self.mles_storage.entry(mle_ptr).or_insert_with(|| {
             let witin_id = self.num_witin;
             self.num_witin = self.num_witin.strict_add(1);
@@ -56,38 +53,24 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         self,
         num_threads: usize,
         max_num_variables: usize,
-        half_eq_mles: Option<Vec<&'a ArcMultilinearExtension<'a, E>>>,
         expressions: &[Expression<E>],
         challenges: &[E],
     ) -> VirtualPolynomials<'a, E> {
         let mles_storage = self
             .mles_storage
-            .values()
+            .into_values()
             .collect::<Vec<_>>() // collect into Vec<&(usize, &ArcMultilinearExtension)>
             .into_iter()
             .sorted_by_key(|(witin_id, _)| *witin_id) // sort by witin_id
-            .map(|(_, mle)| *mle) // extract &ArcMultilinearExtension
+            .map(|(_, mle)| mle) // extract &ArcMultilinearExtension
             .collect::<Vec<_>>();
-
-        // when half_eq is provided, then all monomial term need to be in same num_vars
-        let expected_num_vars_per_expr = if let Some(half_eq_mles) = half_eq_mles.as_ref() {
-            assert_eq!(half_eq_mles.len(), expressions.len());
-            Some(
-                half_eq_mles
-                    .iter()
-                    .map(|half_eq| half_eq.num_vars() + 1) // half_eq
-                    .collect_vec(),
-            )
-        } else {
-            None
-        };
 
         let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, max_num_variables);
         // register mles to assure index matching the arc_poly order
-        virtual_polys.register_mles(mles_storage.clone());
+        virtual_polys.register_mles(mles_storage);
 
         // convert expression into monomial_terms and add to virtual_polys
-        for (i, expression) in expressions.iter().enumerate() {
+        for (_, expression) in expressions.iter().enumerate() {
             let monomial_terms_expr = expression.get_monomial_terms();
             let monomial_terms = monomial_terms_expr
                 .into_iter()
@@ -96,23 +79,6 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                          scalar: scalar_expr,
                          product,
                      }| {
-                        let expected_num_vars = expected_num_vars_per_expr.as_ref().and_then(
-                            |expected_num_vars_per_expr| expected_num_vars_per_expr.get(i),
-                        );
-
-                        let product_mle = product
-                            .into_iter()
-                            .map(|expr| match expr {
-                                Expression::WitIn(witin_id) => {
-                                    let mle = mles_storage[witin_id as usize];
-                                    if let Some(expected_num_vars) = expected_num_vars {
-                                        assert_eq!(*expected_num_vars, mle.num_vars());
-                                    }
-                                    mle
-                                }
-                                other => unimplemented!("un supported expression: {:?}", other),
-                            })
-                            .collect_vec();
                         let scalar = eval_by_expr_with_instance(
                             &[],
                             &[],
@@ -121,19 +87,11 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                             challenges,
                             &scalar_expr,
                         );
-                        Term {
-                            scalar,
-                            product: product_mle,
-                        }
+                        Term { scalar, product }
                     },
                 )
                 .collect_vec();
-            virtual_polys.add_monomial_terms(
-                half_eq_mles
-                    .as_ref()
-                    .and_then(|half_eq_mles| half_eq_mles.get(i).cloned()),
-                monomial_terms,
-            );
+            virtual_polys.add_monomial_terms(monomial_terms);
         }
         virtual_polys
     }
@@ -143,7 +101,7 @@ pub struct VirtualPolynomials<'a, E: ExtensionField> {
     pub num_threads: usize,
     polys: Vec<VirtualPolynomial<'a, E>>,
     /// a storage to keep thread based mles, specific to multi-thread logic
-    thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
+    // thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
     pub(crate) poly_meta: BTreeMap<usize, PolyMeta>,
 }
 
@@ -155,21 +113,48 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             polys: (0..num_threads)
                 .map(|_| VirtualPolynomial::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
-            thread_based_mles_storage: HashMap::new(),
+            // thread_based_mles_storage: HashMap::new(),
             poly_meta: BTreeMap::new(),
         }
     }
 
-    fn get_range_polys_by_thread_id(
+    pub fn new_from_product(
+        num_threads: usize,
+        max_num_variables: usize,
+        mles: Vec<Cow<'a, ArcMultilinearExtension<'a, E>>>,
+        scalar: E,
+    ) -> Self {
+        assert!(!mles.is_empty());
+        assert!(
+            mles.iter().map(|mle| mle.num_vars()).all_equal(),
+            "all product must got same num_vars"
+        );
+        let mut poly = VirtualPolynomials::new(num_threads, max_num_variables);
+        let indexes = poly
+            .register_mles(mles)
+            .into_iter()
+            .map(|index| Expression::WitIn(index as u16))
+            .collect_vec();
+        poly.add_monomial_terms(vec![Term {
+            scalar: Either::Right(scalar),
+            product: indexes,
+        }]);
+        poly
+    }
+
+    fn get_subslice_polys_by_thread_id<'b>(
         &self,
         thread_id: usize,
-        polys: Vec<&'a ArcMultilinearExtension<'a, E>>,
-    ) -> Vec<ArcMultilinearExtension<'a, E>> {
+        polys: Vec<&'b ArcMultilinearExtension<'a, E>>,
+    ) -> Vec<ArcMultilinearExtension<'a, E>>
+    where
+        'b: 'a,
+    {
         polys
             .into_iter()
             .map(|poly| {
                 let range_poly: ArcMultilinearExtension<E> =
-                    Arc::new(poly.get_ranged_mle(self.num_threads, thread_id));
+                    Arc::new(poly.as_view_subslice(self.num_threads, thread_id));
                 range_poly
             })
             .collect_vec()
@@ -184,155 +169,155 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     ///
     /// the per-thread instances are registered locally and stored in `thread_based_mles_storage`
     /// using the MLE’s raw pointer as the key to ensure uniqueness and reference consistency.
-    pub fn register_mles(&mut self, mles: Vec<&'a ArcMultilinearExtension<'a, E>>) {
+    pub fn register_mles(
+        &mut self,
+        mles: Vec<Cow<'a, ArcMultilinearExtension<'a, E>>>,
+    ) -> Vec<usize> {
         let log2_num_threads = log2_strict_usize(self.num_threads);
+        let mut indexes = vec![];
         for mle in mles {
-            let mle_ptr: usize = Arc::as_ptr(mle) as *const () as usize;
-            let mles = (0..self.num_threads)
-                .map(|thread_id| {
-                    let mle_thread_based = if mle.num_vars() > log2_num_threads {
-                        self.get_range_polys_by_thread_id(thread_id, vec![mle])
-                            .remove(0)
+            let poly_meta = if mle.num_vars() > log2_num_threads {
+                PolyMeta::Normal
+            } else {
+                PolyMeta::Phase2Only
+            };
+            // let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
+            let mles = match mle {
+                Cow::Borrowed(mle) => {
+                    // it's possible that mle is_self_owned == true but we dont want it to be in-place change
+                    (0..self.num_threads)
+                        .map(|thread_id| {
+                            let mle_thread_based = if mle.num_vars() > log2_num_threads {
+                                self.get_subslice_polys_by_thread_id(thread_id, vec![mle])
+                                    .remove(0)
+                            } else {
+                                // polynomial is too small
+                                Arc::new(mle.as_view_subslice(1, 0))
+                            };
+                            mle_thread_based
+                        })
+                        .collect_vec()
+                }
+                Cow::Owned(mle) => {
+                    assert!(mle.is_self_owned());
+                    let mle = Arc::into_inner(mle).expect(">1 strong count of arc pointer");
+                    if mle.num_vars() > log2_num_threads {
+                        mle.split_mle_into_chunks(self.num_threads)
+                            .into_iter()
+                            .map(|mle| Arc::new(mle))
+                            .collect_vec()
                     } else {
-                        // polynomial is too small
-                        Arc::new(mle.get_ranged_mle(1, 0))
-                    };
-                    self.polys[thread_id].register_mle(mle_thread_based.clone());
-                    mle_thread_based
-                })
-                .collect_vec();
-            self.thread_based_mles_storage.insert(mle_ptr, mles);
+                        vec![mle; self.num_threads]
+                            .into_iter()
+                            .map(|mle| Arc::new(mle))
+                            .collect_vec()
+                    }
+                }
+            };
+            let index = self
+                .polys
+                .iter_mut()
+                .zip_eq(mles)
+                .map(|(poly, mle)| poly.register_mle(mle))
+                .collect_vec()
+                .first()
+                .cloned()
+                .unwrap();
+            self.poly_meta.insert(index, poly_meta);
+            indexes.push(index);
+            // self.thread_based_mles_storage.insert(mle_ptr, mles);
         }
+        indexes
     }
 
     /// Adds a group of monomial terms to the current expression set.
-    ///
-    /// NOTE: When `zero_check_half_eq` is provided, no deduplication of equality constraints
-    /// is performed internally. It is the caller’s responsibility to ensure that
-    /// `zero_check_half_eq` contains only equality constraints unique to this `monomial_terms` group,
-    /// as reusing the same equality across different groups is semantically invalid.
-    pub fn add_monomial_terms(
-        &mut self,
-        zero_check_half_eq: Option<&'a ArcMultilinearExtension<'a, E>>,
-        monomial_terms: MonomialTermsType<'a, E>,
-    ) {
-        let log2_num_threads = log2_strict_usize(self.num_threads);
-
-        // process eq and separate to thread
-        let zero_check_half_eq_per_threads = if let Some(zero_check_half_eq) = zero_check_half_eq {
-            Some(
-                (0..self.num_threads)
-                    .map(|thread_id| {
-                        if zero_check_half_eq.num_vars() > log2_num_threads {
-                            self.get_range_polys_by_thread_id(thread_id, vec![zero_check_half_eq])
-                                .remove(0)
-                        } else {
-                            // polynomial is too small
-                            Arc::new(zero_check_half_eq.get_ranged_mle(1, 0))
-                        }
-                    })
-                    .collect_vec(),
-            )
-        } else {
-            None
-        };
-
-        let (poly_meta, momomial_terms): (Vec<_>, Vec<_>) = monomial_terms
-            .into_iter()
-            .map(|Term { scalar, product }| {
-                assert!(!product.is_empty(), "some term product is empty");
-                // all mle in product must have same num_vars()
-                assert!(product.iter().map(|m| { m.num_vars() }).all_equal());
-
-                let poly_meta = if product.first().unwrap().num_vars() > log2_num_threads {
-                    PolyMeta::Normal
-                } else {
-                    // polynomial is too small
-                    PolyMeta::Phase2Only
-                };
-
-                let product_per_threads: Vec<Vec<ArcMultilinearExtension<E>>> = product
-                    .into_iter()
-                    .map(|p| {
-                        let mle_ptr: usize = Arc::as_ptr(p) as *const () as usize;
-                        let mles_cloned =
-                            if let Some(mles) = self.thread_based_mles_storage.get(&mle_ptr) {
-                                mles.clone()
-                            } else {
-                                let mles = (0..self.num_threads)
-                                    .map(|thread_id| match poly_meta {
-                                        PolyMeta::Normal => self
-                                            .get_range_polys_by_thread_id(thread_id, vec![p])
-                                            .remove(0),
-                                        PolyMeta::Phase2Only => Arc::new(p.get_ranged_mle(1, 0)),
-                                    })
-                                    .collect_vec();
-                                let mles_cloned = mles.clone();
-                                self.thread_based_mles_storage.insert(mle_ptr, mles);
-                                mles_cloned
-                            };
-                        mles_cloned
-                    })
-                    .collect_vec();
-
-                // product -> thread to thread -> product
-                (
-                    poly_meta,
-                    transpose(product_per_threads)
-                        .into_iter()
-                        .map(|product| Term { scalar, product })
-                        // return Vec<Term>, with total length equal #threads
-                        .collect_vec(),
-                )
-            })
-            .unzip();
-
-        let momomial_terms_threads = transpose(momomial_terms);
-        assert_eq!(momomial_terms_threads.len(), self.num_threads);
-
-        // collect per thread momomial_terms and add to thread-based virtual_poly
-        let (hald_eq_index, monomial_term_product_index): (Option<usize>, &MonomialTerms<E>) =
-            *momomial_terms_threads
-                .into_iter()
-                .zip_eq(self.polys.iter_mut())
-                .enumerate()
-                .map(|(thread_id, (momomial_terms, virtual_poly))| {
-                    let zero_check_half_eq = zero_check_half_eq_per_threads
-                        .as_ref()
-                        .and_then(|zero_check_half_eq| zero_check_half_eq.get(thread_id).cloned());
-                    virtual_poly.add_monomial_terms(zero_check_half_eq, momomial_terms)
-                })
-                .collect_vec()
-                .first()
-                .expect("");
-
-        // update poly_meta w.r.t index, optionally record index for eq
-        if let Some((index, half_eq_mle)) = hald_eq_index.as_ref().zip(zero_check_half_eq.as_ref())
-        {
-            let poly_meta = if half_eq_mle.num_vars() + 1 > log2_num_threads {
-                PolyMeta::Normal
-            } else {
-                // polynomial is too small
-                PolyMeta::Phase2Only
-            };
-            self.poly_meta.insert(*index, poly_meta);
-        }
-        for (poly_meta, term) in poly_meta.iter().zip_eq(&monomial_term_product_index.terms) {
-            for index in &term.product {
-                self.poly_meta.insert(*index, *poly_meta);
-            }
-        }
+    fn add_monomial_terms(&mut self, monomial_terms: MonomialTermsType<'a, E>) {
+        self.polys
+            .iter_mut()
+            .for_each(|poly| poly.add_monomial_terms(monomial_terms.clone()));
     }
 
-    // add with only single monomial term
-    pub fn add_mle_list(&mut self, polys: Vec<&'a ArcMultilinearExtension<'a, E>>, scalar: E) {
-        self.add_monomial_terms(
-            None,
-            vec![Term {
-                scalar: Either::Right(scalar),
-                product: polys,
-            }],
-        );
+    /// evaluate giving a point
+    /// this function is expensive since there are bunch of clone
+    pub fn evaluate_slow(&self, point: &Point<E>) -> E {
+        // recover raw_mles and evaluate each under point
+        let raw_mles_evals = (0..self.polys[0].flattened_ml_extensions.len())
+            .map(|index| match self.poly_meta[&index] {
+                PolyMeta::Normal => {
+                    let mut iter = self
+                        .polys
+                        .iter()
+                        .map(|poly| &poly.flattened_ml_extensions[index]);
+                    let Some(first) = iter.next() else {
+                        panic!("empty flattened_ml_extensions")
+                    };
+                    let mut first = first.as_ref().clone();
+                    for mle in iter {
+                        let mle: MultilinearExtension<E> = mle.as_ref().clone();
+                        first.merge(mle);
+                    }
+                    first
+                }
+                PolyMeta::Phase2Only => self.polys[0].flattened_ml_extensions[index]
+                    .as_ref()
+                    .clone(),
+            })
+            .map(|mle: MultilinearExtension<E>| {
+                mle.evaluate(&point[point.len() - mle.num_vars()..])
+            })
+            .collect_vec();
+        // evaluate based on monimial expression
+        self.polys[0]
+            .products
+            .iter()
+            .map(|MonomialTerms { terms }|
+                terms.iter().map(|Term { scalar, product }|
+                    either::for_both!(scalar, scalar => product.iter().map(|index| raw_mles_evals[*index]).product::<E>() **scalar )).sum()
+            ).sum()
+    }
+
+    pub fn as_view(&'a self) -> Self {
+        Self {
+            num_threads: self.num_threads,
+            polys: self.polys.iter().map(|poly| poly.as_view()).collect_vec(),
+            poly_meta: self.poly_meta.clone(),
+        }
+    }
+    /// Sample a random virtual polynomial, return the polynomial and its sum.
+    pub fn random<R: Rng>(
+        n_threads: usize,
+        nv: &[usize],
+        num_multiplicands_range: (usize, usize),
+        num_products: usize,
+        rng: &mut R,
+    ) -> (Self, E) {
+        let start = entered_span!("sample random virtual polynomial");
+
+        let mut sum = E::ZERO;
+        let max_num_variables = *nv.iter().max().unwrap();
+        let mut poly = VirtualPolynomials::<E>::new(n_threads, max_num_variables);
+        for nv in nv {
+            for _ in 0..num_products {
+                let num_multiplicands =
+                    rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
+                let (product, product_sum) =
+                    MultilinearExtension::random_mle_list(*nv, num_multiplicands, rng);
+                let product: Vec<Expression<E>> = product
+                    .into_iter()
+                    .map(|mle| Cow::Owned(mle as _))
+                    .map(|mle| Expression::WitIn(poly.register_mles(vec![mle])[0] as u16))
+                    .collect_vec();
+                let scalar = E::random(&mut *rng);
+                poly.add_monomial_terms(vec![Term {
+                    scalar: Either::Right(scalar),
+                    product,
+                }]);
+                // need to scale up for the smaller nv
+                sum += E::from_u64(1 << (max_num_variables - nv)) * product_sum * scalar;
+            }
+        }
+        exit_span!(start);
+        (poly, sum)
     }
 
     /// return thread_based polynomial with its polynomial type
@@ -350,25 +335,5 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .first()
             .map(|p| p.aux_info.max_degree)
             .unwrap_or_default()
-    }
-
-    /// in-place merge with another virtual polynomial
-    pub fn merge(&mut self, other: &'a VirtualPolynomial<'a, E>) {
-        for (zero_check_half_eq_index, MonomialTerms { terms }) in other.products.iter() {
-            let new_monomial_term = terms
-                .iter()
-                .map(|Term { scalar, product }| Term {
-                    scalar: *scalar,
-                    product: product
-                        .iter()
-                        .map(|&x| &other.flattened_ml_extensions[x])
-                        .collect(),
-                })
-                .collect_vec();
-            let zero_check_half_eq = zero_check_half_eq_index.map(|zero_check_half_eq_index| {
-                &other.flattened_ml_extensions[zero_check_half_eq_index]
-            });
-            self.add_monomial_terms(zero_check_half_eq, new_monomial_term);
-        }
     }
 }

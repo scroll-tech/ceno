@@ -687,9 +687,7 @@ mod tests {
         };
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
-        use multilinear_extensions::{
-            mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
-        };
+        use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
         use p3::field::PrimeCharacteristicRing;
 
         type E = GoldilocksExt2; // 18446744069414584321
@@ -704,7 +702,7 @@ mod tests {
                 self.iter()
                     .map(|a| {
                         let mle: ArcMultilinearExtension<E> =
-                            DenseMultilinearExtension::from_evaluation_vec_smart(
+                            MultilinearExtension::from_evaluation_vec_smart(
                                 0,
                                 vec![E::BaseField::from_u64(*a)],
                             )

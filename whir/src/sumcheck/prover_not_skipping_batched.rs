@@ -61,7 +61,7 @@ impl<E: ExtensionField> SumcheckProverNotSkippingBatched<E> {
 mod tests {
     use ff_ext::GoldilocksExt2;
     use multilinear_extensions::{
-        mle::{DenseMultilinearExtension, FieldType, MultilinearExtension as _},
+        mle::{FieldType, MultilinearExtension},
         virtual_poly::eq_eval,
     };
     use p3::{field::PrimeCharacteristicRing, util::log2_strict_usize};
@@ -80,13 +80,13 @@ mod tests {
     type T = BasicTranscript<F>;
 
     fn fix_variables(evals: &[F], folding_randomness: &[F]) -> Vec<F> {
-        let mut poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let mut poly = MultilinearExtension::from_evaluations_ext_vec(
             log2_strict_usize(evals.len()),
             evals.to_vec(),
         );
         poly.fix_variables_in_place(folding_randomness);
         match poly.evaluations() {
-            FieldType::Ext(poly) => poly.clone(),
+            FieldType::Ext(poly) => poly.to_vec(),
             _ => panic!("Expected FieldType::Ext"),
         }
     }
@@ -116,12 +116,12 @@ mod tests {
             &statement_points,
             &[alpha_1, alpha_2],
             &[
-                DenseMultilinearExtension::from_evaluations_ext_vec(
+                MultilinearExtension::from_evaluations_ext_vec(
                     num_variables,
                     polynomials[0].clone(),
                 )
                 .evaluate(&statement_points[0]),
-                DenseMultilinearExtension::from_evaluations_ext_vec(
+                MultilinearExtension::from_evaluations_ext_vec(
                     num_variables,
                     polynomials[1].clone(),
                 )
@@ -146,7 +146,7 @@ mod tests {
             .iter()
             .zip(&statement_points)
             .map(|(poly, point)| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, poly.clone())
+                MultilinearExtension::from_evaluations_ext_vec(num_variables, poly.clone())
                     .evaluate(point)
             })
             .collect();

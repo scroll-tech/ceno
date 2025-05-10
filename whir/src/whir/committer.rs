@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 use p3::{
     field::{Field, PrimeCharacteristicRing},
     matrix::dense::RowMajorMatrix,
@@ -30,14 +30,14 @@ where
 
     pub fn commit(
         &self,
-        polynomial: DenseMultilinearExtension<E>,
+        polynomial: MultilinearExtension<E>,
     ) -> Result<(Witnesses<E>, WhirCommitmentInTranscript<E>), Error> {
         let timer = entered_span!("Single Commit");
         let mut transcript = BasicTranscript::new(b"commitment");
         // If size of polynomial < folding factor, keep doubling polynomial size by cloning itself
         let mut evaluations: Vec<E::BaseField> = match polynomial.evaluations() {
             #[cfg(feature = "parallel")]
-            FieldType::Base(evals) => evals.clone(),
+            FieldType::Base(evals) => evals.to_vec(),
             #[cfg(not(feature = "parallel"))]
             FieldType::Base(evals) => evals.iter().map(|x| E::from_base(x)).collect(),
             FieldType::Ext(_) => panic!("Not supporting committing to ext polys"),

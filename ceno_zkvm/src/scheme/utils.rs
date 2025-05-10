@@ -4,10 +4,9 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     commutative_op_mle_pair,
-    mle::{DenseMultilinearExtension, FieldType, IntoMLE},
+    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
-    virtual_poly::ArcMultilinearExtension,
 };
 use rayon::{
     iter::{
@@ -262,7 +261,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
         &|i| instance[i.0].clone(),
         &|scalar| {
             let scalar: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_vec(
+                Arc::new(MultilinearExtension::from_evaluations_vec(
                     0,
                     vec![scalar.left().expect("do not support extension field")],
                 ));
@@ -272,7 +271,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
             let challenge: ArcMultilinearExtension<E> =
-                Arc::new(DenseMultilinearExtension::from_evaluations_ext_vec(
+                Arc::new(MultilinearExtension::from_evaluations_ext_vec(
                     0,
                     vec![challenge.exp_u64(pow as u64) * scalar + offset],
                 ));
@@ -281,25 +280,25 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
         &|a, b| {
             commutative_op_mle_pair!(|a, b| {
                 match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    (1, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                         0,
                         vec![a[0] + b[0]],
                     )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    (1, _) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(b.len()),
                         b.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|b| a[0] + *b)
                             .collect(),
                     )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    (_, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(a.len()),
                         a.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|a| *a + b[0])
                             .collect(),
                     )),
-                    (_, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    (_, _) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(a.len()),
                         a.par_iter()
                             .zip(b.par_iter())
@@ -313,18 +312,18 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
         &|a, b| {
             commutative_op_mle_pair!(|a, b| {
                 match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    (1, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                         0,
                         vec![a[0] * b[0]],
                     )),
-                    (1, _) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    (1, _) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(b.len()),
                         b.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|b| a[0] * *b)
                             .collect(),
                     )),
-                    (_, 1) => Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                    (_, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(a.len()),
                         a.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
@@ -335,7 +334,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                         assert_eq!(a.len(), b.len());
                         // we do the pointwise evaluation multiplication here without involving FFT
                         // the evaluations outside of range will be checked via sumcheck + identity polynomial
-                        Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                        Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                             ceil_log2(a.len()),
                             a.par_iter()
                                 .zip(b.par_iter())
@@ -352,7 +351,7 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                 assert_eq!(a.len(), 1);
                 assert_eq!(b.len(), 1);
                 let (a, b) = (a[0], b[0]);
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+                Arc::new(MultilinearExtension::from_evaluation_vec_smart(
                     ceil_log2(x.len()),
                     x.par_iter()
                         .with_min_len(MIN_PAR_SIZE)
@@ -366,13 +365,14 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use ff_ext::{FieldInto, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         commutative_op_mle_pair,
-        mle::{FieldType, IntoMLE},
+        mle::{ArcMultilinearExtension, FieldType, IntoMLE},
         util::ceil_log2,
-        virtual_poly::ArcMultilinearExtension,
     };
     use p3::field::PrimeCharacteristicRing;
 
@@ -544,20 +544,30 @@ mod tests {
         // input layer p
         assert_eq!(
             layer[0].evaluations().clone(),
-            FieldType::Ext(vec![1.into_f(); 4])
+            FieldType::Ext(Cow::Owned(vec![1.into_f(); 4]))
         );
         assert_eq!(
             layer[1].evaluations().clone(),
-            FieldType::Ext(vec![1.into_f(); 4])
+            FieldType::Ext(Cow::Owned(vec![1.into_f(); 4]))
         );
         // input layer q is none
         assert_eq!(
             layer[2].evaluations().clone(),
-            FieldType::Ext(vec![1.into_f(), 2.into_f(), 3.into_f(), 4.into_f()])
+            FieldType::Ext(Cow::Owned(vec![
+                1.into_f(),
+                2.into_f(),
+                3.into_f(),
+                4.into_f()
+            ]))
         );
         assert_eq!(
             layer[3].evaluations().clone(),
-            FieldType::Ext(vec![5.into_f(), 6.into_f(), 7.into_f(), 8.into_f()])
+            FieldType::Ext(Cow::Owned(vec![
+                5.into_f(),
+                6.into_f(),
+                7.into_f(),
+                8.into_f()
+            ]))
         );
 
         // next layer
@@ -565,34 +575,34 @@ mod tests {
         // next layer p1
         assert_eq!(
             layer[0].evaluations().clone(),
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![1 + 5].into_iter().map(E::from_u64).sum::<E>(),
                 vec![2 + 6].into_iter().map(E::from_u64).sum::<E>()
-            ])
+            ]))
         );
         // next layer p2
         assert_eq!(
             layer[1].evaluations().clone(),
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![3 + 7].into_iter().map(E::from_u64).sum::<E>(),
                 vec![4 + 8].into_iter().map(E::from_u64).sum::<E>()
-            ])
+            ]))
         );
         // next layer q1
         assert_eq!(
             layer[2].evaluations().clone(),
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![5].into_iter().map(E::from_u64).sum::<E>(),
                 vec![2 * 6].into_iter().map(E::from_u64).sum::<E>()
-            ])
+            ]))
         );
         // next layer q2
         assert_eq!(
             layer[3].evaluations().clone(),
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![3 * 7].into_iter().map(E::from_u64).sum::<E>(),
                 vec![4 * 8].into_iter().map(E::from_u64).sum::<E>()
-            ])
+            ]))
         );
 
         // output layer
@@ -601,42 +611,42 @@ mod tests {
         assert_eq!(
             layer[0].evaluations().clone(),
             // p11 * q12 + p12 * q11
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![(1 + 5) * (3 * 7) + (3 + 7) * 5]
                     .into_iter()
                     .map(E::from_u64)
                     .sum::<E>(),
-            ])
+            ]))
         );
         // p2
         assert_eq!(
             layer[1].evaluations().clone(),
             // p21 * q22 + p22 * q21
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![(2 + 6) * (4 * 8) + (4 + 8) * (2 * 6)]
                     .into_iter()
                     .map(E::from_u64)
                     .sum::<E>(),
-            ])
+            ]))
         );
         // q1
         assert_eq!(
             layer[2].evaluations().clone(),
             // q12 * q11
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![(3 * 7) * 5].into_iter().map(E::from_u64).sum::<E>(),
-            ])
+            ]))
         );
         // q2
         assert_eq!(
             layer[3].evaluations().clone(),
             // q22 * q22
-            FieldType::<E>::Ext(vec![
+            FieldType::<E>::Ext(Cow::Owned(vec![
                 vec![(4 * 8) * (2 * 6)]
                     .into_iter()
                     .map(E::from_u64)
                     .sum::<E>(),
-            ])
+            ]))
         );
     }
 

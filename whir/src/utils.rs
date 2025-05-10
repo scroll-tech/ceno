@@ -129,8 +129,8 @@ pub fn stack_evaluations_bench_allocate<F: Field>(
 
 pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &mut FieldType<E>) {
     match evals {
-        FieldType::Ext(evals) => interpolate_over_boolean_hypercube(evals),
-        FieldType::Base(evals) => interpolate_over_boolean_hypercube(evals),
+        FieldType::Ext(evals) => interpolate_over_boolean_hypercube(evals.to_mut()),
+        FieldType::Base(evals) => interpolate_over_boolean_hypercube(evals.to_mut()),
         _ => unreachable!(),
     };
 }
@@ -355,7 +355,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         polys.iter_mut().for_each(|poly| {
-            interpolate_over_boolean_hypercube(poly);
+            interpolate_over_boolean_hypercube(poly.to_mut());
         });
         let new_mles = rmm.to_mles::<E>();
         let new_polys = new_mles

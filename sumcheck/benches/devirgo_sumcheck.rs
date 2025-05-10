@@ -1,7 +1,7 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use criterion::*;
 use ff_ext::{ExtensionField, GoldilocksExt2};
@@ -11,10 +11,10 @@ use rand::thread_rng;
 use sumcheck::structs::IOPProverState;
 
 use multilinear_extensions::{
-    mle::DenseMultilinearExtension,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
     op_mle,
     util::max_usable_threads,
-    virtual_poly::{ArcMultilinearExtension, VirtualPolynomial},
+    virtual_poly::VirtualPolynomial,
     virtual_polys::VirtualPolynomials,
 };
 use transcript::BasicTranscript as Transcript;
@@ -46,7 +46,7 @@ fn prepare_input<'a, E: ExtensionField>(nv: usize) -> (E, Vec<ArcMultilinearExte
     let fs = (0..NUM_DEGREE)
         .map(|_| {
             let mle: ArcMultilinearExtension<'a, E> =
-                DenseMultilinearExtension::<E>::random(nv, &mut rng).into();
+                MultilinearExtension::<E>::random(nv, &mut rng).into();
             mle
         })
         .collect_vec();
@@ -86,9 +86,7 @@ fn sumcheck_fn(c: &mut Criterion) {
                         let mut prover_transcript = Transcript::new(b"test");
                         let (_, fs) = { prepare_input(nv) };
 
-                        let mut virtual_poly_v1 = VirtualPolynomial::new(nv);
-                        virtual_poly_v1.add_mle_list(fs.to_vec(), E::ONE);
-
+                        let virtual_poly_v1 = VirtualPolynomial::new_from_product(fs, E::ONE);
                         let instant = std::time::Instant::now();
                         #[allow(deprecated)]
                         let (_sumcheck_proof_v1, _) = IOPProverState::<E>::prove_parallel(
@@ -126,9 +124,12 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         let mut prover_transcript = Transcript::new(b"test");
                         let (_, fs) = { prepare_input(nv) };
 
-                        let mut virtual_poly_v2 = VirtualPolynomials::new(threads, nv);
-                        virtual_poly_v2.add_mle_list(fs.iter().collect_vec(), E::ONE);
-
+                        let virtual_poly_v2 = VirtualPolynomials::new_from_product(
+                            threads,
+                            nv,
+                            fs.into_iter().map(|fs| Cow::Owned(fs)).collect_vec(),
+                            E::ONE,
+                        );
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) =
                             IOPProverState::<E>::prove(virtual_poly_v2, &mut prover_transcript);
