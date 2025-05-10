@@ -497,7 +497,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     if !poly.is_self_owned() {
                         *poly = Arc::new(poly.fix_variables(&[r]));
                     } else {
-                        // in place
                         let poly = Arc::get_mut(poly).unwrap();
                         poly.fix_variables_in_place(&[r])
                     }
@@ -582,7 +581,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomial<'a, E>) -> Self {
-
         let start = entered_span!("sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
@@ -728,7 +726,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     if !poly.is_self_owned() {
                         *poly = Arc::new(poly.fix_variables_parallel(&[r]));
                     } else {
-                        // in place
                         let poly = Arc::get_mut(poly).unwrap();
                         poly.fix_variables_in_place_parallel(&[r])
                     }

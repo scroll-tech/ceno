@@ -4,6 +4,7 @@ use crate::{
 };
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
 use multilinear_extensions::{
+    mle::Point,
     util::max_usable_threads,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
@@ -16,12 +17,10 @@ use transcript::{BasicTranscript, Transcript};
 #[test]
 fn test_sumcheck_with_different_degree() {
     let log_max_thread = ceil_log2(max_usable_threads());
-    // let nv = vec![1, 2, 3, 4];
-    let nv = vec![3,4];
-    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(2, &nv);
-    // for num_threads in 1..log_max_thread {
-    //     test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << num_threads, &nv);
-    // }
+    let nv = vec![1, 2, 3, 4];
+    for num_threads in 1..log_max_thread {
+        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << num_threads, &nv);
+    }
 }
 
 fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
@@ -32,8 +31,13 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
     let mut transcript = BasicTranscript::<E>::new(b"test");
 
     let max_num_variables = *nv.iter().max().unwrap();
-    let (poly, asserted_sum) =
-        VirtualPolynomials::<E>::random(1, nv, num_multiplicands_range, num_products, &mut rng);
+    let (poly, asserted_sum) = VirtualPolynomials::<E>::random(
+        num_threads,
+        nv,
+        num_multiplicands_range,
+        num_products,
+        &mut rng,
+    );
 
     let (proof, _) = IOPProverState::<E>::prove(poly.as_view(), &mut transcript);
     let mut transcript = BasicTranscript::new(b"test");
@@ -41,27 +45,23 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
         asserted_sum,
         &proof,
         &VPAuxInfo {
-            max_degree: 2,
+            max_degree: degree,
             max_num_variables,
             ..Default::default()
         },
         &mut transcript,
     );
-    let r = subclaim
+    let r: Point<E> = subclaim
         .point
         .iter()
         .map(|c| c.elements)
         .collect::<Vec<_>>();
     assert_eq!(r.len(), max_num_variables);
     // r are right alignment
-    // assert!(
-    //     input_polys
-    //         .iter()
-    //         .map(|(poly, _)| { poly.evaluate(&r[r.len() - poly.aux_info.max_num_variables..]) })
-    //         .sum::<E>()
-    //         == subclaim.expected_evaluation,
-    //     "wrong subclaim"
-    // );
+    assert!(
+        poly.evaluate_slow(&r) == subclaim.expected_evaluation,
+        "wrong subclaim"
+    );
 }
 
 fn test_sumcheck<E: ExtensionField>(

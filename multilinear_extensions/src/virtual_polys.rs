@@ -4,10 +4,10 @@ use crate::{
     Expression, WitnessId,
     expression::monomial::Term,
     macros::{entered_span, exit_span},
-    mle::{ArcMultilinearExtension, MultilinearExtension},
+    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
-    virtual_poly::VirtualPolynomial,
+    virtual_poly::{MonomialTerms, VirtualPolynomial},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -118,6 +118,30 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         }
     }
 
+    pub fn new_from_product(
+        num_threads: usize,
+        max_num_variables: usize,
+        mles: Vec<Cow<'a, ArcMultilinearExtension<'a, E>>>,
+        scalar: E,
+    ) -> Self {
+        assert!(!mles.is_empty());
+        assert!(
+            mles.iter().map(|mle| mle.num_vars()).all_equal(),
+            "all product must got same num_vars"
+        );
+        let mut poly = VirtualPolynomials::new(num_threads, max_num_variables);
+        let indexes = poly
+            .register_mles(mles)
+            .into_iter()
+            .map(|index| Expression::WitIn(index as u16))
+            .collect_vec();
+        poly.add_monomial_terms(vec![Term {
+            scalar: Either::Right(scalar),
+            product: indexes,
+        }]);
+        poly
+    }
+
     fn get_subslice_polys_by_thread_id<'b>(
         &self,
         thread_id: usize,
@@ -160,7 +184,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             // let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
             let mles = match mle {
                 Cow::Borrowed(mle) => {
-                    println!("go borrowed");
                     assert!(!mle.is_self_owned());
                     (0..self.num_threads)
                         .map(|thread_id| {
@@ -176,17 +199,14 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                         .collect_vec()
                 }
                 Cow::Owned(mle) => {
-                    println!("go Owned");
                     assert!(mle.is_self_owned());
                     let mle = Arc::into_inner(mle).expect(">1 strong count of arc pointer");
                     if mle.num_vars() > log2_num_threads {
-                        println!("go split");
                         mle.split_mle_into_chunks(self.num_threads)
                             .into_iter()
                             .map(|mle| Arc::new(mle))
                             .collect_vec()
                     } else {
-                        println!("go no split");
                         vec![mle; self.num_threads]
                             .into_iter()
                             .map(|mle| Arc::new(mle))
@@ -217,6 +237,45 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .for_each(|poly| poly.add_monomial_terms(monomial_terms.clone()));
     }
 
+    /// evaluate giving a point
+    /// this function is expensive since there are bunch of clone
+    pub fn evaluate_slow(&self, point: &Point<E>) -> E {
+        // recover raw_mles and evaluate each under point
+        let raw_mles_evals = (0..self.polys[0].flattened_ml_extensions.len())
+            .map(|index| match self.poly_meta[&index] {
+                PolyMeta::Normal => {
+                    let mut iter = self
+                        .polys
+                        .iter()
+                        .map(|poly| &poly.flattened_ml_extensions[index]);
+                    let Some(first) = iter.next() else {
+                        panic!("empty flattened_ml_extensions")
+                    };
+                    let mut first = first.as_ref().clone();
+                    for mle in iter {
+                        let mle: MultilinearExtension<E> = mle.as_ref().clone();
+                        first.merge(mle);
+                    }
+                    first
+                }
+                PolyMeta::Phase2Only => self.polys[0].flattened_ml_extensions[index]
+                    .as_ref()
+                    .clone(),
+            })
+            .map(|mle: MultilinearExtension<E>| {
+                mle.evaluate(&point[point.len() - mle.num_vars()..])
+            })
+            .collect_vec();
+        // evaluate based on monimial expression
+        self.polys[0]
+            .products
+            .iter()
+            .map(|MonomialTerms { terms }|
+                terms.iter().map(|Term { scalar, product }|
+                    either::for_both!(scalar, scalar => product.iter().map(|index| raw_mles_evals[*index]).product::<E>() **scalar )).sum()
+            ).sum()
+    }
+
     pub fn as_view(&'a self) -> Self {
         Self {
             num_threads: self.num_threads,
@@ -235,7 +294,8 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         let start = entered_span!("sample random virtual polynomial");
 
         let mut sum = E::ZERO;
-        let mut poly = VirtualPolynomials::<E>::new(n_threads, *nv.iter().max().unwrap());
+        let max_num_variables = *nv.iter().max().unwrap();
+        let mut poly = VirtualPolynomials::<E>::new(n_threads, max_num_variables);
         for nv in nv {
             for _ in 0..num_products {
                 let num_multiplicands =
@@ -252,7 +312,8 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                     scalar: Either::Right(scalar),
                     product,
                 }]);
-                sum += product_sum * scalar;
+                // need to scale up for the smaller nv
+                sum += E::from_u64(1 << (max_num_variables - nv)) * product_sum * scalar;
             }
         }
         exit_span!(start);

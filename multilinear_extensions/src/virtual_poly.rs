@@ -63,7 +63,7 @@ pub struct MonomialTerms<E: ExtensionField> {
 pub struct VirtualPolynomial<'a, E: ExtensionField> {
     /// Aux information about the multilinear polynomial
     pub aux_info: VPAuxInfo<E>,
-    // format (eq, monomial_form_formula)
+    //  monomial_form_formula
     pub products: Vec<MonomialTerms<E>>,
     /// Stores multilinear extensions in which product multiplicand can refer
     /// to.
@@ -101,13 +101,26 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         }
     }
 
-    /// Creates an new virtual polynomial from a MLE and its coefficient.
-    pub fn new_from_mle(mle: ArcMultilinearExtension<'a, E>, coefficient: E) -> Self {
-        let mut poly = VirtualPolynomial::new(mle.num_vars());
-        let index = poly.register_mle(mle);
+    /// Creates an new virtual polynomial from a MLE and scalar.
+    pub fn new_from_mle(mle: ArcMultilinearExtension<'a, E>, scalar: E) -> Self {
+        Self::new_from_product(vec![mle], scalar)
+    }
+
+    /// Creates an new virtual polynomial from product and scalar.
+    pub fn new_from_product(mle: Vec<ArcMultilinearExtension<'a, E>>, scalar: E) -> Self {
+        assert!(!mle.is_empty());
+        assert!(
+            mle.iter().map(|mle| mle.num_vars()).all_equal(),
+            "all product must got same num_vars"
+        );
+        let mut poly = VirtualPolynomial::new(mle[0].num_vars());
+        let indexes = mle
+            .into_iter()
+            .map(|mle| Expression::WitIn(poly.register_mle(mle) as u16))
+            .collect_vec();
         poly.add_monomial_terms(vec![Term {
-            scalar: Either::Right(coefficient),
-            product: vec![Expression::WitIn(index as u16)],
+            scalar: Either::Right(scalar),
+            product: indexes,
         }]);
         poly
     }
@@ -127,7 +140,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         curr_index
     }
 
-    pub fn add_monomial_terms(&mut self, monomial_terms: MonomialTermsType<'a, E>) {
+    pub(crate) fn add_monomial_terms(&mut self, monomial_terms: MonomialTermsType<'a, E>) {
         let terms = monomial_terms
             .into_iter()
             .map(|term| {
