@@ -607,7 +607,12 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     }
 
     /// get mle with only subslice range
-    pub fn as_subslice_mle(
+    pub fn as_view(&self) -> MultilinearExtension<'_, E> {
+        self.as_view_subslice(1, 0)
+    }
+
+    /// get mle with only subslice range
+    pub fn as_view_subslice(
         &self,
         num_range: usize,
         range_index: usize,

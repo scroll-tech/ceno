@@ -225,7 +225,9 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
                 let product: Vec<Expression<E>> = product
                     .into_iter()
                     .map(|mle| mle as _)
-                    .map(|mle| Expression::WitIn(poly.register_mle(mle) as u16))
+                    .map(|mle: Arc<MultilinearExtension<'_, _>>| {
+                        Expression::WitIn(poly.register_mle(mle) as u16)
+                    })
                     .collect_vec();
                 let scalar = E::random(&mut *rng);
                 poly.add_monomial_terms(vec![Term {
@@ -238,6 +240,25 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
 
         exit_span!(start);
         (poly, sum)
+    }
+
+    /// Sample a random virtual polynomial, return the polynomial and its sum.
+    pub fn as_view(&'a self) -> Self {
+        let flattened_ml_extensions_view = self
+            .flattened_ml_extensions
+            .iter()
+            .map(|mle| mle.as_view().into())
+            .collect_vec();
+        let mut new_poly = VirtualPolynomial {
+            aux_info: self.aux_info.clone(),
+            products: self.products.clone(),
+            flattened_ml_extensions: vec![],
+            raw_pointers_lookup_table: Default::default(),
+        };
+        flattened_ml_extensions_view.into_iter().for_each(|mle| {
+            let _ = new_poly.register_mle(mle);
+        });
+        new_poly
     }
 
     /// Print out the evaluation map for testing. Panic if the num_vars() > 5.

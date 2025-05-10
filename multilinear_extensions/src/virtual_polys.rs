@@ -130,7 +130,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .into_iter()
             .map(|poly| {
                 let range_poly: ArcMultilinearExtension<E> =
-                    Arc::new(poly.as_subslice_mle(self.num_threads, thread_id));
+                    Arc::new(poly.as_view_subslice(self.num_threads, thread_id));
                 range_poly
             })
             .collect_vec()
@@ -160,6 +160,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             // let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
             let mles = match mle {
                 Cow::Borrowed(mle) => {
+                    println!("go borrowed");
                     assert!(!mle.is_self_owned());
                     (0..self.num_threads)
                         .map(|thread_id| {
@@ -168,21 +169,24 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                                     .remove(0)
                             } else {
                                 // polynomial is too small
-                                Arc::new(mle.as_subslice_mle(1, 0))
+                                Arc::new(mle.as_view_subslice(1, 0))
                             };
                             mle_thread_based
                         })
                         .collect_vec()
                 }
                 Cow::Owned(mle) => {
+                    println!("go Owned");
                     assert!(mle.is_self_owned());
                     let mle = Arc::into_inner(mle).expect(">1 strong count of arc pointer");
                     if mle.num_vars() > log2_num_threads {
+                        println!("go split");
                         mle.split_mle_into_chunks(self.num_threads)
                             .into_iter()
                             .map(|mle| Arc::new(mle))
                             .collect_vec()
                     } else {
+                        println!("go no split");
                         vec![mle; self.num_threads]
                             .into_iter()
                             .map(|mle| Arc::new(mle))
@@ -213,6 +217,13 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .for_each(|poly| poly.add_monomial_terms(monomial_terms.clone()));
     }
 
+    pub fn as_view(&'a self) -> Self {
+        Self {
+            num_threads: self.num_threads,
+            polys: self.polys.iter().map(|poly| poly.as_view()).collect_vec(),
+            poly_meta: self.poly_meta.clone(),
+        }
+    }
     /// Sample a random virtual polynomial, return the polynomial and its sum.
     pub fn random<R: Rng>(
         n_threads: usize,

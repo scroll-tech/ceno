@@ -491,23 +491,16 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .zip_eq(&self.poly_meta)
             .for_each(|(poly, poly_type)| {
                 debug_assert!(poly.num_vars() > 0);
-                if poly.is_self_owned() {
-                    // in place
-                    let poly = Arc::get_mut(poly);
-                    if let Some(f) = poly {
-                        debug_assert!(f.num_vars() <= expected_numvars_at_round);
-                        if f.num_vars() > 0 {
-                            f.fix_variables_in_place(&[r])
-                        }
-                    };
-                } else if poly.num_vars() > 0 {
-                    if expected_numvars_at_round == poly.num_vars()
-                        && matches!(poly_type, PolyMeta::Normal)
-                    {
+                if expected_numvars_at_round == poly.num_vars()
+                    && matches!(poly_type, PolyMeta::Normal)
+                {
+                    if !poly.is_self_owned() {
                         *poly = Arc::new(poly.fix_variables(&[r]));
+                    } else {
+                        // in place
+                        let poly = Arc::get_mut(poly).unwrap();
+                        poly.fix_variables_in_place(&[r])
                     }
-                } else {
-                    panic!("calling sumcheck on constant")
                 }
             });
     }
@@ -589,6 +582,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Initialize the prover state to argue for the sum of the input polynomial
     /// over {0,1}^`num_vars`.
     pub(crate) fn prover_init_parallel(polynomial: VirtualPolynomial<'a, E>) -> Self {
+
         let start = entered_span!("sum check prover init");
         assert_ne!(
             polynomial.aux_info.max_num_variables, 0,
@@ -656,7 +650,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             let chal = challenge.unwrap();
             self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
-            self.fix_var(r.elements);
+            self.fix_var_parallel(r.elements);
         }
         exit_span!(span);
         // exit_span!fix_argument);
@@ -729,20 +723,15 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .flattened_ml_extensions
             .par_iter_mut()
             .for_each(|poly| {
-                if poly.is_self_owned() {
-                    // in place
-                    let poly = Arc::get_mut(poly);
-                    if let Some(f) = poly {
-                        if f.num_vars() > 0 {
-                            f.fix_variables_in_place_parallel(&[r])
-                        }
-                    };
-                } else if poly.num_vars() > 0 {
-                    if expected_numvars_at_round == poly.num_vars() {
+                assert!(poly.num_vars() > 0);
+                if expected_numvars_at_round == poly.num_vars() {
+                    if !poly.is_self_owned() {
                         *poly = Arc::new(poly.fix_variables_parallel(&[r]));
+                    } else {
+                        // in place
+                        let poly = Arc::get_mut(poly).unwrap();
+                        poly.fix_variables_in_place_parallel(&[r])
                     }
-                } else {
-                    panic!("calling sumcheck on constant")
                 }
             });
     }

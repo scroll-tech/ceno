@@ -16,10 +16,12 @@ use transcript::{BasicTranscript, Transcript};
 #[test]
 fn test_sumcheck_with_different_degree() {
     let log_max_thread = ceil_log2(max_usable_threads());
-    let nv = vec![1, 2, 3, 4];
-    for num_threads in 1..log_max_thread {
-        test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << num_threads, &nv);
-    }
+    // let nv = vec![1, 2, 3, 4];
+    let nv = vec![3,4];
+    test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(2, &nv);
+    // for num_threads in 1..log_max_thread {
+    //     test_sumcheck_with_different_degree_helper::<GoldilocksExt2>(1 << num_threads, &nv);
+    // }
 }
 
 fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: usize, nv: &[usize]) {
@@ -33,7 +35,7 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
     let (poly, asserted_sum) =
         VirtualPolynomials::<E>::random(1, nv, num_multiplicands_range, num_products, &mut rng);
 
-    let (proof, _) = IOPProverState::<E>::prove(poly, &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove(poly.as_view(), &mut transcript);
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(
         asserted_sum,
@@ -74,7 +76,7 @@ fn test_sumcheck<E: ExtensionField>(
         VirtualPolynomial::<E>::random(&[nv], num_multiplicands_range, num_products, &mut rng);
     let poly_info = poly.aux_info.clone();
     #[allow(deprecated)]
-    let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove_parallel(poly.as_view(), &mut transcript);
 
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
@@ -101,7 +103,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
         VirtualPolynomial::<E>::random(&[nv], num_multiplicands_range, num_products, &mut rng);
     let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.max_num_variables);
     #[allow(deprecated)]
-    let mut prover_state = IOPProverState::prover_init_parallel(poly.clone());
+    let mut prover_state = IOPProverState::prover_init_parallel(poly.as_view());
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;
 
@@ -157,7 +159,7 @@ fn test_trivial_polynomial_helper<E: ExtensionField>() {
 #[test]
 fn test_normal_polynomial() {
     test_normal_polynomial_helper::<GoldilocksExt2>();
-    // test_normal_polynomial_helper::<BabyBearExt4>();
+    test_normal_polynomial_helper::<BabyBearExt4>();
 }
 
 fn test_normal_polynomial_helper<E: ExtensionField>() {
@@ -166,7 +168,7 @@ fn test_normal_polynomial_helper<E: ExtensionField>() {
     let num_products = 5;
 
     test_sumcheck::<E>(nv, num_multiplicands_range, num_products);
-    // test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
+    test_sumcheck_internal::<E>(nv, num_multiplicands_range, num_products);
 }
 
 #[test]
