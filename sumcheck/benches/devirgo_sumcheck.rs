@@ -124,7 +124,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         let mut prover_transcript = Transcript::new(b"test");
                         let (_, fs) = { prepare_input(nv) };
 
-                        let virtual_poly_v2 = VirtualPolynomials::new_from_product(
+                        let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
                             threads,
                             nv,
                             fs.into_iter().map(|fs| Cow::Owned(fs)).collect_vec(),

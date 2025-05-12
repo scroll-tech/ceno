@@ -275,10 +275,10 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         if *constant != E::ZERO && monomial_term.is_empty() && selector.is_none() {
             todo!("make virtual poly support pure constant")
         }
-        let sel = selector.map(|sel| expr_builder.lift(Cow::Borrowed(sel)));
+        let sel = selector.map(|sel| expr_builder.lift(Either::Left(sel)));
         let terms_polys = monomial_term
             .iter()
-            .map(|wit_id| expr_builder.lift(Cow::Borrowed(wit_ins[*wit_id as usize])))
+            .map(|wit_id| expr_builder.lift(Either::Left(wit_ins[*wit_id as usize])))
             .collect_vec();
         exprs.push(
             sel.into_iter()

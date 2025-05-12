@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use super::{
     encoding::EncodingScheme,
@@ -14,7 +14,7 @@ use crate::{
     },
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use multilinear_extensions::{
     Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
 };
@@ -174,7 +174,7 @@ where
     exit_span!(batch_codeword_span);
 
     let batched_evals = entered_span!("batched_evals");
-    let initial_rlc_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
+    let mut initial_rlc_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
         .par_iter()
         .zip_eq(batch_coeffs_splitted.par_iter())
         .map(|(witin_fixed_mle, batch_coeffs)| {
@@ -200,14 +200,22 @@ where
             running_evals
         })
         .collect::<Vec<_>>();
+    let mut initial_rlc_evals_mut: Vec<ArcMultilinearExtension<E>> = initial_rlc_evals
+        .iter_mut()
+        .map(|initial_rlc_evals| Arc::new(Arc::get_mut(initial_rlc_evals).unwrap().as_mut_slice()))
+        .collect::<Vec<_>>();
     exit_span!(batched_evals);
     exit_span!(prepare_span);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_span = entered_span!("Basefold::build eq");
-    let eq: Vec<ArcMultilinearExtension<E>> = witin_polys_and_meta
+    let mut eq: Vec<ArcMultilinearExtension<E>> = witin_polys_and_meta
         .par_iter()
         .map(|(point, _)| build_eq_x_r_vec(point).into_mle().into())
+        .collect::<Vec<_>>();
+    let mut eq_mut: Vec<ArcMultilinearExtension<E>> = eq
+        .iter_mut()
+        .map(|eq| Arc::new(Arc::get_mut(eq).unwrap().as_mut_slice()))
         .collect::<Vec<_>>();
     exit_span!(build_eq_span);
 
@@ -215,13 +223,13 @@ where
     let log2_num_threads = log2_strict_usize(num_threads);
 
     let mut expr_builder = VirtualPolynomialsBuilder::default();
-    let eq_expr = eq
-        .into_iter()
-        .map(|eq| expr_builder.lift(Cow::Owned(eq)))
+    let eq_expr = eq_mut
+        .iter_mut()
+        .map(|eq| expr_builder.lift(Either::Right(eq)))
         .collect_vec();
-    let initial_rlc_evals_expr = initial_rlc_evals
-        .into_iter()
-        .map(|initial_rlc_evals| expr_builder.lift(Cow::Owned(initial_rlc_evals)))
+    let initial_rlc_evals_expr = initial_rlc_evals_mut
+        .iter_mut()
+        .map(|initial_rlc_evals| expr_builder.lift(Either::Right(initial_rlc_evals)))
         .collect_vec();
     let polys = expr_builder.to_virtual_polys(
         num_threads,

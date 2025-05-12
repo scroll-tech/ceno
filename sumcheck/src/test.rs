@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
     util::{ceil_log2, interpolate_uni_poly},
 };
+use either::Either;
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
+use itertools::Itertools;
 use multilinear_extensions::{
     mle::Point,
     util::max_usable_threads,
@@ -31,12 +35,40 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
     let mut transcript = BasicTranscript::<E>::new(b"test");
 
     let max_num_variables = *nv.iter().max().unwrap();
-    let (poly, asserted_sum) = VirtualPolynomials::<E>::random(
-        num_threads,
+    let (mut monimials, asserted_sum) = VirtualPolynomials::<E>::random_monimials(
         nv,
         num_multiplicands_range,
         num_products,
         &mut rng,
+    );
+    let mut monimials_mut = monimials
+        .iter_mut()
+        .map(|(scalar, product)| {
+            (
+                Either::Right(*scalar),
+                product
+                    .iter_mut()
+                    .map(|mle| Arc::new(Arc::get_mut(mle).unwrap().as_mut_slice()))
+                    .collect_vec(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let poly = VirtualPolynomials::<E>::new_from_monimials(
+        num_threads,
+        max_num_variables,
+        monimials_mut
+            .iter_mut()
+            .map(|(scalar, product)| {
+                (
+                    *scalar,
+                    product
+                        .iter_mut()
+                        .map(|mle| Either::Right(mle))
+                        .collect_vec(),
+                )
+            })
+            .collect_vec(),
     );
 
     let (proof, _) = IOPProverState::<E>::prove(poly.as_view(), &mut transcript);

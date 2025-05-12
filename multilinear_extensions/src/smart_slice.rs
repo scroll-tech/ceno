@@ -78,6 +78,18 @@ impl<'a, T> SmartSlice<'a, T> {
         }
     }
 
+    /// clone inner vector
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        match self {
+            SmartSlice::Owned(vec) => vec.clone(),
+            SmartSlice::Borrowed(slice) => slice.to_vec(),
+            SmartSlice::BorrowedMut(slice) => slice.to_vec(),
+        }
+    }
+
     /// truncates the contents to `new_len`
     pub fn truncate_mut(&mut self, new_len: usize)
     where

@@ -648,6 +648,51 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         }
     }
 
+    /// get mut mle with only subslice range
+    pub fn as_mut_slice(&mut self) -> MultilinearExtension<'_, E> {
+        self.as_mut_subslice(1, 0)
+    }
+
+    pub fn as_mut_subslice(
+        &mut self,
+        num_range: usize,
+        range_index: usize,
+    ) -> MultilinearExtension<'_, E> {
+        assert!(num_range > 0);
+        let total_len = self.evaluations.len();
+        let offset = total_len / num_range;
+        assert!(
+            offset > 0,
+            "invalid: {num_range} > evaluation length {total_len}"
+        );
+        let start = offset * range_index;
+
+        let sub_evaluations = match &mut self.evaluations {
+            FieldType::Base(SmartSlice::BorrowedMut(evals)) => {
+                let slice = &mut evals[start..start + offset];
+                FieldType::Base(SmartSlice::BorrowedMut(slice))
+            }
+            FieldType::Ext(SmartSlice::BorrowedMut(evals)) => {
+                let slice = &mut evals[start..start + offset];
+                FieldType::Ext(SmartSlice::BorrowedMut(slice))
+            }
+            FieldType::Base(SmartSlice::Owned(vec)) => {
+                let slice = &mut vec[start..start + offset];
+                FieldType::Base(SmartSlice::BorrowedMut(slice))
+            }
+            FieldType::Ext(SmartSlice::Owned(vec)) => {
+                let slice = &mut vec[start..start + offset];
+                FieldType::Ext(SmartSlice::BorrowedMut(slice))
+            }
+            _ => unimplemented!("Unsupported variant for as_view_mut_subslice"),
+        };
+
+        MultilinearExtension {
+            evaluations: sub_evaluations,
+            num_vars: self.num_vars - num_range.trailing_zeros() as usize,
+        }
+    }
+
     pub fn get_ext_field_vec(&self) -> &[E] {
         match &self.evaluations() {
             FieldType::Ext(evaluations) => evaluations.as_ref(),
@@ -662,21 +707,9 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         }
     }
 
-    pub fn to_owned(self) -> MultilinearExtension<'a, E> {
-        let owned_eval = match self.evaluations {
-            FieldType::Base(data) => FieldType::Base(SmartSlice::Owned(data.into_owned())),
-            FieldType::Ext(data) => FieldType::Ext(SmartSlice::Owned(data.into_owned())),
-            FieldType::Unreachable => FieldType::Unreachable,
-        };
-        MultilinearExtension {
-            evaluations: owned_eval,
-            num_vars: self.num_vars,
-        }
-    }
-
     /// split the MLE into `num_chunks` parts, each with disjoint ownership of the evaluation data
     /// panics if `num_chunks` is zero, not divisible, or if the data is not owned or mutable
-    pub fn split_mle_into_chunks(self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+    pub fn split_mle_into_chunks(&mut self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
         assert!(num_chunks > 0, "num_chunks must be > 0");
         let len = self.evaluations.len();
         assert_eq!(
@@ -687,31 +720,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         let chunk_size = len / num_chunks;
         let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
 
-        match self.evaluations {
-            FieldType::Base(SmartSlice::Owned(mut vec)) => {
-                let mut result = Vec::with_capacity(num_chunks);
-                for _ in 0..num_chunks {
-                    let chunk: Vec<_> = vec.drain(..chunk_size).collect();
-                    result.push(MultilinearExtension {
-                        evaluations: FieldType::Base(SmartSlice::Owned(chunk)),
-                        num_vars: num_vars_per_chunk,
-                    });
-                }
-                result
-            }
-
-            FieldType::Ext(SmartSlice::Owned(mut vec)) => {
-                let mut result = Vec::with_capacity(num_chunks);
-                for _ in 0..num_chunks {
-                    let chunk: Vec<_> = vec.drain(..chunk_size).collect();
-                    result.push(MultilinearExtension {
-                        evaluations: FieldType::Ext(SmartSlice::Owned(chunk)),
-                        num_vars: num_vars_per_chunk,
-                    });
-                }
-                result
-            }
-
+        match &mut self.evaluations {
             // handle splitting a mutable borrowed slice into disjoint mutable slices
             FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
                 let mut result = Vec::with_capacity(num_chunks);
@@ -743,9 +752,24 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
                 result
             }
 
-            _ => {
-                panic!("Can only split when evaluations are owned or mutably borrowed");
+            e => {
+                panic!(
+                    "unsupport {:?}. can only split when evaluation are mutably borrowed",
+                    e
+                );
             }
+        }
+    }
+
+    pub fn as_owned(&self) -> Self {
+        let owned_eval = match &self.evaluations {
+            FieldType::Base(data) => FieldType::Base(SmartSlice::Owned(data.to_vec())),
+            FieldType::Ext(data) => FieldType::Ext(SmartSlice::Owned(data.to_vec())),
+            FieldType::Unreachable => FieldType::Unreachable,
+        };
+        MultilinearExtension {
+            evaluations: owned_eval,
+            num_vars: self.num_vars,
         }
     }
 }
