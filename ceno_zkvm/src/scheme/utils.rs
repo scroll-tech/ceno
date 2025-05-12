@@ -32,24 +32,18 @@ pub(crate) fn masked_mle_split_to_parts<'a, E: ExtensionField>(
     assert!(num_parts.is_power_of_two());
     assert!(num_instance <= mle.evaluations().len());
 
-    let evals = mle.evaluations();
+    let evals = mle.get_ext_field_vec();
     (0..num_parts)
         .into_par_iter()
         .map(|part_idx| {
             let n = mle.evaluations().len() / num_parts;
-            let mut evaluations = vec![default; n];
 
             (part_idx * n..(part_idx + 1) * n)
                 .into_iter()
-                .map(|i| {
-                    if i < num_instance {
-                        mle.evaluations()[i]
-                    } else {
-                        default
-                    }
-                })
+                .map(|i| if i < num_instance { evals[i] } else { default })
                 .collect::<Vec<_>>()
                 .into_mle()
+                .into()
         })
         .collect::<Vec<_>>()
 }

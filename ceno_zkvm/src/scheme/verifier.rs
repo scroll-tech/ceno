@@ -26,9 +26,7 @@ use crate::{
 };
 use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
 
-use super::{
-    ZKVMOpcodeProof, ZKVMProof, ZKVMTableProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE,
-};
+use super::{ZKVMChipProof, ZKVMProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE};
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
@@ -332,7 +330,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         _name: &str,
         circuit_vk: &VerifyingKey<E>,
-        proof: &ZKVMOpcodeProof<E>,
+        proof: &ZKVMChipProof<E>,
         num_instances: usize,
         pi: &[E],
         transcript: &mut impl Transcript<E>,
@@ -346,11 +344,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.w_expressions.len(),
             cs.lk_expressions.len(),
         );
-        let (log2_r_count, log2_w_count, log2_lk_count) = (
-            ceil_log2(r_counts_per_instance),
-            ceil_log2(w_counts_per_instance),
-            ceil_log2(lk_counts_per_instance),
-        );
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
@@ -360,28 +353,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let tower_proofs = &proof.tower_proof;
 
         let (rt_tower, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
-            vec![
-                proof.record_r_out_evals.clone(),
-                proof.record_w_out_evals.clone(),
-            ],
-            vec![vec![
-                proof.lk_p1_out_eval,
-                proof.lk_p2_out_eval,
-                proof.lk_q1_out_eval,
-                proof.lk_q2_out_eval,
-            ]],
+            vec![proof.r_out_evals.clone(), proof.w_out_evals.clone()],
+            proof.lk_out_evals.clone(),
             tower_proofs,
-            vec![
-                log2_num_instances + log2_r_count,
-                log2_num_instances + log2_w_count,
-                log2_num_instances + log2_lk_count,
-            ],
+            vec![log2_num_instances, log2_num_instances, log2_num_instances],
             num_product_fanin,
             transcript,
         )?;
-        assert!(record_evals.len() == 2, "[r_record, w_record]");
-        assert!(logup_q_evals.len() == 1, "[lk_q_record]");
-        assert!(logup_p_evals.len() == 1, "[lk_p_record]");
 
         // verify LogUp witness nominator p(x) ?= constant vector 1
         // index 0 is LogUp witness for Fixed Lookup table
