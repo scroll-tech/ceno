@@ -113,26 +113,24 @@ fn emulate_program(
         vm.init_memory(record.addr.into(), record.value);
     }
 
-    let all_records = vm
-        .iter_until_halt()
-        .take(max_steps)
-        .collect::<Result<Vec<StepRecord>, _>>()
-        .expect("vm exec failed");
+    let all_records_result: Result<Vec<StepRecord>, _> =
+        vm.iter_until_halt().take(max_steps).collect();
 
     if platform.is_debug {
-        // show io message if have
-        let all_messages = &read_all_messages(&vm)
+        let all_messages = read_all_messages(&vm)
             .iter()
             .map(|msg| String::from_utf8_lossy(msg).to_string())
-            .collect::<Vec<String>>();
+            .collect::<Vec<_>>();
+
         if !all_messages.is_empty() {
             tracing::info!("========= BEGIN: I/O from guest =========");
-            for msg in all_messages {
-                tracing::info!("{}", msg);
+            for msg in &all_messages {
+                tracing::info!("│ {}", msg);
             }
             tracing::info!("========= END: I/O from guest =========");
         }
     }
+    let all_records = all_records_result.expect("vm exec failed");
 
     // Find the exit code from the HALT step, if halting at all.
     let exit_code = all_records
