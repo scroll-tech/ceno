@@ -2,7 +2,8 @@ use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, PcsKind, Preset, run_e2e_with_checkpoint, setup_platform, verify,
+        Checkpoint, FieldType, PcsKind, Preset, run_e2e_with_checkpoint, setup_platform,
+        setup_platform_debug, verify,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey,
@@ -162,13 +163,23 @@ fn main() {
     tracing::info!("Loading ELF file: {}", args.elf.display());
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
-    let platform = setup_platform(
-        args.platform,
-        &program,
-        args.stack_size,
-        args.heap_size,
-        pub_io_size,
-    );
+    let platform = if cfg!(debug_assertions) {
+        setup_platform_debug(
+            args.platform,
+            &program,
+            args.stack_size,
+            args.heap_size,
+            pub_io_size,
+        )
+    } else {
+        setup_platform(
+            args.platform,
+            &program,
+            args.stack_size,
+            args.heap_size,
+            pub_io_size,
+        )
+    };
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",

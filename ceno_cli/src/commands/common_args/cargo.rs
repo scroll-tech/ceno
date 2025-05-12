@@ -38,11 +38,11 @@ pub struct CargoOptions {
 }
 
 /// Package Selection:
-///   -p, --package [<SPEC>]  Package with the target to run
+///   --package [<SPEC>]  Package with the target to run
 #[derive(Clone, Args)]
 pub struct PackageSelection {
     /// Package with the target to run
-    #[arg(short = 'p', long)]
+    #[arg(long)]
     pub package: Option<String>,
 }
 

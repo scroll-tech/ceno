@@ -75,6 +75,10 @@ pub struct CenoOptions {
     /// Setting any value restricts logs to profiling information
     #[arg(long)]
     profiling: Option<usize>,
+
+    #[clap(skip)]
+    /// run in release mode or not.
+    pub release: bool,
 }
 
 impl CenoOptions {
@@ -288,13 +292,23 @@ fn run_elf_inner<
         .next_power_of_two()
         .max(16);
 
-    let platform = setup_platform(
-        options.platform,
-        &program,
-        options.stack_size(),
-        options.heap_size(),
-        pub_io_size,
-    );
+    let platform = if options.release {
+        setup_platform(
+            options.platform,
+            &program,
+            options.stack_size(),
+            options.heap_size(),
+            pub_io_size,
+        )
+    } else {
+        setup_platform_debug(
+            options.platform,
+            &program,
+            options.stack_size(),
+            options.heap_size(),
+            pub_io_size,
+        )
+    };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",

@@ -91,7 +91,7 @@ impl ProveCmd {
 }
 
 impl CmdInner {
-    fn run(self, toolchain: Option<String>, kind: RunKind) -> anyhow::Result<()> {
+    fn run(mut self, toolchain: Option<String>, kind: RunKind) -> anyhow::Result<()> {
         let manifest_path = match self.manifest_options.manifest_path.clone() {
             Some(path) => path,
             None => search_cargo_manifest_path(current_dir()?)?,
@@ -99,6 +99,9 @@ impl CmdInner {
         let target_selection = self
             .target_selection
             .canonicalize(manifest_path, &self.package_selection)?;
+
+        // XXX: custom handling: set release mode from compilation_options
+        self.ceno_options.release = self.compilation_options.release;
 
         let build = BuildCmd {
             cargo_options: self.cargo_options.clone(),
