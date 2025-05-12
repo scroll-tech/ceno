@@ -120,13 +120,16 @@ impl CmdInner {
 
         match kind {
             RunKind::Keygen => {
-                self.ceno_options.keygen(target_elf)?;
+                self.ceno_options
+                    .keygen(&self.compilation_options, target_elf)?;
             }
             RunKind::Run => {
-                self.ceno_options.run(target_elf)?;
+                self.ceno_options
+                    .run(&self.compilation_options, target_elf)?;
             }
             RunKind::Prove => {
-                self.ceno_options.prove(target_elf)?;
+                self.ceno_options
+                    .prove(&self.compilation_options, target_elf)?;
             }
         }
 
