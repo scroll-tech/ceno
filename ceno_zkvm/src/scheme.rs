@@ -106,8 +106,8 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pi_evals: Vec<E>,
     // circuit size -> instance mapping
     pub num_instances: Vec<(usize, usize)>,
-    opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
-    table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
+    opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+    table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
     witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub fixed_witin_opening_proof: PCS::Proof,
 }
@@ -116,8 +116,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         raw_pi: Vec<Vec<E::BaseField>>,
         pi_evals: Vec<E>,
-        opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
-        table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
+        opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+        table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         fixed_witin_opening_proof: PCS::Proof,
         num_instances: Vec<(usize, usize)>,
@@ -214,7 +214,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .opcode_proofs
             .iter()
             .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.main_sel_sumcheck_proofs);
+                let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {
                     *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })

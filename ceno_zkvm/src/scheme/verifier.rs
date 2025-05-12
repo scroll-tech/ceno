@@ -208,18 +208,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     + num_lks.next_power_of_two() * num_padded_instance;
 
                 prod_r *= opcode_proof
-                    .record_r_out_evals
+                    .r_out_evals
                     .iter()
-                    .copied()
-                    .product::<E>();
+                    .flatten()
+                    .fold(E::ONE, |acc, e| acc * *e);
                 prod_w *= opcode_proof
-                    .record_w_out_evals
+                    .w_out_evals
                     .iter()
-                    .copied()
-                    .product::<E>();
+                    .flatten()
+                    .fold(E::ONE, |acc, e| acc * *e);
 
-                logup_sum += opcode_proof.lk_p1_out_eval * opcode_proof.lk_q1_out_eval.inverse();
-                logup_sum += opcode_proof.lk_p2_out_eval * opcode_proof.lk_q2_out_eval.inverse();
+                opcode_proof.lk_out_evals.iter().for_each(|evals| {
+                    // TODO: return error instead of panic
+                    assert_eq!(evals.len(), 4);
+
+                    let p1 = evals[0];
+                    let p2 = evals[1];
+                    let q1 = evals[2];
+                    let q2 = evals[3];
+                    logup_sum += p1 * q1.inverse();
+                    logup_sum += p2 * q2.inverse();
+                });
             } else if let Some(table_proof) = vm_proof.table_proofs.get(index) {
                 transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
                 rt_points.push(self.verify_table_proof(
@@ -243,8 +252,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 logup_sum = table_proof
                     .lk_out_evals
                     .iter()
-                    .fold(logup_sum, |acc, [p1, p2, q1, q2]| {
-                        acc - *p1 * q1.inverse() - *p2 * q2.inverse()
+                    .fold(logup_sum, |acc, evals| {
+
+                        let (p1, p2, q1, q2) = (
+                            evals[0],
+                            evals[1],
+                            evals[2],
+                            evals[3],
+                        );
+
+                        acc - p1 * q1.inverse() - p2 * q2.inverse()
                     });
 
                 prod_w *= table_proof
@@ -353,7 +370,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let tower_proofs = &proof.tower_proof;
 
         let (rt_tower, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
-            vec![proof.r_out_evals.clone(), proof.w_out_evals.clone()],
+            proof
+                .r_out_evals
+                .iter()
+                .cloned()
+                .chain(proof.w_out_evals.iter().cloned())
+                .collect_vec(),
             proof.lk_out_evals.clone(),
             tower_proofs,
             vec![log2_num_instances, log2_num_instances, log2_num_instances],
@@ -369,34 +391,41 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
-        // verify zero statement (degree > 1) + sel sumcheck
-        let (rt_r, rt_w, rt_lk): (Vec<E>, Vec<E>, Vec<E>) = (
-            record_evals[0].point.clone(),
-            record_evals[1].point.clone(),
-            logup_q_evals[0].point.clone(),
+        assert!(
+            record_evals
+                .iter()
+                .map(|e| e.point)
+                .all(|point| point == record_evals[0].point)
         );
 
+        // verify zero statement (degree > 1) + sel sumcheck
+        let rt = record_evals[0].point.clone();
+        let num_rw_records = r_counts_per_instance + w_counts_per_instance;
+
+        assert_eq!(record_evals.len(), num_rw_records);
+
         let alpha_pow = get_challenge_pows(
-            MAINCONSTRAIN_SUMCHECK_BATCH_SIZE + cs.assert_zero_sumcheck_expressions.len(),
+            r_counts_per_instance
+                + w_counts_per_instance
+                + lk_counts_per_instance
+                + cs.assert_zero_sumcheck_expressions.len(),
             transcript,
         );
-        let mut alpha_pow_iter = alpha_pow.iter();
-        let (alpha_read, alpha_write, alpha_lk) = (
-            alpha_pow_iter.next().unwrap(),
-            alpha_pow_iter.next().unwrap(),
-            alpha_pow_iter.next().unwrap(),
-        );
+
         // alpha_read * (out_r[rt] - 1) + alpha_write * (out_w[rt] - 1) + alpha_lk * (out_lk_q - chip_record_alpha)
         // + 0 // 0 come from zero check
-        let claim_sum = *alpha_read * (record_evals[0].eval - E::ONE)
-            + *alpha_write * (record_evals[1].eval - E::ONE)
-            + *alpha_lk * (logup_q_evals[0].eval - chip_record_alpha);
+        let claim_sum = izip!(&alpha_pow[0..num_rw_records], record_evals)
+            .map(|(alpha, eval)| *alpha * (eval.eval - E::ONE))
+            .sum::<E>()
+            + izip!(&alpha_pow[num_rw_records..], logup_q_evals)
+                .map(|(alpha, eval)| *alpha * (eval.eval - chip_record_alpha))
+                .sum::<E>();
 
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
                 point: vec![], // final claimed point will be derive from sumcheck protocol
-                proofs: proof.main_sel_sumcheck_proofs.clone(),
+                proofs: proof.main_sumcheck_proofs.as_ref().unwrap().clone(),
             },
             &VPAuxInfo {
                 // + 1 from sel_non_lc_zero_sumcheck
@@ -414,43 +443,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .collect_vec(),
             main_sel_subclaim.expected_evaluation,
         );
-        let eq_r = build_eq_x_r_vec_sequential(&rt_r[..log2_r_count]);
-        let eq_w = build_eq_x_r_vec_sequential(&rt_w[..log2_w_count]);
-        let eq_lk = build_eq_x_r_vec_sequential(&rt_lk[..log2_lk_count]);
 
-        let (sel_r, sel_w, sel_lk, sel_non_lc_zero_sumcheck) = {
-            // sel(rt, t)
-            (
-                eq_eval_less_or_equal_than(
-                    num_instances - 1,
-                    &input_opening_point,
-                    &rt_r[log2_r_count..],
-                ),
-                eq_eval_less_or_equal_than(
-                    num_instances - 1,
-                    &input_opening_point,
-                    &rt_w[log2_w_count..],
-                ),
-                eq_eval_less_or_equal_than(
-                    num_instances - 1,
-                    &input_opening_point,
-                    &rt_lk[log2_lk_count..],
-                ),
-                // only initialize when circuit got non empty assert_zero_sumcheck_expressions
-                {
-                    let rt_non_lc_sumcheck = rt_tower[..log2_num_instances].to_vec();
-                    if !cs.assert_zero_sumcheck_expressions.is_empty() {
-                        Some(eq_eval_less_or_equal_than(
-                            num_instances - 1,
-                            &input_opening_point,
-                            &rt_non_lc_sumcheck,
-                        ))
-                    } else {
-                        None
-                    }
-                },
-            )
-        };
+        // sel(rt, t)
+        let sel = eq_eval_less_or_equal_than(num_instances - 1, &input_opening_point, &rt);
 
         // derive r_records, w_records, lk_records from witness's evaluations
         let r_records_in_evals: Vec<_> = cs
@@ -482,50 +477,48 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .collect();
         let computed_evals = [
             // read
-            *alpha_read
-                * sel_r
-                * (0..r_counts_per_instance)
-                    .map(|i| (r_records_in_evals[i] - E::ONE) * eq_r[i])
-                    .sum::<E>(),
+            sel * izip!(&alpha_pow[0..r_counts_per_instance], r_records_in_evals)
+                .map(|(alpha, in_eval)| *alpha * (in_eval - E::ONE))
+                .sum::<E>(),
             // write
-            *alpha_write
-                * sel_w
-                * (0..w_counts_per_instance)
-                    .map(|i| (w_records_in_evals[i] - E::ONE) * eq_w[i])
-                    .sum::<E>(),
+            sel * izip!(
+                &alpha_pow[r_counts_per_instance..num_rw_records],
+                w_records_in_evals
+            )
+            .map(|(alpha, in_eval)| *alpha * (in_eval - E::ONE))
+            .sum::<E>(),
             // lookup
-            *alpha_lk
-                * sel_lk
-                * (0..lk_counts_per_instance)
-                    .map(|i| (lk_records_in_evals[i] - chip_record_alpha) * eq_lk[i])
-                    .sum::<E>(),
+            sel * izip!(&alpha_pow[num_rw_records..], lk_records_in_evals)
+                .map(|(alpha, in_eval)| *alpha * (in_eval - chip_record_alpha))
+                .sum::<E>(),
             // degree > 1 zero exp sumcheck
             {
                 // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
-                sel_non_lc_zero_sumcheck.unwrap_or(E::ZERO)
-                    * cs.assert_zero_sumcheck_expressions
-                        .iter()
-                        .zip_eq(alpha_pow_iter)
-                        .map(|(expr, alpha)| {
-                            // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
-                            *alpha
-                                * eval_by_expr_with_instance(
-                                    &[],
-                                    &proof.wits_in_evals,
-                                    &[],
-                                    pi,
-                                    challenges,
-                                    expr,
-                                )
-                                .right()
-                                .unwrap()
-                        })
-                        .sum::<E>()
+                sel * cs
+                    .assert_zero_sumcheck_expressions
+                    .iter()
+                    .zip_eq(&alpha_pow[(num_rw_records + lk_counts_per_instance)..])
+                    .map(|(expr, alpha)| {
+                        // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
+                        *alpha
+                            * eval_by_expr_with_instance(
+                                &[],
+                                &proof.wits_in_evals,
+                                &[],
+                                pi,
+                                challenges,
+                                expr,
+                            )
+                            .right()
+                            .unwrap()
+                    })
+                    .sum::<E>()
             },
         ]
         .iter()
         .copied()
         .sum::<E>();
+
         if computed_evals != expected_evaluation {
             return Err(ZKVMError::VerifyError(
                 "main + sel evaluation verify failed".into(),
@@ -550,7 +543,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         name: &str,
         circuit_vk: &VerifyingKey<E>,
-        proof: &ZKVMTableProof<E>,
+        proof: &ZKVMChipProof<E>,
         num_instances: usize,
         raw_pi: &[Vec<E::BaseField>],
         pi: &[E],
@@ -669,7 +662,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .collect_vec(),
             )
         } else {
-            assert!(proof.same_r_sumcheck_proofs.is_some());
+            assert!(proof.main_sumcheck_proofs.is_some());
 
             // verify opening same point layer sumcheck
             let alpha_pow = get_challenge_pows(
@@ -696,7 +689,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 claim_sum,
                 &IOPProof {
                     point: vec![], // final claimed point will be derived from sumcheck protocol
-                    proofs: proof.same_r_sumcheck_proofs.clone().unwrap(),
+                    proofs: proof.main_sumcheck_proofs.clone().unwrap(),
                 },
                 &VPAuxInfo {
                     max_degree: SEL_DEGREE,

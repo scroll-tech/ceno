@@ -923,31 +923,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let r_out_evals = r_wit_layers
             .iter()
             .map(|r_wit_layers| {
-                [
-                    r_wit_layers[0][0].get_ext_field_vec()[0],
-                    r_wit_layers[0][1].get_ext_field_vec()[0],
-                ]
+                r_wit_layers
+                    .iter()
+                    .map(|r_wit_layer| r_wit_layer[0].get_ext_field_vec()[0])
+                    .collect_vec()
             })
             .collect_vec();
         let w_out_evals = w_wit_layers
             .iter()
             .map(|w_wit_layers| {
-                [
-                    w_wit_layers[0][0].get_ext_field_vec()[0],
-                    w_wit_layers[0][1].get_ext_field_vec()[0],
-                ]
+                w_wit_layers
+                    .iter()
+                    .map(|w_wit_layer| w_wit_layer[0].get_ext_field_vec()[0])
+                    .collect_vec()
             })
             .collect_vec();
         let lk_out_evals = lk_wit_layers
             .iter()
             .map(|lk_wit_layers| {
-                [
-                    // p1, p2, q1, q2
-                    lk_wit_layers[0][0].get_ext_field_vec()[0],
-                    lk_wit_layers[0][1].get_ext_field_vec()[0],
-                    lk_wit_layers[0][2].get_ext_field_vec()[0],
-                    lk_wit_layers[0][3].get_ext_field_vec()[0],
-                ]
+                lk_wit_layers
+                    .iter()
+                    .map(|lk_wit_layer| lk_wit_layer[0].get_ext_field_vec()[0])
+                    .collect_vec()
             })
             .collect_vec();
 
