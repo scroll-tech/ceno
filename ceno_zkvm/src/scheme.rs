@@ -29,39 +29,13 @@ mod tests;
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct ZKVMOpcodeProof<E: ExtensionField> {
-    // product constraints
-    pub record_r_out_evals: Vec<E>,
-    pub record_w_out_evals: Vec<E>,
-
-    // logup sum at layer 1
-    pub lk_p1_out_eval: E,
-    pub lk_p2_out_eval: E,
-    pub lk_q1_out_eval: E,
-    pub lk_q2_out_eval: E,
-
-    pub tower_proof: TowerProofs<E>,
-
-    // main constraint and select sumcheck proof
-    pub main_sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
-
-    pub wits_in_evals: Vec<E>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-pub struct ZKVMTableProof<E: ExtensionField> {
+pub struct ZKVMChipProof<E: ExtensionField> {
     // tower evaluation at layer 1
-    pub r_out_evals: Vec<[E; 2]>,
-    pub w_out_evals: Vec<[E; 2]>,
-    pub lk_out_evals: Vec<[E; 4]>,
+    pub r_out_evals: Vec<Vec<E>>,
+    pub w_out_evals: Vec<Vec<E>>,
+    pub lk_out_evals: Vec<Vec<E>>,
 
-    pub same_r_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
-    pub rw_in_evals: Vec<E>,
-    pub lk_in_evals: Vec<E>,
+    pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
 
     pub tower_proof: TowerProofs<E>,
 
