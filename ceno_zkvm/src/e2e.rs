@@ -113,22 +113,24 @@ fn emulate_program(
         vm.init_memory(record.addr.into(), record.value);
     }
 
-    let all_records = vm
-        .iter_until_halt()
-        .take(max_steps)
-        .collect::<Result<Vec<StepRecord>, _>>()
-        .expect("vm exec failed");
+    let all_records_result: Result<Vec<StepRecord>, _> =
+        vm.iter_until_halt().take(max_steps).collect();
 
-    if cfg!(debug_assertions) {
-        // show io message if have
-        let all_messages = &read_all_messages(&vm)
+    if platform.is_debug {
+        let all_messages = read_all_messages(&vm)
             .iter()
             .map(|msg| String::from_utf8_lossy(msg).to_string())
-            .collect::<Vec<String>>();
-        for msg in all_messages {
-            tracing::info!("{}", msg);
+            .collect::<Vec<_>>();
+
+        if !all_messages.is_empty() {
+            tracing::info!("========= BEGIN: I/O from guest =========");
+            for msg in &all_messages {
+                tracing::info!("│ {}", msg);
+            }
+            tracing::info!("========= END: I/O from guest =========");
         }
     }
+    let all_records = all_records_result.expect("vm exec failed");
 
     // Find the exit code from the HALT step, if halting at all.
     let exit_code = all_records
@@ -290,13 +292,37 @@ pub fn setup_platform(
     heap_size: u32,
     pub_io_size: u32,
 ) -> Platform {
+    setup_platform_inner(preset, program, stack_size, heap_size, pub_io_size, false)
+}
+
+pub fn setup_platform_debug(
+    preset: Preset,
+    program: &Program,
+    stack_size: u32,
+    heap_size: u32,
+    pub_io_size: u32,
+) -> Platform {
+    setup_platform_inner(preset, program, stack_size, heap_size, pub_io_size, true)
+}
+
+fn setup_platform_inner(
+    preset: Preset,
+    program: &Program,
+    stack_size: u32,
+    heap_size: u32,
+    pub_io_size: u32,
+    is_debug: bool,
+) -> Platform {
     let preset = match preset {
-        Preset::Ceno => CENO_PLATFORM,
+        Preset::Ceno => Platform {
+            is_debug,
+            ..CENO_PLATFORM
+        },
     };
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
 
-    let stack = if cfg!(debug_assertions) {
+    let stack = if preset.is_debug {
         // reserve some extra space for io
         // thus memory consistent check could be satisfied
         preset.stack.end - stack_size..(preset.stack.end + 0x4000)
