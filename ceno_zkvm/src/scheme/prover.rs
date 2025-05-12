@@ -1,21 +1,18 @@
 use ff_ext::ExtensionField;
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, BTreeSet, HashMap},
-};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use itertools::{Either, Itertools, enumerate, izip};
+use itertools::{Either, Itertools, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression,
-    mle::{ArcMultilinearExtension, IntoMLE},
+    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::iter::Iterator;
+use std::{iter::Iterator, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -512,10 +509,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             alpha_pow_iter.next().unwrap(),
         );
         // create selector: all ONE, but padding ZERO to ceil_log2
-        let (sel_r, sel_w, sel_lk): (
-            ArcMultilinearExtension<E>,
-            ArcMultilinearExtension<E>,
-            ArcMultilinearExtension<E>,
+        let (mut sel_r, mut sel_w, mut sel_lk): (
+            MultilinearExtension<E>,
+            MultilinearExtension<E>,
+            MultilinearExtension<E>,
         ) = {
             // TODO sel can be shared if expression count match
             let mut sel_r = build_eq_x_r_vec(&rt_r[log2_r_count..]);
@@ -542,11 +539,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 );
             }
 
-            (
-                sel_r.into_mle().into(),
-                sel_w.into_mle().into(),
-                sel_lk.into_mle().into(),
-            )
+            (sel_r.into_mle(), sel_w.into_mle(), sel_lk.into_mle())
         };
 
         // only initialize when circuit got assert_zero_sumcheck_expressions
@@ -593,7 +586,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     })
                     .collect::<Vec<_>>()
                     .into_mle()
-                    .into()
             };
 
         // The relation between the last layer of tower binary tree and read/write/logup records is
@@ -608,15 +600,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // out(rs,rt) - padding = \sum_j eq(rt,j)*sel[j]*\sum_{i < counts} eq(rs,i)*(records[i][j] - padding)
 
         // r_records_combined is \sum_{i < r_counts} eq(rs,i)*(r_records[i][j]-padding) where padding = 1
-        let r_records_combined: ArcMultilinearExtension<E> =
+        let mut r_records_combined: MultilinearExtension<E> =
             linear_combine_mles(&eq_r[0..r_counts_per_instance], r_records_wit, E::ONE.neg());
 
         // w_records_combined is \sum_{i < w_counts} eq(rs,i)*(w_records[i][j]-padding) where padding = 1
-        let w_records_combined: ArcMultilinearExtension<E> =
+        let mut w_records_combined: MultilinearExtension<E> =
             linear_combine_mles(&eq_w[0..w_counts_per_instance], w_records_wit, E::ONE.neg());
 
         // lk_records_combined is \sum_{i < lk_counts} eq(rs,i)*(lk_records[i][j]-padding) where padding = chip_record_alpha
-        let lk_records_combined: ArcMultilinearExtension<E> = linear_combine_mles(
+        let mut lk_records_combined: MultilinearExtension<E> = linear_combine_mles(
             &eq_lk[0..lk_counts_per_instance],
             lk_records_wit,
             chip_record_alpha.neg(),
@@ -635,14 +627,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             lk_records_combined,
             alpha_lk,
         ) = (
-            expr_builder.lift(Cow::Owned(sel_r)),
-            expr_builder.lift(Cow::Owned(r_records_combined)),
+            expr_builder.lift(Either::Right(&mut sel_r)),
+            expr_builder.lift(Either::Right(&mut r_records_combined)),
             Expression::Constant(either::Right(*alpha_read)),
-            expr_builder.lift(Cow::Owned(sel_w)),
-            expr_builder.lift(Cow::Owned(w_records_combined)),
+            expr_builder.lift(Either::Right(&mut sel_w)),
+            expr_builder.lift(Either::Right(&mut w_records_combined)),
             Expression::Constant(either::Right(*alpha_write)),
-            expr_builder.lift(Cow::Owned(sel_lk)),
-            expr_builder.lift(Cow::Owned(lk_records_combined)),
+            expr_builder.lift(Either::Right(&mut sel_lk)),
+            expr_builder.lift(Either::Right(&mut lk_records_combined)),
             Expression::Constant(either::Right(*alpha_lk)),
         );
 
@@ -835,7 +827,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let wit_inference_span = entered_span!("wit_inference");
         // main constraint: lookup denominator and numerator record witness inference
         let record_span = entered_span!("record");
-        let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
+        let records_wit: Vec<MultilinearExtension<'_, E>> = cs
             .r_table_expressions
             .par_iter()
             .map(|r| &r.expr)
@@ -857,14 +849,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     expr,
                 )
             })
+            .map(|mle| Arc::into_inner(mle).unwrap())
             .collect();
         let max_log2_num_instance = records_wit.iter().map(|mle| mle.num_vars()).max().unwrap();
         let min_log2_num_instance = records_wit.iter().map(|mle| mle.num_vars()).min().unwrap();
         let mut remains = records_wit;
-        let r_set_wit: Vec<_> = remains.drain(..cs.r_table_expressions.len()).collect();
-        let w_set_wit: Vec<_> = remains.drain(..cs.w_table_expressions.len()).collect();
-        let lk_n_wit: Vec<_> = remains.drain(..cs.lk_table_expressions.len()).collect();
-        let lk_d_wit: Vec<_> = remains.drain(..cs.lk_table_expressions.len()).collect();
+        let mut r_set_wit: Vec<_> = remains.drain(..cs.r_table_expressions.len()).collect();
+        let mut w_set_wit: Vec<_> = remains.drain(..cs.w_table_expressions.len()).collect();
+        let mut lk_n_wit: Vec<_> = remains.drain(..cs.lk_table_expressions.len()).collect();
+        let mut lk_d_wit: Vec<_> = remains.drain(..cs.lk_table_expressions.len()).collect();
 
         assert!(remains.is_empty());
 
@@ -909,10 +902,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let (first, second) = wit
                     .get_ext_field_vec()
                     .split_at(wit.evaluations().len() / 2);
-                let res = vec![
-                    first.to_vec().into_mle().into(),
-                    second.to_vec().into_mle().into(),
-                ];
+                let res = vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res
             })
@@ -1085,13 +1075,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .chain(tower_proof.logup_specs_points.iter())
                     .map(|layer_points| {
                         let rt = layer_points.last().unwrap();
-                        build_eq_x_r_vec(rt).into_mle().into()
+                        build_eq_x_r_vec(rt).into_mle()
                     })
-                    .collect::<Vec<ArcMultilinearExtension<E>>>();
+                    .collect::<Vec<MultilinearExtension<E>>>();
 
                 let mut eq = eq;
-                let eq_rw: Vec<_> = eq.drain(..cs.r_table_expressions.len()).collect();
-                let eq_lk: Vec<_> = eq.drain(..).collect(); // drain the rest
+                let mut eq_rw: Vec<_> = eq.drain(..cs.r_table_expressions.len()).collect();
+                let mut eq_lk: Vec<_> = eq.drain(..).collect(); // drain the rest
 
                 let mut expr_builder = VirtualPolynomialsBuilder::default();
                 let mut exprs =
@@ -1100,32 +1090,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let mut witness_lk_expr = Vec::<Expression<E>>::with_capacity(lk_n_wit.len() * 2);
 
                 // alpha_r{i} * eq(rt_{i}, s) * r(s) + alpha_w{i} * eq(rt_{i}, s) * w(s)
-                for ((r_set_wit, w_set_wit), eq) in
-                    r_set_wit.into_iter().zip_eq(w_set_wit).zip_eq(eq_rw)
+                for ((r_set_wit, w_set_wit), eq) in r_set_wit
+                    .iter_mut()
+                    .zip_eq(w_set_wit.iter_mut())
+                    .zip_eq(eq_rw.iter_mut())
                 {
-                    let eq = expr_builder.lift(Cow::Owned(eq));
+                    let eq = expr_builder.lift(Either::Right(eq));
                     let alpha_r =
                         Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    let r_set_wit = expr_builder.lift(Cow::Owned(r_set_wit));
+                    let r_set_wit = expr_builder.lift(Either::Right(r_set_wit));
                     let alpha_w =
                         Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    let w_set_wit = expr_builder.lift(Cow::Owned(w_set_wit));
+                    let w_set_wit = expr_builder.lift(Either::Right(w_set_wit));
                     witness_rw_expr.push(r_set_wit.clone());
                     witness_lk_expr.push(w_set_wit.clone());
                     exprs.push(eq * (alpha_r * r_set_wit + alpha_w * w_set_wit));
                 }
 
                 // alpha_lkn{i} * eq(rt_{i}, s) * lk_n(s) + alpha_lkd{i} * eq(rt_{i}, s) * lk_d(s)
-                for ((lk_n_wit, lk_d_wit), eq) in
-                    lk_n_wit.into_iter().zip_eq(lk_d_wit).zip_eq(eq_lk)
+                for ((lk_n_wit, lk_d_wit), eq) in lk_n_wit
+                    .iter_mut()
+                    .zip_eq(lk_d_wit.iter_mut())
+                    .zip_eq(eq_lk.iter_mut())
                 {
-                    let eq = expr_builder.lift(Cow::Owned(eq));
+                    let eq = expr_builder.lift(Either::Right(eq));
                     let alpha_lk_n =
                         Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    let lk_n_wit = expr_builder.lift(Cow::Owned(lk_n_wit));
+                    let lk_n_wit = expr_builder.lift(Either::Right(lk_n_wit));
                     let alpha_lk_d =
                         Expression::Constant(Either::Right(*alpha_pow_iter.next().unwrap()));
-                    let lk_d_wit = expr_builder.lift(Cow::Owned(lk_d_wit));
+                    let lk_d_wit = expr_builder.lift(Either::Right(lk_d_wit));
                     witness_lk_expr.push(lk_n_wit.clone());
                     witness_lk_expr.push(lk_d_wit.clone());
                     exprs.push(eq * (alpha_lk_n * lk_n_wit + alpha_lk_d * lk_d_wit));
@@ -1261,7 +1255,8 @@ impl TowerProver {
         // TODO mayber give a better naming?
         assert_eq!(num_fanin, 2);
 
-        let mut proofs = TowerProofs::new(prod_specs.len(), logup_specs.len());
+        let (prod_specs_len, logup_specs_len) = (prod_specs.len(), logup_specs.len());
+        let mut proofs = TowerProofs::new(prod_specs_len, logup_specs_len);
         let log_num_fanin = ceil_log2(num_fanin);
         // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
         let max_round_index = prod_specs
@@ -1274,9 +1269,9 @@ impl TowerProver {
 
         // generate alpha challenge
         let alpha_pows = get_challenge_pows(
-            prod_specs.len() +
+            prod_specs_len +
             // logup occupy 2 sumcheck: numerator and denominator
-            logup_specs.len() * 2,
+            logup_specs_len * 2,
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
@@ -1285,116 +1280,122 @@ impl TowerProver {
             (1..=max_round_index).fold((initial_rt, alpha_pows), |(out_rt, alpha_pows), round| {
                 // in first few round we just run on single thread
                 let num_threads = optimal_sumcheck_threads(out_rt.len());
-
-                let eq: ArcMultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle().into();
-
-                let mut expr_builder = VirtualPolynomialsBuilder::default();
                 let mut exprs =
-                    Vec::<Expression<E>>::with_capacity(prod_specs.len() + logup_specs.len());
-                let eq_expr = expr_builder.lift(Cow::Owned(eq));
-                let mut witness_prod_expr = vec![vec![]; prod_specs.len()];
-                let mut witness_lk_expr = vec![vec![]; logup_specs.len()];
+                    Vec::<Expression<E>>::with_capacity(prod_specs_len + logup_specs_len);
+                let mut expr_builder = VirtualPolynomialsBuilder::default();
+                let mut witness_prod_expr = vec![vec![]; prod_specs_len];
+                // let mut witness_lk_expr = vec![vec![]; logup_specs_len];
 
+                let mut eq: MultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle();
+                let eq_expr = expr_builder.lift(Either::Right(&mut eq));
                 for (i, (s, alpha)) in izip!(prod_specs.iter_mut(), &alpha_pows).enumerate() {
-                    if s.witness.len() > 1 {
+                    if round < s.witness.len() {
                         let alpha_expr = Expression::Constant(Either::Right(*alpha));
-                        let layer_polys = s.witness.remove(1);
+                        let layer_polys = &mut s.witness[round];
 
                         // sanity check
                         assert_eq!(layer_polys.len(), num_fanin);
                         assert!(
                             layer_polys
                                 .iter()
-                                .all(|f| {
-                                    f.evaluations().len() == 1 << (log_num_fanin * round)
-                                })
+                                .all(|f| { f.evaluations().len() == 1 << (log_num_fanin * round) })
                         );
 
-                        let layer_polys = layer_polys.into_iter().map(|layer_poly| expr_builder.lift(Cow::Owned(layer_poly))).collect_vec();
+                        let layer_polys = layer_polys
+                            .into_iter()
+                            .map(|layer_poly| expr_builder.lift(Either::Right(layer_poly)))
+                            .collect_vec();
                         witness_prod_expr[i].extend(layer_polys.clone());
-                        let layer_polys_product = layer_polys.into_iter().product::<Expression<E>>();
+                        let layer_polys_product =
+                            layer_polys.into_iter().product::<Expression<E>>();
                         // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
-                        exprs.push(eq_expr.clone() * alpha_expr *layer_polys_product);
+                        exprs.push(eq_expr.clone() * alpha_expr * layer_polys_product);
                     }
                 }
 
-                for (i,(s, alpha)) in izip!(logup_specs.iter_mut(), alpha_pows[prod_specs.len()..].chunks(2)).enumerate()
-                {
-                    if s.witness.len() > 1 {
-                        let mut layer_polys = s.witness.remove(1);
-                        // sanity check
-                        assert_eq!(layer_polys.len(), 4); // p1, p2, q1, q2
-                        assert!(
-                            layer_polys
-                                .iter()
-                                .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
-                        );
+                // for (i,(s, alpha)) in izip!(logup_specs.iter_mut(), alpha_pows[prod_specs_len..].chunks(2)).enumerate()
+                // {
+                //     if round < s.witness.len() {
+                //         let layer_polys = &mut s.witness[round];
+                //         // sanity check
+                //         assert_eq!(layer_polys.len(), 4); // p1, p2, q1, q2
+                //         assert!(
+                //             layer_polys
+                //                 .iter()
+                //                 .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
+                //         );
 
-                        let (alpha_numerator, alpha_denominator) = (Expression::Constant(Either::Right(alpha[0])), Expression::Constant(Either::Right(alpha[1])));
+                //         let (alpha_numerator, alpha_denominator) = (Expression::Constant(Either::Right(alpha[0])), Expression::Constant(Either::Right(alpha[1])));
 
-                        let (p1, p2, q1, q2) = (
-                            expr_builder.lift(Cow::Owned(layer_polys.remove(0))),
-                            expr_builder.lift(Cow::Owned(layer_polys.remove(0))),
-                            expr_builder.lift(Cow::Owned(layer_polys.remove(0))),
-                            expr_builder.lift(Cow::Owned(layer_polys.remove(0))),
-                        );
-                        witness_lk_expr[i].extend(vec![p1.clone(), p2.clone(), q1.clone(), q2.clone()]);
+                //         let (p1, rest) = layer_polys.split_at_mut(1);
+                //         let (p2, rest) = rest.split_at_mut(1);
+                //         let (q1, q2) = rest.split_at_mut(1);
 
-                        // \sum_s eq(rt, s) * (alpha_numerator^{i} * (p1 * q2 + p2 * q1) + alpha_denominator^{i} * q1 * q2)
-                        exprs.push(eq_expr.clone() * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())  + alpha_denominator * q1 * q2));
-                    }
-                }
+                //         let (p1, p2, q1, q2) = (
+                //             expr_builder.lift(Either::Right(&mut p1[0])),
+                //             expr_builder.lift(Either::Right(&mut p2[0])),
+                //             expr_builder.lift(Either::Right(&mut q1[0])),
+                //             expr_builder.lift(Either::Right(&mut q2[0])),
+                //         );
+                //         witness_lk_expr[i].extend(vec![p1.clone(), p2.clone(), q1.clone(), q2.clone()]);
 
-                let wrap_batch_span = entered_span!("wrap_batch");
-                let (sumcheck_proofs, state) = IOPProverState::prove(
-                    expr_builder.to_virtual_polys(
-                        num_threads,
-                        out_rt.len(),
-                        &[exprs.into_iter().sum()],
-                        &[],
-                    ),
-                    transcript,
-                );
-                exit_span!(wrap_batch_span);
+                //         // \sum_s eq(rt, s) * (alpha_numerator^{i} * (p1 * q2 + p2 * q1) + alpha_denominator^{i} * q1 * q2)
+                //         exprs.push(eq_expr.clone() * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())  + alpha_denominator * q1 * q2));
+                //     }
+                // }
 
-                proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
+                // let wrap_batch_span = entered_span!("wrap_batch");
+                // let (sumcheck_proofs, state) = IOPProverState::prove(
+                //     expr_builder.to_virtual_polys(
+                //         num_threads,
+                //         out_rt.len(),
+                //         &[exprs.into_iter().sum()],
+                //         &[],
+                //     ),
+                //     transcript,
+                // );
+                // exit_span!(wrap_batch_span);
 
-                // rt' = r_merge || rt
-                let r_merge =  transcript.sample_and_append_vec(b"merge", log_num_fanin);
-                let rt_prime = [sumcheck_proofs.point, r_merge].concat();
+                // proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
 
-                // generate next round challenge
-                let next_alpha_pows = get_challenge_pows(
-                    prod_specs.len() +logup_specs.len() * 2, // logup occupy 2 sumcheck: numerator and denominator
-                    transcript,
-                );
-                let evals = state.get_mle_flatten_final_evaluations();
-                for (i, _) in enumerate(&prod_specs) {
-                    let evals = witness_prod_expr[i].iter().map(|expr| { match expr {
-                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
-                       _ => unreachable!()
-                        }
-                    }).collect_vec();
-                    if !evals.is_empty() {
-                        assert_eq!(evals.len(), num_fanin);
-                        proofs.push_prod_evals_and_point(
-                            i,
-                            evals,
-                            rt_prime.clone(),
-                        );
-                    }
-                }
-                for (i, _) in enumerate(&logup_specs) {
-                    let evals = witness_lk_expr[i].iter().map(|expr| { match expr {
-                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
-                        _ => unreachable!()
-                        }
-                    }).collect_vec();
-                    if !evals.is_empty() {
-                        assert_eq!(evals.len(), 4); // p1, p2, q1, q2
-                        proofs.push_logup_evals_and_point(i, evals, rt_prime.clone());
-                    }
-                }
+                // // rt' = r_merge || rt
+                // let r_merge =  transcript.sample_and_append_vec(b"merge", log_num_fanin);
+                // let rt_prime = [sumcheck_proofs.point, r_merge].concat();
+
+                // // generate next round challenge
+                // let next_alpha_pows = get_challenge_pows(
+                //     prod_specs_len + logup_specs_len * 2, // logup occupy 2 sumcheck: numerator and denominator
+                //     transcript,
+                // );
+                // let evals = state.get_mle_flatten_final_evaluations();
+                // for i in 0..prod_specs_len {
+                //     let evals = witness_prod_expr[i].iter().map(|expr| { match expr {
+                //         Expression::WitIn(wit_id) => evals[*wit_id as usize],
+                //        _ => unreachable!()
+                //         }
+                //     }).collect_vec();
+                //     if !evals.is_empty() {
+                //         assert_eq!(evals.len(), num_fanin);
+                //         proofs.push_prod_evals_and_point(
+                //             i,
+                //             evals,
+                //             rt_prime.clone(),
+                //         );
+                //     }
+                // }
+                // for i in 0..logup_specs_len {
+                //     let evals = witness_lk_expr[i].iter().map(|expr| { match expr {
+                //         Expression::WitIn(wit_id) => evals[*wit_id as usize],
+                //         _ => unreachable!()
+                //         }
+                //     }).collect_vec();
+                //     if !evals.is_empty() {
+                //         assert_eq!(evals.len(), 4); // p1, p2, q1, q2
+                //         proofs.push_logup_evals_and_point(i, evals, rt_prime.clone());
+                //     }
+                // }
+                let rt_prime = vec![];
+                let next_alpha_pows = vec![];
                 (rt_prime, next_alpha_pows)
             });
 

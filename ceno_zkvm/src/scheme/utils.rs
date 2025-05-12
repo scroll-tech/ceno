@@ -28,7 +28,7 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     num_instances: usize,
     num_limbs: usize,
     default: E,
-) -> Vec<ArcMultilinearExtension<'a, E>> {
+) -> Vec<MultilinearExtension<'a, E>> {
     assert!(num_limbs.is_power_of_two());
     assert!(!mles.is_empty());
     let next_power_of_2 = next_pow2_instance_padding(num_instances);
@@ -80,9 +80,9 @@ pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
                         _ => unreachable!(),
                     });
             }
-            evaluations.into_mle().into()
+            evaluations.into_mle()
         })
-        .collect::<Vec<ArcMultilinearExtension<E>>>()
+        .collect::<Vec<MultilinearExtension<E>>>()
 }
 
 macro_rules! tower_mle_4 {
@@ -105,9 +105,9 @@ macro_rules! tower_mle_4 {
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
 pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
-    p_mles: Option<Vec<ArcMultilinearExtension<'a, E>>>,
-    q_mles: Vec<ArcMultilinearExtension<'a, E>>,
-) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
+    p_mles: Option<Vec<MultilinearExtension<'a, E>>>,
+    q_mles: Vec<MultilinearExtension<'a, E>>,
+) -> Vec<Vec<MultilinearExtension<'a, E>>> {
     if cfg!(test) {
         assert_eq!(q_mles.len(), 2);
         assert!(q_mles.iter().map(|q| q.evaluations().len()).all_equal());
@@ -115,15 +115,12 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
     let num_vars = ceil_log2(q_mles[0].evaluations().len());
     let mut wit_layers = (0..num_vars).fold(vec![(p_mles, q_mles)], |mut acc, _| {
         let (p, q): &(
-            Option<Vec<ArcMultilinearExtension<E>>>,
-            Vec<ArcMultilinearExtension<E>>,
+            Option<Vec<MultilinearExtension<E>>>,
+            Vec<MultilinearExtension<E>>,
         ) = acc.last().unwrap();
         let (q1, q2) = (&q[0], &q[1]);
         let cur_len = q1.evaluations().len() / 2;
-        let (next_p, next_q): (
-            Vec<ArcMultilinearExtension<E>>,
-            Vec<ArcMultilinearExtension<E>>,
-        ) = (0..2)
+        let (next_p, next_q): (Vec<MultilinearExtension<E>>, Vec<MultilinearExtension<E>>) = (0..2)
             .map(|index| {
                 let start_index = cur_len * index;
                 let (p_evals, q_evals): (Vec<E>, Vec<E>) = if let Some(p) = p {
@@ -167,7 +164,7 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                         _ => unreachable!(),
                     }
                 };
-                (p_evals.into_mle().into(), q_evals.into_mle().into())
+                (p_evals.into_mle(), q_evals.into_mle())
             })
             .unzip(); // vec[vec[p1, p2], vec[q1, q2]]
         acc.push((Some(next_p), next_q));
@@ -207,9 +204,9 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
 /// infer tower witness from last layer
 pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     num_vars: usize,
-    last_layer: Vec<ArcMultilinearExtension<'_, E>>,
+    last_layer: Vec<MultilinearExtension<'_, E>>,
     num_product_fanin: usize,
-) -> Vec<Vec<ArcMultilinearExtension<'_, E>>> {
+) -> Vec<Vec<MultilinearExtension<'_, E>>> {
     assert!(last_layer.len() == num_product_fanin);
     assert_eq!(num_product_fanin % 2, 0);
     let log2_num_product_fanin = ceil_log2(num_product_fanin);
@@ -217,7 +214,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
         (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
             let next_layer = acc.last().unwrap();
             let cur_len = next_layer[0].evaluations().len() / num_product_fanin;
-            let cur_layer: Vec<ArcMultilinearExtension<E>> = (0..num_product_fanin)
+            let cur_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
                 .map(|index| {
                     let mut evaluations = vec![E::ONE; cur_len];
                     next_layer.chunks_exact(2).for_each(|f| {
@@ -236,7 +233,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
                             _ => unreachable!("must be extension field"),
                         }
                     });
-                    evaluations.into_mle().into()
+                    evaluations.into_mle()
                 })
                 .collect_vec();
             acc.push(cur_layer);
@@ -365,13 +362,13 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
 
     use ff_ext::{FieldInto, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         commutative_op_mle_pair,
-        mle::{ArcMultilinearExtension, FieldType, IntoMLE},
+        mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+        smart_slice::SmartSlice,
         util::ceil_log2,
     };
     use p3::field::PrimeCharacteristicRing;
@@ -390,9 +387,9 @@ mod tests {
     fn test_infer_tower_witness() {
         type E = GoldilocksExt2;
         let num_product_fanin = 2;
-        let last_layer: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from_u64(2u64)].into_mle().into(),
-            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle().into(),
+        let last_layer: Vec<MultilinearExtension<E>> = vec![
+            vec![E::ONE, E::from_u64(2u64)].into_mle(),
+            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle(),
         ];
         let num_vars = ceil_log2(last_layer[0].evaluations().len()) + 1;
         let res = infer_tower_product_witness(num_vars, last_layer.clone(), 2);
@@ -523,19 +520,17 @@ mod tests {
     fn test_infer_tower_logup_witness() {
         type E = GoldilocksExt2;
         let num_vars = 2;
-        let q: Vec<ArcMultilinearExtension<E>> = vec![
+        let q: Vec<MultilinearExtension<E>> = vec![
             vec![1, 2, 3, 4]
                 .into_iter()
                 .map(E::from_u64)
                 .collect_vec()
-                .into_mle()
-                .into(),
+                .into_mle(),
             vec![5, 6, 7, 8]
                 .into_iter()
                 .map(E::from_u64)
                 .collect_vec()
-                .into_mle()
-                .into(),
+                .into_mle(),
         ];
         let mut res = infer_tower_logup_witness(None, q);
         assert_eq!(num_vars + 1, res.len());
@@ -543,17 +538,17 @@ mod tests {
         let layer = res.pop().unwrap();
         // input layer p
         assert_eq!(
-            layer[0].evaluations().clone(),
-            FieldType::Ext(Cow::Owned(vec![1.into_f(); 4]))
+            layer[0].evaluations().to_owned(),
+            FieldType::Ext(SmartSlice::Owned(vec![1.into_f(); 4]))
         );
         assert_eq!(
             layer[1].evaluations().clone(),
-            FieldType::Ext(Cow::Owned(vec![1.into_f(); 4]))
+            FieldType::Ext(SmartSlice::Owned(vec![1.into_f(); 4]))
         );
         // input layer q is none
         assert_eq!(
             layer[2].evaluations().clone(),
-            FieldType::Ext(Cow::Owned(vec![
+            FieldType::Ext(SmartSlice::Owned(vec![
                 1.into_f(),
                 2.into_f(),
                 3.into_f(),
@@ -562,7 +557,7 @@ mod tests {
         );
         assert_eq!(
             layer[3].evaluations().clone(),
-            FieldType::Ext(Cow::Owned(vec![
+            FieldType::Ext(SmartSlice::Owned(vec![
                 5.into_f(),
                 6.into_f(),
                 7.into_f(),
@@ -575,7 +570,7 @@ mod tests {
         // next layer p1
         assert_eq!(
             layer[0].evaluations().clone(),
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![1 + 5].into_iter().map(E::from_u64).sum::<E>(),
                 vec![2 + 6].into_iter().map(E::from_u64).sum::<E>()
             ]))
@@ -583,7 +578,7 @@ mod tests {
         // next layer p2
         assert_eq!(
             layer[1].evaluations().clone(),
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![3 + 7].into_iter().map(E::from_u64).sum::<E>(),
                 vec![4 + 8].into_iter().map(E::from_u64).sum::<E>()
             ]))
@@ -591,7 +586,7 @@ mod tests {
         // next layer q1
         assert_eq!(
             layer[2].evaluations().clone(),
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![5].into_iter().map(E::from_u64).sum::<E>(),
                 vec![2 * 6].into_iter().map(E::from_u64).sum::<E>()
             ]))
@@ -599,7 +594,7 @@ mod tests {
         // next layer q2
         assert_eq!(
             layer[3].evaluations().clone(),
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![3 * 7].into_iter().map(E::from_u64).sum::<E>(),
                 vec![4 * 8].into_iter().map(E::from_u64).sum::<E>()
             ]))
@@ -611,7 +606,7 @@ mod tests {
         assert_eq!(
             layer[0].evaluations().clone(),
             // p11 * q12 + p12 * q11
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![(1 + 5) * (3 * 7) + (3 + 7) * 5]
                     .into_iter()
                     .map(E::from_u64)
@@ -622,7 +617,7 @@ mod tests {
         assert_eq!(
             layer[1].evaluations().clone(),
             // p21 * q22 + p22 * q21
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![(2 + 6) * (4 * 8) + (4 + 8) * (2 * 6)]
                     .into_iter()
                     .map(E::from_u64)
@@ -633,7 +628,7 @@ mod tests {
         assert_eq!(
             layer[2].evaluations().clone(),
             // q12 * q11
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![(3 * 7) * 5].into_iter().map(E::from_u64).sum::<E>(),
             ]))
         );
@@ -641,7 +636,7 @@ mod tests {
         assert_eq!(
             layer[3].evaluations().clone(),
             // q22 * q22
-            FieldType::<E>::Ext(Cow::Owned(vec![
+            FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![(4 * 8) * (2 * 6)]
                     .into_iter()
                     .map(E::from_u64)
