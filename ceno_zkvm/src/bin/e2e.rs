@@ -56,7 +56,7 @@ struct Args {
     profiling: Option<usize>,
 
     /// The preset configuration to use.
-    #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
+    #[arg(long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
 
     /// The polynomial commitment scheme to use.
