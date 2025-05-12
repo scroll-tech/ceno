@@ -33,7 +33,7 @@ pub fn search_cargo_manifest<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf>
                 path.display()
             );
         }
-        path @ _ => Ok(path?.join("Cargo.toml")),
+        path => Ok(path?.join("Cargo.toml")),
     }
 }
 
@@ -48,13 +48,12 @@ pub fn search_workspace_root<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf>
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             // try to generate a lockfile if we are in a workspace
             eprintln!(
-                "{}{} {}",
+                "{}{} No Cargo.lock found, try to generating one.",
                 style("warning").yellow().bold(),
                 style(":").white().bold(),
-                "No Cargo.lock found, try to generating one."
             );
         }
-        path @ _ => return Ok(path?),
+        path => return Ok(path?),
     }
 
     let result = Command::new("cargo").arg("generate-lockfile").status()?;
@@ -71,7 +70,7 @@ pub fn search_workspace_root<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf>
                 path.display()
             );
         }
-        path @ _ => Ok(path?),
+        path => Ok(path?),
     }
 }
 
