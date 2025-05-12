@@ -146,12 +146,15 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
 }
 
 impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
-    /// Returns true if the evaluations are owned (not borrowed)
-    /// avoid is_owned to conflict with std api
-    pub fn is_self_owned(&self) -> bool {
+    /// returns true if the evaluations are either mutably borrowed or owned (i.e., mutable access is possible)
+    pub fn is_mut(&self) -> bool {
         match &self.evaluations {
-            FieldType::Base(cow) => matches!(cow, SmartSlice::Owned(_)),
-            FieldType::Ext(cow) => matches!(cow, SmartSlice::Owned(_)),
+            FieldType::Base(slice) => {
+                matches!(slice, SmartSlice::BorrowedMut(_) | SmartSlice::Owned(_))
+            }
+            FieldType::Ext(slice) => {
+                matches!(slice, SmartSlice::BorrowedMut(_) | SmartSlice::Owned(_))
+            }
             FieldType::Unreachable => false,
         }
     }
@@ -244,7 +247,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         nv: usize,
         degree: usize,
         rng: &mut R,
-    ) -> (Vec<ArcMultilinearExtension<'a, E>>, E) {
+    ) -> (Vec<MultilinearExtension<'a, E>>, E) {
         let start = entered_span!("sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
@@ -265,7 +268,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
 
         let list = multiplicands
             .into_iter()
-            .map(|x| MultilinearExtension::from_evaluations_vec(nv, x).into())
+            .map(|x| MultilinearExtension::from_evaluations_vec(nv, x))
             .collect();
 
         exit_span!(start);
@@ -333,7 +336,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` in place
     pub fn fix_variables_in_place(&mut self, partial_point: &[E]) {
-        assert!(self.is_self_owned());
+        assert!(self.is_mut());
         assert!(
             partial_point.len() <= self.num_vars(),
             "partial point len {} >= num_vars {}",
@@ -412,7 +415,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` from high position in place
     pub fn fix_high_variables_in_place(&mut self, partial_point: &[E]) {
-        assert!(self.is_self_owned());
+        assert!(self.is_mut());
         assert!(
             partial_point.len() <= self.num_vars(),
             "invalid size of partial point"
@@ -518,7 +521,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Reduce the number of variables of `self` by fixing the
     /// `partial_point.len()` variables at `partial_point` in place
     pub fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]) {
-        assert!(self.is_self_owned());
+        assert!(self.is_mut());
         assert!(
             partial_point.len() <= self.num_vars(),
             "partial point len {} >= num_vars {}",
@@ -709,7 +712,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
 
     /// split the MLE into `num_chunks` parts, each with disjoint ownership of the evaluation data
     /// panics if `num_chunks` is zero, not divisible, or if the data is not owned or mutable
-    pub fn split_mle_into_chunks(&mut self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+    pub fn split_mle_into_chunks(
+        &'a mut self,
+        num_chunks: usize,
+    ) -> Vec<MultilinearExtension<'a, E>> {
         assert!(num_chunks > 0, "num_chunks must be > 0");
         let len = self.evaluations.len();
         assert_eq!(
@@ -744,6 +750,28 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
                     let start = i * chunk_size;
                     let chunk =
                         unsafe { std::slice::from_raw_parts_mut(ptr.add(start), chunk_size) };
+                    result.push(MultilinearExtension {
+                        evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
+                        num_vars: num_vars_per_chunk,
+                    });
+                }
+                result
+            }
+
+            FieldType::Base(SmartSlice::Owned(vec)) => {
+                let mut result = Vec::with_capacity(num_chunks);
+                for chunk in vec.chunks_mut(chunk_size) {
+                    result.push(MultilinearExtension {
+                        evaluations: FieldType::Base(SmartSlice::BorrowedMut(chunk)),
+                        num_vars: num_vars_per_chunk,
+                    });
+                }
+                result
+            }
+
+            FieldType::Ext(SmartSlice::Owned(vec)) => {
+                let mut result = Vec::with_capacity(num_chunks);
+                for chunk in vec.chunks_mut(chunk_size) {
                     result.push(MultilinearExtension {
                         evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
                         num_vars: num_vars_per_chunk,

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
     util::{ceil_log2, interpolate_uni_poly},
@@ -41,27 +39,15 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
         num_products,
         &mut rng,
     );
-    let mut monimials_mut = monimials
-        .iter_mut()
-        .map(|(scalar, product)| {
-            (
-                Either::Right(*scalar),
-                product
-                    .iter_mut()
-                    .map(|mle| Arc::new(Arc::get_mut(mle).unwrap().as_mut_slice()))
-                    .collect_vec(),
-            )
-        })
-        .collect::<Vec<_>>();
 
     let poly = VirtualPolynomials::<E>::new_from_monimials(
         num_threads,
         max_num_variables,
-        monimials_mut
+        monimials
             .iter_mut()
             .map(|(scalar, product)| {
                 (
-                    *scalar,
+                    Either::Right(*scalar),
                     product
                         .iter_mut()
                         .map(|mle| Either::Right(mle))
@@ -94,6 +80,11 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
         poly.evaluate_slow(&r) == subclaim.expected_evaluation,
         "wrong subclaim"
     );
+
+    // test in-place work
+    let mut transcript = BasicTranscript::<E>::new(b"test");
+    let (proof_mut, _) = IOPProverState::<E>::prove(poly, &mut transcript);
+    assert_eq!(proof, proof_mut, "different proof");
 }
 
 fn test_sumcheck<E: ExtensionField>(

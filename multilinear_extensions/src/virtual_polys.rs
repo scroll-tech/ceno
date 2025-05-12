@@ -37,7 +37,7 @@ pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
         usize,
         (
             usize,
-            Either<&'a ArcMultilinearExtension<'a, E>, &'a mut ArcMultilinearExtension<'a, E>>,
+            Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>,
         ),
     >,
     _phantom: PhantomData<E>,
@@ -46,10 +46,10 @@ pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
 impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
     pub fn lift(
         &mut self,
-        mle: Either<&'a ArcMultilinearExtension<'a, E>, &'a mut ArcMultilinearExtension<'a, E>>,
+        mle: Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>,
     ) -> Expression<E> {
         mle.map_left(|mle| {
-            let mle_ptr = Arc::as_ptr(mle) as *const () as usize;
+            let mle_ptr = mle as *const MultilinearExtension<E> as *const () as usize;
             let (witin_id, _) = self.mles_storage.entry(mle_ptr).or_insert_with(|| {
                 let witin_id = self.num_witin;
                 self.num_witin = self.num_witin.strict_add(1);
@@ -58,7 +58,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
             Expression::WitIn(*witin_id as u16)
         })
         .map_right(|mle| {
-            let mle_ptr = Arc::as_ptr(mle) as *const () as usize;
+            let mle_ptr = mle as *const MultilinearExtension<E> as *const () as usize;
             let (witin_id, _) = self.mles_storage.entry(mle_ptr).or_insert_with(|| {
                 let witin_id = self.num_witin;
                 self.num_witin = self.num_witin.strict_add(1);
@@ -143,7 +143,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         max_num_variables: usize,
         monimials: Vec<(
             Either<E::BaseField, E>,
-            Vec<Either<&'a ArcMultilinearExtension<'a, E>, &'a mut ArcMultilinearExtension<'a, E>>>,
+            Vec<Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>>,
         )>,
     ) -> Self {
         assert!(!monimials.is_empty());
@@ -156,7 +156,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             );
             let product: Vec<Expression<E>> = product
                 .into_iter()
-                .map(|mle| mle as _)
                 .map(|mle| Expression::WitIn(poly.register_mles(vec![mle])[0] as u16))
                 .collect_vec();
             poly.add_monomial_terms(vec![Term { scalar, product }]);
@@ -167,7 +166,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     fn get_subslice_polys_by_thread_id<'b>(
         &self,
         thread_id: usize,
-        polys: Vec<&'b ArcMultilinearExtension<'a, E>>,
+        polys: Vec<&'b MultilinearExtension<'a, E>>,
     ) -> Vec<ArcMultilinearExtension<'a, E>>
     where
         'b: 'a,
@@ -193,14 +192,11 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     /// using the MLE’s raw pointer as the key to ensure uniqueness and reference consistency.
     pub fn register_mles(
         &mut self,
-        mles: Vec<
-            Either<&'a ArcMultilinearExtension<'a, E>, &'a mut ArcMultilinearExtension<'a, E>>,
-        >,
+        mles: Vec<Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>>,
     ) -> Vec<usize> {
         let log2_num_threads = log2_strict_usize(self.num_threads);
         let mut indexes = vec![];
         for mle in mles {
-            assert!(!mle.is_self_owned());
             let poly_meta = if mle.num_vars() > log2_num_threads {
                 PolyMeta::Normal
             } else {
@@ -209,7 +205,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             // let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
             let mles = match mle {
                 Either::Left(mle) => {
-                    // it's possible that mle is_self_owned == true but we dont want it to be in-place change
                     (0..self.num_threads)
                         .map(|thread_id| {
                             let mle_thread_based = if mle.num_vars() > log2_num_threads {
@@ -224,7 +219,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                         .collect_vec()
                 }
                 Either::Right(mle) => {
-                    let mle = Arc::get_mut(mle).expect(">1 strong count of arc pointer");
                     if mle.num_vars() > log2_num_threads {
                         mle.split_mle_into_chunks(self.num_threads)
                             .into_iter()
@@ -314,7 +308,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         num_multiplicands_range: (usize, usize),
         num_products: usize,
         rng: &mut R,
-    ) -> (Vec<(E, Vec<Arc<MultilinearExtension<'a, E>>>)>, E) {
+    ) -> (Vec<(E, Vec<MultilinearExtension<'a, E>>)>, E) {
         let start = entered_span!("sample random virtual polynomial");
 
         let mut sum = E::ZERO;

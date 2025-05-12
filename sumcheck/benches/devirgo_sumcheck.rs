@@ -1,9 +1,10 @@
 #![allow(clippy::manual_memcpy)]
 #![allow(clippy::needless_range_loop)]
 
-use std::{borrow::Cow, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use criterion::*;
+use either::Either;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::Itertools;
 use p3::field::PrimeCharacteristicRing;
@@ -11,10 +12,7 @@ use rand::thread_rng;
 use sumcheck::structs::IOPProverState;
 
 use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, MultilinearExtension},
-    op_mle,
-    util::max_usable_threads,
-    virtual_poly::VirtualPolynomial,
+    mle::MultilinearExtension, op_mle, util::max_usable_threads, virtual_poly::VirtualPolynomial,
     virtual_polys::VirtualPolynomials,
 };
 use transcript::BasicTranscript as Transcript;
@@ -41,14 +39,10 @@ pub fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
         .collect()
 }
 
-fn prepare_input<'a, E: ExtensionField>(nv: usize) -> (E, Vec<ArcMultilinearExtension<'a, E>>) {
+fn prepare_input<'a, E: ExtensionField>(nv: usize) -> (E, Vec<MultilinearExtension<'a, E>>) {
     let mut rng = thread_rng();
     let fs = (0..NUM_DEGREE)
-        .map(|_| {
-            let mle: ArcMultilinearExtension<'a, E> =
-                MultilinearExtension::<E>::random(nv, &mut rng).into();
-            mle
-        })
+        .map(|_| MultilinearExtension::<E>::random(nv, &mut rng))
         .collect_vec();
 
     let asserted_sum = fs
@@ -85,6 +79,7 @@ fn sumcheck_fn(c: &mut Criterion) {
                     for _ in 0..iters {
                         let mut prover_transcript = Transcript::new(b"test");
                         let (_, fs) = { prepare_input(nv) };
+                        let fs = fs.into_iter().map(Arc::new).collect_vec();
 
                         let virtual_poly_v1 = VirtualPolynomial::new_from_product(fs, E::ONE);
                         let instant = std::time::Instant::now();
@@ -127,8 +122,39 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
                             threads,
                             nv,
-                            fs.into_iter().map(|fs| Cow::Owned(fs)).collect_vec(),
-                            E::ONE,
+                            vec![(
+                                Either::Right(E::ONE),
+                                fs.iter().map(|fs| Either::Left(fs)).collect_vec(),
+                            )],
+                        );
+                        let instant = std::time::Instant::now();
+                        let (_sumcheck_proof_v2, _) =
+                            IOPProverState::<E>::prove(virtual_poly_v2, &mut prover_transcript);
+                        let elapsed = instant.elapsed();
+                        time += elapsed;
+                    }
+                    time
+                });
+            },
+        );
+
+        // Benchmark the proving time
+        group.bench_function(
+            BenchmarkId::new("prove_sumcheck_in_place", format!("devirgo_nv_{}", nv)),
+            |b| {
+                b.iter_custom(|iters| {
+                    let mut time = Duration::new(0, 0);
+                    for _ in 0..iters {
+                        let mut prover_transcript = Transcript::new(b"test");
+                        let (_, mut fs) = { prepare_input(nv) };
+
+                        let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
+                            threads,
+                            nv,
+                            vec![(
+                                Either::Right(E::ONE),
+                                fs.iter_mut().map(|fs| Either::Right(fs)).collect_vec(),
+                            )],
                         );
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) =

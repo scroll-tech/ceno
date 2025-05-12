@@ -494,7 +494,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 if expected_numvars_at_round == poly.num_vars()
                     && matches!(poly_type, PolyMeta::Normal)
                 {
-                    if !poly.is_self_owned() {
+                    if !poly.is_mut() {
                         *poly = Arc::new(poly.fix_variables(&[r]));
                     } else {
                         let poly = Arc::get_mut(poly).unwrap();
@@ -723,7 +723,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .for_each(|poly| {
                 assert!(poly.num_vars() > 0);
                 if expected_numvars_at_round == poly.num_vars() {
-                    if !poly.is_self_owned() {
+                    if !poly.is_mut() {
                         *poly = Arc::new(poly.fix_variables_parallel(&[r]));
                     } else {
                         let poly = Arc::get_mut(poly).unwrap();

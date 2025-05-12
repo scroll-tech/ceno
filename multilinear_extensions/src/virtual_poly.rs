@@ -237,6 +237,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
                     rng.gen_range(num_multiplicands_range.0..num_multiplicands_range.1);
                 let (product, product_sum) =
                     MultilinearExtension::random_mle_list(*nv, num_multiplicands, rng);
+                let product = product.into_iter().map(Arc::new).collect_vec();
                 let product: Vec<Expression<E>> = product
                     .into_iter()
                     .map(|mle| mle as _)
