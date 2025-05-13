@@ -5,7 +5,7 @@ use itertools::{Either, Itertools, enumerate, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression,
-    mle::IntoMLE,
+    mle::{FieldType, IntoMLE},
     util::ceil_log2,
     virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
     virtual_polys::{VirtualPolynomials, VirtualPolynomialsBuilder},
@@ -187,87 +187,78 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         tracing::debug!("challenges in prover: {:?}", challenges);
 
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
-        let (points, evaluations) = self
-            .pk
-            .circuit_pks
-            .iter()
-            .enumerate()
-            .try_fold((vec![], vec![]), |(mut points, mut evaluations), (index, (circuit_name, pk))| {
+        let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
+            (vec![], vec![]),
+            |(mut points, mut evaluations), (index, (circuit_name, pk))| {
                 let num_instances = *wits_instances
-                .get(circuit_name)
-                .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
-            if num_instances == 0 {
-                // do nothing without point and evaluation insertion
-                return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points,evaluations));
-            }
-            transcript.append_field_element(&E::BaseField::from_u64(index as u64));
-            // TODO: add an enum for circuit type either in constraint_system or vk
-            let cs = pk.get_cs();
-            let witness_mle = witness_mles.drain(..cs.num_witin as usize).collect_vec();
-            let is_opcode_circuit = cs.lk_table_expressions.is_empty()
-                && cs.r_table_expressions.is_empty()
-                && cs.w_table_expressions.is_empty();
+                    .get(circuit_name)
+                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
+                if num_instances == 0 {
+                    // do nothing without point and evaluation insertion
+                    return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
+                }
+                transcript.append_field_element(&E::BaseField::from_u64(index as u64));
+                // TODO: add an enum for circuit type either in constraint_system or vk
+                let cs = pk.get_cs();
+                let witness_mle = witness_mles.drain(..cs.num_witin as usize).collect_vec();
+                let is_opcode_circuit = cs.lk_table_expressions.is_empty()
+                    && cs.r_table_expressions.is_empty()
+                    && cs.w_table_expressions.is_empty();
 
-            if is_opcode_circuit {
-                tracing::debug!(
-                    "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
-                    circuit_name,
-                    cs.num_witin,
-                    cs.r_expressions.len(),
-                    cs.w_expressions.len(),
-                    cs.lk_expressions.len(),
-                );
-                let opcode_proof = self.create_opcode_proof(
-                    circuit_name,
-                    pk,
-                    witness_mle,
-                    &pi,
-                    num_instances,
-                    &mut transcript,
-                    &challenges,
-                )?;
-                tracing::info!(
-                    "generated proof for opcode {} with num_instances={}",
-                    circuit_name,
-                    num_instances
-                );
-                points.push(opcode_proof.input_opening_point.clone());
-                evaluations.push(opcode_proof.wits_in_evals.clone());
-                opcode_proofs
-                    .insert(index, opcode_proof);
-            } else {
-                let fixed_mle = fixed_mles.drain(..cs.num_fixed).collect_vec();
-                let (structural_witness, structural_num_instances) = structural_wits
-                    .remove(circuit_name)
-                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
-                let (table_proof, pi_in_evals) = self.create_table_proof(
-                    circuit_name,
-                    pk,
-                    fixed_mle,
-                    witness_mle,
-                    structural_witness,
-                    &pi,
-                    &mut transcript,
-                    &challenges,
-                )?;
-                points.push(table_proof.input_opening_point.clone());
-                evaluations.push(table_proof.wits_in_evals.clone());
-                if cs.num_fixed > 0 {
-                    evaluations.push(table_proof.fixed_in_evals.clone());
-                }
-                tracing::info!(
-                    "generated proof for table {} with num_instances={}, structural_num_instances={}",
-                    circuit_name,
-                    num_instances,
-                    structural_num_instances
-                );
-                table_proofs.insert(index, table_proof);
-                for (idx, eval) in pi_in_evals {
-                    pi_evals[idx]= eval;
-                }
-            };
-            Ok((points,evaluations))
-            })?;
+                if is_opcode_circuit {
+                    tracing::debug!(
+                        "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
+                        circuit_name,
+                        cs.num_witin,
+                        cs.r_expressions.len(),
+                        cs.w_expressions.len(),
+                        cs.lk_expressions.len(),
+                    );
+                    let opcode_proof = self.create_opcode_proof(
+                        circuit_name,
+                        pk,
+                        witness_mle,
+                        &pi,
+                        num_instances,
+                        &mut transcript,
+                        &challenges,
+                    )?;
+                    tracing::info!(
+                        "generated proof for opcode {} with num_instances={}",
+                        circuit_name,
+                        num_instances
+                    );
+                    points.push(opcode_proof.input_opening_point.clone());
+                    evaluations.push(opcode_proof.wits_in_evals.clone());
+                    opcode_proofs.insert(index, opcode_proof);
+                } else {
+                    let fixed_mle = fixed_mles.drain(..cs.num_fixed).collect_vec();
+                    let (structural_witness, structural_num_instances) = structural_wits
+                        .remove(circuit_name)
+                        .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
+                    let (table_proof, pi_in_evals) = self.create_table_proof(
+                        circuit_name,
+                        pk,
+                        fixed_mle,
+                        witness_mle,
+                        structural_witness,
+                        &pi,
+                        &mut transcript,
+                        &challenges,
+                    )?;
+                    points.push(table_proof.input_opening_point.clone());
+                    evaluations.push(table_proof.wits_in_evals.clone());
+                    if cs.num_fixed > 0 {
+                        evaluations.push(table_proof.fixed_in_evals.clone());
+                    }
+                    table_proofs.insert(index, table_proof);
+                    for (idx, eval) in pi_in_evals {
+                        pi_evals[idx] = eval;
+                    }
+                };
+                Ok((points, evaluations))
+            },
+        )?;
 
         // batch opening pcs
         // generate static info from prover key for expected num variable
@@ -347,8 +338,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 wit_infer_by_expr(&[], &witnesses, &[], pi, challenges, expr)
             })
             .collect();
-        let (r_records_wit, w_lk_records_wit) = records_wit.split_at(cs.r_expressions.len());
-        let (w_records_wit, lk_records_wit) = w_lk_records_wit.split_at(cs.w_expressions.len());
+        let (r_records_wit, remains) = records_wit.split_at(cs.r_expressions.len());
+        let (w_records_wit, lk_records_wit) = remains.split_at(cs.w_expressions.len());
         exit_span!(record_span);
 
         // product constraint: tower witness inference
@@ -411,7 +402,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             })
             .collect_vec();
         exit_span!(span);
-        println!("finish infer lk");
 
         let span = entered_span!("tower_witness_lk_layers");
         let lk_wit_layers = lk_records_last_layers
@@ -465,13 +455,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let lk_out_evals = lk_wit_layers
             .iter()
             .map(|lk_wit_layers| {
+                assert_eq!(lk_wit_layers[0].len(), 4);
                 lk_wit_layers[0]
                     .iter()
-                    .map(|lk_wit_layer| lk_wit_layer.get_ext_field_vec()[0])
+                    .map(|mle| mle.get_ext_field_vec()[0])
                     .collect_vec()
             })
             .collect_vec();
-        println!("finish get evals");
         let (rt_tower, tower_proof) = TowerProver::create_proof(
             r_wit_layers
                 .into_iter()
@@ -524,14 +514,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 assert_eq!(coeffs.len(), mles.len());
 
                 let n = mles[0].evaluations().len();
-                let mle_evals = mles.iter().map(|mle| mle.get_ext_field_vec()).collect_vec();
-                
+
                 // combine into single mle by dot product with coeff
                 (0..n)
                     .into_par_iter()
                     .map(|j| {
                         dot_product::<E, _, _>(
-                            mle_evals.iter().map(|mle_eval| mle_eval[j] + shifting),
+                            mles.iter().map(|mle| match mle.evaluations() {
+                                FieldType::Ext(evals) => evals[j] + shifting,
+                                FieldType::Base(evals) => E::from(evals[j]) + shifting,
+                                _ => unreachable!(),
+                            }),
+                            // mle_evals.iter().map(|mle_eval| mle_eval[j] + shifting),
                             coeffs.iter().copied(),
                         )
                     })
@@ -895,27 +889,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let r_out_evals = r_wit_layers
             .iter()
             .map(|r_wit_layers| {
-                r_wit_layers
+                r_wit_layers[0]
                     .iter()
-                    .map(|r_wit_layer| r_wit_layer[0].get_ext_field_vec()[0])
+                    .map(|mle| mle.get_ext_field_vec()[0])
                     .collect_vec()
             })
             .collect_vec();
         let w_out_evals = w_wit_layers
             .iter()
             .map(|w_wit_layers| {
-                w_wit_layers
+                w_wit_layers[0]
                     .iter()
-                    .map(|w_wit_layer| w_wit_layer[0].get_ext_field_vec()[0])
+                    .map(|mle| mle.get_ext_field_vec()[0])
                     .collect_vec()
             })
             .collect_vec();
         let lk_out_evals = lk_wit_layers
             .iter()
             .map(|lk_wit_layers| {
-                lk_wit_layers
+                lk_wit_layers[0]
                     .iter()
-                    .map(|lk_wit_layer| lk_wit_layer[0].get_ext_field_vec()[0])
+                    .map(|mle| mle.get_ext_field_vec()[0])
                     .collect_vec()
             })
             .collect_vec();

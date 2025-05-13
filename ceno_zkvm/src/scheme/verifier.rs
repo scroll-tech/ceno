@@ -201,11 +201,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().lk_expressions.len();
-                let num_padded_lks_per_instance = next_pow2_instance_padding(num_lks) - num_lks;
                 let num_padded_instance =
                     next_pow2_instance_padding(*num_instances) - num_instances;
-                dummy_table_item_multiplicity += num_padded_lks_per_instance * num_instances
-                    + num_lks.next_power_of_two() * num_padded_instance;
+                dummy_table_item_multiplicity += num_lks * num_padded_instance;
+                    // + num_lks.next_power_of_two() * num_padded_instance;
 
                 prod_r *= opcode_proof
                     .r_out_evals
@@ -218,17 +217,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .flatten()
                     .fold(E::ONE, |acc, e| acc * *e);
 
-                opcode_proof.lk_out_evals.iter().for_each(|evals| {
+                println!("opcode {} lk_out_evals.len() = {}", name, opcode_proof.lk_out_evals.len());
+                for evals in opcode_proof.lk_out_evals.iter() {
                     // TODO: return error instead of panic
                     assert_eq!(evals.len(), 4);
 
-                    let p1 = evals[0];
-                    let p2 = evals[1];
-                    let q1 = evals[2];
-                    let q2 = evals[3];
+                    let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
+
                     logup_sum += p1 * q1.inverse();
                     logup_sum += p2 * q2.inverse();
-                });
+                };
             } else if let Some(table_proof) = vm_proof.table_proofs.get(index) {
                 transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
 
@@ -357,6 +355,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.w_expressions.len(),
             cs.lk_expressions.len(),
         );
+        let num_records = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
@@ -374,7 +373,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .collect_vec(),
             proof.lk_out_evals.clone(),
             tower_proofs,
-            vec![log2_num_instances, log2_num_instances, log2_num_instances],
+            vec![log2_num_instances; num_records],
             num_product_fanin,
             transcript,
         )?;
