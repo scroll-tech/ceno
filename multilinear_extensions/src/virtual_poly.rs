@@ -14,7 +14,9 @@ use itertools::Itertools;
 use p3::field::Field;
 use rand::Rng;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+    },
     slice::ParallelSliceMut,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -463,10 +465,41 @@ pub fn build_eq_x_r_vec<E: ExtensionField>(r: &[E]) -> Vec<E> {
     }
 }
 
+pub fn par_eq_naive<F: Field>(zs: &[F], scale: F) -> Vec<F> {
+    let k = zs.len();
+    let mut eq = vec![F::ZERO; 1 << k];
+    eq[0] = scale;
+    for (i, &zi) in zs.iter().enumerate() {
+        let (lo, hi) = eq.split_at_mut(1 << i);
+        lo.par_iter_mut()
+            .zip(hi.par_iter_mut())
+            .for_each(|(lo, hi)| {
+                *hi = *lo * zi;
+                *lo -= *hi;
+            });
+    }
+    eq
+}
+
+pub fn seq_eq_naive<F: Field>(zs: &[F], scale: F) -> Vec<F> {
+    let k = zs.len();
+    let mut eq = vec![F::ZERO; 1 << k];
+    eq[0] = scale;
+    for (i, &zi) in zs.iter().enumerate() {
+        let (lo, hi) = eq.split_at_mut(1 << i);
+        lo.iter_mut().zip(hi.iter_mut()).for_each(|(lo, hi)| {
+            *hi = *lo * zi;
+            *lo -= *hi;
+        });
+    }
+    eq
+}
+
 #[cfg(test)]
 mod tests {
     use crate::virtual_poly::{build_eq_x_r_vec, build_eq_x_r_vec_sequential};
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
+    use p3::field::PrimeCharacteristicRing;
     use rand::thread_rng;
 
     #[test]
@@ -474,7 +507,7 @@ mod tests {
         env_logger::init();
         let mut rng = thread_rng();
 
-        for num_vars in 10..24 {
+        for num_vars in 20..24 {
             let r = (0..num_vars)
                 .map(|_| GoldilocksExt2::random(&mut rng))
                 .collect::<Vec<GoldilocksExt2>>();
@@ -483,17 +516,25 @@ mod tests {
             let eq_r_seq = build_eq_x_r_vec_sequential(&r);
             let seq_time = seq_start.elapsed();
 
+            let seq_start_naive = std::time::Instant::now();
+            let eq_r_seq_naive = super::seq_eq_naive(&r, GoldilocksExt2::ONE);
+            let seq_time_naive = seq_start_naive.elapsed();
+
             let par_start = std::time::Instant::now();
             let eq_r_par = build_eq_x_r_vec(&r);
             let par_time = par_start.elapsed();
 
-            assert_eq!(eq_r_par, eq_r_seq);
-            log::info!(
-                "nv = {}, par_time: {:?}, seq_time: {:?}, speedup: {}",
-                num_vars,
-                par_time,
-                seq_time,
-                (seq_time.as_micros() as f64) / (par_time.as_micros() as f64)
+            let par_start_naive = std::time::Instant::now();
+            let eq_r_par_naive = super::par_eq_naive(&r, GoldilocksExt2::ONE);
+            let par_time_naive = par_start_naive.elapsed();
+
+            assert_eq!(eq_r_seq, eq_r_seq_naive);
+            assert_eq!(eq_r_seq, eq_r_par);
+            assert_eq!(eq_r_seq, eq_r_par_naive);
+
+            println!(
+                "nv = {}, par_time: {:?}, par_time_naive: {:?}, seq_time: {:?}, seq_time_naive: {:?}",
+                num_vars, par_time, par_time_naive, seq_time, seq_time_naive
             );
         }
     }
