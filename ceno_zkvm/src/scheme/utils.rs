@@ -175,8 +175,9 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
         .into_iter()
         .map(|(p, q)| {
             // input layer p are all 1
-            if let Some(p) = p {
-                [p, q].concat()
+            if let Some(mut p) = p {
+                p.extend(q);
+                p
             } else {
                 let len = q[0].evaluations().len();
                 vec![
