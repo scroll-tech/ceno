@@ -154,7 +154,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                                     mle.num_vars(),
                                     mle.get_base_field_vec()
                                         .iter()
-                                        .map(|base| E::from_base(base))
+                                        .map(E::from_base)
                                         .collect_vec(),
                                 )
                             })
@@ -195,7 +195,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                                     mle.num_vars(),
                                     mle.get_base_field_vec()
                                         .iter()
-                                        .map(|base| E::from_base(base))
+                                        .map(E::from_base)
                                         .collect_vec(),
                                 )
                             })
