@@ -1316,14 +1316,12 @@ impl TowerProver {
 
             let mut eq: MultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle();
             let eq_expr = expr_builder.lift(Either::Right(&mut eq));
-            let mut alpha_pows_iter = alpha_pows.iter();
 
             // processing exprs
             for group_witness in layer_witness.iter_mut() {
                 match group_witness {
                     GroupedMLE::Prod((i, layer_polys)) => {
-                        let alpha_expr =
-                            Expression::Constant(Either::Right(*alpha_pows_iter.next().unwrap()));
+                        let alpha_expr = Expression::Constant(Either::Right(alpha_pows[*i]));
                         // sanity check
                         assert_eq!(layer_polys.len(), num_fanin);
                         assert!(
@@ -1351,8 +1349,12 @@ impl TowerProver {
                         );
 
                         let (alpha_numerator, alpha_denominator) = (
-                            Expression::Constant(Either::Right(*alpha_pows_iter.next().unwrap())),
-                            Expression::Constant(Either::Right(*alpha_pows_iter.next().unwrap())),
+                            Expression::Constant(Either::Right(
+                                alpha_pows[prod_specs_len + *i * 2], // numerator and denominator
+                            )),
+                            Expression::Constant(Either::Right(
+                                alpha_pows[prod_specs_len + *i * 2 + 1],
+                            )),
                         );
 
                         let (p1, rest) = layer_polys.split_at_mut(1);
