@@ -42,6 +42,10 @@ pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
+    /// lifts a reference to a `MultilinearExtension` into an `Expression::WitIn`
+    ///
+    /// assigns a unique witness index based on pointer identity, reusing the same index
+    /// if the MLE was already lifted. supports both shared and mutable references.
     pub fn lift(
         &mut self,
         mle: Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>,

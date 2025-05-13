@@ -138,15 +138,68 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
             },
         );
 
-        // Benchmark the proving time
+        // Benchmark the proving time ext
         group.bench_function(
-            BenchmarkId::new("prove_sumcheck_in_place", format!("devirgo_nv_{}", nv)),
+            BenchmarkId::new("prove_sumcheck_ext", format!("devirgo_nv_{}", nv)),
             |b| {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
                         let mut prover_transcript = Transcript::new(b"test");
-                        let (_, mut fs) = { prepare_input(nv) };
+                        let (_, fs) = { prepare_input(nv) };
+                        let fs = fs
+                            .into_iter()
+                            .map(|mle: MultilinearExtension<'_, E>| {
+                                MultilinearExtension::from_evaluation_vec_smart(
+                                    mle.num_vars(),
+                                    mle.get_base_field_vec()
+                                        .iter()
+                                        .map(|base| E::from_base(base))
+                                        .collect_vec(),
+                                )
+                            })
+                            .collect_vec();
+
+                        let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
+                            threads,
+                            nv,
+                            vec![Term {
+                                scalar: Either::Right(E::ONE),
+                                product: fs.iter().map(Either::Left).collect_vec(),
+                            }],
+                        );
+                        let instant = std::time::Instant::now();
+                        let (_sumcheck_proof_v2, _) =
+                            IOPProverState::<E>::prove(virtual_poly_v2, &mut prover_transcript);
+                        let elapsed = instant.elapsed();
+                        time += elapsed;
+                    }
+                    time
+                });
+            },
+        );
+
+        // Benchmark the proving time
+        group.bench_function(
+            BenchmarkId::new("prove_sumcheck_ext_in_place", format!("devirgo_nv_{}", nv)),
+            |b| {
+                b.iter_custom(|iters| {
+                    let mut time = Duration::new(0, 0);
+                    for _ in 0..iters {
+                        let mut prover_transcript = Transcript::new(b"test");
+                        let (_, fs) = { prepare_input(nv) };
+                        let mut fs = fs
+                            .into_iter()
+                            .map(|mle: MultilinearExtension<'_, E>| {
+                                MultilinearExtension::from_evaluation_vec_smart(
+                                    mle.num_vars(),
+                                    mle.get_base_field_vec()
+                                        .iter()
+                                        .map(|base| E::from_base(base))
+                                        .collect_vec(),
+                                )
+                            })
+                            .collect_vec();
 
                         let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
                             threads,
