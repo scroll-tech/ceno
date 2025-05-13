@@ -31,25 +31,22 @@ pub enum PolyMeta {
 /// this struct manages witness identifiers and multilinear extensions (mles),
 /// enabling reuse and deduplication of polynomial
 #[derive(Default)]
-pub struct VirtualPolynomialsBuilder<'a, 'b, E: ExtensionField> {
+pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
     num_witin: WitnessId,
     mles_storage: BTreeMap<
         usize,
         (
             usize,
-            Either<&'b MultilinearExtension<'a, E>, &'b mut MultilinearExtension<'a, E>>,
+            Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>,
         ),
     >,
     _phantom: PhantomData<E>,
 }
 
-impl<'a, 'b, E: ExtensionField> VirtualPolynomialsBuilder<'a, 'b, E>
-where
-    'b: 'a,
-{
+impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
     pub fn lift(
         &mut self,
-        mle: Either<&'b MultilinearExtension<'a, E>, &'b mut MultilinearExtension<'a, E>>,
+        mle: Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>,
     ) -> Expression<E> {
         mle.map_left(|mle| {
             let mle_ptr = mle as *const MultilinearExtension<E> as *const () as usize;
