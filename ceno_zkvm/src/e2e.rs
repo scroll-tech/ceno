@@ -519,6 +519,7 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub pubio_len: usize,
     pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
+    pub io_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
 }
 
@@ -552,13 +553,14 @@ pub fn setup_program<E: ExtensionField>(program: Program, platform: Platform) ->
     };
     let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
+    let io_init = MemPadder::new_mem_records_uninit(platform.public_io.clone(), pubio_len);
 
     // Generate fixed traces
     let zkvm_fixed_traces = generate_fixed_traces(
         &system_config,
         &reg_init,
         &static_addrs,
-        &platform.public_io.clone().collect_vec(),
+        &io_init.iter().map(|rec| rec.addr).collect_vec(),
         &program,
     );
 
@@ -569,6 +571,7 @@ pub fn setup_program<E: ExtensionField>(program: Program, platform: Platform) ->
         pubio_len,
         system_config,
         reg_init,
+        io_init,
         zkvm_fixed_traces,
     }
 }
@@ -594,9 +597,9 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
 
     /// Setup init mem state
     pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> InitMemState {
-        let io_init =
-            MemPadder::init_mem(self.platform.public_io.clone(), self.pubio_len, public_io);
-        let hint_init = MemPadder::init_mem(
+        let mut io_init = self.io_init.clone();
+        MemPadder::init_mem_records(&mut io_init, public_io);
+        let hint_init = MemPadder::new_mem_records(
             self.platform.hints.clone(),
             hints.len().next_power_of_two(),
             hints,
