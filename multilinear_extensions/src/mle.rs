@@ -710,8 +710,14 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         }
     }
 
-    /// split the MLE into `num_chunks` parts, each with disjoint ownership of the evaluation data
-    /// panics if `num_chunks` is zero, not divisible, or if the data is not owned or mutable
+    /// splits the MLE into `num_chunks` parts, where each part contains disjoint mutable pointers
+    /// to the original data (either borrowed mutably or owned).
+    ///
+    /// # panics
+    /// panics if:
+    /// - `num_chunks` is zero,
+    /// - the data length is not divisible by `num_chunks`,
+    /// - or the underlying data is neither owned nor mutably borrowed.
     pub fn split_mle_into_chunks(
         &'a mut self,
         num_chunks: usize,
