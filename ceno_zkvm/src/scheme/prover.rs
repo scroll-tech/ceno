@@ -357,11 +357,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             cs.w_expressions.len(),
             cs.lk_expressions.len(),
         );
-        let (log2_r_count, log2_w_count, log2_lk_count) = (
-            ceil_log2(r_counts_per_instance),
-            ceil_log2(w_counts_per_instance),
-            ceil_log2(lk_counts_per_instance),
-        );
+
         // process last layer by interleaving all the read/write record respectively
         // as last layer is the output of sel stage
         let span = entered_span!("tower_witness_r_last_layers");
@@ -377,11 +373,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let r_wit_layers = r_records_last_layers
             .into_iter()
             .map(|r_records_last_layer| {
-                infer_tower_product_witness(
-                    log2_num_instances + log2_r_count,
-                    r_records_last_layer,
-                    NUM_FANIN,
-                )
+                infer_tower_product_witness(log2_num_instances, r_records_last_layer, NUM_FANIN)
             })
             .collect_vec();
         exit_span!(span);
@@ -400,11 +392,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let w_wit_layers = w_records_last_layers
             .into_iter()
             .map(|w_records_last_layer| {
-                infer_tower_product_witness(
-                    log2_num_instances + log2_w_count,
-                    w_records_last_layer,
-                    NUM_FANIN,
-                )
+                infer_tower_product_witness(log2_num_instances, w_records_last_layer, NUM_FANIN)
             })
             .collect_vec();
         exit_span!(span);
@@ -423,6 +411,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             })
             .collect_vec();
         exit_span!(span);
+        println!("finish infer lk");
 
         let span = entered_span!("tower_witness_lk_layers");
         let lk_wit_layers = lk_records_last_layers
@@ -482,6 +471,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .collect_vec()
             })
             .collect_vec();
+        println!("finish get evals");
         let (rt_tower, tower_proof) = TowerProver::create_proof(
             r_wit_layers
                 .into_iter()
@@ -535,6 +525,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
                 let n = mles[0].evaluations().len();
                 let mle_evals = mles.iter().map(|mle| mle.get_ext_field_vec()).collect_vec();
+                
                 // combine into single mle by dot product with coeff
                 (0..n)
                     .into_par_iter()
@@ -649,31 +640,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         assert_eq!(
             main_sel_evals.len(),
             3 // 3 from [r_combined, w_combined, lk_combined]
-                + 3 // 3 from [sel_r, sel_w, sel_lk]
+                + 1 // sel
                 + if cs.assert_zero_sumcheck_expressions.is_empty() {
                     0
                 } else {
-                    distrinct_zerocheck_terms_set.len() + 1 // +1 from sel_non_lc_zero_sumcheck
+                    distrinct_zerocheck_terms_set.len()
                 }
         );
-        let mut main_sel_evals_iter = main_sel_evals.into_iter();
-        main_sel_evals_iter.next(); // skip sel_r
-        main_sel_evals_iter.next(); // skip r_records_combined
-        main_sel_evals_iter.next(); // skip sel_w
-        main_sel_evals_iter.next(); // skip w_records_combined
-        main_sel_evals_iter.next(); // skip sel_lk
-        main_sel_evals_iter.next(); // skip lk_records_combined
 
-        assert!(
-            // we can skip all the rest of degree > 1 monomial terms because all the witness evaluation will be evaluated at last step
-            // and pass to verifier
-            main_sel_evals_iter.count()
-                == if cs.assert_zero_sumcheck_expressions.is_empty() {
-                    0
-                } else {
-                    distrinct_zerocheck_terms_set.len() + 1
-                }
-        );
         let input_opening_point = main_sel_sumcheck_proofs.point.clone();
         assert!(input_opening_point.len() == log2_num_instances);
         exit_span!(main_sel_span);
@@ -977,97 +951,95 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // as tower sumcheck batch product argument/logup in same length
         let is_skip_same_point_sumcheck = true;
 
-        let (input_opening_point, same_r_sumcheck_proofs, rw_in_evals, lk_in_evals) =
-            if is_skip_same_point_sumcheck {
-                (rt_tower, None, vec![], vec![])
-            } else {
-                // one sumcheck to make them opening on same point r (with different prefix)
-                // If all table length are the same, we can skip this sumcheck
-                let span = entered_span!("opening_same_point");
-                // NOTE: max concurrency will be dominated by smallest table since it will blo
-                let num_threads = optimal_sumcheck_threads(min_log2_num_instance);
-                let alpha_pow = get_challenge_pows(
-                    cs.r_table_expressions.len()
-                        + cs.w_table_expressions.len()
-                        + cs.lk_table_expressions.len() * 2,
-                    transcript,
-                );
-                let mut alpha_pow_iter = alpha_pow.iter();
+        let (input_opening_point, same_r_sumcheck_proofs, _, _) = if is_skip_same_point_sumcheck {
+            (rt_tower, None, vec![], vec![])
+        } else {
+            // one sumcheck to make them opening on same point r (with different prefix)
+            // If all table length are the same, we can skip this sumcheck
+            let span = entered_span!("opening_same_point");
+            // NOTE: max concurrency will be dominated by smallest table since it will blo
+            let num_threads = optimal_sumcheck_threads(min_log2_num_instance);
+            let alpha_pow = get_challenge_pows(
+                cs.r_table_expressions.len()
+                    + cs.w_table_expressions.len()
+                    + cs.lk_table_expressions.len() * 2,
+                transcript,
+            );
+            let mut alpha_pow_iter = alpha_pow.iter();
 
-                // create eq
-                // TODO same size rt lead to same identical poly eq which can be merged together
-                let eq = tower_proof
-                    .prod_specs_points
-                    .iter()
-                    .step_by(2) // r,w are in same length therefore share same point
-                    .chain(tower_proof.logup_specs_points.iter())
-                    .map(|layer_points| {
-                        let rt = layer_points.last().unwrap();
-                        build_eq_x_r_vec(rt).into_mle().into()
-                    })
-                    .collect::<Vec<ArcMultilinearExtension<E>>>();
+            // create eq
+            // TODO same size rt lead to same identical poly eq which can be merged together
+            let eq = tower_proof
+                .prod_specs_points
+                .iter()
+                .step_by(2) // r,w are in same length therefore share same point
+                .chain(tower_proof.logup_specs_points.iter())
+                .map(|layer_points| {
+                    let rt = layer_points.last().unwrap();
+                    build_eq_x_r_vec(rt).into_mle().into()
+                })
+                .collect::<Vec<ArcMultilinearExtension<E>>>();
 
-                let (eq_rw, eq_lk) = eq.split_at(cs.r_table_expressions.len());
+            let (eq_rw, eq_lk) = eq.split_at(cs.r_table_expressions.len());
 
-                let mut virtual_polys =
-                    VirtualPolynomials::<E>::new(num_threads, max_log2_num_instance);
+            let mut virtual_polys =
+                VirtualPolynomials::<E>::new(num_threads, max_log2_num_instance);
 
-                // alpha_r{i} * eq(rt_{i}, s) * r(s) + alpha_w{i} * eq(rt_{i}, s) * w(s)
-                for ((r_set_wit, w_set_wit), eq) in r_set_wit
-                    .iter()
-                    .zip_eq(w_set_wit.iter())
-                    .zip_eq(eq_rw.iter())
-                {
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, r_set_wit], *alpha);
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, w_set_wit], *alpha);
-                }
+            // alpha_r{i} * eq(rt_{i}, s) * r(s) + alpha_w{i} * eq(rt_{i}, s) * w(s)
+            for ((r_set_wit, w_set_wit), eq) in r_set_wit
+                .iter()
+                .zip_eq(w_set_wit.iter())
+                .zip_eq(eq_rw.iter())
+            {
+                let alpha = alpha_pow_iter.next().unwrap();
+                virtual_polys.add_mle_list(vec![eq, r_set_wit], *alpha);
+                let alpha = alpha_pow_iter.next().unwrap();
+                virtual_polys.add_mle_list(vec![eq, w_set_wit], *alpha);
+            }
 
-                // alpha_lkn{i} * eq(rt_{i}, s) * lk_n(s) + alpha_lkd{i} * eq(rt_{i}, s) * lk_d(s)
-                for ((lk_n_wit, lk_d_wit), eq) in
-                    lk_n_wit.iter().zip_eq(lk_d_wit.iter()).zip_eq(eq_lk.iter())
-                {
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, lk_n_wit], *alpha);
-                    let alpha = alpha_pow_iter.next().unwrap();
-                    virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
-                }
+            // alpha_lkn{i} * eq(rt_{i}, s) * lk_n(s) + alpha_lkd{i} * eq(rt_{i}, s) * lk_d(s)
+            for ((lk_n_wit, lk_d_wit), eq) in
+                lk_n_wit.iter().zip_eq(lk_d_wit.iter()).zip_eq(eq_lk.iter())
+            {
+                let alpha = alpha_pow_iter.next().unwrap();
+                virtual_polys.add_mle_list(vec![eq, lk_n_wit], *alpha);
+                let alpha = alpha_pow_iter.next().unwrap();
+                virtual_polys.add_mle_list(vec![eq, lk_d_wit], *alpha);
+            }
 
-                let (same_r_sumcheck_proofs, state) =
-                    IOPProverState::prove(virtual_polys, transcript);
-                let evals = state.get_mle_flatten_final_evaluations();
-                let mut evals_iter = evals.into_iter();
-                let rw_in_evals = cs
-                    // r, w table len are identical
-                    .r_table_expressions
-                    .iter()
-                    .flat_map(|_table| {
-                        let _eq = evals_iter.next().unwrap(); // skip eq
-                        [evals_iter.next().unwrap(), evals_iter.next().unwrap()] // r, w
-                    })
-                    .collect_vec();
-                let lk_in_evals = cs
-                    .lk_table_expressions
-                    .iter()
-                    .flat_map(|_table| {
-                        let _eq = evals_iter.next().unwrap(); // skip eq
-                        [evals_iter.next().unwrap(), evals_iter.next().unwrap()] // n, d
-                    })
-                    .collect_vec();
-                assert_eq!(evals_iter.count(), 0);
+            let (same_r_sumcheck_proofs, state) = IOPProverState::prove(virtual_polys, transcript);
+            let evals = state.get_mle_flatten_final_evaluations();
+            let mut evals_iter = evals.into_iter();
+            let rw_in_evals = cs
+                // r, w table len are identical
+                .r_table_expressions
+                .iter()
+                .flat_map(|_table| {
+                    let _eq = evals_iter.next().unwrap(); // skip eq
+                    [evals_iter.next().unwrap(), evals_iter.next().unwrap()] // r, w
+                })
+                .collect_vec();
+            let lk_in_evals = cs
+                .lk_table_expressions
+                .iter()
+                .flat_map(|_table| {
+                    let _eq = evals_iter.next().unwrap(); // skip eq
+                    [evals_iter.next().unwrap(), evals_iter.next().unwrap()] // n, d
+                })
+                .collect_vec();
+            assert_eq!(evals_iter.count(), 0);
 
-                let input_open_point = same_r_sumcheck_proofs.point.clone();
-                assert_eq!(input_open_point.len(), max_log2_num_instance);
-                exit_span!(span);
+            let input_open_point = same_r_sumcheck_proofs.point.clone();
+            assert_eq!(input_open_point.len(), max_log2_num_instance);
+            exit_span!(span);
 
-                (
-                    input_open_point,
-                    Some(same_r_sumcheck_proofs.proofs),
-                    rw_in_evals,
-                    lk_in_evals,
-                )
-            };
+            (
+                input_open_point,
+                Some(same_r_sumcheck_proofs.proofs),
+                rw_in_evals,
+                lk_in_evals,
+            )
+        };
 
         exit_span!(sumcheck_span);
         let span = entered_span!("fixed::evals + witin::evals");

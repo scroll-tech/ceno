@@ -365,7 +365,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        let (rt_tower, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
+        let (_, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             proof
                 .r_out_evals
                 .iter()
