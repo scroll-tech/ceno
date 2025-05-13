@@ -26,7 +26,7 @@ use crate::{
 };
 use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
 
-use super::{ZKVMChipProof, ZKVMProof, constants::MAINCONSTRAIN_SUMCHECK_BATCH_SIZE};
+use super::{ZKVMChipProof, ZKVMProof};
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
@@ -231,7 +231,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 });
             } else if let Some(table_proof) = vm_proof.table_proofs.get(index) {
                 transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
-                rt_points.push(self.verify_table_proof(
+
+                self.verify_table_proof(
                     name,
                     circuit_vk,
                     table_proof,
@@ -242,7 +243,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     NUM_FANIN_LOGUP,
                     &point_eval,
                     &challenges,
-                )?);
+                )?;
+                rt_points.push(table_proof.input_opening_point.clone());
                 evaluations.push(table_proof.wits_in_evals.clone());
                 if circuit_vk.cs.num_fixed > 0 {
                     evaluations.push(table_proof.fixed_in_evals.clone());
@@ -253,13 +255,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .lk_out_evals
                     .iter()
                     .fold(logup_sum, |acc, evals| {
-
-                        let (p1, p2, q1, q2) = (
-                            evals[0],
-                            evals[1],
-                            evals[2],
-                            evals[3],
-                        );
+                        let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
 
                         acc - p1 * q1.inverse() - p2 * q2.inverse()
                     });
@@ -394,8 +390,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         assert!(
             record_evals
                 .iter()
-                .map(|e| e.point)
-                .all(|point| point == record_evals[0].point)
+                .map(|e| &e.point)
+                .all(|point| point == &record_evals[0].point)
         );
 
         // verify zero statement (degree > 1) + sel sumcheck
@@ -448,49 +444,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let sel = eq_eval_less_or_equal_than(num_instances - 1, &input_opening_point, &rt);
 
         // derive r_records, w_records, lk_records from witness's evaluations
-        let r_records_in_evals: Vec<_> = cs
+        let expected_evals = cs
             .r_expressions
             .iter()
+            .chain(cs.w_expressions.iter())
+            .chain(cs.lk_expressions.iter())
             .map(|expr| {
                 eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
                     .right()
                     .unwrap()
             })
-            .collect();
-        let w_records_in_evals: Vec<_> = cs
-            .w_expressions
-            .iter()
-            .map(|expr| {
-                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
-                    .right()
-                    .unwrap()
-            })
-            .collect();
-        let lk_records_in_evals: Vec<_> = cs
-            .lk_expressions
-            .iter()
-            .map(|expr| {
-                eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
-                    .right()
-                    .unwrap()
-            })
-            .collect();
+            .collect_vec();
+
         let computed_evals = [
             // read
-            sel * izip!(&alpha_pow[0..r_counts_per_instance], r_records_in_evals)
-                .map(|(alpha, in_eval)| *alpha * (in_eval - E::ONE))
-                .sum::<E>(),
+            sel * izip!(
+                &alpha_pow[0..r_counts_per_instance],
+                &expected_evals[0..r_counts_per_instance]
+            )
+            .map(|(alpha, in_eval)| *alpha * (*in_eval - E::ONE))
+            .sum::<E>(),
             // write
             sel * izip!(
                 &alpha_pow[r_counts_per_instance..num_rw_records],
-                w_records_in_evals
+                &expected_evals[r_counts_per_instance..num_rw_records],
             )
-            .map(|(alpha, in_eval)| *alpha * (in_eval - E::ONE))
+            .map(|(alpha, in_eval)| *alpha * (*in_eval - E::ONE))
             .sum::<E>(),
             // lookup
-            sel * izip!(&alpha_pow[num_rw_records..], lk_records_in_evals)
-                .map(|(alpha, in_eval)| *alpha * (in_eval - chip_record_alpha))
-                .sum::<E>(),
+            sel * izip!(
+                &alpha_pow[num_rw_records..],
+                &expected_evals[num_rw_records..]
+            )
+            .map(|(alpha, in_eval)| *alpha * (*in_eval - chip_record_alpha))
+            .sum::<E>(),
             // degree > 1 zero exp sumcheck
             {
                 // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
@@ -551,7 +538,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2],
-    ) -> Result<Point<E>, ZKVMError> {
+    ) -> Result<(), ZKVMError> {
         let cs = circuit_vk.get_cs();
         debug_assert!(
             cs.r_table_expressions
@@ -629,6 +616,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 num_logup_fanin,
                 transcript,
             )?;
+
+        // TODO: return error instead of panic
         assert_eq!(
             logup_q_point_and_eval.len(),
             cs.lk_table_expressions.len(),
@@ -644,10 +633,64 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.r_table_expressions.len() + cs.w_table_expressions.len(),
             "[prod_record] mismatch length"
         );
+        let num_rw_records = cs.r_table_expressions.len() + cs.w_table_expressions.len();
 
-        let (input_opening_point, in_evals) = if is_skip_same_point_sumcheck {
-            (
-                rt_tower,
+        // evaluate the evaluation of structural mles at input_opening_point by verifier
+        let structural_evals = cs
+            .r_table_expressions
+            .iter()
+            .map(|r| &r.table_spec)
+            .chain(cs.lk_table_expressions.iter().map(|r| &r.table_spec))
+            .flat_map(|table_spec| {
+                table_spec
+                    .structural_witins
+                    .iter()
+                    .map(
+                        |StructuralWitIn {
+                             offset,
+                             multi_factor,
+                             descending,
+                             ..
+                         }| {
+                            eval_wellform_address_vec(
+                                *offset as u64,
+                                *multi_factor as u64,
+                                &proof.input_opening_point,
+                                *descending,
+                            )
+                        },
+                    )
+                    .collect_vec()
+            })
+            .collect_vec();
+
+        // verify records (degree = 1) statement, thus no sumcheck
+        let expected_evals = interleave(
+            &cs.r_table_expressions, // r
+            &cs.w_table_expressions, // w
+        )
+        .map(|rw| &rw.expr)
+        .chain(
+            cs.lk_table_expressions
+                .iter()
+                .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
+        )
+        .map(|expr| {
+            eval_by_expr_with_instance(
+                &proof.fixed_in_evals,
+                &proof.wits_in_evals,
+                &structural_evals,
+                pi,
+                challenges,
+                expr,
+            )
+            .right()
+            .unwrap()
+        })
+        .collect_vec();
+
+        if is_skip_same_point_sumcheck {
+            for (expected_eval, eval) in expected_evals.iter().zip(
                 prod_point_and_eval
                     .into_iter()
                     .chain(
@@ -658,9 +701,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                                 [p_point_and_eval, q_point_and_eval]
                             }),
                     )
-                    .map(|point_and_eval| point_and_eval.eval)
-                    .collect_vec(),
-            )
+                    .map(|point_and_eval| point_and_eval.eval),
+            ) {
+                if expected_eval != &eval {
+                    return Err(ZKVMError::VerifyError(format!(
+                        "table {name} evaluation mismatch {expected_eval:?} != {eval:?}"
+                    )));
+                }
+            }
+            if proof.input_opening_point != rt_tower {
+                return Err(ZKVMError::VerifyError(format!(
+                    "table {name} input opening point mismatch {:?} != {rt_tower:?}",
+                    proof.input_opening_point,
+                )));
+            }
         } else {
             assert!(proof.main_sumcheck_proofs.is_some());
 
@@ -682,7 +736,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .map(|(point_and_eval, alpha)| *alpha * point_and_eval.eval)
                 .sum::<E>()
                 + interleave(&logup_p_point_and_eval, &logup_q_point_and_eval)
-                    .zip_eq(alpha_pow.iter().skip(prod_point_and_eval.len()))
+                    .zip_eq(alpha_pow.iter().skip(num_rw_records))
                     .map(|(point_n_eval, alpha)| *alpha * point_n_eval.eval)
                     .sum::<E>();
             let sel_subclaim = IOPVerifierState::verify(
@@ -703,11 +757,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 sel_subclaim.expected_evaluation,
             );
 
+            if input_opening_point != proof.input_opening_point {
+                return Err(ZKVMError::VerifyError(format!(
+                    "table {name} input opening point mismatch {:?} != {input_opening_point:?}",
+                    proof.input_opening_point,
+                )));
+            }
+
             let computed_evals = [
                 // r, w
                 prod_point_and_eval
                     .into_iter()
-                    .zip_eq(proof.rw_in_evals.iter())
+                    .zip_eq(&expected_evals[0..num_rw_records])
                     .zip(alpha_pow.iter())
                     .map(|((point_and_eval, in_eval), alpha)| {
                         let eq = eq_eval(
@@ -719,12 +780,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     })
                     .sum::<E>(),
                 interleave(logup_p_point_and_eval, logup_q_point_and_eval)
-                    .zip_eq(proof.lk_in_evals.iter())
-                    .zip_eq(
-                        alpha_pow
-                            .iter()
-                            .skip(cs.r_table_expressions.len() + cs.w_table_expressions.len()),
-                    )
+                    .zip_eq(&expected_evals[num_rw_records..])
+                    .zip_eq(alpha_pow.iter().skip(num_rw_records))
                     .map(|((point_and_eval, in_eval), alpha)| {
                         let eq = eq_eval(
                             &point_and_eval.point,
@@ -738,80 +795,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .iter()
             .copied()
             .sum::<E>();
+
             if computed_evals != expected_evaluation {
                 return Err(ZKVMError::VerifyError(
                     "sel evaluation verify failed".into(),
                 ));
             }
-            (
-                input_opening_point,
-                [proof.rw_in_evals.to_vec(), proof.lk_in_evals.to_vec()].concat(),
-            )
         };
-
-        // evaluate structural witness from verifier succinctly
-        let structural_witnesses = cs
-            .r_table_expressions
-            .iter()
-            .map(|r| &r.table_spec)
-            .chain(cs.lk_table_expressions.iter().map(|r| &r.table_spec))
-            .flat_map(|table_spec| {
-                table_spec
-                    .structural_witins
-                    .iter()
-                    .map(
-                        |StructuralWitIn {
-                             offset,
-                             multi_factor,
-                             descending,
-                             ..
-                         }| {
-                            eval_wellform_address_vec(
-                                *offset as u64,
-                                *multi_factor as u64,
-                                &input_opening_point,
-                                *descending,
-                            )
-                        },
-                    )
-                    .collect_vec()
-            })
-            .collect_vec();
-
-        // verify records (degree = 1) statement, thus no sumcheck
-        if interleave(
-            &cs.r_table_expressions, // r
-            &cs.w_table_expressions, // w
-        )
-        .map(|rw| &rw.expr)
-        .chain(
-            cs.lk_table_expressions
-                .iter()
-                .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
-        )
-        .zip_eq(in_evals)
-        .any(|(expr, expected_evals)| {
-            eval_by_expr_with_instance(
-                &proof.fixed_in_evals,
-                &proof.wits_in_evals,
-                &structural_witnesses,
-                pi,
-                challenges,
-                expr,
-            )
-            .right()
-            .unwrap()
-                != expected_evals
-        }) {
-            return Err(ZKVMError::VerifyError(
-                "record evaluate != expected_evals".into(),
-            ));
-        }
 
         // assume public io is tiny vector, so we evaluate it directly without PCS
         for &Instance(idx) in cs.instance_name_map.keys() {
             let poly = raw_pi[idx].to_vec().into_mle();
-            let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
+            let expected_eval = poly.evaluate(&proof.input_opening_point[..poly.num_vars()]);
             let eval = pi[idx];
             if expected_eval != eval {
                 return Err(ZKVMError::VerifyError(format!(
@@ -819,11 +814,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 )));
             }
             tracing::debug!(
-                "[table {name}] verified public inputs on index {idx} with point {input_opening_point:?}",
+                "[table {name}] verified public inputs on index {idx} with point {:?}",
+                proof.input_opening_point
             );
         }
 
-        Ok(input_opening_point)
+        Ok(())
     }
 }
 

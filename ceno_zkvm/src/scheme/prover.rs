@@ -39,7 +39,7 @@ use multilinear_extensions::Instance;
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof};
 
-type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
+type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>);
 
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pk: ZKVMProvingKey<E, PCS>,
@@ -217,7 +217,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     cs.w_expressions.len(),
                     cs.lk_expressions.len(),
                 );
-                let (opcode_proof, point) = self.create_opcode_proof(
+                let opcode_proof = self.create_opcode_proof(
                     circuit_name,
                     pk,
                     witness_mle,
@@ -231,7 +231,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     circuit_name,
                     num_instances
                 );
-                points.push(point);
+                points.push(opcode_proof.input_opening_point.clone());
                 evaluations.push(opcode_proof.wits_in_evals.clone());
                 opcode_proofs
                     .insert(index, opcode_proof);
@@ -240,7 +240,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let (structural_witness, structural_num_instances) = structural_wits
                     .remove(circuit_name)
                     .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
-                let (table_proof, pi_in_evals, point) = self.create_table_proof(
+                let (table_proof, pi_in_evals) = self.create_table_proof(
                     circuit_name,
                     pk,
                     fixed_mle,
@@ -250,7 +250,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     &mut transcript,
                     &challenges,
                 )?;
-                points.push(point);
+                points.push(table_proof.input_opening_point.clone());
                 evaluations.push(table_proof.wits_in_evals.clone());
                 if cs.num_fixed > 0 {
                     evaluations.push(table_proof.fixed_in_evals.clone());
@@ -320,7 +320,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         num_instances: usize,
         transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<(ZKVMChipProof<E>, Point<E>), ZKVMError> {
+    ) -> Result<ZKVMChipProof<E>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
@@ -674,15 +674,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     distrinct_zerocheck_terms_set.len() + 1
                 }
         );
-        let input_open_point = main_sel_sumcheck_proofs.point.clone();
-        assert!(input_open_point.len() == log2_num_instances);
+        let input_opening_point = main_sel_sumcheck_proofs.point.clone();
+        assert!(input_opening_point.len() == log2_num_instances);
         exit_span!(main_sel_span);
         exit_span!(sumcheck_span);
 
         let span = entered_span!("witin::evals", profiling_3 = true);
         let wits_in_evals: Vec<E> = witnesses
             .par_iter()
-            .map(|poly| poly.evaluate(&input_open_point))
+            .map(|poly| poly.evaluate(&input_opening_point))
             .collect();
         exit_span!(span);
 
@@ -699,18 +699,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             opening_dur.elapsed(),
         );
         exit_span!(pcs_open_span);
-        Ok((
-            ZKVMChipProof {
-                r_out_evals,
-                w_out_evals,
-                lk_out_evals,
-                tower_proof,
-                main_sumcheck_proofs: Some(main_sel_sumcheck_proofs.proofs),
-                fixed_in_evals: vec![],
-                wits_in_evals,
-            },
-            input_open_point,
-        ))
+        Ok(ZKVMChipProof {
+            r_out_evals,
+            w_out_evals,
+            lk_out_evals,
+            tower_proof,
+            main_sumcheck_proofs: Some(main_sel_sumcheck_proofs.proofs),
+            fixed_in_evals: vec![],
+            wits_in_evals,
+            input_opening_point,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -979,7 +977,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // as tower sumcheck batch product argument/logup in same length
         let is_skip_same_point_sumcheck = true;
 
-        let (input_open_point, same_r_sumcheck_proofs, rw_in_evals, lk_in_evals) =
+        let (input_opening_point, same_r_sumcheck_proofs, rw_in_evals, lk_in_evals) =
             if is_skip_same_point_sumcheck {
                 (rt_tower, None, vec![], vec![])
             } else {
@@ -1076,7 +1074,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let mut evals = witnesses
             .par_iter()
             .chain(fixed.par_iter())
-            .map(|poly| poly.evaluate(&input_open_point[..poly.num_vars()]))
+            .map(|poly| poly.evaluate(&input_opening_point[..poly.num_vars()]))
             .collect::<Vec<_>>();
         let fixed_in_evals = evals.split_off(witnesses.len());
         let wits_in_evals = evals;
@@ -1087,7 +1085,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             let span = entered_span!("pi::evals");
             for &Instance(idx) in cs.instance_name_map.keys() {
                 let poly = &pi[idx];
-                pi_in_evals.insert(idx, poly.evaluate(&input_open_point[..poly.num_vars()]));
+                pi_in_evals.insert(idx, poly.evaluate(&input_opening_point[..poly.num_vars()]));
             }
             exit_span!(span);
         }
@@ -1108,9 +1106,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 tower_proof,
                 fixed_in_evals,
                 wits_in_evals,
+                input_opening_point,
             },
             pi_in_evals,
-            input_open_point,
         ))
     }
 }

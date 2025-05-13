@@ -39,6 +39,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
     pub tower_proof: TowerProofs<E>,
 
+    pub input_opening_point: Vec<E>,
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
 }
@@ -242,7 +243,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .table_proofs
             .iter()
             .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.same_r_sumcheck_proofs);
+                let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {
                     *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
